@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import type { Express } from "express";
 import session from "express-session";
@@ -13,6 +14,18 @@ export interface AuthUser {
   avatarUrl?: string;
 }
 
+export function authorizeGitHubProfile(
+  profile: Pick<Profile, "username" | "displayName" | "photos">,
+  allowedLogin: string,
+): AuthUser | false {
+  if (profile.username?.toLocaleLowerCase() !== allowedLogin.toLocaleLowerCase()) return false;
+  return {
+    login: profile.username,
+    displayName: profile.displayName || profile.username,
+    avatarUrl: profile.photos?.[0]?.value,
+  };
+}
+
 declare global {
   // Express uses namespace merging for authenticated request users.
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -22,6 +35,12 @@ declare global {
       displayName: string;
       avatarUrl?: string;
     }
+  }
+}
+
+declare module "express-session" {
+  interface SessionData {
+    csrfToken?: string;
   }
 }
 
@@ -64,6 +83,8 @@ export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): 
         clientID: config.githubClientId,
         clientSecret: config.githubClientSecret,
         callbackURL: `${config.publicOrigin}/auth/github/callback`,
+        // passport-github2 types expose this as string; any truthy strategy value enables nonce state storage.
+        state: "enabled",
       },
       (
         _accessToken: string,
@@ -71,17 +92,7 @@ export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): 
         profile: Profile,
         done: (error: Error | null, user?: AuthUser | false) => void,
       ) => {
-        if (
-          profile.username?.toLocaleLowerCase() !== config.githubAllowedLogin.toLocaleLowerCase()
-        ) {
-          done(null, false);
-          return;
-        }
-        done(null, {
-          login: profile.username,
-          displayName: profile.displayName || profile.username,
-          avatarUrl: profile.photos?.[0]?.value,
-        });
+        done(null, authorizeGitHubProfile(profile, config.githubAllowedLogin));
       },
     ),
   );
@@ -93,7 +104,7 @@ export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): 
     passport.authenticate("github", { failureRedirect: "/?auth=denied" }),
     (_req, res) => res.redirect("/"),
   );
-  app.post("/auth/logout", (req, res, next) => {
+  app.post("/auth/logout", requireUser, requireCsrf(config), (req, res, next) => {
     req.logout((error) => {
       if (error) return next(error);
       req.session.destroy(() => res.status(204).end());
@@ -107,6 +118,39 @@ export function requireUser(req: Request, res: Response, next: NextFunction): vo
     return;
   }
   res.status(401).json({ error: "Innlogging kreves.", loginUrl: "/auth/github" });
+}
+
+export function csrfToken(req: Request): string {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = randomBytes(32).toString("base64url");
+  }
+  return req.session.csrfToken;
+}
+
+export function requireCsrf(config: AppConfig) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+      next();
+      return;
+    }
+    const origin = req.get("origin");
+    if (origin && origin !== config.publicOrigin) {
+      res.status(403).json({ error: "Ugyldig forespørselsopprinnelse." });
+      return;
+    }
+    const expected = csrfToken(req);
+    const supplied = req.get("x-csrf-token") ?? "";
+    const expectedBuffer = Buffer.from(expected);
+    const suppliedBuffer = Buffer.from(supplied);
+    if (
+      expectedBuffer.length !== suppliedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, suppliedBuffer)
+    ) {
+      res.status(403).json({ error: "Ugyldig CSRF-token." });
+      return;
+    }
+    next();
+  };
 }
 
 export function currentLogin(req: Request): string {

@@ -3,7 +3,7 @@
   hosts: vps
   gather_facts: false
   vars:
-    repo_url: "https://github.com/Reedtrullz/Nytt-Trondheim.git"
+    repo_url: "git@github.com:Reedtrullz/Nytt-Trondheim.git"
     app_dir: "/home/deploy/nytt-trondheim"
     app_port: "8090"
     canary_port: "8091"
@@ -21,12 +21,29 @@
         - "{{ app_dir }}"
         - "/var/backups/nytt-trondheim"
 
+    - name: Require installed read-only GitHub repository deploy key
+      ansible.builtin.stat:
+        path: /home/deploy/.ssh/nytt_github_deploy
+      register: github_deploy_key
+
+    - name: Fail when private repository deploy key is not provisioned
+      ansible.builtin.assert:
+        that: github_deploy_key.stat.exists
+        fail_msg: "Install the Nytt-Trondheim read-only GitHub deploy key on the VPS first."
+
+    - name: Trust GitHub SSH host key for repository checkout
+      ansible.builtin.known_hosts:
+        path: /home/deploy/.ssh/known_hosts
+        name: github.com
+        key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519 github.com') }}"
+
     - name: Clone or update repository
       ansible.builtin.git:
         repo: "{{ repo_url }}"
         dest: "{{ app_dir }}"
         version: main
         force: true
+        key_file: /home/deploy/.ssh/nytt_github_deploy
 
     - name: Write application secrets file from CI secrets
       ansible.builtin.copy:
@@ -50,6 +67,58 @@
           DATEX_ENDPOINT={{ lookup('env', 'NYTT_DATEX_ENDPOINT') | default('', true) }}
           DATEX_API_KEY={{ lookup('env', 'NYTT_DATEX_API_KEY') | default('', true) }}
 
+    - name: Ensure restic is installed before database changes
+      become: true
+      ansible.builtin.apt:
+        name: restic
+        state: present
+
+    - name: Install encrypted backup scripts before database changes
+      become: true
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "0750"
+      loop:
+        - { src: "scripts/backup.sh", dest: "/usr/local/bin/nytt-backup" }
+        - { src: "scripts/restore-check.sh", dest: "/usr/local/bin/nytt-restore-check" }
+
+    - name: Install backup environment before database changes
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/nytt-backup.env
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          APP_DIR={{ app_dir }}
+          RESTIC_REPOSITORY={{ lookup('env', 'NYTT_RESTIC_REPOSITORY') }}
+          RESTIC_PASSWORD={{ lookup('env', 'NYTT_RESTIC_PASSWORD') }}
+          AWS_ACCESS_KEY_ID={{ lookup('env', 'NYTT_BACKUP_ACCESS_KEY') }}
+          AWS_SECRET_ACCESS_KEY={{ lookup('env', 'NYTT_BACKUP_SECRET_KEY') }}
+
+    - name: Initialize restic repository when needed
+      become: true
+      ansible.builtin.shell: |
+        set -euo pipefail
+        set -a
+        . /etc/nytt-backup.env
+        set +a
+        restic snapshots >/dev/null 2>&1 || restic init
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Retain previous API image before building candidate
+      ansible.builtin.shell: docker image tag nytt-trondheim-api:latest nytt-trondheim-api:previous || true
+      changed_when: false
+
+    - name: Retain previous worker image before building candidate
+      ansible.builtin.shell: docker image tag nytt-trondheim-worker:latest nytt-trondheim-worker:previous || true
+      changed_when: false
+
     - name: Build application images
       ansible.builtin.command: docker compose --env-file .env.production build
       args:
@@ -62,15 +131,18 @@
         chdir: "{{ app_dir }}"
       changed_when: true
 
-    - name: Create pre-migration database backup when database already has data
+    - name: Create and verify encrypted pre-migration backup
+      become: true
       ansible.builtin.shell: |
         set -euo pipefail
-        docker compose --env-file .env.production exec -T postgres pg_dump -Fc -U nytt nytt > /var/backups/nytt-trondheim/pre-migrate-$(date +%Y%m%d%H%M%S).dump
+        set -a
+        . /etc/nytt-backup.env
+        set +a
+        /usr/local/bin/nytt-backup
+        /usr/local/bin/nytt-restore-check
       args:
-        chdir: "{{ app_dir }}"
         executable: /bin/bash
       changed_when: true
-      failed_when: false
 
     - name: Apply database migrations
       ansible.builtin.command: docker compose --env-file .env.production run --rm migrate
@@ -93,7 +165,8 @@
           DATABASE_URL: "postgres://nytt:{{ lookup('env', 'NYTT_POSTGRES_PASSWORD') }}@postgres:5432/nytt"
           PORT: "8080"
         networks:
-          - name: "nytt_backend"
+          - name: "nytt_database"
+          - name: "nytt_outbound"
         published_ports:
           - "127.0.0.1:{{ canary_port }}:8080"
 
@@ -127,43 +200,16 @@
             reverse_proxy 127.0.0.1:{{ app_port }}
           }
 
-    - name: Reload Caddy
+    - name: Validate Caddy configuration
+      become: true
+      ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile
+      changed_when: false
+
+    - name: Reload validated Caddy
       become: true
       ansible.builtin.systemd:
         name: caddy
         state: reloaded
-
-    - name: Install encrypted backup scripts
-      become: true
-      ansible.builtin.copy:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        owner: root
-        group: root
-        mode: "0750"
-      loop:
-        - { src: "scripts/backup.sh", dest: "/usr/local/bin/nytt-backup" }
-        - { src: "scripts/restore-check.sh", dest: "/usr/local/bin/nytt-restore-check" }
-
-    - name: Ensure restic is installed for offsite backups
-      become: true
-      ansible.builtin.apt:
-        name: restic
-        state: present
-
-    - name: Install backup environment file
-      become: true
-      ansible.builtin.copy:
-        dest: /etc/nytt-backup.env
-        owner: root
-        group: root
-        mode: "0600"
-        content: |
-          APP_DIR={{ app_dir }}
-          RESTIC_REPOSITORY={{ lookup('env', 'NYTT_RESTIC_REPOSITORY') }}
-          RESTIC_PASSWORD={{ lookup('env', 'NYTT_RESTIC_PASSWORD') }}
-          AWS_ACCESS_KEY_ID={{ lookup('env', 'NYTT_BACKUP_ACCESS_KEY') }}
-          AWS_SECRET_ACCESS_KEY={{ lookup('env', 'NYTT_BACKUP_SECRET_KEY') }}
 
     - name: Install systemd backup units
       become: true

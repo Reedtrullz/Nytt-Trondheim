@@ -1,8 +1,19 @@
-import type { Response } from "express";
+import { PassThrough } from "node:stream";
 import archiver from "archiver";
 import PDFDocument from "pdfkit";
 import type { SituationWorkspace } from "@nytt/shared";
 import type { Store } from "./store.js";
+
+function safeFilename(filename: string): string {
+  const name = filename.split(/[\\/]/).pop() ?? "vedlegg";
+  const sanitized = [...name]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 || character === '"' ? "_" : character;
+    })
+    .join("");
+  return sanitized.slice(0, 180) || "vedlegg";
+}
 
 function renderBrief(workspace: SituationWorkspace): Promise<Buffer> {
   return new Promise((resolve) => {
@@ -21,7 +32,7 @@ function renderBrief(workspace: SituationWorkspace): Promise<Buffer> {
       );
     doc.moveDown(1.2).fontSize(15).fillColor("#141b1e").text("Dette vet vi nå");
     workspace.situation.evidence.forEach((evidence) => {
-      doc.moveDown(0.5).fontSize(11).text(`- ${evidence.claim}`);
+      doc.moveDown(0.5).fontSize(11).text(`- [${evidence.provenance}] ${evidence.claim}`);
       doc.fontSize(9).fillColor("#586671").text(`${evidence.sourceLabel}: ${evidence.sourceUrl}`);
       doc.fillColor("#141b1e");
     });
@@ -51,15 +62,22 @@ function renderBrief(workspace: SituationWorkspace): Promise<Buffer> {
   });
 }
 
-export async function streamWorkspaceExport(
-  res: Response,
+export async function buildWorkspaceExport(
   store: Store,
   workspace: SituationWorkspace,
-): Promise<void> {
+  manifest?: unknown,
+): Promise<Buffer> {
   const pdf = await renderBrief(workspace);
   const archive = archiver("zip", { zlib: { level: 9 } });
-  res.attachment(`${workspace.situation.id}-arbeidsmappe.zip`);
-  archive.pipe(res);
+  const output = new PassThrough();
+  const chunks: Buffer[] = [];
+  const finished = new Promise<Buffer>((resolve, reject) => {
+    output.on("data", (chunk: Buffer) => chunks.push(chunk));
+    output.on("end", () => resolve(Buffer.concat(chunks)));
+    output.on("error", reject);
+    archive.on("error", reject);
+  });
+  archive.pipe(output);
   archive.append(pdf, { name: "situasjonsbrief.pdf" });
   archive.append(JSON.stringify(workspace.situation.timeline, null, 2), { name: "utvikling.json" });
   archive.append(JSON.stringify(workspace.situation.evidence, null, 2), {
@@ -68,6 +86,21 @@ export async function streamWorkspaceExport(
   archive.append(JSON.stringify({ tasks: workspace.tasks, notes: workspace.notes }, null, 2), {
     name: "privat/arbeidsnotater.json",
   });
+  archive.append(
+    JSON.stringify(
+      manifest ?? {
+        situationId: workspace.situation.id,
+        attachmentChecksums: workspace.attachments.map(({ filename, sha256, size }) => ({
+          filename: safeFilename(filename),
+          sha256,
+          size,
+        })),
+      },
+      null,
+      2,
+    ),
+    { name: "manifest.json" },
+  );
   for (const provenance of [
     "official",
     "reporting_estimate",
@@ -83,7 +116,9 @@ export async function streamWorkspaceExport(
   }
   for (const attachment of workspace.attachments) {
     const stored = await store.getAttachment(attachment.id);
-    if (stored) archive.file(stored.storagePath, { name: `vedlegg/${stored.filename}` });
+    if (stored)
+      archive.file(stored.storagePath, { name: `vedlegg/${safeFilename(stored.filename)}` });
   }
   await archive.finalize();
+  return finished;
 }

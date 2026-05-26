@@ -2,15 +2,31 @@ import type {
   Attachment,
   BootstrapPayload,
   MapFeature,
+  SessionPayload,
   SituationWorkspace,
   WorkspaceNote,
   WorkspaceTask,
 } from "@nytt/shared";
 
+let csrfTokenPromise: Promise<string> | undefined;
+
+async function csrfToken(): Promise<string> {
+  csrfTokenPromise ??= fetch("/api/session", { credentials: "include" }).then(async (response) => {
+    if (!response.ok) throw new Error("Innlogging kreves");
+    return ((await response.json()) as SessionPayload).csrfToken;
+  });
+  return csrfTokenPromise;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const unsafe = init?.method && !["GET", "HEAD", "OPTIONS"].includes(init.method);
   const response = await fetch(url, {
     credentials: "include",
-    headers: init?.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
+    headers: {
+      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(unsafe ? { "X-CSRF-Token": await csrfToken() } : {}),
+      ...init?.headers,
+    },
     ...init,
   });
   if (response.status === 401) {
@@ -30,12 +46,26 @@ export const api = {
   bootstrap: () => request<BootstrapPayload>("/api/bootstrap"),
   workspace: (id: string) => request<SituationWorkspace>(`/api/situations/${id}`),
   saveArticle: (id: string, saved: boolean) =>
-    request<void>(`/api/saved/${id}`, { method: "PUT", body: JSON.stringify({ saved }) }),
+    request<void>(`/api/saved/articles/${id}`, { method: saved ? "PUT" : "DELETE" }),
+  saveSituation: (id: string, saved: boolean) =>
+    request<void>(`/api/situations/${id}/saved`, { method: saved ? "PUT" : "DELETE" }),
+  setSituationStatus: (id: string, status: "active" | "resolved") =>
+    request<SituationWorkspace["situation"]>(`/api/situations/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
   addFeature: (id: string, feature: Pick<MapFeature, "geometry" | "properties">) =>
     request<MapFeature>(`/api/situations/${id}/features`, {
       method: "POST",
       body: JSON.stringify({ geometry: feature.geometry, properties: feature.properties }),
     }),
+  updateFeature: (id: string, featureId: string, label: string) =>
+    request<MapFeature>(`/api/situations/${id}/features/${featureId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ label }),
+    }),
+  deleteFeature: (id: string, featureId: string) =>
+    request<void>(`/api/situations/${id}/features/${featureId}`, { method: "DELETE" }),
   addTask: (id: string, text: string) =>
     request<WorkspaceTask>(`/api/situations/${id}/tasks`, {
       method: "POST",
@@ -46,14 +76,44 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ completed }),
     }),
+  updateTask: (id: string, taskId: string, text: string) =>
+    request<WorkspaceTask>(`/api/situations/${id}/tasks/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    }),
+  deleteTask: (id: string, taskId: string) =>
+    request<void>(`/api/situations/${id}/tasks/${taskId}`, { method: "DELETE" }),
   addNote: (id: string, text: string) =>
     request<WorkspaceNote>(`/api/situations/${id}/notes`, {
       method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  deleteNote: (id: string, noteId: string) =>
+    request<void>(`/api/situations/${id}/notes/${noteId}`, { method: "DELETE" }),
+  updateNote: (id: string, noteId: string, text: string) =>
+    request<WorkspaceNote>(`/api/situations/${id}/notes/${noteId}`, {
+      method: "PATCH",
       body: JSON.stringify({ text }),
     }),
   addAttachment: (id: string, file: File) => {
     const body = new FormData();
     body.append("file", file);
     return request<Attachment>(`/api/situations/${id}/attachments`, { method: "POST", body });
+  },
+  deleteAttachment: (id: string, attachmentId: string) =>
+    request<void>(`/api/situations/${id}/attachments/${attachmentId}`, { method: "DELETE" }),
+  exportWorkspace: async (id: string) => {
+    const response = await fetch(`/api/situations/${id}/exports`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "X-CSRF-Token": await csrfToken() },
+    });
+    if (!response.ok) throw new Error("Eksporten kunne ikke opprettes");
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${id}-arbeidsmappe.zip`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   },
 };

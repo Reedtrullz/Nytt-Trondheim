@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -8,14 +8,16 @@ import multer from "multer";
 import pg from "pg";
 import {
   articleQuerySchema,
+  labelInputSchema,
+  lifecycleInputSchema,
   noteInputSchema,
   privateMapFeatureInputSchema,
   taskInputSchema,
   type MapFeature,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
-import { configureAuth, currentLogin, requireUser } from "./auth.js";
-import { streamWorkspaceExport } from "./export.js";
+import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from "./auth.js";
+import { buildWorkspaceExport } from "./export.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
 
 export interface AppRuntime {
@@ -36,7 +38,20 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.set("trust proxy", 1);
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy:
+        config.nodeEnv === "production"
+          ? {
+              directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'"],
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                imgSrc: ["'self'", "data:", "https://cache.kartverket.no", "https://ogc.dsb.no"],
+                connectSrc: ["'self'"],
+                fontSrc: ["'self'"],
+                objectSrc: ["'none'"],
+              },
+            }
+          : false,
       crossOriginEmbedderPolicy: false,
     }),
   );
@@ -52,8 +67,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.get("/api/session", requireUser, (req, res) => res.json({ user: req.user }));
+  app.get("/api/session", requireUser, (req, res) =>
+    res.json({ user: req.user, csrfToken: csrfToken(req) }),
+  );
   app.use("/api", requireUser);
+  app.use("/api", requireCsrf(config));
 
   app.get("/api/bootstrap", async (req, res, next) => {
     try {
@@ -72,6 +90,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.get("/api/saved/articles", async (req, res, next) => {
+    try {
+      res.json(await store.listSavedArticles(currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.put("/api/saved/:articleId", async (req, res, next) => {
     try {
       await store.setSaved(req.params.articleId, Boolean(req.body?.saved), currentLogin(req));
@@ -81,14 +107,108 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.put("/api/saved/articles/:articleId", async (req, res, next) => {
+    try {
+      await store.setSaved(req.params.articleId, true, currentLogin(req));
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/saved/:articleId", async (req, res, next) => {
+    try {
+      await store.setSaved(req.params.articleId, false, currentLogin(req));
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/saved/articles/:articleId", async (req, res, next) => {
+    try {
+      await store.setSaved(req.params.articleId, false, currentLogin(req));
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/situations", async (req, res, next) => {
+    try {
+      res.json(await store.listSituations(currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/situations/:id", async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id);
+      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) {
         res.status(404).json({ error: "Situasjonen finnes ikke." });
         return;
       }
       res.json(workspace);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/situations/:id/timeline", async (req, res, next) => {
+    try {
+      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      res.json(workspace.situation.timeline);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/situations/:id/articles", async (req, res, next) => {
+    try {
+      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      res.json(workspace.relatedArticles);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/situations/:id/features", async (req, res, next) => {
+    try {
+      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      res.json(workspace.situation.features);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/situations/:id/saved", async (req, res, next) => {
+    try {
+      await store.setSavedSituation(req.params.id, true, currentLogin(req));
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/situations/:id/saved", async (req, res, next) => {
+    try {
+      await store.setSavedSituation(req.params.id, false, currentLogin(req));
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/situations/:id/status", async (req, res, next) => {
+    try {
+      const { status } = lifecycleInputSchema.parse(req.body);
+      const situation = await store.setSituationStatus(req.params.id, status);
+      if (!situation) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      res.json(situation);
     } catch (error) {
       next(error);
     }
@@ -113,6 +233,33 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.patch("/api/situations/:id/features/:featureId", async (req, res, next) => {
+    try {
+      const { label, note } = labelInputSchema.parse(req.body);
+      const feature = await store.updatePrivateFeature(
+        req.params.id,
+        req.params.featureId,
+        label,
+        note,
+      );
+      if (!feature) return void res.status(404).json({ error: "Markeringen finnes ikke." });
+      res.json(feature);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/situations/:id/features/:featureId", async (req, res, next) => {
+    try {
+      if (!(await store.deletePrivateFeature(req.params.id, req.params.featureId))) {
+        return void res.status(404).json({ error: "Markeringen finnes ikke." });
+      }
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/situations/:id/tasks", async (req, res, next) => {
     try {
       const { text } = taskInputSchema.parse(req.body);
@@ -124,11 +271,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.patch("/api/situations/:id/tasks/:taskId", async (req, res, next) => {
     try {
-      const task = await store.toggleTask(
-        req.params.id,
-        req.params.taskId,
-        Boolean(req.body?.completed),
-      );
+      const task =
+        typeof req.body?.text === "string"
+          ? await store.updateTaskText(
+              req.params.id,
+              req.params.taskId,
+              taskInputSchema.parse(req.body).text,
+            )
+          : await store.toggleTask(req.params.id, req.params.taskId, Boolean(req.body?.completed));
       if (!task) {
         res.status(404).json({ error: "Oppgaven finnes ikke." });
         return;
@@ -139,10 +289,43 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.delete("/api/situations/:id/tasks/:taskId", async (req, res, next) => {
+    try {
+      if (!(await store.deleteTask(req.params.id, req.params.taskId))) {
+        return void res.status(404).json({ error: "Oppgaven finnes ikke." });
+      }
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/situations/:id/notes", async (req, res, next) => {
     try {
       const { text } = noteInputSchema.parse(req.body);
       res.status(201).json(await store.addNote(req.params.id, text));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/situations/:id/notes/:noteId", async (req, res, next) => {
+    try {
+      const { text } = noteInputSchema.parse(req.body);
+      const note = await store.updateNote(req.params.id, req.params.noteId, text);
+      if (!note) return void res.status(404).json({ error: "Notatet finnes ikke." });
+      res.json(note);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/situations/:id/notes/:noteId", async (req, res, next) => {
+    try {
+      if (!(await store.deleteNote(req.params.id, req.params.noteId))) {
+        return void res.status(404).json({ error: "Notatet finnes ikke." });
+      }
+      res.status(204).end();
     } catch (error) {
       next(error);
     }
@@ -172,14 +355,74 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.get("/api/situations/:id/export", async (req, res, next) => {
+  app.get("/api/situations/:id/attachments/:attachmentId", async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id);
-      if (!workspace) {
-        res.status(404).json({ error: "Situasjonen finnes ikke." });
-        return;
+      const attachment = await store.getAttachment(req.params.attachmentId);
+      if (!attachment || attachment.situationId !== req.params.id) {
+        return void res.status(404).json({ error: "Vedlegget finnes ikke." });
       }
-      await streamWorkspaceExport(res, store, workspace);
+      const filename = path.basename(attachment.filename).replaceAll(/[\r\n"]/g, "_");
+      res.download(attachment.storagePath, filename);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/situations/:id/attachments/:attachmentId", async (req, res, next) => {
+    try {
+      const attachment = await store.deleteAttachment(req.params.id, req.params.attachmentId);
+      if (!attachment) return void res.status(404).json({ error: "Vedlegget finnes ikke." });
+      await unlink(attachment.storagePath).catch(() => undefined);
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/situations/:id/exports", async (req, res, next) => {
+    try {
+      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      const exportId = randomUUID();
+      const manifest = {
+        exportId,
+        situationId: workspace.situation.id,
+        createdAt: new Date().toISOString(),
+        attachmentChecksums: workspace.attachments.map(({ filename, sha256, size }) => ({
+          filename,
+          sha256,
+          size,
+        })),
+      };
+      const storagePath = path.join(config.uploadDir, `export-${exportId}.zip`);
+      const contents = await buildWorkspaceExport(store, workspace, manifest);
+      try {
+        await writeFile(storagePath, contents);
+        await store.recordExport({
+          id: exportId,
+          situationId: req.params.id,
+          githubLogin: currentLogin(req),
+          storagePath,
+          payload: manifest,
+          createdAt: manifest.createdAt,
+        });
+      } catch (error) {
+        await unlink(storagePath).catch(() => undefined);
+        throw error;
+      }
+      res.set("Location", `/api/situations/${req.params.id}/exports/${exportId}`);
+      res.set("X-Export-Id", exportId);
+      res.attachment(`${workspace.situation.id}-arbeidsmappe.zip`).send(contents);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/situations/:id/exports/:exportId", async (req, res, next) => {
+    try {
+      const record = await store.getExport(req.params.exportId, req.params.id, currentLogin(req));
+      if (!record) return void res.status(404).json({ error: "Eksporten finnes ikke." });
+      res.download(record.storagePath, `${req.params.id}-arbeidsmappe.zip`);
     } catch (error) {
       next(error);
     }

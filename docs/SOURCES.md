@@ -16,10 +16,14 @@ Articles link to the publisher; this application does not republish complete art
 
 - Kartverket WMTS `topo` provides the map underlay and must be attributed `© Kartverket`.
 - Kartverket Stedsnavn geocodes source-mentioned Trondheim place names into clearly marked reporting-estimate points; the application does not generate incident perimeters from a name.
-- MET MetAlerts and NVE/Varsom endpoints are health-probed by the initial worker. The map model supports their official warning geometry, but production parsing and situation attachment of current warning features must be completed before those live layers are shown.
+- MET MetAlerts is collected from filtered RSS and immutable CAP updates for Trøndelag land areas, with GeoRSS warning geometry retained from published alerts. CAP identifiers are stored once and updates/cancellations retire superseded records. Geometry is attached only to a relevant located situation and is shown as `Farevarsel`; it does not confirm an active incident.
+- NVE/Varsom flood and landslide municipality warnings for Trondheim are collected as official textual warning context. The worker does not invent map geometry where NVE supplies municipality scope without polygons.
+- Trondheim kommune stories matching the incident type and place can corroborate a situation as `Offentlig bekreftet`; general MET/NVE danger warnings cannot.
 - DSB public WMS/WFS supplies optional preparedness context. Its authenticated skogbrann functions for fire fronts, forecasts and resources are not consumed.
 - Statens vegvesen DATEX is represented as awaiting access until credentials are installed.
 
 ## Politiloggen
 
 `POLITILOGGEN_ENABLED=false` by default. The optional adapter is isolated because the current web application's structured endpoint is not a documented stable public collection contract and `/api/` is disallowed in the site's robots policy. Enabling it is a personal-use operational choice; failure does not disable the Situation Room.
+
+DATEX and Politiloggen are intentionally deferred from the safe core production release and remain disabled or awaiting access.

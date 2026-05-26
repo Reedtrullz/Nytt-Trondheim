@@ -720,6 +720,15 @@ button {
   font-size: 11px;
 }
 
+.map-empty {
+  margin: 0;
+  padding: 9px 15px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-top: 0;
+  font-size: 11px;
+}
+
 .legend::before {
   content: "";
   display: inline-block;
@@ -798,6 +807,35 @@ button {
 .drawing-tools .finish {
   color: #fff;
   background: #474ea1;
+}
+
+.private-features {
+  padding: 0;
+  margin: 10px 0 0;
+  list-style: none;
+}
+
+.private-features li,
+.workspace-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.private-features input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #dae0ed;
+}
+
+.private-features button,
+.remove {
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: white;
+  font-size: 11px;
 }
 
 .intelligence {
@@ -892,15 +930,52 @@ button {
   background: var(--paper);
 }
 
-.tasks label {
-  display: block;
+.workspace-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  color: #8a2f21;
+  background: #fff1ed;
+  font-size: 12px;
+}
+
+.workspace-success {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--green);
+  background: #edf7f1;
+  font-size: 12px;
+}
+
+.tasks label,
+.tasks .workspace-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 14px 0;
   color: #39434b;
   font-size: 13px;
 }
 
-.tasks input {
-  margin-right: 10px;
+.tasks input[type="checkbox"] {
+  margin-right: 4px;
+}
+
+.tasks .workspace-item input:not([type="checkbox"]),
+.notes .workspace-item input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.workspace-item button {
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  background: white;
+  font-size: 11px;
 }
 
 .inline-form {

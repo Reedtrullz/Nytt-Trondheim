@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    networks: [backend]
+    networks: [database]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nytt -d nytt"]
       interval: 10s
@@ -26,7 +26,7 @@ services:
     image: nytt-trondheim-api:latest
     env_file: .env.production
     command: ["node", "apps/server/dist/db/migrate.js"]
-    networks: [backend]
+    networks: [database]
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,7 +45,7 @@ services:
       - "127.0.0.1:${APP_PORT:-8090}:8080"
     volumes:
       - uploads:/data/uploads
-    networks: [backend]
+    networks: [database, outbound]
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,7 +69,7 @@ services:
     env_file: .env.production
     environment:
       DATABASE_URL: postgres://nytt:${POSTGRES_PASSWORD}@postgres:5432/nytt
-    networks: [backend]
+    networks: [database, outbound]
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,10 +85,14 @@ services:
           cpus: "0.75"
 
 networks:
-  backend:
-    name: nytt_backend
+  database:
+    name: nytt_database
     internal: true
+  outbound:
+    name: nytt_outbound
 
 volumes:
   postgres-data:
+    name: nytt_postgres_data
   uploads:
+    name: nytt_uploads

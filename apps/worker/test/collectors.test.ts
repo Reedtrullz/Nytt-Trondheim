@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectRss } from "../src/collectors.js";
+import { canonicalUrl, collectMunicipality, collectRss } from "../src/collectors.js";
 import { articleDedupeKey } from "../src/repository.js";
 
 const rss = `<?xml version="1.0"?><rss><channel>
@@ -36,5 +36,22 @@ describe("RSS collection policy", () => {
     expect(articleDedupeKey(base)).toBe(
       articleDedupeKey({ ...base, title: "BRANN i Bymarka", publishedAt: "2026-05-26T12:45:00Z" }),
     );
+  });
+
+  it("normalizes tracking parameters in article URLs", () => {
+    expect(canonicalUrl("https://example.test/news?utm_source=rss&id=3#top")).toBe(
+      "https://example.test/news?id=3",
+    );
+  });
+
+  it("extracts publication times from municipal detail pages", async () => {
+    const listing =
+      '<article class="card"><a href="/aktuelt/sak/">Varsel om brann i Bymarka</a><div>Oppdatert informasjon.</div></article>';
+    const detail = '<meta property="article:published_time" content="26.05.2026 13:15:00">';
+    const articles = await collectMunicipality(
+      async (url) =>
+        new Response(String(url).includes("/aktuelt/sak/") ? detail : listing, { status: 200 }),
+    );
+    expect(articles[0]?.publishedAt).toBe("2026-05-26T11:15:00.000Z");
   });
 });

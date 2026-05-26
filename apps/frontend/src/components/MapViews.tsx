@@ -85,9 +85,13 @@ function featureStyle(feature?: MapFeature) {
 export function SituationMap({
   situation,
   onCreateFeature,
+  onUpdateFeature,
+  onDeleteFeature,
 }: {
   situation: Situation;
   onCreateFeature: (geometry: MapFeature["geometry"], label: string) => Promise<void>;
+  onUpdateFeature: (id: string, label: string) => Promise<void>;
+  onDeleteFeature: (id: string) => Promise<void>;
 }) {
   const [layers, setLayers] = useState({ warning: true, dsbStations: false, dsbCentral: false });
   const [mode, setMode] = useState<DrawingMode>(null);
@@ -99,6 +103,9 @@ export function SituationMap({
         (feature) => feature.properties.layer !== "warning" || layers.warning,
       ),
     [layers.warning, situation.features],
+  );
+  const privateFeatures = situation.features.filter(
+    (feature) => feature.properties.provenance === "private_annotation",
   );
 
   function capture(coordinate: [number, number]) {
@@ -215,6 +222,11 @@ export function SituationMap({
         <span className="legend warning">Farevarsel</span>
         <span className="legend private">Privat markering</span>
       </div>
+      {!visibleFeatures.some((feature) => feature.properties.layer === "warning") ? (
+        <p className="map-empty">
+          Ingen relevante offentlige farevarsler er koblet til situasjonen.
+        </p>
+      ) : null}
       <section className="drawing-tools" aria-label="Mine markeringer">
         <div>
           <h3>
@@ -246,6 +258,43 @@ export function SituationMap({
           </button>
         ) : null}
       </section>
+      {privateFeatures.length > 0 ? (
+        <ul className="private-features">
+          {privateFeatures.map((feature) => (
+            <PrivateFeatureRow
+              key={feature.id}
+              feature={feature}
+              onSave={onUpdateFeature}
+              onDelete={onDeleteFeature}
+            />
+          ))}
+        </ul>
+      ) : null}
     </div>
+  );
+}
+
+function PrivateFeatureRow({
+  feature,
+  onSave,
+  onDelete,
+}: {
+  feature: MapFeature;
+  onSave: (id: string, label: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [label, setLabel] = useState(feature.properties.label);
+  return (
+    <li>
+      <input
+        aria-label="Navn på privat markering"
+        value={label}
+        onChange={(event) => setLabel(event.target.value)}
+      />
+      <button onClick={() => void onSave(feature.id, label)}>Lagre</button>
+      <button className="remove" onClick={() => void onDelete(feature.id)}>
+        Slett
+      </button>
+    </li>
   );
 }

@@ -19,7 +19,7 @@ export function loadConfig(): AppConfig {
   return {
     port: Number(process.env.PORT ?? 8080),
     nodeEnv,
-    publicOrigin: process.env.PUBLIC_ORIGIN ?? "http://localhost:5173",
+    publicOrigin: process.env.PUBLIC_ORIGIN ?? "http://127.0.0.1:5173",
     databaseUrl: process.env.DATABASE_URL,
     seedDemo: process.env.SEED_DEMO === "true" || !process.env.DATABASE_URL,
     devAuthBypass: nodeEnv !== "production" && process.env.DEV_AUTH_BYPASS !== "false",

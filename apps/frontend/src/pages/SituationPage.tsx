@@ -20,14 +20,26 @@ export function SituationPage() {
   const [taskText, setTaskText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string>();
+  const [actionError, setActionError] = useState<string>();
+  const [actionMessage, setActionMessage] = useState<string>();
 
   useEffect(() => {
-    void api.workspace(id).then(setWorkspace);
+    void api
+      .workspace(id)
+      .then(setWorkspace)
+      .catch((reason: Error) => setError(reason.message));
   }, [id]);
 
+  if (error) return <main className="loading">Kunne ikke åpne situasjonsrom: {error}</main>;
   if (!workspace) return <main className="loading">Åpner situasjonsrom...</main>;
   const situation = workspace.situation;
-  const statusLabel = situation.status === "preliminary" ? "Foreløpig" : "Pågår";
+  const statusLabel =
+    situation.status === "preliminary"
+      ? "Foreløpig"
+      : situation.status === "resolved"
+        ? "Avsluttet"
+        : "Pågår";
 
   async function createFeature(geometry: MapFeature["geometry"], label: string) {
     const feature = await api.addFeature(id, {
@@ -39,6 +51,38 @@ export function SituationPage() {
         ? {
             ...current,
             situation: { ...current.situation, features: [...current.situation.features, feature] },
+          }
+        : current,
+    );
+  }
+
+  async function updateFeature(featureId: string, label: string) {
+    const feature = await api.updateFeature(id, featureId, label);
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            situation: {
+              ...current.situation,
+              features: current.situation.features.map((item) =>
+                item.id === feature.id ? feature : item,
+              ),
+            },
+          }
+        : current,
+    );
+  }
+
+  async function deleteFeature(featureId: string) {
+    await api.deleteFeature(id, featureId);
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            situation: {
+              ...current.situation,
+              features: current.situation.features.filter((feature) => feature.id !== featureId),
+            },
           }
         : current,
     );
@@ -74,14 +118,87 @@ export function SituationPage() {
   async function uploadAttachment(file?: File) {
     if (!file) return;
     setUploading(true);
+    setActionError(undefined);
+    setActionMessage(undefined);
     try {
       const attachment = await api.addAttachment(id, file);
       setWorkspace((current) =>
         current ? { ...current, attachments: [...current.attachments, attachment] } : current,
       );
+      setActionMessage("Vedlegget er lastet opp.");
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : "Opplastingen feilet");
     } finally {
       setUploading(false);
     }
+  }
+
+  async function exportWorkspace() {
+    setActionError(undefined);
+    setActionMessage(undefined);
+    try {
+      await api.exportWorkspace(id);
+      setActionMessage("Arbeidsmappen er eksportert.");
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : "Eksporten feilet");
+    }
+  }
+
+  async function saveSituation() {
+    const saved = !situation.saved;
+    await api.saveSituation(id, saved);
+    setWorkspace((current) =>
+      current ? { ...current, situation: { ...current.situation, saved } } : current,
+    );
+  }
+
+  async function resolveSituation() {
+    const updated = await api.setSituationStatus(id, "resolved");
+    setWorkspace((current) => (current ? { ...current, situation: updated } : current));
+  }
+
+  async function deleteTask(taskId: string) {
+    await api.deleteTask(id, taskId);
+    setWorkspace((current) =>
+      current ? { ...current, tasks: current.tasks.filter((task) => task.id !== taskId) } : current,
+    );
+  }
+
+  async function updateTask(taskId: string, text: string) {
+    const task = await api.updateTask(id, taskId, text);
+    setWorkspace((current) =>
+      current
+        ? { ...current, tasks: current.tasks.map((item) => (item.id === task.id ? task : item)) }
+        : current,
+    );
+  }
+
+  async function deleteNote(noteId: string) {
+    await api.deleteNote(id, noteId);
+    setWorkspace((current) =>
+      current ? { ...current, notes: current.notes.filter((note) => note.id !== noteId) } : current,
+    );
+  }
+
+  async function updateNote(noteId: string, text: string) {
+    const note = await api.updateNote(id, noteId, text);
+    setWorkspace((current) =>
+      current
+        ? { ...current, notes: current.notes.map((item) => (item.id === note.id ? note : item)) }
+        : current,
+    );
+  }
+
+  async function deleteAttachment(attachmentId: string) {
+    await api.deleteAttachment(id, attachmentId);
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            attachments: current.attachments.filter((attachment) => attachment.id !== attachmentId),
+          }
+        : current,
+    );
   }
 
   return (
@@ -99,11 +216,21 @@ export function SituationPage() {
           <span className="status">{statusLabel}</span>
           <strong>Sist oppdatert {formatTime(situation.updatedAt)}</strong>
           <small>{situation.verificationStatus}</small>
-          <button>Lagre situasjon</button>
+          <button onClick={() => void saveSituation()}>
+            {situation.saved ? "Fjern lagring" : "Lagre situasjon"}
+          </button>
+          {situation.status !== "resolved" ? (
+            <button onClick={() => void resolveSituation()}>Marker avsluttet</button>
+          ) : null}
         </div>
       </header>
       <div className="situation-layout">
-        <SituationMap situation={situation} onCreateFeature={createFeature} />
+        <SituationMap
+          situation={situation}
+          onCreateFeature={createFeature}
+          onUpdateFeature={updateFeature}
+          onDeleteFeature={deleteFeature}
+        />
         <aside className="intelligence">
           <section>
             <h2>Dette vet vi nå</h2>
@@ -144,17 +271,18 @@ export function SituationPage() {
         </aside>
       </div>
       <section className="workspace-panel">
+        {actionError ? <p className="workspace-error">{actionError}</p> : null}
+        {actionMessage ? <p className="workspace-success">{actionMessage}</p> : null}
         <div className="tasks">
           <h2>Oppgaver</h2>
           {workspace.tasks.map((task) => (
-            <label key={task.id}>
-              <input
-                type="checkbox"
-                checked={task.completed}
-                onChange={(event) => void toggleTask(task.id, event.target.checked)}
-              />
-              <span>{task.text}</span>
-            </label>
+            <TaskRow
+              key={task.id}
+              task={task}
+              onToggle={toggleTask}
+              onUpdate={updateTask}
+              onDelete={deleteTask}
+            />
           ))}
           <div className="inline-form">
             <input
@@ -168,7 +296,7 @@ export function SituationPage() {
         <div className="notes">
           <h2>Notater</h2>
           {workspace.notes.map((note) => (
-            <p key={note.id}>{note.text}</p>
+            <NoteRow key={note.id} note={note} onUpdate={updateNote} onDelete={deleteNote} />
           ))}
           <textarea
             value={noteText}
@@ -181,9 +309,14 @@ export function SituationPage() {
           <h2>Vedlegg</h2>
           {workspace.attachments.length ? (
             workspace.attachments.map((attachment) => (
-              <p className="muted" key={attachment.id}>
-                {attachment.filename}
-              </p>
+              <div className="workspace-item" key={attachment.id}>
+                <a className="muted" href={`/api/situations/${id}/attachments/${attachment.id}`}>
+                  {attachment.filename}
+                </a>
+                <button className="remove" onClick={() => void deleteAttachment(attachment.id)}>
+                  Slett
+                </button>
+              </div>
             ))
           ) : (
             <p className="muted">Ingen vedlegg lastet opp</p>
@@ -196,12 +329,70 @@ export function SituationPage() {
               onChange={(event) => void uploadAttachment(event.target.files?.[0])}
             />
           </label>
-          <a className="export" href={`/api/situations/${id}/export`}>
+          <button className="export" onClick={() => void exportWorkspace()}>
             Eksporter arbeidsmappe <ArrowIcon />
-          </a>
+          </button>
           <p className="private-note">Privat eksport med PDF, GeoJSON og kildedata.</p>
         </div>
       </section>
     </main>
+  );
+}
+
+function TaskRow({
+  task,
+  onToggle,
+  onUpdate,
+  onDelete,
+}: {
+  task: SituationWorkspace["tasks"][number];
+  onToggle: (id: string, completed: boolean) => Promise<void>;
+  onUpdate: (id: string, text: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(task.text);
+  return (
+    <div className="workspace-item">
+      <input
+        aria-label={`Fullfør ${task.text}`}
+        type="checkbox"
+        checked={task.completed}
+        onChange={(event) => void onToggle(task.id, event.target.checked)}
+      />
+      <input
+        aria-label={`Rediger oppgave: ${task.text}`}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+      />
+      <button onClick={() => void onUpdate(task.id, text)}>Lagre</button>
+      <button className="remove" onClick={() => void onDelete(task.id)}>
+        Slett
+      </button>
+    </div>
+  );
+}
+
+function NoteRow({
+  note,
+  onUpdate,
+  onDelete,
+}: {
+  note: SituationWorkspace["notes"][number];
+  onUpdate: (id: string, text: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(note.text);
+  return (
+    <div className="workspace-item">
+      <input
+        aria-label="Rediger notat"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+      />
+      <button onClick={() => void onUpdate(note.id, text)}>Lagre</button>
+      <button className="remove" onClick={() => void onDelete(note.id)}>
+        Slett
+      </button>
+    </div>
   );
 }

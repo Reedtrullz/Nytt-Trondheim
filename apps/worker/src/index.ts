@@ -6,9 +6,10 @@ import {
   probeOfficialSources,
   rssSources,
 } from "./collectors.js";
-import { createAnalyzer } from "./ai.js";
+import { createAnalyzer, enhanceSituations } from "./ai.js";
 import { detectPreliminarySituations } from "./clusters.js";
 import { geocodeArticles } from "./geocode.js";
+import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -23,6 +24,7 @@ let lastMunicipalityCollection = 0;
 
 async function collectAll(): Promise<void> {
   console.log(`[worker] collection started ${new Date().toISOString()}`);
+  const nextPollAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const articleSets = await Promise.all(
     rssSources.map(async (source) => {
       try {
@@ -32,6 +34,7 @@ async function collectAll(): Promise<void> {
           label: source.label,
           state: "ok",
           lastCheckedAt: new Date().toISOString(),
+          nextPollAt,
           detail: `${articles.length} relevante saker hentet via RSS`,
         });
         return articles;
@@ -41,6 +44,8 @@ async function collectAll(): Promise<void> {
           label: source.label,
           state: "degraded",
           lastCheckedAt: new Date().toISOString(),
+          lastFailureAt: new Date().toISOString(),
+          nextPollAt,
           detail: String(error),
         });
         return [];
@@ -57,6 +62,7 @@ async function collectAll(): Promise<void> {
         label: "Trondheim kommune",
         state: "ok",
         lastCheckedAt: new Date().toISOString(),
+        nextPollAt: new Date(Date.now() + municipalityIntervalMs).toISOString(),
         detail: `${articles.length} kommunale oppslag hentet`,
       });
     } catch (error) {
@@ -65,6 +71,8 @@ async function collectAll(): Promise<void> {
         label: "Trondheim kommune",
         state: "degraded",
         lastCheckedAt: new Date().toISOString(),
+        lastFailureAt: new Date().toISOString(),
+        nextPollAt: new Date(Date.now() + municipalityIntervalMs).toISOString(),
         detail: String(error),
       });
     }
@@ -72,20 +80,62 @@ async function collectAll(): Promise<void> {
   const articles = await geocodeArticles(articleSets.flat());
   await repository.upsertArticles(articles);
   for (const status of await probeOfficialSources()) {
-    await repository.setHealth({ ...status, lastCheckedAt: new Date().toISOString() });
+    await repository.setHealth({ ...status, lastCheckedAt: new Date().toISOString(), nextPollAt });
   }
   if (process.env.POLITILOGGEN_ENABLED === "true") {
     await collectPolitiloggenPersonalUse().catch((error) =>
       console.warn(`[worker] Politiloggen adapter failed: ${String(error)}`),
     );
   }
-  const analysis = await analyzer.cluster(articles);
-  const deterministicSituations = detectPreliminarySituations(articles);
+  const officialEvents = [];
+  const knownMetEventIds = await repository.knownOfficialEventIds("met");
+  for (const [source, collector] of [
+    ["met", () => collectMetWarnings(fetch, knownMetEventIds)],
+    ["nve", collectNveWarnings],
+  ] as const) {
+    try {
+      officialEvents.push(...(await collector()));
+    } catch (error) {
+      await repository.setHealth({
+        source,
+        label: source === "met" ? "MET farevarsel" : "NVE Varsom",
+        state: "degraded",
+        lastCheckedAt: new Date().toISOString(),
+        lastFailureAt: new Date().toISOString(),
+        nextPollAt,
+        detail: `Varselinnhenting feilet: ${String(error)}`,
+      });
+    }
+  }
+  await repository.upsertOfficialEvents(officialEvents);
+  const recentArticles = await repository.recentArticles(12);
+  const currentWarnings = await repository.currentOfficialEvents();
+  const analysis = await analyzer.cluster(recentArticles);
+  await repository.saveAiRun(analysis.run);
+  await repository.setHealth({
+    source: "openai",
+    label: "AI-analyse",
+    state: analysis.run.status === "disabled" ? "disabled" : analysis.run.status,
+    lastCheckedAt: analysis.run.completedAt,
+    lastFailureAt: analysis.run.status === "degraded" ? analysis.run.completedAt : undefined,
+    nextPollAt,
+    detail:
+      analysis.run.status === "ok"
+        ? `${analysis.result.clusters.length} validerte kandidatgrupper`
+        : analysis.run.status === "disabled"
+          ? "OPENAI_API_KEY er ikke konfigurert"
+          : (analysis.run.error ?? "AI-analyse feilet"),
+  });
+  const deterministicSituations = enhanceSituations(
+    detectPreliminarySituations(recentArticles, currentWarnings),
+    analysis.result,
+    recentArticles,
+  );
   await Promise.all(
     deterministicSituations.map((situation) => repository.upsertSituation(situation)),
   );
   console.log(
-    `[worker] stored ${articles.length} articles; persisted ${deterministicSituations.length} multi-source situations; AI identified ${analysis.clusters.length} additional candidates`,
+    `[worker] stored ${articles.length} articles; persisted ${deterministicSituations.length} multi-source situations; AI identified ${analysis.result.clusters.length} validated candidates`,
   );
 }
 

@@ -4,8 +4,11 @@
 - All `/api` data, notes, drawings, attachments and exports require an authenticated owner session.
 - Secrets are supplied through GitHub Actions/VPS-managed environment files and must never be committed.
 - Uploaded files are stored outside the web root, size-limited, and checksum-recorded.
+- State-changing authenticated API requests require an owner-session CSRF token and same-origin browser requests.
+- GitHub OAuth authorization uses a session-backed state nonce, and logout requires the same CSRF protection.
+- Production responses set a Content Security Policy permitting only application assets plus the configured Kartverket and DSB map image hosts.
 - Private workspace content is excluded from AI processing.
-- The exported workspace package is authenticated and includes private information; handle it as confidential.
+- The exported workspace package is authenticated, persisted for protected re-download, sanitizes attachment paths and includes a checksum manifest; handle it as confidential.
 
 ## Secrets Required For Deployment
 

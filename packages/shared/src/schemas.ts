@@ -39,4 +39,14 @@ export const articleQuerySchema = z.object({
   scope: z.enum(["trondheim", "trondelag"]).optional(),
   category: z.string().optional(),
   q: z.string().trim().max(120).optional(),
+  cursor: z.string().datetime().optional(),
+});
+
+export const labelInputSchema = z.object({
+  label: z.string().trim().min(1).max(160),
+  note: z.string().trim().max(2000).optional(),
+});
+
+export const lifecycleInputSchema = z.object({
+  status: z.enum(["active", "resolved"]),
 });

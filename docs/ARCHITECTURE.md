@@ -6,6 +6,8 @@
 
 PostgreSQL/PostGIS stores articles, situations, workspace content and geometry. Production attachments are stored on a persisted Docker volume with metadata and SHA-256 checksums in PostgreSQL.
 
+Normalized incident records are authoritative: situation/article associations, evidence, timeline entries, official events, AI processing runs, saved situations and export manifests are stored separately from the summary payload returned for the dashboard.
+
 ## Provenance Model
 
 Map features carry one required provenance classification:
@@ -20,3 +22,5 @@ The API ignores any client attempt to create an annotation under another provena
 ## AI Boundary
 
 The worker defines a provider interface and initially implements OpenAI-based structured clustering only when `OPENAI_API_KEY` is configured. Only public feed excerpts and public official data may enter that process. Private annotations, attachments, tasks and notes are excluded.
+
+AI clusters are accepted only after each cited snippet matches an input excerpt and at least two independent sources remain. Deterministic multi-source detection remains available when AI is disabled or degraded.

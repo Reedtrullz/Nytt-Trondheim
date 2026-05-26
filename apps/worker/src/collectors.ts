@@ -42,6 +42,17 @@ function stableId(source: SourceId, url: string): string {
   return `${source}-${createHash("sha1").update(url).digest("hex").slice(0, 16)}`;
 }
 
+export function canonicalUrl(rawUrl: string, base?: string): string {
+  const url = new URL(rawUrl, base);
+  url.hash = "";
+  for (const parameter of [...url.searchParams.keys()]) {
+    if (parameter.startsWith("utm_") || parameter === "fbclid") {
+      url.searchParams.delete(parameter);
+    }
+  }
+  return url.toString();
+}
+
 export async function collectRss(
   source: FeedSource,
   fetcher: typeof fetch = fetch,
@@ -60,8 +71,9 @@ export async function collectRss(
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    const url = textValue(item.link).trim();
-    if (!title || !url) return [];
+    const link = textValue(item.link).trim();
+    if (!title || !link) return [];
+    const url = canonicalUrl(link);
     const scope = detectScope(`${title} ${excerpt}`);
     if (!scope && !source.retainRegionalUnmatched) return [];
     return [
@@ -81,6 +93,27 @@ export async function collectRss(
   });
 }
 
+function parseNorwegianDate(value: string): string | undefined {
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) return undefined;
+  const [, day, month, year, hours, minutes, seconds = "00"] = match;
+  return new Date(`${year}-${month}-${day}T${hours}:${minutes}:${seconds}+02:00`).toISOString();
+}
+
+async function municipalPublishedAt(url: string, fetcher: typeof fetch): Promise<string> {
+  try {
+    const response = await fetcher(url, {
+      headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
+    });
+    if (!response.ok) return new Date().toISOString();
+    const detail = cheerio.load(await response.text());
+    const value = detail('meta[property="article:published_time"]').attr("content") ?? "";
+    return parseNorwegianDate(value) ?? new Date().toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
 export async function collectMunicipality(fetcher: typeof fetch = fetch): Promise<Article[]> {
   const url = "https://www.trondheim.kommune.no/aktuelt/nyheter/";
   const response = await fetcher(url, {
@@ -88,28 +121,32 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
   });
   if (!response.ok) throw new Error(`Trondheim kommune returned ${response.status}`);
   const $ = cheerio.load(await response.text());
-  const articles: Article[] = [];
+  const candidates: Array<Omit<Article, "publishedAt">> = [];
   $("article.card").each((_index, element) => {
     const link = $(element).find("a[href]").first();
     const title = link.text().replace(/\s+/g, " ").trim();
     const href = link.attr("href");
     if (!title || !href) return;
-    const canonical = new URL(href, url).toString();
+    const canonical = canonicalUrl(href, url);
     const excerpt = $(element).text().replace(title, "").replace(/\s+/g, " ").trim();
-    articles.push({
+    candidates.push({
       id: stableId("trondheim_kommune", canonical),
       source: "trondheim_kommune",
       sourceLabel: "Trondheim kommune",
       title,
       excerpt: excerpt.slice(0, 300),
       url: canonical,
-      publishedAt: new Date().toISOString(),
       scope: "trondheim",
       category: categorize(`${title} ${excerpt}`),
       places: extractPlaces(`${title} ${excerpt}`),
     });
   });
-  return articles;
+  return Promise.all(
+    candidates.map(async (article) => ({
+      ...article,
+      publishedAt: await municipalPublishedAt(article.url, fetcher),
+    })),
+  );
 }
 
 export interface OfficialProbeResult {
@@ -124,11 +161,15 @@ export async function probeOfficialSources(
 ): Promise<OfficialProbeResult[]> {
   const results: OfficialProbeResult[] = [];
   const probes: Array<[SourceId, string, string]> = [
-    ["met", "MET farevarsel", "https://api.met.no/weatherapi/metalerts/2.0/current.json?county=50"],
+    [
+      "met",
+      "MET farevarsel",
+      "https://api.met.no/weatherapi/metalerts/2.0/current.rss?county=50&geographicDomain=land&lang=no",
+    ],
     [
       "nve",
       "NVE Varsom",
-      "https://api01.nve.no/hydrology/forecast/flood/v1.0.10/api/Warning/Current",
+      "https://api01.nve.no/hydrology/forecast/flood/v1.0.10/api/Warning/Municipality/5001/1/",
     ],
     [
       "dsb",

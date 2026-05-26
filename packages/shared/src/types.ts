@@ -10,7 +10,8 @@ export type SourceId =
   | "nve"
   | "datex"
   | "dsb"
-  | "politiloggen";
+  | "politiloggen"
+  | "openai";
 
 export type GeographicScope = "trondheim" | "trondelag";
 export type ArticleCategory =
@@ -26,6 +27,7 @@ export type SituationType =
   | "missing_person"
   | "traffic"
   | "flood"
+  | "landslide"
   | "weather"
   | "rescue"
   | "service_disruption"
@@ -109,6 +111,39 @@ export interface Situation {
   evidence: EvidenceItem[];
   features: MapFeature[];
   timeline: TimelineEntry[];
+  saved?: boolean;
+}
+
+export type OfficialEventState = "active" | "updated" | "cancelled" | "expired";
+
+export interface OfficialEvent {
+  id: string;
+  source: "met" | "nve";
+  eventType: SituationType;
+  title: string;
+  detail: string;
+  sourceUrl: string;
+  areaLabel: string;
+  state: OfficialEventState;
+  severity?: string;
+  publishedAt: string;
+  validFrom: string;
+  validTo: string;
+  geometry?: MapFeature["geometry"];
+  replacesIds?: string[];
+  raw: unknown;
+}
+
+export interface AiProcessingRun {
+  id: string;
+  provider: "openai" | "deterministic";
+  model: string;
+  status: "ok" | "degraded" | "disabled";
+  startedAt: string;
+  completedAt: string;
+  articleIds: string[];
+  result: unknown;
+  error?: string;
 }
 
 export interface WorkspaceTask {
@@ -141,6 +176,8 @@ export interface SourceHealth {
   label: string;
   state: "ok" | "degraded" | "disabled" | "awaiting_access";
   lastCheckedAt?: string;
+  lastFailureAt?: string;
+  nextPollAt?: string;
   detail: string;
 }
 
@@ -156,4 +193,9 @@ export interface BootstrapPayload {
   articles: Article[];
   situations: Situation[];
   sourceHealth: SourceHealth[];
+}
+
+export interface SessionPayload {
+  user: { login: string; displayName: string; avatarUrl?: string };
+  csrfToken: string;
 }

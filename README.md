@@ -12,7 +12,7 @@ npm run build -w @nytt/shared
 npm run dev
 ```
 
-The development API uses seeded in-memory data and bypasses GitHub authentication unless `DEV_AUTH_BYPASS=false` is set. Open `http://localhost:5173`.
+The development API uses seeded in-memory data and bypasses GitHub authentication unless `DEV_AUTH_BYPASS=false` is set. Open `http://127.0.0.1:5173`.
 
 For PostgreSQL/PostGIS-backed development:
 
@@ -27,6 +27,8 @@ DATABASE_URL=postgres://nytt:nytt@localhost:5432/nytt npm run db:migrate
 - `Siste nytt`: chronological Trondheim/Trøndelag views, categories, search, saved links and nearby map.
 - `Situasjonsrom`: event timeline, attributed evidence, warning/context layers, related stories and private planning workspace.
 - Map provenance is explicit: official information, reporting-derived estimates, DSB preparedness context and private drawings are separate layers.
+- Situation processing stores MET/NVE official warning context, validated OpenAI-cited summaries and municipality corroboration without treating warnings as emergency confirmation.
+- Private workspace mutations use CSRF protection; persisted protected exports include manifests, checksums and provenance-separated GeoJSON.
 
 ## Services
 

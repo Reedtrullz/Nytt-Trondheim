@@ -13,7 +13,11 @@ export default defineConfig({
     url: "http://127.0.0.1:8080/health",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { DEV_AUTH_BYPASS: "true", NODE_ENV: "development" },
+    env: {
+      DEV_AUTH_BYPASS: "true",
+      NODE_ENV: "development",
+      PUBLIC_ORIGIN: "http://127.0.0.1:5173",
+    },
   },
   projects: [
     {
