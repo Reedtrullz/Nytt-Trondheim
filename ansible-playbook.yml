@@ -1,0 +1,228 @@
+---
+- name: Deploy Nytt Trondheim to VPS
+  hosts: vps
+  gather_facts: false
+  vars:
+    repo_url: "https://github.com/Reedtrullz/Nytt-Trondheim.git"
+    app_dir: "/home/deploy/nytt-trondheim"
+    app_port: "8090"
+    canary_port: "8091"
+    public_origin: "https://nytt.reidar.tech"
+  tasks:
+    - name: Ensure app and backup directories exist
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: deploy
+        group: deploy
+        mode: "0750"
+      loop:
+        - "{{ app_dir }}"
+        - "/var/backups/nytt-trondheim"
+
+    - name: Clone or update repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: true
+
+    - name: Write application secrets file from CI secrets
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/.env.production"
+        owner: deploy
+        group: deploy
+        mode: "0600"
+        content: |
+          NODE_ENV=production
+          PORT=8080
+          PUBLIC_ORIGIN={{ public_origin }}
+          POSTGRES_PASSWORD={{ lookup('env', 'NYTT_POSTGRES_PASSWORD') }}
+          DATABASE_URL=postgres://nytt:{{ lookup('env', 'NYTT_POSTGRES_PASSWORD') }}@postgres:5432/nytt
+          SESSION_SECRET={{ lookup('env', 'NYTT_SESSION_SECRET') }}
+          GITHUB_CLIENT_ID={{ lookup('env', 'NYTT_GITHUB_CLIENT_ID') }}
+          GITHUB_CLIENT_SECRET={{ lookup('env', 'NYTT_GITHUB_CLIENT_SECRET') }}
+          GITHUB_ALLOWED_LOGIN=Reedtrullz
+          OPENAI_API_KEY={{ lookup('env', 'NYTT_OPENAI_API_KEY') }}
+          OPENAI_MODEL=gpt-4.1-mini
+          POLITILOGGEN_ENABLED={{ lookup('env', 'NYTT_POLITILOGGEN_ENABLED') | default('false', true) }}
+          DATEX_ENDPOINT={{ lookup('env', 'NYTT_DATEX_ENDPOINT') | default('', true) }}
+          DATEX_API_KEY={{ lookup('env', 'NYTT_DATEX_API_KEY') | default('', true) }}
+
+    - name: Build application images
+      ansible.builtin.command: docker compose --env-file .env.production build
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Start database
+      ansible.builtin.command: docker compose --env-file .env.production up -d postgres
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Create pre-migration database backup when database already has data
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker compose --env-file .env.production exec -T postgres pg_dump -Fc -U nytt nytt > /var/backups/nytt-trondheim/pre-migrate-$(date +%Y%m%d%H%M%S).dump
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      changed_when: true
+      failed_when: false
+
+    - name: Apply database migrations
+      ansible.builtin.command: docker compose --env-file .env.production run --rm migrate
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Remove stale canary
+      community.docker.docker_container:
+        name: nytt-trondheim-canary
+        state: absent
+
+    - name: Start API canary with production database
+      community.docker.docker_container:
+        name: nytt-trondheim-canary
+        image: nytt-trondheim-api:latest
+        state: started
+        env_file: "{{ app_dir }}/.env.production"
+        env:
+          DATABASE_URL: "postgres://nytt:{{ lookup('env', 'NYTT_POSTGRES_PASSWORD') }}@postgres:5432/nytt"
+          PORT: "8080"
+        networks:
+          - name: "nytt_backend"
+        published_ports:
+          - "127.0.0.1:{{ canary_port }}:8080"
+
+    - name: Wait for canary health
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ canary_port }}/health"
+        return_content: true
+      register: canary_health
+      until: canary_health.json.status == "ok"
+      retries: 12
+      delay: 5
+
+    - name: Promote API and worker
+      ansible.builtin.command: docker compose --env-file .env.production up -d app worker
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Remove healthy canary
+      community.docker.docker_container:
+        name: nytt-trondheim-canary
+        state: absent
+
+    - name: Configure Caddy reverse proxy
+      become: true
+      ansible.builtin.blockinfile:
+        path: /etc/caddy/Caddyfile
+        marker: "# {mark} ANSIBLE MANAGED - Nytt Trondheim"
+        block: |
+          nytt.reidar.tech {
+            reverse_proxy 127.0.0.1:{{ app_port }}
+          }
+
+    - name: Reload Caddy
+      become: true
+      ansible.builtin.systemd:
+        name: caddy
+        state: reloaded
+
+    - name: Install encrypted backup scripts
+      become: true
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "0750"
+      loop:
+        - { src: "scripts/backup.sh", dest: "/usr/local/bin/nytt-backup" }
+        - { src: "scripts/restore-check.sh", dest: "/usr/local/bin/nytt-restore-check" }
+
+    - name: Ensure restic is installed for offsite backups
+      become: true
+      ansible.builtin.apt:
+        name: restic
+        state: present
+
+    - name: Install backup environment file
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/nytt-backup.env
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          APP_DIR={{ app_dir }}
+          RESTIC_REPOSITORY={{ lookup('env', 'NYTT_RESTIC_REPOSITORY') }}
+          RESTIC_PASSWORD={{ lookup('env', 'NYTT_RESTIC_PASSWORD') }}
+          AWS_ACCESS_KEY_ID={{ lookup('env', 'NYTT_BACKUP_ACCESS_KEY') }}
+          AWS_SECRET_ACCESS_KEY={{ lookup('env', 'NYTT_BACKUP_SECRET_KEY') }}
+
+    - name: Install systemd backup units
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ item.name }}"
+        mode: "0644"
+        content: "{{ item.content }}"
+      loop:
+        - name: nytt-backup.service
+          content: |
+            [Unit]
+            Description=Encrypted backup for Nytt Trondheim
+            [Service]
+            Type=oneshot
+            EnvironmentFile=/etc/nytt-backup.env
+            ExecStart=/usr/local/bin/nytt-backup
+        - name: nytt-backup.timer
+          content: |
+            [Unit]
+            Description=Nightly Nytt Trondheim backup
+            [Timer]
+            OnCalendar=*-*-* 03:15:00
+            Persistent=true
+            [Install]
+            WantedBy=timers.target
+        - name: nytt-restore-check.service
+          content: |
+            [Unit]
+            Description=Validate Nytt Trondheim backups
+            [Service]
+            Type=oneshot
+            EnvironmentFile=/etc/nytt-backup.env
+            ExecStart=/usr/local/bin/nytt-restore-check
+        - name: nytt-restore-check.timer
+          content: |
+            [Unit]
+            Description=Weekly Nytt Trondheim restore verification
+            [Timer]
+            OnCalendar=Sun *-*-* 04:15:00
+            Persistent=true
+            [Install]
+            WantedBy=timers.target
+
+    - name: Enable backup timers
+      become: true
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      loop:
+        - nytt-backup.timer
+        - nytt-restore-check.timer
+
+    - name: Verify production health
+      ansible.builtin.uri:
+        url: "https://nytt.reidar.tech/health"
+        return_content: true
+      register: production_health
+      until: production_health.json.status == "ok"
+      retries: 6
+      delay: 5

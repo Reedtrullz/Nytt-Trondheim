@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nytt
+      POSTGRES_USER: nytt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nytt -d nytt"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  migrate:
+    build:
+      context: .
+      target: api
+    image: nytt-trondheim-api:latest
+    env_file: .env.production
+    command: ["node", "apps/server/dist/db/migrate.js"]
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      target: api
+    image: nytt-trondheim-api:latest
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgres://nytt:${POSTGRES_PASSWORD}@postgres:5432/nytt
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "127.0.0.1:${APP_PORT:-8090}:8080"
+    volumes:
+      - uploads:/data/uploads
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: "1.0"
+
+  worker:
+    build:
+      context: .
+      target: worker
+    image: nytt-trondheim-worker:latest
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgres://nytt:${POSTGRES_PASSWORD}@postgres:5432/nytt
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+
+networks:
+  backend:
+    name: nytt_backend
+    internal: true
+
+volumes:
+  postgres-data:
+  uploads:

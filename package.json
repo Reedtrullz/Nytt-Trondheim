@@ -1,0 +1,43 @@
+{
+  "name": "nytt-trondheim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "apps/frontend",
+    "apps/server",
+    "apps/worker"
+  ],
+  "scripts": {
+    "build": "npm run build -w @nytt/shared && npm run build -w @nytt/frontend && npm run build -w @nytt/server && npm run build -w @nytt/worker",
+    "dev": "concurrently -n api,web \"npm run dev -w @nytt/server\" \"npm run dev -w @nytt/frontend\"",
+    "dev:worker": "npm run dev -w @nytt/worker",
+    "db:migrate": "npm run db:migrate -w @nytt/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "audit:production": "npm audit --omit=dev --audit-level=high"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.29.0",
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.15.30",
+    "@types/supertest": "^6.0.3",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.29.0",
+    "globals": "^16.2.0",
+    "prettier": "^3.5.3",
+    "supertest": "^7.1.1",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.34.0",
+    "vitest": "^3.2.3"
+  }
+}

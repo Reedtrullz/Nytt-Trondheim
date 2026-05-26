@@ -1,0 +1,47 @@
+name: Deploy to VPS
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Nytt Trondheim
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (vars.NYTT_DEPLOY_ENABLED == 'true' && github.event.workflow_run.conclusion == 'success') }}
+    env:
+      NYTT_POSTGRES_PASSWORD: ${{ secrets.NYTT_POSTGRES_PASSWORD }}
+      NYTT_SESSION_SECRET: ${{ secrets.NYTT_SESSION_SECRET }}
+      NYTT_GITHUB_CLIENT_ID: ${{ secrets.NYTT_GITHUB_CLIENT_ID }}
+      NYTT_GITHUB_CLIENT_SECRET: ${{ secrets.NYTT_GITHUB_CLIENT_SECRET }}
+      NYTT_OPENAI_API_KEY: ${{ secrets.NYTT_OPENAI_API_KEY }}
+      NYTT_POLITILOGGEN_ENABLED: ${{ vars.NYTT_POLITILOGGEN_ENABLED }}
+      NYTT_DATEX_ENDPOINT: ${{ secrets.NYTT_DATEX_ENDPOINT }}
+      NYTT_DATEX_API_KEY: ${{ secrets.NYTT_DATEX_API_KEY }}
+      NYTT_RESTIC_REPOSITORY: ${{ secrets.NYTT_RESTIC_REPOSITORY }}
+      NYTT_RESTIC_PASSWORD: ${{ secrets.NYTT_RESTIC_PASSWORD }}
+      NYTT_BACKUP_ACCESS_KEY: ${{ secrets.NYTT_BACKUP_ACCESS_KEY }}
+      NYTT_BACKUP_SECRET_KEY: ${{ secrets.NYTT_BACKUP_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ansible
+        run: sudo apt-get update && sudo apt-get install -y ansible
+      - name: Install Docker collection
+        run: ansible-galaxy collection install community.docker
+      - name: Configure deployment SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa_racknerd
+          chmod 600 ~/.ssh/id_rsa_racknerd
+          ssh-keyscan -H 198.23.137.16 >> ~/.ssh/known_hosts
+      - name: Smoke test SSH
+        run: ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 "echo SSH_OK"
+      - name: Run Ansible deployment
+        run: ansible-playbook -i inventory/hosts.yml ansible-playbook.yml -vv
