@@ -14,7 +14,7 @@
     "dev": "concurrently -n api,web \"npm run dev -w @nytt/server\" \"npm run dev -w @nytt/frontend\"",
     "dev:worker": "npm run dev -w @nytt/worker",
     "db:migrate": "npm run db:migrate -w @nytt/server",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build -w @nytt/shared && npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
