@@ -493,6 +493,12 @@ button {
   background: var(--blue-soft);
 }
 
+.leaflet-control-attribution a {
+  color: #154e76;
+  text-decoration: underline;
+  text-underline-offset: 1px;
+}
+
 .story-marker span {
   display: flex;
   align-items: center;
