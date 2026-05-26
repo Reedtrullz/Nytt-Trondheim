@@ -15,6 +15,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
 COPY packages/shared/package.json packages/shared/package.json
+COPY apps/frontend/package.json apps/frontend/package.json
 COPY apps/server/package.json apps/server/package.json
 COPY apps/worker/package.json apps/worker/package.json
 RUN npm ci --omit=dev --workspace @nytt/shared --workspace @nytt/server --workspace @nytt/worker
