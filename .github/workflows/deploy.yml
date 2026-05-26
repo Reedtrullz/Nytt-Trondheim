@@ -30,7 +30,7 @@ jobs:
       NYTT_BACKUP_ACCESS_KEY: ${{ secrets.NYTT_BACKUP_ACCESS_KEY }}
       NYTT_BACKUP_SECRET_KEY: ${{ secrets.NYTT_BACKUP_SECRET_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Ansible
         run: sudo apt-get update && sudo apt-get install -y ansible
       - name: Install Docker collection
