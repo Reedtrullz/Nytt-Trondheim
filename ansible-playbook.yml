@@ -173,7 +173,12 @@
         set -a
         . /etc/nytt-backup.env
         set +a
-        restic snapshots >/dev/null 2>&1 || restic init
+        if ! restic snapshots >/dev/null 2>&1; then
+          if restic cat config >/dev/null 2>&1; then
+            exit 0
+          fi
+          restic init
+        fi
       args:
         executable: /bin/bash
       changed_when: false
