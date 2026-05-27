@@ -175,6 +175,16 @@
         chdir: "{{ app_dir }}"
       changed_when: true
 
+    - name: Wait for database readiness before backup and migration
+      ansible.builtin.command: docker compose --env-file .env.production exec -T postgres pg_isready -U nytt -d nytt
+      args:
+        chdir: "{{ app_dir }}"
+      register: postgres_readiness
+      until: postgres_readiness.rc == 0
+      retries: 12
+      delay: 5
+      changed_when: false
+
     - name: Create and verify encrypted pre-migration backup
       become: true
       ansible.builtin.shell: |

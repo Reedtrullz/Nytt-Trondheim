@@ -48,6 +48,6 @@ As inspected on May 27, 2026:
 - GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false`.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
-- The `nytt-trondheim` GitHub App credentials and DeepSeek API credential are configured; the Google Drive/rclone backup target remains to be provisioned.
+- The `nytt-trondheim` GitHub App credentials, DeepSeek API credential and restricted Google Drive/rclone backup target are configured.
 - Caddy now serves valid TLS for `https://nytt.reidar.tech/health`; it returns HTTP `502` until the application is deployed to localhost port `8090`.
 - The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.
