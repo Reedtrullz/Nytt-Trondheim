@@ -14,7 +14,11 @@ docker run --rm -v nytt_uploads:/source:ro -v "$BACKUP_STAGE:/backup" alpine \
   sh -c 'tar -czf /backup/uploads.tar.gz -C /source .'
 
 restic backup --retry-lock 2m "$BACKUP_STAGE/nytt.dump" "$BACKUP_STAGE/uploads.tar.gz" --tag nytt-trondheim
-restic forget --retry-lock 2m --tag nytt-trondheim --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune
+
+if [[ "${BACKUP_APPLY_RETENTION:-false}" == "true" ]]; then
+  restic forget --retry-lock 2m --tag nytt-trondheim --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune
+fi
+
 printf '{"status":"ok","completedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATUS_DIR/backup.json.tmp"
 chmod 0644 "$STATUS_DIR/backup.json.tmp"
 mv "$STATUS_DIR/backup.json.tmp" "$STATUS_DIR/backup.json"
