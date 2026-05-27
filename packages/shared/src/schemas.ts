@@ -39,7 +39,7 @@ export const articleQuerySchema = z.object({
   scope: z.enum(["trondheim", "trondelag"]).optional(),
   category: z.string().optional(),
   q: z.string().trim().max(120).optional(),
-  cursor: z.string().datetime().optional(),
+  cursor: z.string().trim().max(250).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(40),
 });
 
@@ -53,7 +53,7 @@ export const situationQuerySchema = z.object({
     .enum(["true", "false"])
     .transform((value) => value === "true")
     .optional(),
-  cursor: z.string().datetime().optional(),
+  cursor: z.string().trim().max(250).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
 

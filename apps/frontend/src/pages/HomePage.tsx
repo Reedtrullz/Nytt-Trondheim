@@ -88,7 +88,7 @@ function SituationBanner({
         <p>Omtalt område</p>
         <div className="preview-shape" />
         <span className="preview-point">{situation.locationLabel}</span>
-        <small>Ikke bekreftet brannperimeter</small>
+        <small>Ingen presis hendelsesavgrensning uten publisert geometri</small>
       </div>
     </article>
   );
@@ -213,8 +213,10 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [category, setCategory] = useState("Alle");
   const [query, setQuery] = useState("");
   const [articles, setArticles] = useState(initialData.articles);
+  const [nextCursor, setNextCursor] = useState<string>();
   const [situations, setSituations] = useState<BootstrapPayload["situations"]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
 
   useEffect(() => {
@@ -226,13 +228,17 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setNextCursor(undefined);
     setFeedError(undefined);
     const timeout = window.setTimeout(
       () => {
         void api
           .articles({ scope, category, q: query })
           .then((page) => {
-            if (!cancelled) setArticles(page.items);
+            if (!cancelled) {
+              setArticles(page.items);
+              setNextCursor(page.nextCursor);
+            }
           })
           .catch((reason: Error) => {
             if (!cancelled) setFeedError(reason.message);
@@ -263,6 +269,24 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
 
   function updateSaved(id: string, saved: boolean) {
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
+  }
+
+  async function loadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    setFeedError(undefined);
+    try {
+      const page = await api.articles({ scope, category, q: query, cursor: nextCursor });
+      setArticles((current) => [
+        ...current,
+        ...page.items.filter((item) => !current.some((existing) => existing.id === item.id)),
+      ]);
+      setNextCursor(page.nextCursor);
+    } catch (reason) {
+      setFeedError(reason instanceof Error ? reason.message : "Kunne ikke hente flere saker");
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   return (
@@ -311,6 +335,11 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
               <NewsRow key={article.id} article={article} onSave={updateSaved} />
             ))}
           </div>
+          {nextCursor ? (
+            <button className="load-more" disabled={loadingMore} onClick={() => void loadMore()}>
+              {loadingMore ? "Henter flere saker..." : "Vis flere saker"}
+            </button>
+          ) : null}
         </section>
         <NearbyRail articles={initialData.articles} data={initialData} />
       </div>

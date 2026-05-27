@@ -33,7 +33,7 @@ Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.ti
 - Add the listed repository secrets, including `NYTT_REPO_DEPLOY_KEY` for the repository-scoped read-only checkout key.
 - Authorize an `rclone` Google Drive remote for the dedicated encrypted backup folder and configure `NYTT_RESTIC_REPOSITORY=rclone:nytt_drive:nytt-trondheim/restic`.
 - Run `Provision Origin` once using an already-authorized VPS SSH key; it installs the dedicated Actions and repository checkout keys and configures the Caddy hostname. After it succeeds, rotate `SSH_PRIVATE_KEY` to the dedicated Actions key.
-- After the first manual release succeeds, set repository variable `NYTT_DEPLOY_ENABLED=true` to permit automatic promotions from `main`.
+- After manual release acceptance succeeds, set repository variable `NYTT_DEPLOY_ENABLED=true` to permit automatic promotions from `main`.
 - Confirm DNS for `nytt.reidar.tech` resolves to the VPS.
 - Run origin provisioning to repair TLS/Cloudflare routing before release; the endpoint returned HTTP `525` before the `nytt.reidar.tech` Caddy hostname existed.
 - Confirm Docker, Caddy and the `deploy` SSH key are available on the same VPS used by RFMC.
@@ -48,10 +48,11 @@ The deployment preserves the prior API and worker images as `:previous` before b
 As inspected on May 27, 2026:
 
 - The application is live at `https://nytt.reidar.tech`; `/health` returns healthy Postgres-backed status through Caddy and Cloudflare.
-- GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false` until the incident-correctness release is verified manually.
+- The incident-correctness release was manually verified and `NYTT_DEPLOY_ENABLED=true`; successful `main` CI runs now trigger production promotion.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
 - The `nytt-trondheim` GitHub App credentials, DeepSeek API credential and restricted Google Drive/rclone backup target are configured.
 - Caddy serves the application from localhost port `8090` with valid TLS at `https://nytt.reidar.tech`.
 - The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.
 - Encrypted Google Drive/restic backups and restore verification are active. Runtime status files expose only successful completion timestamps to the owner-only operations view.
+- Persisted false-positive situations have been dismissed with retained audit history; new automatic incidents require explicit event type and a specific matching place.

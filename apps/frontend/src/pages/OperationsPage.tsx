@@ -34,7 +34,7 @@ export function OperationsPage() {
       <div className="operations-summary">
         <article>
           <strong>{status.articleCount}</strong>
-          <span>Lagrede saker</span>
+          <span>Innhentede saker</span>
         </article>
         <article>
           <strong>{status.situationCounts.preliminary + status.situationCounts.active}</strong>

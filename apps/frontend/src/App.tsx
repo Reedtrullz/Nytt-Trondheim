@@ -9,6 +9,18 @@ import { SituationPage } from "./pages/SituationPage.js";
 import { SituationsPage } from "./pages/SituationsPage.js";
 
 function Header() {
+  const [logoutError, setLogoutError] = useState<string>();
+
+  async function logout() {
+    setLogoutError(undefined);
+    try {
+      await api.logout();
+      window.location.href = "/auth/github";
+    } catch (reason) {
+      setLogoutError(reason instanceof Error ? reason.message : "Utlogging feilet");
+    }
+  }
+
   return (
     <header className="site-header">
       <div className="masthead">
@@ -32,7 +44,11 @@ function Header() {
           <span aria-hidden="true">⌕</span>
         </label>
         <div className="refreshed">Oppdatert nå</div>
+        <button className="logout" onClick={() => void logout()}>
+          Logg ut
+        </button>
       </div>
+      {logoutError ? <p className="header-error">{logoutError}</p> : null}
     </header>
   );
 }

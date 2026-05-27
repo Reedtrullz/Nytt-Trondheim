@@ -1,7 +1,6 @@
 import type { ArticleCategory, GeographicScope } from "@nytt/shared";
 
 const trondheimTerms = [
-  "trondheim",
   "midtbyen",
   "lade",
   "sluppen",
@@ -21,8 +20,9 @@ const trondheimTerms = [
   "leangen",
   "singsaker",
   "sverresborg",
+  "trondheim",
 ];
-const regionalTerms = ["trøndelag", "malvik", "stjørdal", "orkland", "melhus", "oppdal"];
+const regionalTerms = ["malvik", "stjørdal", "orkland", "melhus", "oppdal", "trøndelag"];
 
 const categoryRules: Array<[ArticleCategory, string[]]> = [
   ["Hendelser", ["brann", "savnet", "ulykke", "redning", "evaku", "politi"]],

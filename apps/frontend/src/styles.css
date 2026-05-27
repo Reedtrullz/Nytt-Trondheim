@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap");
-
 :root {
   --page: #fbfaf7;
   --paper: #fffefa;
@@ -13,8 +11,8 @@
   --green: #176446;
   --green-soft: #edf5f0;
   --amber: #d79132;
-  --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
-  --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --serif: "Iowan Old Style", "Baskerville", Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ink);
   font-family: var(--sans);
   background: var(--page);
@@ -133,6 +131,28 @@ button {
   color: var(--muted);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.logout {
+  padding: 8px 12px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.header-error {
+  position: absolute;
+  top: 72px;
+  right: 38px;
+  z-index: 500;
+  margin: 0;
+  padding: 8px 12px;
+  color: #8a2f21;
+  background: #fff1ed;
+  border: 1px solid #ead8cf;
+  font-size: 12px;
 }
 
 .home,
@@ -444,6 +464,21 @@ button {
 
 .news-list {
   margin-top: 4px;
+}
+
+.load-more {
+  display: block;
+  margin: 22px auto 0;
+  padding: 11px 22px;
+  color: var(--blue);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.load-more:disabled {
+  color: var(--muted);
+  cursor: wait;
 }
 
 .news-row {
@@ -1335,6 +1370,10 @@ button {
 
   .refreshed {
     margin-left: auto;
+  }
+
+  .logout {
+    order: 2;
   }
 
   .view-controls {

@@ -43,78 +43,130 @@ export function SituationPage() {
           ? "Avvist som feilkobling"
           : "Pågår";
 
+  async function performAction<T>(
+    request: () => Promise<T>,
+    apply: (value: T) => void,
+    message?: string,
+  ) {
+    setActionError(undefined);
+    setActionMessage(undefined);
+    try {
+      const value = await request();
+      apply(value);
+      if (message) setActionMessage(message);
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : "Handlingen feilet");
+    }
+  }
+
   async function createFeature(geometry: MapFeature["geometry"], label: string) {
-    const feature = await api.addFeature(id, {
-      geometry,
-      properties: { label, provenance: "private_annotation", updatedAt: new Date().toISOString() },
-    });
-    setWorkspace((current) =>
-      current
-        ? {
-            ...current,
-            situation: { ...current.situation, features: [...current.situation.features, feature] },
-          }
-        : current,
+    await performAction(
+      () =>
+        api.addFeature(id, {
+          geometry,
+          properties: {
+            label,
+            provenance: "private_annotation",
+            updatedAt: new Date().toISOString(),
+          },
+        }),
+      (feature) =>
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                situation: {
+                  ...current.situation,
+                  features: [...current.situation.features, feature],
+                },
+              }
+            : current,
+        ),
+      "Privat markering lagret.",
     );
   }
 
   async function updateFeature(featureId: string, label: string) {
-    const feature = await api.updateFeature(id, featureId, label);
-    setWorkspace((current) =>
-      current
-        ? {
-            ...current,
-            situation: {
-              ...current.situation,
-              features: current.situation.features.map((item) =>
-                item.id === feature.id ? feature : item,
-              ),
-            },
-          }
-        : current,
+    await performAction(
+      () => api.updateFeature(id, featureId, label),
+      (feature) =>
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                situation: {
+                  ...current.situation,
+                  features: current.situation.features.map((item) =>
+                    item.id === feature.id ? feature : item,
+                  ),
+                },
+              }
+            : current,
+        ),
+      "Privat markering oppdatert.",
     );
   }
 
   async function deleteFeature(featureId: string) {
-    await api.deleteFeature(id, featureId);
-    setWorkspace((current) =>
-      current
-        ? {
-            ...current,
-            situation: {
-              ...current.situation,
-              features: current.situation.features.filter((feature) => feature.id !== featureId),
-            },
-          }
-        : current,
+    await performAction(
+      () => api.deleteFeature(id, featureId),
+      () =>
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                situation: {
+                  ...current.situation,
+                  features: current.situation.features.filter(
+                    (feature) => feature.id !== featureId,
+                  ),
+                },
+              }
+            : current,
+        ),
+      "Privat markering slettet.",
     );
   }
 
   async function createTask() {
     if (!taskText.trim()) return;
-    const task = await api.addTask(id, taskText);
-    setWorkspace((current) =>
-      current ? { ...current, tasks: [...current.tasks, task] } : current,
+    await performAction(
+      () => api.addTask(id, taskText),
+      (task) => {
+        setWorkspace((current) =>
+          current ? { ...current, tasks: [...current.tasks, task] } : current,
+        );
+        setTaskText("");
+      },
     );
-    setTaskText("");
   }
 
   async function toggleTask(taskId: string, completed: boolean) {
-    const task = await api.toggleTask(id, taskId, completed);
-    setWorkspace((current) =>
-      current
-        ? { ...current, tasks: current.tasks.map((item) => (item.id === task.id ? task : item)) }
-        : current,
+    await performAction(
+      () => api.toggleTask(id, taskId, completed),
+      (task) =>
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                tasks: current.tasks.map((item) => (item.id === task.id ? task : item)),
+              }
+            : current,
+        ),
     );
   }
 
   async function addNote() {
     if (!noteText.trim()) return;
-    const note = await api.addNote(id, noteText);
-    setWorkspace((current) =>
-      current ? { ...current, notes: [...current.notes, note] } : current,
+    await performAction(
+      () => api.addNote(id, noteText),
+      (note) => {
+        setWorkspace((current) =>
+          current ? { ...current, notes: [...current.notes, note] } : current,
+        );
+        setNoteText("");
+      },
     );
-    setNoteText("");
   }
 
   async function uploadAttachment(file?: File) {
@@ -148,63 +200,102 @@ export function SituationPage() {
 
   async function saveSituation() {
     const saved = !situation.saved;
-    await api.saveSituation(id, saved);
-    setWorkspace((current) =>
-      current ? { ...current, situation: { ...current.situation, saved } } : current,
+    await performAction(
+      () => api.saveSituation(id, saved),
+      () =>
+        setWorkspace((current) =>
+          current ? { ...current, situation: { ...current.situation, saved } } : current,
+        ),
     );
   }
 
   async function resolveSituation() {
-    const updated = await api.setSituationStatus(id, "resolved");
-    setWorkspace((current) => (current ? { ...current, situation: updated } : current));
+    await performAction(
+      () => api.setSituationStatus(id, "resolved"),
+      (updated) =>
+        setWorkspace((current) => (current ? { ...current, situation: updated } : current)),
+      "Situasjonen er markert som avsluttet.",
+    );
   }
 
   async function dismissSituation() {
-    const updated = await api.setSituationStatus(id, "dismissed", "false_positive");
-    setWorkspace((current) => (current ? { ...current, situation: updated } : current));
+    await performAction(
+      () => api.setSituationStatus(id, "dismissed", "false_positive"),
+      (updated) =>
+        setWorkspace((current) => (current ? { ...current, situation: updated } : current)),
+      "Situasjonen er avvist som feilkobling.",
+    );
   }
 
   async function deleteTask(taskId: string) {
-    await api.deleteTask(id, taskId);
-    setWorkspace((current) =>
-      current ? { ...current, tasks: current.tasks.filter((task) => task.id !== taskId) } : current,
+    await performAction(
+      () => api.deleteTask(id, taskId),
+      () =>
+        setWorkspace((current) =>
+          current
+            ? { ...current, tasks: current.tasks.filter((task) => task.id !== taskId) }
+            : current,
+        ),
     );
   }
 
   async function updateTask(taskId: string, text: string) {
-    const task = await api.updateTask(id, taskId, text);
-    setWorkspace((current) =>
-      current
-        ? { ...current, tasks: current.tasks.map((item) => (item.id === task.id ? task : item)) }
-        : current,
+    await performAction(
+      () => api.updateTask(id, taskId, text),
+      (task) =>
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                tasks: current.tasks.map((item) => (item.id === task.id ? task : item)),
+              }
+            : current,
+        ),
     );
   }
 
   async function deleteNote(noteId: string) {
-    await api.deleteNote(id, noteId);
-    setWorkspace((current) =>
-      current ? { ...current, notes: current.notes.filter((note) => note.id !== noteId) } : current,
+    await performAction(
+      () => api.deleteNote(id, noteId),
+      () =>
+        setWorkspace((current) =>
+          current
+            ? { ...current, notes: current.notes.filter((note) => note.id !== noteId) }
+            : current,
+        ),
     );
   }
 
   async function updateNote(noteId: string, text: string) {
-    const note = await api.updateNote(id, noteId, text);
-    setWorkspace((current) =>
-      current
-        ? { ...current, notes: current.notes.map((item) => (item.id === note.id ? note : item)) }
-        : current,
+    await performAction(
+      () => api.updateNote(id, noteId, text),
+      (note) =>
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                notes: current.notes.map((item) => (item.id === note.id ? note : item)),
+              }
+            : current,
+        ),
     );
   }
 
   async function deleteAttachment(attachmentId: string) {
-    await api.deleteAttachment(id, attachmentId);
-    setWorkspace((current) =>
-      current
-        ? {
-            ...current,
-            attachments: current.attachments.filter((attachment) => attachment.id !== attachmentId),
-          }
-        : current,
+    await performAction(
+      () => api.deleteAttachment(id, attachmentId),
+      () =>
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                attachments: current.attachments.filter(
+                  (attachment) => attachment.id !== attachmentId,
+                ),
+              }
+            : current,
+        ),
+      "Vedlegget er slettet.",
     );
   }
 

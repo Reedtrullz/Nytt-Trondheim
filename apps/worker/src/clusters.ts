@@ -9,6 +9,7 @@ interface CandidateGroup {
 }
 
 const clusterWindowMs = 12 * 60 * 60 * 1000;
+const continuationWindowMs = 72 * 60 * 60 * 1000;
 const genericPlaces = new Set(["trondheim", "trøndelag"]);
 
 function slug(value: string): string {
@@ -23,11 +24,19 @@ export function detectPreliminarySituations(
   officialEvents: OfficialEvent[] = [],
   existingSituations: Situation[] = [],
 ): Situation[] {
-  const existingBySignature = new Map(
-    existingSituations
-      .filter((situation) => situation.incidentSignature)
-      .map((situation) => [situation.incidentSignature!, situation]),
-  );
+  const openBySignature = new Map<string, Situation>();
+  const historicalArticlesBySignature = new Map<string, Set<string>>();
+  for (const situation of existingSituations) {
+    if (!situation.incidentSignature) continue;
+    const linked = historicalArticlesBySignature.get(situation.incidentSignature) ?? new Set();
+    situation.relatedArticleIds.forEach((articleId) => linked.add(articleId));
+    historicalArticlesBySignature.set(situation.incidentSignature, linked);
+    if (situation.status === "resolved" || situation.status === "dismissed") continue;
+    const current = openBySignature.get(situation.incidentSignature);
+    if (!current || current.updatedAt < situation.updatedAt) {
+      openBySignature.set(situation.incidentSignature, situation);
+    }
+  }
   const groups = new Map<string, CandidateGroup>();
   for (const article of articles) {
     const type = detectType(article);
@@ -40,19 +49,48 @@ export function detectPreliminarySituations(
   }
 
   return [...groups.values()].flatMap((group) => {
-    const existing = existingBySignature.get(group.key);
-    if (existing?.status === "dismissed") return [];
+    const openSituation = openBySignature.get(group.key);
     const ordered = [...group.articles].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
-    const latest = ordered[0]!;
+    const previousArticleIds = historicalArticlesBySignature.get(group.key) ?? new Set<string>();
+    const newReports = openSituation
+      ? ordered.filter(
+          (article) =>
+            !openSituation.relatedArticleIds.includes(article.id) &&
+            article.publishedAt > openSituation.updatedAt,
+        )
+      : [];
+    const canContinueOpen =
+      openSituation &&
+      (newReports.length === 0 ||
+        newReports.some((article) => article.source === "trondheim_kommune") ||
+        newReports.some(
+          (article) =>
+            new Date(article.publishedAt).getTime() - new Date(openSituation.updatedAt).getTime() <=
+            continuationWindowMs,
+        ));
+    const availableForActivation = ordered.filter((article) => !previousArticleIds.has(article.id));
+    const candidateReports = canContinueOpen ? ordered : availableForActivation;
+    const latest = candidateReports[0];
+    if (!latest) return [];
     const latestTime = new Date(latest.publishedAt).getTime();
-    const activationReports = ordered.filter(
+    const activationReports = candidateReports.filter(
       (article) => latestTime - new Date(article.publishedAt).getTime() <= clusterWindowMs,
     );
-    if (!existing && new Set(activationReports.map((article) => article.source)).size < 2) {
+    if (!canContinueOpen && new Set(activationReports.map((article) => article.source)).size < 2) {
       return [];
     }
+    const existing = canContinueOpen ? openSituation : undefined;
     const currentReports = existing ? ordered : activationReports;
-    const id = existing?.id ?? `auto-${slug(group.key)}`;
+    const activationToken = createHash("sha1")
+      .update(
+        activationReports
+          .map((article) => article.id)
+          .sort()
+          .join(":"),
+      )
+      .digest("hex")
+      .slice(0, 8);
+    const id = existing?.id ?? `auto-${slug(group.key)}-${activationToken}`;
     const evidence: EvidenceItem[] = currentReports.map((article) => ({
       id: createHash("sha1").update(`${id}:${article.id}`).digest("hex").slice(0, 18),
       situationId: id,

@@ -18,7 +18,7 @@ import {
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
 import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from "./auth.js";
-import { buildWorkspaceExport } from "./export.js";
+import { buildWorkspaceExport, safeFilename } from "./export.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
 
 export interface AppRuntime {
@@ -353,6 +353,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       });
       res.status(201).json(attachment);
     } catch (error) {
+      if (req.file) await unlink(req.file.path).catch(() => undefined);
       next(error);
     }
   });
@@ -363,8 +364,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       if (!attachment || attachment.situationId !== req.params.id) {
         return void res.status(404).json({ error: "Vedlegget finnes ikke." });
       }
-      const filename = path.basename(attachment.filename).replaceAll(/[\r\n"]/g, "_");
-      res.download(attachment.storagePath, filename);
+      res.download(attachment.storagePath, safeFilename(attachment.filename));
     } catch (error) {
       next(error);
     }
@@ -391,7 +391,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         situationId: workspace.situation.id,
         createdAt: new Date().toISOString(),
         attachmentChecksums: workspace.attachments.map(({ filename, sha256, size }) => ({
-          filename,
+          filename: safeFilename(filename),
           sha256,
           size,
         })),

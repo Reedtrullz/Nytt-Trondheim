@@ -1,9 +1,33 @@
 import type pg from "pg";
-import type { AiProcessingRun } from "@nytt/shared";
+import type { AiProcessingRun, Article } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerRepository } from "../src/repository.js";
 
 describe("WorkerRepository", () => {
+  it("refreshes stored article metadata without replacing situation linkage", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const article: Article = {
+      id: "article-one",
+      source: "nrk",
+      sourceLabel: "NRK",
+      title: "Ny oppdatering",
+      excerpt: "Brann i Bymarka i Trondheim.",
+      url: "https://example.test/one",
+      publishedAt: "2026-05-27T07:00:00Z",
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Bymarka", "Trondheim"],
+    };
+
+    await repository.upsertArticles([article]);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0]?.[0]).toContain("payload ? 'situationId'");
+    expect(query.mock.calls[0]?.[0]).toContain("NOT EXISTS");
+    expect(query.mock.calls[0]?.[1]?.[7]).toBe(article);
+  });
+
   it("serializes AI processing arrays and results for jsonb columns", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);

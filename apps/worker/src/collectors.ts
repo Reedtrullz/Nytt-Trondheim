@@ -97,7 +97,25 @@ function parseNorwegianDate(value: string): string | undefined {
   const match = /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
   if (!match) return undefined;
   const [, day, month, year, hours, minutes, seconds = "00"] = match;
-  return new Date(`${year}-${month}-${day}T${hours}:${minutes}:${seconds}+02:00`).toISOString();
+  const wallClockUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hours),
+    Number(minutes),
+    Number(seconds),
+  );
+  const offsetName = new Intl.DateTimeFormat("en", {
+    timeZone: "Europe/Oslo",
+    timeZoneName: "shortOffset",
+  })
+    .formatToParts(new Date(wallClockUtc))
+    .find((part) => part.type === "timeZoneName")?.value;
+  const offsetMatch = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(offsetName ?? "");
+  if (!offsetMatch) return undefined;
+  const [, direction, offsetHours, offsetMinutes = "0"] = offsetMatch;
+  const offset = (Number(offsetHours) * 60 + Number(offsetMinutes)) * (direction === "+" ? 1 : -1);
+  return new Date(wallClockUtc - offset * 60_000).toISOString();
 }
 
 async function municipalPublishedAt(url: string, fetcher: typeof fetch): Promise<string> {

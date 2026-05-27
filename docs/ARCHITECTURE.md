@@ -25,6 +25,8 @@ The worker defines a provider interface and initially implements DeepSeek-based 
 
 AI clusters are accepted only after each cited snippet matches an input excerpt and at least two independent sources remain. Deterministic multi-source detection remains available when AI is disabled or degraded.
 
+Incident identity is lifecycle-aware: an open case may receive timely matching reports or a later official closure, while resolved or dismissed history cannot absorb a later same-place event. A later qualifying event receives a distinct activation identity and preserved provenance.
+
 ## Situation Activation
 
 Automatic Situation Room activation requires an explicit incident type and a shared specific place or event signature; broad references such as `Trondheim` alone never activate a situation. New incidents require two independent sources within 12 hours. Later matching reporting or municipal updates may update an already activated signature without reopening that activation rule.

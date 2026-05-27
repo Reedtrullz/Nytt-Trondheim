@@ -11,6 +11,7 @@
 | Trondheim kommune | Public Aktuelt HTML listing                    | Hourly    | Headline, excerpt, URL            |
 
 Articles link to the publisher; this application does not republish complete articles. Nidaros is excluded until a suitable permitted collection route is confirmed.
+Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, including daylight-saving transitions. When a still-visible collected article is fetched again, corrected public classification and geocoding metadata are refreshed without removing an established situation link.
 
 ## Official And Geographic Layers
 
@@ -30,4 +31,4 @@ DATEX and Politiloggen are intentionally deferred from the safe core production 
 
 ## Situation Matching
 
-The worker creates preliminary situations only for explicit incident categories and a shared specific place identifier. A general Trondheim mention is valid for feed relevance, but not for linking independent stories into one incident. DeepSeek may enrich an already qualifying group with cited text; it does not bypass deterministic activation requirements.
+The worker creates preliminary situations only for explicit incident categories and a shared specific place identifier. A general Trondheim mention is valid for feed relevance, but not for linking independent stories into one incident. Open situations accept timely matching reporting and matching official closure updates; resolved or dismissed cases cannot absorb a later new event at the same place. DeepSeek may enrich an already qualifying group with cited text; it does not bypass deterministic activation requirements.

@@ -103,6 +103,40 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function encodeCursor(timestamp: string, id: string): string {
+  return Buffer.from(JSON.stringify([timestamp, id]), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor: string): { timestamp: string; id?: string } {
+  if (!Number.isNaN(Date.parse(cursor))) return { timestamp: cursor };
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      typeof parsed[0] === "string" &&
+      !Number.isNaN(Date.parse(parsed[0])) &&
+      typeof parsed[1] === "string"
+    ) {
+      return { timestamp: parsed[0], id: parsed[1] };
+    }
+  } catch {
+    // Validation below returns one stable client-facing error for malformed cursors.
+  }
+  throw new Error("Ugyldig sidepeker.");
+}
+
+function beforeCursor(
+  timestamp: string,
+  id: string,
+  cursor?: { timestamp: string; id?: string },
+): boolean {
+  if (!cursor) return true;
+  return (
+    timestamp < cursor.timestamp ||
+    (timestamp === cursor.timestamp && Boolean(cursor.id && id < cursor.id))
+  );
+}
+
 export class MemoryStore implements Store {
   private articles = clone(sampleArticles);
   private situations = new Map([[sampleSituation.id, clone(sampleSituation)]]);
@@ -122,18 +156,32 @@ export class MemoryStore implements Store {
 
   async listArticles(filters: ArticleFilters): Promise<ArticlePage> {
     const search = filters.q?.toLocaleLowerCase("nb");
-    const items = this.articles.filter(
-      (article) =>
-        (!filters.scope || article.scope === filters.scope) &&
-        (!filters.category ||
-          filters.category === "Alle" ||
-          article.category === filters.category) &&
-        (!search ||
-          `${article.title} ${article.excerpt} ${article.places.join(" ")}`
-            .toLocaleLowerCase("nb")
-            .includes(search)),
-    );
-    return { items: clone(items.slice(0, filters.limit ?? 40)) };
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const limit = filters.limit ?? 40;
+    const items = this.articles
+      .filter(
+        (article) =>
+          (!filters.scope || article.scope === filters.scope) &&
+          (!filters.category ||
+            filters.category === "Alle" ||
+            article.category === filters.category) &&
+          (!search ||
+            `${article.title} ${article.excerpt} ${article.places.join(" ")}`
+              .toLocaleLowerCase("nb")
+              .includes(search)) &&
+          beforeCursor(article.publishedAt, article.id, cursor),
+      )
+      .sort(
+        (left, right) =>
+          right.publishedAt.localeCompare(left.publishedAt) || right.id.localeCompare(left.id),
+      );
+    const page = items.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: clone(page),
+      nextCursor:
+        items.length > limit && last ? encodeCursor(last.publishedAt, last.id) : undefined,
+    };
   }
 
   async listSavedArticles(): Promise<Article[]> {
@@ -146,18 +194,28 @@ export class MemoryStore implements Store {
   }
 
   async listSituations(filters: SituationFilters): Promise<SituationPage> {
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const limit = filters.limit ?? 30;
+    const items = [...this.situations.values()]
+      .filter(
+        (situation) =>
+          ((!filters.status && (filters.includeDismissed || situation.status !== "dismissed")) ||
+            situation.status === filters.status) &&
+          (!filters.saved || this.savedSituations.has(situation.id)) &&
+          beforeCursor(situation.updatedAt, situation.id, cursor),
+      )
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
+      );
+    const page = items.slice(0, limit);
+    const last = page.at(-1);
     return {
-      items: [...this.situations.values()]
-        .filter(
-          (situation) =>
-            (!filters.status && (filters.includeDismissed || situation.status !== "dismissed")) ||
-            situation.status === filters.status,
-        )
-        .filter((situation) => !filters.saved || this.savedSituations.has(situation.id))
-        .map((situation) => ({
-          ...clone(situation),
-          saved: this.savedSituations.has(situation.id),
-        })),
+      items: page.map((situation) => ({
+        ...clone(situation),
+        saved: this.savedSituations.has(situation.id),
+      })),
+      nextCursor: items.length > limit && last ? encodeCursor(last.updatedAt, last.id) : undefined,
     };
   }
 
@@ -411,22 +469,34 @@ export class PgStore implements Store {
       );
     }
     if (filters.cursor) {
-      params.push(filters.cursor);
-      where.push(`a.published_at < $${params.length}`);
+      const cursor = decodeCursor(filters.cursor);
+      params.push(cursor.timestamp);
+      const timestampIndex = params.length;
+      if (cursor.id) {
+        params.push(cursor.id);
+        where.push(
+          `(a.published_at < $${timestampIndex} OR (a.published_at = $${timestampIndex} AND a.id < $${params.length}))`,
+        );
+      } else {
+        where.push(`a.published_at < $${timestampIndex}`);
+      }
     }
     params.push((filters.limit ?? 40) + 1);
     const result = await this.pool.query<{ payload: Article; saved: boolean }>(
       `SELECT a.payload, (s.article_id IS NOT NULL) AS saved
        FROM articles a LEFT JOIN saved_articles s ON s.article_id = a.id AND s.github_login = $1
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY a.published_at DESC LIMIT $${params.length}`,
+       ORDER BY a.published_at DESC, a.id DESC LIMIT $${params.length}`,
       params,
     );
     const limit = filters.limit ?? 40;
     const items = result.rows.slice(0, limit).map((row) => ({ ...row.payload, saved: row.saved }));
     return {
       items,
-      nextCursor: result.rows.length > limit ? items.at(-1)?.publishedAt : undefined,
+      nextCursor:
+        result.rows.length > limit && items.at(-1)
+          ? encodeCursor(items.at(-1)!.publishedAt, items.at(-1)!.id)
+          : undefined,
     };
   }
 
@@ -465,22 +535,34 @@ export class PgStore implements Store {
     }
     if (filters.saved) where.push("ss.situation_id IS NOT NULL");
     if (filters.cursor) {
-      params.push(filters.cursor);
-      where.push(`s.updated_at < $${params.length}`);
+      const cursor = decodeCursor(filters.cursor);
+      params.push(cursor.timestamp);
+      const timestampIndex = params.length;
+      if (cursor.id) {
+        params.push(cursor.id);
+        where.push(
+          `(s.updated_at < $${timestampIndex} OR (s.updated_at = $${timestampIndex} AND s.id < $${params.length}))`,
+        );
+      } else {
+        where.push(`s.updated_at < $${timestampIndex}`);
+      }
     }
     params.push((filters.limit ?? 30) + 1);
     const result = await this.pool.query<{ payload: Situation; saved: boolean }>(
       `SELECT s.payload, (ss.situation_id IS NOT NULL) AS saved FROM situations s
        LEFT JOIN saved_situations ss ON ss.situation_id=s.id AND ss.github_login=$1
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY s.updated_at DESC LIMIT $${params.length}`,
+       ORDER BY s.updated_at DESC, s.id DESC LIMIT $${params.length}`,
       params,
     );
     const limit = filters.limit ?? 30;
     const items = result.rows.slice(0, limit).map((row) => ({ ...row.payload, saved: row.saved }));
     return {
       items,
-      nextCursor: result.rows.length > limit ? items.at(-1)?.updatedAt : undefined,
+      nextCursor:
+        result.rows.length > limit && items.at(-1)
+          ? encodeCursor(items.at(-1)!.updatedAt, items.at(-1)!.id)
+          : undefined,
     };
   }
 

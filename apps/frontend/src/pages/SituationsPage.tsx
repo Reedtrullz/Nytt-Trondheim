@@ -20,6 +20,7 @@ function time(value: string) {
 export function SituationsPage() {
   const [selected, setSelected] = useState(filters[0]!);
   const [items, setItems] = useState<Situation[]>([]);
+  const [nextCursor, setNextCursor] = useState<string>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
 
@@ -28,18 +29,44 @@ export function SituationsPage() {
     setError(undefined);
     void api
       .situations({ status: selected.status, includeDismissed: selected.includeDismissed })
-      .then((page) =>
+      .then((page) => {
         setItems(
           selected.label === "Aktuelle"
             ? page.items.filter(
                 (situation) => situation.status === "preliminary" || situation.status === "active",
               )
             : page.items,
-        ),
-      )
+        );
+        setNextCursor(page.nextCursor);
+      })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
   }, [selected]);
+
+  async function loadMore() {
+    if (!nextCursor) return;
+    setLoading(true);
+    setError(undefined);
+    try {
+      const page = await api.situations({
+        status: selected.status,
+        includeDismissed: selected.includeDismissed,
+        cursor: nextCursor,
+      });
+      const additional =
+        selected.label === "Aktuelle"
+          ? page.items.filter(
+              (situation) => situation.status === "preliminary" || situation.status === "active",
+            )
+          : page.items;
+      setItems((current) => [...current, ...additional]);
+      setNextCursor(page.nextCursor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Kunne ikke hente flere situasjoner");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <main className="situations-index">
@@ -84,6 +111,11 @@ export function SituationsPage() {
           </article>
         ))}
       </section>
+      {nextCursor ? (
+        <button className="load-more" disabled={loading} onClick={() => void loadMore()}>
+          {loading ? "Henter flere situasjoner..." : "Vis flere situasjoner"}
+        </button>
+      ) : null}
     </main>
   );
 }

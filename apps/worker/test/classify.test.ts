@@ -19,6 +19,10 @@ describe("Trondheim relevance classification", () => {
     expect(categorize("Ny skole åpner i Trondheim")).toBe("Nyheter");
   });
 
+  it("prefers a specific district over the generic city when placing a story", () => {
+    expect(extractPlaces("Brann i Bymarka i Trondheim")).toEqual(["Bymarka", "Trondheim"]);
+  });
+
   it("opens only multi-source preliminary incident candidates", () => {
     const base: Article = {
       id: "one",
@@ -190,6 +194,61 @@ describe("Trondheim relevance classification", () => {
     expect(updates[0]?.status).toBe("resolved");
   });
 
+  it("does not attach late ordinary reporting to a stale open case", () => {
+    const activated = detectPreliminarySituations([
+      incidentArticle("first", "nrk", "2026-05-20T08:00:00Z"),
+      incidentArticle("second", "adressa", "2026-05-20T08:10:00Z"),
+    ])[0]!;
+    const updates = detectPreliminarySituations(
+      [incidentArticle("late", "nrk", "2026-05-27T08:00:00Z")],
+      [],
+      [activated],
+    );
+    expect(updates).toEqual([]);
+  });
+
+  it("creates a new qualified incident after a resolved same-place case", () => {
+    const oldCase = {
+      ...detectPreliminarySituations([
+        incidentArticle("old-one", "nrk", "2026-05-20T08:00:00Z"),
+        incidentArticle("old-two", "adressa", "2026-05-20T08:10:00Z"),
+      ])[0]!,
+      status: "resolved" as const,
+    };
+    const newCases = detectPreliminarySituations(
+      [
+        incidentArticle("new-one", "nrk", "2026-05-27T08:00:00Z"),
+        incidentArticle("new-two", "adressa", "2026-05-27T08:10:00Z"),
+      ],
+      [],
+      [oldCase],
+    );
+    expect(newCases).toHaveLength(1);
+    expect(newCases[0]?.id).not.toBe(oldCase.id);
+    expect(newCases[0]?.relatedArticleIds).toEqual(["new-two", "new-one"]);
+  });
+
+  it("allows a real incident after an earlier dismissed same-place candidate", () => {
+    const dismissed = {
+      ...detectPreliminarySituations([
+        incidentArticle("dismissed-one", "nrk", "2026-05-20T08:00:00Z"),
+        incidentArticle("dismissed-two", "adressa", "2026-05-20T08:10:00Z"),
+      ])[0]!,
+      status: "dismissed" as const,
+      dismissalReason: "false_positive" as const,
+    };
+    const newCases = detectPreliminarySituations(
+      [
+        incidentArticle("fresh-one", "nrk", "2026-05-27T08:00:00Z"),
+        incidentArticle("fresh-two", "adressa", "2026-05-27T08:10:00Z"),
+      ],
+      [],
+      [dismissed],
+    );
+    expect(newCases).toHaveLength(1);
+    expect(newCases[0]?.id).not.toBe(dismissed.id);
+  });
+
   it("uses a matching municipality report as official corroboration", () => {
     const reports: Article[] = [
       {
@@ -283,3 +342,18 @@ describe("Trondheim relevance classification", () => {
     );
   });
 });
+
+function incidentArticle(id: string, source: Article["source"], publishedAt: string): Article {
+  return {
+    id,
+    source,
+    sourceLabel: source === "nrk" ? "NRK" : "Adresseavisen",
+    title: "Brann i Bymarka",
+    excerpt: "Brann omtalt i Bymarka.",
+    url: `https://example.test/${id}`,
+    publishedAt,
+    scope: "trondheim",
+    category: "Hendelser",
+    places: ["Bymarka"],
+  };
+}

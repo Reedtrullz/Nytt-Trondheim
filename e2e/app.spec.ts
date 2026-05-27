@@ -61,6 +61,25 @@ test("owner can open the real situation index and operations status", async ({ p
   await page.getByRole("link", { name: "Drift" }).click();
   await expect(page.getByRole("heading", { name: "Kilder og systemstatus" })).toBeVisible();
   await expect(page.getByText("Sikkerhetskopi")).toBeVisible();
+  await expect(page.getByText("Innhentede saker")).toBeVisible();
   await page.getByRole("link", { name: "Lagret" }).click();
   await expect(page.getByRole("heading", { name: "Lagret" })).toBeVisible();
+});
+
+test("workspace mutation failures are visible to the owner", async ({ page }) => {
+  await page.route("**/api/situations/skogbrann-bymarka/notes", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Notater er midlertidig utilgjengelige." }),
+    });
+  });
+  await page.goto("/situasjoner/skogbrann-bymarka");
+  const notes = page.locator(".notes");
+  await notes.getByPlaceholder("Skriv privat notat...").fill("Skal ikke forsvinne stille.");
+  await notes.getByRole("button", { name: "Legg til notat" }).click();
+  await expect(page.getByText("Notater er midlertidig utilgjengelige.")).toBeVisible();
+  await expect(notes.getByPlaceholder("Skriv privat notat...")).toHaveValue(
+    "Skal ikke forsvinne stille.",
+  );
 });

@@ -4,7 +4,7 @@ import PDFDocument from "pdfkit";
 import type { SituationWorkspace } from "@nytt/shared";
 import type { Store } from "./store.js";
 
-function safeFilename(filename: string): string {
+export function safeFilename(filename: string): string {
   const name = filename.split(/[\\/]/).pop() ?? "vedlegg";
   const sanitized = [...name]
     .map((character) => {
@@ -45,6 +45,20 @@ function renderBrief(workspace: SituationWorkspace): Promise<Buffer> {
         .text(`${entry.timestamp} / ${entry.sourceLabel}`);
       doc.fontSize(11).fillColor("#141b1e").text(`${entry.title}: ${entry.detail}`);
     });
+    doc.moveDown(1).fontSize(15).fillColor("#141b1e").text("Kartlag og proveniens");
+    doc
+      .moveDown(0.4)
+      .fontSize(10)
+      .text(
+        "- Offentlig oppgitt / Farevarsel: publisert offentlig kontekst, ikke bekreftelse på innsats.",
+      );
+    doc.text(
+      "- Anslag fra rapportering: geokodet omtale fra publiserte saker, ikke presis avgrensning.",
+    );
+    doc.text(
+      "- DSB beredskap: ressurser i området, ikke aktive responspersonell eller plasseringer.",
+    );
+    doc.text("- Mine markeringer: privat arbeidsmateriale og aldri offentlig evidens.");
     doc.moveDown(1).fontSize(15).text("Private arbeidsnotater");
     if (workspace.notes.length === 0) {
       doc.fontSize(10).fillColor("#586671").text("Ingen private notater.");

@@ -48,10 +48,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   bootstrap: () => request<BootstrapPayload>("/api/bootstrap"),
-  articles: (query: { scope?: string; category?: string; q?: string; cursor?: string } = {}) => {
+  articles: (
+    query: { scope?: string; category?: string; q?: string; cursor?: string; limit?: number } = {},
+  ) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
-      if (value && value !== "Alle") parameters.set(key, value);
+      if (value && value !== "Alle") parameters.set(key, String(value));
     }
     return request<ArticlePage>(`/api/articles?${parameters.toString()}`);
   },
@@ -147,4 +149,5 @@ export const api = {
     link.click();
     URL.revokeObjectURL(link.href);
   },
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
 };

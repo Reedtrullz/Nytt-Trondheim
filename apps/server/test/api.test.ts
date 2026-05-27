@@ -6,6 +6,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
+import { safeFilename } from "../src/export.js";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
@@ -128,6 +129,18 @@ describe("private situation API", () => {
       .expect(200);
   });
 
+  it("uses opaque cursor pagination without repeating feed items", async () => {
+    const { agent } = await ownerAgent();
+    const first = await agent.get("/api/articles?limit=1").expect(200);
+    expect(first.body.items).toHaveLength(1);
+    expect(first.body.nextCursor).toBeTruthy();
+    const second = await agent
+      .get(`/api/articles?limit=1&cursor=${encodeURIComponent(first.body.nextCursor as string)}`)
+      .expect(200);
+    expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
+    await agent.get("/api/articles?cursor=not-a-valid-cursor").expect(400);
+  });
+
   it("stores uploaded private attachment metadata with a content checksum", async () => {
     const { agent, csrf } = await ownerAgent();
     const bytes = Buffer.from("privat vedlegg");
@@ -138,6 +151,11 @@ describe("private situation API", () => {
       .expect(201);
     expect(response.body.filename).toBe("notat.txt");
     expect(response.body.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+  });
+
+  it("sanitizes private filenames before they enter downloads and export paths", () => {
+    expect(safeFilename('../rapport\r\n".txt')).toBe("rapport___.txt");
+    expect(safeFilename("../../")).toBe("vedlegg");
   });
 
   it("rejects state-changing requests without a CSRF token", async () => {

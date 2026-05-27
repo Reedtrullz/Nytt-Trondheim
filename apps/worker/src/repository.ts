@@ -13,20 +13,36 @@ export class WorkerRepository {
 
   async upsertArticles(articles: Article[]): Promise<void> {
     for (const article of articles) {
+      const values = [
+        article.id,
+        article.url,
+        articleDedupeKey(article),
+        article.source,
+        article.publishedAt,
+        article.scope,
+        article.category,
+        article,
+      ];
+      const updated = await this.pool.query(
+        `UPDATE articles SET canonical_url=$2, dedupe_key=$3, source=$4, published_at=$5,
+         scope=$6, category=$7,
+         payload=CASE WHEN payload ? 'situationId'
+           THEN $8::jsonb || jsonb_build_object('situationId', payload->'situationId')
+           ELSE $8::jsonb END
+         WHERE id=$1
+         AND NOT EXISTS (
+           SELECT 1 FROM articles duplicate
+           WHERE duplicate.id <> $1
+           AND (duplicate.canonical_url=$2 OR duplicate.dedupe_key=$3)
+         )`,
+        values,
+      );
+      if ((updated.rowCount ?? 0) > 0) continue;
       await this.pool.query(
         `INSERT INTO articles (id, canonical_url, dedupe_key, source, published_at, scope, category, payload)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT DO NOTHING`,
-        [
-          article.id,
-          article.url,
-          articleDedupeKey(article),
-          article.source,
-          article.publishedAt,
-          article.scope,
-          article.category,
-          article,
-        ],
+        values,
       );
     }
   }

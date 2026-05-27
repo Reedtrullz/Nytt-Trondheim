@@ -54,4 +54,15 @@ describe("RSS collection policy", () => {
     );
     expect(articles[0]?.publishedAt).toBe("2026-05-26T11:15:00.000Z");
   });
+
+  it("uses Oslo winter time for municipal publication timestamps", async () => {
+    const listing =
+      '<article class="card"><a href="/aktuelt/vinter/">Brann i Bymarka i Trondheim</a></article>';
+    const detail = '<meta property="article:published_time" content="26.01.2026 13:15:00">';
+    const articles = await collectMunicipality(
+      async (url) =>
+        new Response(String(url).includes("/aktuelt/vinter/") ? detail : listing, { status: 200 }),
+    );
+    expect(articles[0]?.publishedAt).toBe("2026-01-26T12:15:00.000Z");
+  });
 });
