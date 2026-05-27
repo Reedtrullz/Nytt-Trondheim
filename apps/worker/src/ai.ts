@@ -92,38 +92,51 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
         places,
       }),
     );
-    try {
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: "system",
-            content:
-              'Return JSON only in the supplied shape. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Cite literal supporting excerpts. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}.',
-          },
-          {
-            role: "user",
-            content: `Analyze these public feed excerpts and output JSON: ${JSON.stringify(publicInputs)}`,
-          },
-        ],
-        response_format: { type: "json_object" },
-        max_tokens: 4096,
-      });
-      const content = response.choices[0]?.message.content;
-      if (!content) throw new Error("DeepSeek returned empty JSON content.");
-      const parsed = resultSchema.parse(JSON.parse(content));
-      const validated = validateCitations(parsed, articles);
-      return {
-        result: validated,
-        run: run("deepseek", this.model, "ok", startedAt, articles, validated),
-      };
-    } catch (error) {
-      const result = { clusters: [] };
-      return {
-        result,
-        run: run("deepseek", this.model, "degraded", startedAt, articles, result, String(error)),
-      };
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await this.client.chat.completions.create({
+          model: this.model,
+          messages: [
+            {
+              role: "system",
+              content:
+                'Return JSON only in the supplied shape. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Return at most 8 clusters. If none qualify, return {"clusters":[]}. Cite literal supporting excerpts. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}.',
+            },
+            {
+              role: "user",
+              content: `Analyze these public feed excerpts and output JSON: ${JSON.stringify(publicInputs)}`,
+            },
+            ...(attempt === 1
+              ? [
+                  {
+                    role: "system" as const,
+                    content:
+                      'The previous completion was not valid structured output. Return one compact, syntactically valid JSON object only. Use {"clusters":[]} when uncertain.',
+                  },
+                ]
+              : []),
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 8192,
+        });
+        const content = response.choices[0]?.message.content;
+        if (!content) throw new Error("DeepSeek returned empty JSON content.");
+        const parsed = resultSchema.parse(JSON.parse(content));
+        const validated = validateCitations(parsed, articles);
+        return {
+          result: validated,
+          run: run("deepseek", this.model, "ok", startedAt, articles, validated),
+        };
+      } catch (error) {
+        lastError = error;
+      }
     }
+    const result = { clusters: [] };
+    return {
+      result,
+      run: run("deepseek", this.model, "degraded", startedAt, articles, result, String(lastError)),
+    };
   }
 }
 

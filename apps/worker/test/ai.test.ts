@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Article } from "@nytt/shared";
-import { validateCitations } from "../src/ai.js";
+import { DeepSeekAnalyzer, validateCitations } from "../src/ai.js";
 
 const articles: Article[] = [
   {
@@ -76,5 +76,20 @@ describe("AI citation validation", () => {
       articles,
     );
     expect(result.clusters).toEqual([]);
+  });
+
+  it("retries a malformed DeepSeek JSON completion once", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: { content: '{"clusters":[' } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: '{"clusters":[]}' } }] });
+    const analyzer = new DeepSeekAnalyzer("test-key", "test-model");
+    Object.assign(analyzer, { client: { chat: { completions: { create } } } });
+
+    const outcome = await analyzer.cluster(articles);
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(outcome.run.status).toBe("ok");
+    expect(outcome.result).toEqual({ clusters: [] });
   });
 });
