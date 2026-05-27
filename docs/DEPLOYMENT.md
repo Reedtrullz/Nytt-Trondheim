@@ -45,8 +45,8 @@ The deployment preserves the prior API and worker images as `:previous` before b
 As inspected on May 27, 2026:
 
 - GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false`.
-- The repository-scoped read-only GitHub deploy key is registered and can be installed through the `Provision Origin` workflow.
+- The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
-- The `nytt-trondheim` GitHub App Client ID is configured; its generated Client Secret, OpenAI credentials, backup target credentials and the GitHub Actions VPS SSH key remain to be provisioned.
-- `https://nytt.reidar.tech/health` returns Cloudflare HTTP `525`; direct origin probing shows Caddy HTTP redirection is present but the origin TLS handshake fails.
-- New SSH connections to `198.23.137.16:22` are refused, so server-side Caddy and key provisioning require recovery through the VPS console before deployment.
+- The `nytt-trondheim` GitHub App Client ID is configured; its generated Client Secret, OpenAI credentials and backup target credentials remain to be provisioned.
+- Caddy now serves valid TLS for `https://nytt.reidar.tech/health`; it returns HTTP `502` until the application is deployed to localhost port `8090`.
+- The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.

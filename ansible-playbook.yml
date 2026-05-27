@@ -6,7 +6,7 @@
     repo_url: "git@github.com:Reedtrullz/Nytt-Trondheim.git"
     app_dir: "/home/deploy/nytt-trondheim"
     app_port: "8090"
-    canary_port: "8091"
+    canary_port: "8092"
     public_origin: "https://nytt.reidar.tech"
   pre_tasks:
     - name: Require production deployment values
