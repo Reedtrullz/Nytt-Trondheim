@@ -185,6 +185,20 @@
       delay: 5
       changed_when: false
 
+    - name: Allow first database initialization restart to settle
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Confirm stable database readiness before backup and migration
+      ansible.builtin.command: docker compose --env-file .env.production exec -T postgres pg_isready -U nytt -d nytt
+      args:
+        chdir: "{{ app_dir }}"
+      register: stable_postgres_readiness
+      until: stable_postgres_readiness.rc == 0
+      retries: 12
+      delay: 5
+      changed_when: false
+
     - name: Create and verify encrypted pre-migration backup
       become: true
       ansible.builtin.shell: |
