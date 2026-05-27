@@ -25,7 +25,9 @@ The playbook also normalizes persisted upload-volume ownership for the non-root 
 
 ## Backups
 
-Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.timer`. Database dumps and uploaded files are encrypted offsite with restic using its `rclone` backend to a dedicated Google Drive folder. Deploy-time safety backups are created and restore-verified without running retention pruning; the scheduled nightly backup applies the retention policy and prune step. The backup environment also rate-limits rclone Google Drive requests to avoid release-time quota bursts. Configure `NYTT_RESTIC_REPOSITORY`, `NYTT_RESTIC_PASSWORD` and the restricted Google Drive `NYTT_RCLONE_CONFIG` in GitHub deployment secrets before first production deployment.
+Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.timer`. Database dumps and uploaded files are encrypted offsite with restic using its `rclone` backend to a dedicated Google Drive folder. Deploy-time safety backups are created and restore-verified without running retention pruning; the scheduled nightly backup applies the retention policy and prune step. The backup environment runs rclone with conservative Google Drive request pacing, single-transfer concurrency and expanded retries to reduce release-time quota bursts. Configure `NYTT_RESTIC_REPOSITORY`, `NYTT_RESTIC_PASSWORD` and the restricted Google Drive `NYTT_RCLONE_CONFIG` in GitHub deployment secrets before first production deployment.
+
+If Google Drive still reports `rateLimitExceeded` while backups recover after retries, the remaining cause is usually the shared default rclone Google API project rather than Nytt Trondheim traffic volume. Create a dedicated Google Cloud OAuth client for this backup remote, reauthorize the rclone Drive config with its `client_id` and `client_secret`, then update the `NYTT_RCLONE_CONFIG` GitHub secret.
 
 ## First Deployment Prerequisites
 
