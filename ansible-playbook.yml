@@ -223,6 +223,12 @@
         name: nytt-trondheim-canary
         state: absent
 
+    - name: Ensure outbound application network exists for canary
+      community.docker.docker_network:
+        name: nytt_outbound
+        internal: false
+        state: present
+
     - name: Start API canary with production database
       community.docker.docker_container:
         name: nytt-trondheim-canary
