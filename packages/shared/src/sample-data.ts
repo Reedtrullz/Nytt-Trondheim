@@ -142,6 +142,14 @@ export const sampleSituation: Situation = {
   updatedAt: now,
   createdAt: "2026-05-26T11:06:00.000Z",
   locationLabel: "Bymarka / Granåsen",
+  incidentSignature: "fire:bymarka",
+  detectionVersion: "2",
+  activationBasis: {
+    rule: "two_independent_sources",
+    sourceIds: ["nrk", "adressa"],
+    articleIds: ["a-fire"],
+    activatedAt: "2026-05-26T11:06:00.000Z",
+  },
   relatedArticleIds: ["a-fire"],
   features: situationFeatures,
   evidence: [

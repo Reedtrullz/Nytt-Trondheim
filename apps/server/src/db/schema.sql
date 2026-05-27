@@ -31,6 +31,19 @@ CREATE TABLE IF NOT EXISTS situations (
   payload jsonb NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS situation_activations (
+  situation_id text PRIMARY KEY REFERENCES situations(id) ON DELETE CASCADE,
+  incident_signature text NOT NULL,
+  detection_version text NOT NULL,
+  source_ids jsonb NOT NULL,
+  article_ids jsonb NOT NULL,
+  activated_at timestamptz NOT NULL,
+  dismissed_at timestamptz,
+  dismissal_reason text
+);
+CREATE INDEX IF NOT EXISTS situation_activations_signature_idx
+  ON situation_activations (incident_signature);
+
 CREATE TABLE IF NOT EXISTS situation_articles (
   situation_id text NOT NULL REFERENCES situations(id) ON DELETE CASCADE,
   article_id text NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
@@ -161,3 +174,4 @@ CREATE TABLE IF NOT EXISTS "session" (
 CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
 
 INSERT INTO schema_migrations (version) VALUES ('001_safe_launch_schema') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('002_situation_trustworthiness') ON CONFLICT DO NOTHING;

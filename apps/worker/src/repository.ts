@@ -58,6 +58,13 @@ export class WorkerRepository {
     return result.rows.map((row) => row.payload);
   }
 
+  async trackedSituations(): Promise<Situation[]> {
+    const result = await this.pool.query<{ payload: Situation }>(
+      "SELECT payload FROM situations WHERE payload->>'incidentSignature' IS NOT NULL",
+    );
+    return result.rows.map((row) => row.payload);
+  }
+
   async upsertOfficialEvents(events: OfficialEvent[]): Promise<void> {
     for (const event of events) {
       await this.pool.query(
@@ -152,6 +159,28 @@ export class WorkerRepository {
         merged,
       ],
     );
+    if (merged.incidentSignature && merged.activationBasis) {
+      await this.pool.query(
+        `INSERT INTO situation_activations
+         (situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at,
+          dismissed_at, dismissal_reason)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (situation_id) DO UPDATE SET incident_signature=EXCLUDED.incident_signature,
+         detection_version=EXCLUDED.detection_version, source_ids=EXCLUDED.source_ids,
+         article_ids=EXCLUDED.article_ids, activated_at=EXCLUDED.activated_at,
+         dismissed_at=EXCLUDED.dismissed_at, dismissal_reason=EXCLUDED.dismissal_reason`,
+        [
+          merged.id,
+          merged.incidentSignature,
+          merged.detectionVersion ?? "2",
+          JSON.stringify(merged.activationBasis.sourceIds),
+          JSON.stringify(merged.activationBasis.articleIds),
+          merged.activationBasis.activatedAt,
+          merged.dismissedAt ?? null,
+          merged.dismissalReason ?? null,
+        ],
+      );
+    }
     for (const evidence of merged.evidence) {
       await this.pool.query(
         `INSERT INTO evidence_items
@@ -224,13 +253,15 @@ export class WorkerRepository {
 function mergeSituation(existing: Situation | undefined, incoming: Situation): Situation {
   if (!existing) return incoming;
   const lifecycle =
-    existing.status === "resolved"
-      ? "resolved"
-      : incoming.status === "resolved"
+    existing.status === "dismissed"
+      ? "dismissed"
+      : existing.status === "resolved"
         ? "resolved"
-        : existing.status === "active" || incoming.status === "active"
-          ? "active"
-          : "preliminary";
+        : incoming.status === "resolved"
+          ? "resolved"
+          : existing.status === "active" || incoming.status === "active"
+            ? "active"
+            : "preliminary";
   return {
     ...existing,
     ...incoming,

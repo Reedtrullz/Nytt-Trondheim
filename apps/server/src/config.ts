@@ -12,6 +12,7 @@ export interface AppConfig {
   githubAllowedLogin: string;
   sessionSecret: string;
   uploadDir: string;
+  runtimeStatusDir: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -28,5 +29,6 @@ export function loadConfig(): AppConfig {
     githubAllowedLogin: process.env.GITHUB_ALLOWED_LOGIN ?? "Reedtrullz",
     sessionSecret: process.env.SESSION_SECRET ?? "development-only-session-secret",
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
+    runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
   };
 }

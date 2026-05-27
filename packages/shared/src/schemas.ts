@@ -40,6 +40,21 @@ export const articleQuerySchema = z.object({
   category: z.string().optional(),
   q: z.string().trim().max(120).optional(),
   cursor: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(40),
+});
+
+export const situationQuerySchema = z.object({
+  status: z.enum(["preliminary", "active", "resolved", "dismissed"]).optional(),
+  saved: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+  includeDismissed: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+  cursor: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
 });
 
 export const labelInputSchema = z.object({
@@ -47,6 +62,12 @@ export const labelInputSchema = z.object({
   note: z.string().trim().max(2000).optional(),
 });
 
-export const lifecycleInputSchema = z.object({
-  status: z.enum(["active", "resolved"]),
-});
+export const lifecycleInputSchema = z
+  .object({
+    status: z.enum(["active", "resolved", "dismissed"]),
+    dismissalReason: z.enum(["false_positive", "owner_dismissed"]).optional(),
+  })
+  .refine((value) => value.status !== "dismissed" || value.dismissalReason, {
+    message: "Avviste situasjoner krever en begrunnelse.",
+    path: ["dismissalReason"],
+  });

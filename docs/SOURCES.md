@@ -27,3 +27,7 @@ Articles link to the publisher; this application does not republish complete art
 `POLITILOGGEN_ENABLED=false` by default. The optional adapter is isolated because the current web application's structured endpoint is not a documented stable public collection contract and `/api/` is disallowed in the site's robots policy. Enabling it is a personal-use operational choice; failure does not disable the Situation Room.
 
 DATEX and Politiloggen are intentionally deferred from the safe core production release and remain disabled or awaiting access.
+
+## Situation Matching
+
+The worker creates preliminary situations only for explicit incident categories and a shared specific place identifier. A general Trondheim mention is valid for feed relevance, but not for linking independent stories into one incident. DeepSeek may enrich an already qualifying group with cited text; it does not bypass deterministic activation requirements.

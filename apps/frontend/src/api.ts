@@ -1,8 +1,12 @@
 import type {
   Attachment,
+  ArticlePage,
   BootstrapPayload,
   MapFeature,
+  OperationsStatus,
   SessionPayload,
+  Situation,
+  SituationPage,
   SituationWorkspace,
   WorkspaceNote,
   WorkspaceTask,
@@ -44,15 +48,42 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   bootstrap: () => request<BootstrapPayload>("/api/bootstrap"),
+  articles: (query: { scope?: string; category?: string; q?: string; cursor?: string } = {}) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value && value !== "Alle") parameters.set(key, value);
+    }
+    return request<ArticlePage>(`/api/articles?${parameters.toString()}`);
+  },
+  situations: (
+    query: {
+      status?: Situation["status"];
+      saved?: boolean;
+      includeDismissed?: boolean;
+      cursor?: string;
+    } = {},
+  ) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) parameters.set(key, String(value));
+    }
+    return request<SituationPage>(`/api/situations?${parameters.toString()}`);
+  },
+  savedArticles: () => request<ArticlePage["items"]>("/api/saved/articles"),
+  operations: () => request<OperationsStatus>("/api/operations/status"),
   workspace: (id: string) => request<SituationWorkspace>(`/api/situations/${id}`),
   saveArticle: (id: string, saved: boolean) =>
     request<void>(`/api/saved/articles/${id}`, { method: saved ? "PUT" : "DELETE" }),
   saveSituation: (id: string, saved: boolean) =>
     request<void>(`/api/situations/${id}/saved`, { method: saved ? "PUT" : "DELETE" }),
-  setSituationStatus: (id: string, status: "active" | "resolved") =>
+  setSituationStatus: (
+    id: string,
+    status: "active" | "resolved" | "dismissed",
+    dismissalReason?: "false_positive" | "owner_dismissed",
+  ) =>
     request<SituationWorkspace["situation"]>(`/api/situations/${id}/status`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, dismissalReason }),
     }),
   addFeature: (id: string, feature: Pick<MapFeature, "geometry" | "properties">) =>
     request<MapFeature>(`/api/situations/${id}/features`, {

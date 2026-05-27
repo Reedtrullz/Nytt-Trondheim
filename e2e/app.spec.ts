@@ -51,3 +51,16 @@ test("owner manages private situation workspace and creates an export", async ({
   await page.getByRole("button", { name: /Eksporter arbeidsmappe/ }).click();
   await expect(page.getByText("Arbeidsmappen er eksportert.")).toBeVisible();
 });
+
+test("owner can open the real situation index and operations status", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Situasjonsrom", exact: true }).click();
+  await expect(page).toHaveURL(/\/situasjoner$/);
+  await expect(page.getByRole("heading", { name: "Hendelser og utvikling" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Åpne oversikt" })).toBeVisible();
+  await page.getByRole("link", { name: "Drift" }).click();
+  await expect(page.getByRole("heading", { name: "Kilder og systemstatus" })).toBeVisible();
+  await expect(page.getByText("Sikkerhetskopi")).toBeVisible();
+  await page.getByRole("link", { name: "Lagret" }).click();
+  await expect(page.getByRole("heading", { name: "Lagret" })).toBeVisible();
+});

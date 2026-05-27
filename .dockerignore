@@ -12,6 +12,7 @@ playwright-report
 coverage
 data
 uploads
+runtime-status
 backups
 *.log
 .DS_Store

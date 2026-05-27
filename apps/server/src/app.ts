@@ -12,6 +12,7 @@ import {
   lifecycleInputSchema,
   noteInputSchema,
   privateMapFeatureInputSchema,
+  situationQuerySchema,
   taskInputSchema,
   type MapFeature,
 } from "@nytt/shared";
@@ -136,7 +137,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.get("/api/situations", async (req, res, next) => {
     try {
-      res.json(await store.listSituations(currentLogin(req)));
+      const query = situationQuerySchema.parse(req.query);
+      res.json(await store.listSituations(query, currentLogin(req)));
     } catch (error) {
       next(error);
     }
@@ -205,8 +207,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.patch("/api/situations/:id/status", async (req, res, next) => {
     try {
-      const { status } = lifecycleInputSchema.parse(req.body);
-      const situation = await store.setSituationStatus(req.params.id, status);
+      const { status, dismissalReason } = lifecycleInputSchema.parse(req.body);
+      const situation = await store.setSituationStatus(req.params.id, status, dismissalReason);
       if (!situation) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.json(situation);
     } catch (error) {
@@ -431,6 +433,31 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/operations/sources", async (_req, res, next) => {
     try {
       res.json(await store.listSourceHealth());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/status", async (_req, res, next) => {
+    try {
+      const status = await store.getOperationsStatus();
+      const runtimeEntry = async (filename: string) => {
+        try {
+          return JSON.parse(
+            await readFile(path.join(config.runtimeStatusDir, filename), "utf8"),
+          ) as {
+            status: "ok";
+            completedAt: string;
+          };
+        } catch {
+          return undefined;
+        }
+      };
+      const [backup, restoreCheck] = await Promise.all([
+        runtimeEntry("backup.json"),
+        runtimeEntry("restore-check.json"),
+      ]);
+      res.json({ ...status, backup, restoreCheck });
     } catch (error) {
       next(error);
     }

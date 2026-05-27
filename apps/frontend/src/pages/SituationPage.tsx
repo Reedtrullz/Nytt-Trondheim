@@ -39,7 +39,9 @@ export function SituationPage() {
       ? "Foreløpig"
       : situation.status === "resolved"
         ? "Avsluttet"
-        : "Pågår";
+        : situation.status === "dismissed"
+          ? "Avvist som feilkobling"
+          : "Pågår";
 
   async function createFeature(geometry: MapFeature["geometry"], label: string) {
     const feature = await api.addFeature(id, {
@@ -157,6 +159,11 @@ export function SituationPage() {
     setWorkspace((current) => (current ? { ...current, situation: updated } : current));
   }
 
+  async function dismissSituation() {
+    const updated = await api.setSituationStatus(id, "dismissed", "false_positive");
+    setWorkspace((current) => (current ? { ...current, situation: updated } : current));
+  }
+
   async function deleteTask(taskId: string) {
     await api.deleteTask(id, taskId);
     setWorkspace((current) =>
@@ -219,8 +226,16 @@ export function SituationPage() {
           <button onClick={() => void saveSituation()}>
             {situation.saved ? "Fjern lagring" : "Lagre situasjon"}
           </button>
-          {situation.status !== "resolved" ? (
+          {situation.status !== "resolved" && situation.status !== "dismissed" ? (
             <button onClick={() => void resolveSituation()}>Marker avsluttet</button>
+          ) : null}
+          {situation.status !== "dismissed" ? (
+            <button className="dismiss" onClick={() => void dismissSituation()}>
+              Avvis feilkobling
+            </button>
+          ) : null}
+          {situation.dismissalReason ? (
+            <small>Begrunnelse: Feilkobling i automatisk gruppering</small>
           ) : null}
         </div>
       </header>

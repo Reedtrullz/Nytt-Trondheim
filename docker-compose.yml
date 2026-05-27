@@ -45,6 +45,7 @@ services:
       - "127.0.0.1:${APP_PORT:-8090}:8080"
     volumes:
       - uploads:/data/uploads
+      - ./runtime-status:/data/runtime-status:ro
     networks: [database, outbound]
     depends_on:
       postgres:

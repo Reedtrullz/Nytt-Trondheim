@@ -3,11 +3,13 @@ import type { Article, EvidenceItem, MapFeature, OfficialEvent, Situation } from
 
 interface CandidateGroup {
   key: string;
+  type: Situation["type"];
+  place: string;
   articles: Article[];
 }
 
-const incidentCategories = new Set(["Hendelser", "Transport", "Vær"]);
 const clusterWindowMs = 12 * 60 * 60 * 1000;
+const genericPlaces = new Set(["trondheim", "trøndelag"]);
 
 function slug(value: string): string {
   return value
@@ -19,27 +21,38 @@ function slug(value: string): string {
 export function detectPreliminarySituations(
   articles: Article[],
   officialEvents: OfficialEvent[] = [],
+  existingSituations: Situation[] = [],
 ): Situation[] {
+  const existingBySignature = new Map(
+    existingSituations
+      .filter((situation) => situation.incidentSignature)
+      .map((situation) => [situation.incidentSignature!, situation]),
+  );
   const groups = new Map<string, CandidateGroup>();
   for (const article of articles) {
-    const place = article.places[0];
-    if (!place || !incidentCategories.has(article.category)) continue;
     const type = detectType(article);
-    const key = `${type}:${place}`;
-    const group = groups.get(key) ?? { key, articles: [] };
+    const place = specificPlace(article);
+    if (!place || !type) continue;
+    const key = `${type}:${slug(place)}`;
+    const group = groups.get(key) ?? { key, type, place, articles: [] };
     group.articles.push(article);
     groups.set(key, group);
   }
 
   return [...groups.values()].flatMap((group) => {
+    const existing = existingBySignature.get(group.key);
+    if (existing?.status === "dismissed") return [];
     const ordered = [...group.articles].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
     const latest = ordered[0]!;
     const latestTime = new Date(latest.publishedAt).getTime();
-    const currentReports = ordered.filter(
+    const activationReports = ordered.filter(
       (article) => latestTime - new Date(article.publishedAt).getTime() <= clusterWindowMs,
     );
-    if (new Set(currentReports.map((article) => article.source)).size < 2) return [];
-    const id = `auto-${slug(group.key)}`;
+    if (!existing && new Set(activationReports.map((article) => article.source)).size < 2) {
+      return [];
+    }
+    const currentReports = existing ? ordered : activationReports;
+    const id = existing?.id ?? `auto-${slug(group.key)}`;
     const evidence: EvidenceItem[] = currentReports.map((article) => ({
       id: createHash("sha1").update(`${id}:${article.id}`).digest("hex").slice(0, 18),
       situationId: id,
@@ -55,7 +68,7 @@ export function detectPreliminarySituations(
       publishedAt: article.publishedAt,
     }));
     const locatedReport = currentReports.find((article) => article.location) ?? latest;
-    const contextualWarnings = warningEventsForSituation(locatedReport, officialEvents);
+    const contextualWarnings = warningEventsForSituation(locatedReport, group.type, officialEvents);
     const features = [
       ...reportingFeatures(id, currentReports),
       ...contextualWarnings.flatMap((event) => warningFeature(id, event)),
@@ -100,7 +113,7 @@ export function detectPreliminarySituations(
     return [
       {
         id,
-        type: detectType(latest),
+        type: group.type,
         title: latest.title,
         summary:
           "Foreløpig samling av relaterte, publiserte saker. Opplysninger må verifiseres mot originalkildene.",
@@ -108,10 +121,19 @@ export function detectPreliminarySituations(
         verificationStatus: corroborated ? "Offentlig bekreftet" : "Foreløpig fra rapportering",
         importance: contextualWarnings.length > 0 || corroborated ? "high" : "normal",
         updatedAt: latest.publishedAt,
-        createdAt: [...currentReports].sort((a, b) =>
-          a.publishedAt.localeCompare(b.publishedAt),
-        )[0]!.publishedAt,
-        locationLabel: latest.places[0]!,
+        createdAt:
+          existing?.createdAt ??
+          [...currentReports].sort((a, b) => a.publishedAt.localeCompare(b.publishedAt))[0]!
+            .publishedAt,
+        locationLabel: group.place,
+        incidentSignature: group.key,
+        detectionVersion: "2",
+        activationBasis: existing?.activationBasis ?? {
+          rule: "two_independent_sources",
+          sourceIds: [...new Set(activationReports.map((article) => article.source))],
+          articleIds: activationReports.map((article) => article.id),
+          activatedAt: latest.publishedAt,
+        },
         relatedArticleIds: currentReports.map((article) => article.id),
         evidence: [...evidence, ...officialEvidence, ...warningEvidence],
         features,
@@ -142,11 +164,15 @@ export function detectPreliminarySituations(
   });
 }
 
-function warningEventsForSituation(article: Article, events: OfficialEvent[]): OfficialEvent[] {
+function warningEventsForSituation(
+  article: Article,
+  type: Situation["type"],
+  events: OfficialEvent[],
+): OfficialEvent[] {
   const location = article.location;
   return events.filter((event) => {
     if (event.state === "cancelled" || new Date(event.validTo).getTime() < Date.now()) return false;
-    if (event.eventType !== articleType(article)) return false;
+    if (event.eventType !== type) return false;
     if (event.source === "nve") {
       return (
         article.scope === "trondheim" &&
@@ -176,10 +202,6 @@ function warningFeature(id: string, event: OfficialEvent): MapFeature[] {
       },
     },
   ];
-}
-
-function articleType(article: Article): Situation["type"] {
-  return detectType(article);
 }
 
 function containsPoint(geometry: MapFeature["geometry"], lng: number, lat: number): boolean {
@@ -233,15 +255,21 @@ function reportingFeatures(id: string, articles: Article[]): MapFeature[] {
   return [...points.values()];
 }
 
-function detectType(article: Article): Situation["type"] {
+function specificPlace(article: Article): string | undefined {
+  return article.places.find((place) => !genericPlaces.has(place.toLocaleLowerCase("nb")));
+}
+
+function detectType(article: Article): Situation["type"] | undefined {
   const text = `${article.title} ${article.excerpt}`.toLocaleLowerCase("nb");
-  if (/\b(brann|skogbrann|røyk)\b/.test(text)) return "fire";
+  if (/\b(brann|skogbrann|røykutvikling)\b/.test(text)) return "fire";
   if (/\b(savnet|leteaksjon|forsvunnet)\b/.test(text)) return "missing_person";
   if (/\b(jordskred|ras)\b/.test(text)) return "landslide";
   if (/\bflom\b/.test(text)) return "flood";
-  if (article.category === "Transport") return "traffic";
-  if (article.category === "Vær") return "weather";
+  if (/\b(trafikkulykke|trafikkhendelse|kollisjon|bilstans|veiarbeid|kø)\b/.test(text)) {
+    return "traffic";
+  }
+  if (/\b(ekstremvær|farevarsel|storm|orkan)\b/.test(text)) return "weather";
   if (/\b(redningsaksjon|ulykke)\b/.test(text)) return "rescue";
   if (/\b(evakuert|strømbrudd|vannbrudd)\b/.test(text)) return "service_disruption";
-  return "other";
+  return undefined;
 }

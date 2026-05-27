@@ -10,6 +10,17 @@ const trondheimTerms = [
   "nidelva",
   "innherredsveien",
   "estenstadmarka",
+  "møllenberg",
+  "klett",
+  "tiller",
+  "heimdal",
+  "byåsen",
+  "moholt",
+  "ranheim",
+  "nardo",
+  "leangen",
+  "singsaker",
+  "sverresborg",
 ];
 const regionalTerms = ["trøndelag", "malvik", "stjørdal", "orkland", "melhus", "oppdal"];
 
@@ -33,7 +44,7 @@ export function categorize(text: string): ArticleCategory {
   const normalized = text.toLocaleLowerCase("nb");
   return (
     categoryRules.find(([, terms]) => terms.some((term) => normalized.includes(term)))?.[0] ??
-    "Hendelser"
+    "Nyheter"
   );
 }
 

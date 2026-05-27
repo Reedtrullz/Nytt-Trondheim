@@ -5,7 +5,15 @@ import { api } from "../api.js";
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
 import { NewsMap } from "../components/MapViews.js";
 
-const categories = ["Alle", "Hendelser", "Byutvikling", "Kultur", "Transport", "Politikk"];
+const categories = [
+  "Alle",
+  "Nyheter",
+  "Hendelser",
+  "Byutvikling",
+  "Kultur",
+  "Transport",
+  "Politikk",
+];
 
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("nb-NO", { hour: "2-digit", minute: "2-digit" }).format(
@@ -35,8 +43,15 @@ function SaveButton({
   );
 }
 
-function SituationBanner({ data }: { data: BootstrapPayload }) {
-  const situation = data.situations.find((item) => item.status !== "resolved");
+function SituationBanner({
+  situations: candidates,
+}: {
+  situations: BootstrapPayload["situations"];
+}) {
+  const situations = candidates.filter(
+    (item) => item.status === "preliminary" || item.status === "active",
+  );
+  const situation = situations[0];
   if (!situation) return null;
   const status = situation.status === "preliminary" ? "Foreløpig" : "Pågår";
   return (
@@ -59,11 +74,20 @@ function SituationBanner({ data }: { data: BootstrapPayload }) {
         <Link className="primary-link" to={`/situasjoner/${situation.id}`}>
           Åpne situasjonsrom <ArrowIcon />
         </Link>
+        {situations.length > 1 ? (
+          <div className="additional-situations">
+            {situations.slice(1, 3).map((item) => (
+              <Link key={item.id} to={`/situasjoner/${item.id}`}>
+                {item.title}
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="situation-preview" aria-label="Forhåndsvisning av kart">
         <p>Omtalt område</p>
         <div className="preview-shape" />
-        <span className="preview-point">Bymarka</span>
+        <span className="preview-point">{situation.locationLabel}</span>
         <small>Ikke bekreftet brannperimeter</small>
       </div>
     </article>
@@ -78,8 +102,8 @@ function LeadStory({
   onSave: (id: string, saved: boolean) => void;
 }) {
   return (
-    <article className="lead-story">
-      <img src="/assets/trondheim-nidelva-feature.png" alt="Nidelva og trehusrekken i Trondheim" />
+    <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
+      {article.imageUrl ? <img src={article.imageUrl} alt="" /> : null}
       <div className="lead-copy">
         <div className="metadata">
           {article.sourceLabel} · {formatTime(article.publishedAt)}
@@ -189,6 +213,9 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [category, setCategory] = useState("Alle");
   const [query, setQuery] = useState("");
   const [articles, setArticles] = useState(initialData.articles);
+  const [situations, setSituations] = useState<BootstrapPayload["situations"]>([]);
+  const [loading, setLoading] = useState(false);
+  const [feedError, setFeedError] = useState<string>();
 
   useEffect(() => {
     const onSearch = (event: Event) => setQuery((event as CustomEvent<string>).detail);
@@ -196,20 +223,43 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
     return () => window.removeEventListener("nytt-search", onSearch);
   }, []);
 
-  const filtered = useMemo(() => {
-    const search = query.toLocaleLowerCase("nb");
-    return articles.filter(
-      (article) =>
-        article.scope === scope &&
-        (category === "Alle" || article.category === category) &&
-        (!search || `${article.title} ${article.excerpt}`.toLocaleLowerCase("nb").includes(search)),
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setFeedError(undefined);
+    const timeout = window.setTimeout(
+      () => {
+        void api
+          .articles({ scope, category, q: query })
+          .then((page) => {
+            if (!cancelled) setArticles(page.items);
+          })
+          .catch((reason: Error) => {
+            if (!cancelled) setFeedError(reason.message);
+          })
+          .finally(() => {
+            if (!cancelled) setLoading(false);
+          });
+      },
+      query ? 180 : 0,
     );
-  }, [articles, category, query, scope]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [category, query, scope]);
 
-  const lead = filtered.find((article) => article.id === "a-bridge") ?? filtered[0];
-  const secondary = filtered.filter(
-    (article) => article.id !== lead?.id && article.id !== "a-fire",
-  );
+  useEffect(() => {
+    void api
+      .situations()
+      .then((page) => setSituations(page.items))
+      .catch(() => setSituations(initialData.situations));
+  }, [initialData.situations]);
+
+  const filtered = useMemo(() => articles, [articles]);
+
+  const lead = filtered[0];
+  const secondary = filtered.filter((article) => article.id !== lead?.id);
 
   function updateSaved(id: string, saved: boolean) {
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
@@ -244,18 +294,25 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
           ))}
         </div>
       </div>
-      <SituationBanner data={initialData} />
+      <SituationBanner situations={situations} />
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
+          {feedError ? (
+            <p className="feed-state error">Kunne ikke hente saker: {feedError}</p>
+          ) : null}
+          {loading ? <p className="feed-state">Oppdaterer saker...</p> : null}
           {lead ? <LeadStory article={lead} onSave={updateSaved} /> : null}
+          {!loading && !lead ? (
+            <p className="feed-state">Ingen saker samsvarer med filteret.</p>
+          ) : null}
           <div className="news-list">
             {secondary.map((article) => (
               <NewsRow key={article.id} article={article} onSave={updateSaved} />
             ))}
           </div>
         </section>
-        <NearbyRail articles={articles} data={initialData} />
+        <NearbyRail articles={initialData.articles} data={initialData} />
       </div>
     </main>
   );

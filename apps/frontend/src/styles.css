@@ -136,7 +136,10 @@ button {
 }
 
 .home,
-.situation-page {
+.situation-page,
+.situations-index,
+.operations-page,
+.saved-page {
   max-width: 1376px;
   margin: 0 auto;
   padding: 28px 38px 50px;
@@ -231,6 +234,14 @@ button {
   color: #3b4549;
   font-size: 13px;
   list-style-position: inside;
+}
+
+.additional-situations {
+  display: flex;
+  gap: 16px;
+  margin-top: 17px;
+  color: var(--blue);
+  font-size: 12px;
 }
 
 .primary-link {
@@ -329,6 +340,17 @@ button {
   gap: 26px;
   padding-bottom: 27px;
   border-bottom: 1px solid var(--line);
+}
+
+.lead-story.text-only {
+  grid-template-columns: 1fr;
+  min-height: 235px;
+  padding: 25px 28px;
+  border: 1px solid var(--line);
+}
+
+.lead-story.text-only .lead-copy h2 {
+  max-width: 720px;
 }
 
 .lead-story img {
@@ -602,6 +624,214 @@ button {
 .fatal-error {
   padding: 80px 38px;
   color: var(--muted);
+}
+
+.feed-state,
+.empty-panel {
+  margin: 0 0 18px;
+  padding: 13px 15px;
+  color: var(--muted);
+  background: var(--blue-soft);
+  font-size: 13px;
+}
+
+.feed-state.error {
+  color: #8a2f21;
+  background: #fff1ed;
+}
+
+/* Situation overview and operations */
+.page-heading {
+  max-width: 700px;
+  margin: 13px 0 30px;
+}
+
+.page-heading h1 {
+  margin: 0 0 10px;
+  font: 54px/1.04 var(--serif);
+  letter-spacing: -0.025em;
+}
+
+.page-heading > p:last-child {
+  margin: 0;
+  color: var(--muted);
+}
+
+.situation-filters {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 22px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.situation-filters button {
+  padding: 10px 14px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.situation-filters button.selected {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.situation-cards {
+  display: grid;
+  gap: 14px;
+}
+
+.situation-cards article {
+  padding: 22px 25px;
+  display: flex;
+  justify-content: space-between;
+  gap: 30px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.situation-cards h2 {
+  margin: 8px 0 7px;
+  font: 30px/1.1 var(--serif);
+}
+
+.situation-cards h3 {
+  margin: 0 0 7px;
+  font: 28px/1.1 var(--serif);
+}
+
+.situation-cards p {
+  max-width: 720px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.situation-cards small {
+  color: var(--muted);
+}
+
+.case-status {
+  color: var(--terracotta);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.case-status.dismissed {
+  color: var(--muted);
+}
+
+.operations-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 34px;
+}
+
+.operations-summary article {
+  padding: 22px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.operations-summary strong {
+  display: block;
+  margin-bottom: 6px;
+  font: 36px/1 var(--serif);
+  text-transform: capitalize;
+}
+
+.operations-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.operations-detail {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 30px;
+}
+
+.operations-detail h2 {
+  margin: 0 0 18px;
+  font: 30px/1.1 var(--serif);
+}
+
+.source-row {
+  padding: 12px 0;
+  display: grid;
+  grid-template-columns: 170px 1fr 180px;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.source-row span::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.source-row .disabled::before,
+.source-row .awaiting_access::before,
+.source-row .degraded::before {
+  background: var(--amber);
+}
+
+.source-row small,
+.source-row time {
+  color: var(--muted);
+}
+
+.backup-state {
+  padding: 24px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.backup-state p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.saved-group {
+  margin-bottom: 34px;
+}
+
+.saved-group > h2 {
+  margin: 0 0 16px;
+  font: 32px/1.1 var(--serif);
+}
+
+.saved-articles a {
+  display: block;
+  max-width: 850px;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.saved-articles small {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.saved-articles strong {
+  display: block;
+  font: 26px/1.1 var(--serif);
+}
+
+.saved-articles p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* Situation Room */
@@ -1058,12 +1288,16 @@ button {
   }
 
   .home,
-  .situation-page {
+  .situation-page,
+  .situations-index,
+  .operations-page,
+  .saved-page {
     padding-inline: 22px;
   }
 
   .home-grid,
-  .situation-layout {
+  .situation-layout,
+  .operations-detail {
     grid-template-columns: 1fr;
   }
 
@@ -1117,7 +1351,8 @@ button {
 
   .situation-banner,
   .lead-story,
-  .workspace-panel {
+  .workspace-panel,
+  .operations-summary {
     grid-template-columns: 1fr;
   }
 
@@ -1143,6 +1378,19 @@ button {
 
   .incident-header {
     display: block;
+  }
+
+  .situation-cards article {
+    display: block;
+  }
+
+  .situation-cards .primary-link {
+    margin-top: 18px;
+  }
+
+  .source-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
   }
 
   .incident-header h1 {

@@ -9,6 +9,7 @@ test-results/
 data/
 uploads/
 backups/
+runtime-status/
 *.log
 *.tsbuildinfo
 .DS_Store

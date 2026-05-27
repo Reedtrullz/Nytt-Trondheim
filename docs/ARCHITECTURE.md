@@ -24,3 +24,9 @@ The API ignores any client attempt to create an annotation under another provena
 The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only public feed excerpts and public official data may enter that process. Private annotations, attachments, tasks and notes are excluded.
 
 AI clusters are accepted only after each cited snippet matches an input excerpt and at least two independent sources remain. Deterministic multi-source detection remains available when AI is disabled or degraded.
+
+## Situation Activation
+
+Automatic Situation Room activation requires an explicit incident type and a shared specific place or event signature; broad references such as `Trondheim` alone never activate a situation. New incidents require two independent sources within 12 hours. Later matching reporting or municipal updates may update an already activated signature without reopening that activation rule.
+
+Owner-dismissed false positives retain evidence, timelines and activation audit records under the `dismissed` lifecycle state, but are excluded from current-situation surfaces.

@@ -109,6 +109,7 @@ async function collectAll(): Promise<void> {
   }
   await repository.upsertOfficialEvents(officialEvents);
   const recentArticles = await repository.recentArticles(12);
+  const situationUpdateArticles = await repository.recentArticles(72);
   const currentWarnings = await repository.currentOfficialEvents();
   const analysis = await analyzer.cluster(recentArticles);
   await repository.saveAiRun(analysis.run);
@@ -127,7 +128,11 @@ async function collectAll(): Promise<void> {
           : (analysis.run.error ?? "AI-analyse feilet"),
   });
   const deterministicSituations = enhanceSituations(
-    detectPreliminarySituations(recentArticles, currentWarnings),
+    detectPreliminarySituations(
+      situationUpdateArticles,
+      currentWarnings,
+      await repository.trackedSituations(),
+    ),
     analysis.result,
     recentArticles,
   );

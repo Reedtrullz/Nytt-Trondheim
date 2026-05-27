@@ -3,7 +3,10 @@ import { Link, NavLink, Route, Routes } from "react-router-dom";
 import type { BootstrapPayload } from "@nytt/shared";
 import { api } from "./api.js";
 import { HomePage } from "./pages/HomePage.js";
+import { OperationsPage } from "./pages/OperationsPage.js";
+import { SavedPage } from "./pages/SavedPage.js";
 import { SituationPage } from "./pages/SituationPage.js";
+import { SituationsPage } from "./pages/SituationsPage.js";
 
 function Header() {
   return (
@@ -14,8 +17,9 @@ function Header() {
         </Link>
         <nav aria-label="Hovedmeny">
           <NavLink to="/">Siste nytt</NavLink>
-          <NavLink to="/situasjoner/skogbrann-bymarka">Situasjonsrom</NavLink>
-          <a href="#lagret">Lagret</a>
+          <NavLink to="/situasjoner">Situasjonsrom</NavLink>
+          <NavLink to="/lagret">Lagret</NavLink>
+          <NavLink to="/drift">Drift</NavLink>
         </nav>
         <label className="search">
           <span className="sr-only">Søk i saker</span>
@@ -53,7 +57,10 @@ export function App() {
       ) : (
         <Routes>
           <Route path="/" element={<HomePage initialData={data} />} />
+          <Route path="/situasjoner" element={<SituationsPage />} />
           <Route path="/situasjoner/:id" element={<SituationPage />} />
+          <Route path="/lagret" element={<SavedPage />} />
+          <Route path="/drift" element={<OperationsPage />} />
         </Routes>
       )}
     </>

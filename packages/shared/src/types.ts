@@ -15,6 +15,7 @@ export type SourceId =
 
 export type GeographicScope = "trondheim" | "trondelag";
 export type ArticleCategory =
+  | "Nyheter"
   | "Hendelser"
   | "Byutvikling"
   | "Kultur"
@@ -33,7 +34,7 @@ export type SituationType =
   | "service_disruption"
   | "other";
 
-export type SituationLifecycle = "preliminary" | "active" | "resolved";
+export type SituationLifecycle = "preliminary" | "active" | "resolved" | "dismissed";
 export type Provenance =
   | "official"
   | "reporting_estimate"
@@ -107,6 +108,16 @@ export interface Situation {
   updatedAt: string;
   createdAt: string;
   locationLabel: string;
+  incidentSignature?: string;
+  detectionVersion?: string;
+  activationBasis?: {
+    rule: "two_independent_sources";
+    sourceIds: SourceId[];
+    articleIds: string[];
+    activatedAt: string;
+  };
+  dismissedAt?: string;
+  dismissalReason?: "false_positive" | "owner_dismissed";
   relatedArticleIds: string[];
   evidence: EvidenceItem[];
   features: MapFeature[];
@@ -193,6 +204,26 @@ export interface BootstrapPayload {
   articles: Article[];
   situations: Situation[];
   sourceHealth: SourceHealth[];
+}
+
+export interface ArticlePage {
+  items: Article[];
+  nextCursor?: string;
+}
+
+export interface SituationPage {
+  items: Situation[];
+  nextCursor?: string;
+}
+
+export interface OperationsStatus {
+  sources: SourceHealth[];
+  articleCount: number;
+  situationCounts: Record<SituationLifecycle, number>;
+  latestAiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt" | "error">;
+  latestCollectionAt?: string;
+  backup?: { status: "ok"; completedAt: string };
+  restoreCheck?: { status: "ok"; completedAt: string };
 }
 
 export interface SessionPayload {

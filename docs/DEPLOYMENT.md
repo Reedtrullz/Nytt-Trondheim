@@ -45,9 +45,11 @@ The deployment preserves the prior API and worker images as `:previous` before b
 
 As inspected on May 27, 2026:
 
-- GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false`.
+- The application is live at `https://nytt.reidar.tech`; `/health` returns healthy Postgres-backed status through Caddy and Cloudflare.
+- GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false` until the incident-correctness release is verified manually.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
 - The `nytt-trondheim` GitHub App credentials, DeepSeek API credential and restricted Google Drive/rclone backup target are configured.
-- Caddy now serves valid TLS for `https://nytt.reidar.tech/health`; it returns HTTP `502` until the application is deployed to localhost port `8090`.
+- Caddy serves the application from localhost port `8090` with valid TLS at `https://nytt.reidar.tech`.
 - The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.
+- Encrypted Google Drive/restic backups and restore verification are active. Runtime status files expose only successful completion timestamps to the owner-only operations view.

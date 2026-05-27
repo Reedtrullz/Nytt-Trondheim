@@ -107,6 +107,11 @@ export function SituationMap({
   const privateFeatures = situation.features.filter(
     (feature) => feature.properties.provenance === "private_annotation",
   );
+  const mappedPoint = situation.features.find((feature) => feature.geometry.type === "Point");
+  const mapCenter: LatLngTuple =
+    mappedPoint?.geometry.type === "Point"
+      ? ([mappedPoint.geometry.coordinates[1], mappedPoint.geometry.coordinates[0]] as LatLngTuple)
+      : [63.421, 10.395];
 
   function capture(coordinate: [number, number]) {
     if (mode === "point") {
@@ -172,7 +177,7 @@ export function SituationMap({
           <small>Viser ressurser i området - ikke aktiv innsats</small>
         </div>
       </div>
-      <MapContainer center={[63.401, 10.31]} zoom={13} className="incident-map">
+      <MapContainer center={mapCenter} zoom={13} className="incident-map">
         <TileLayer url={tiles} attribution="© Kartverket" />
         {layers.dsbStations ? (
           <WMSTileLayer

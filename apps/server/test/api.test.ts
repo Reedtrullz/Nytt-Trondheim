@@ -18,6 +18,7 @@ async function testApp() {
     githubAllowedLogin: "Reedtrullz",
     sessionSecret: "test-only-secret",
     uploadDir,
+    runtimeStatusDir: uploadDir,
   });
 }
 
@@ -51,6 +52,7 @@ describe("private situation API", () => {
       githubAllowedLogin: "Reedtrullz",
       sessionSecret: "test-only-secret",
       uploadDir,
+      runtimeStatusDir: uploadDir,
     });
     await request(app).get("/api/bootstrap").expect(401);
   });
@@ -68,6 +70,7 @@ describe("private situation API", () => {
       githubAllowedLogin: "Reedtrullz",
       sessionSecret: "test-only-secret",
       uploadDir,
+      runtimeStatusDir: uploadDir,
     });
     const response = await request.agent(app).get("/auth/github").expect(302);
     const target = new URL(response.headers.location as string);
@@ -90,6 +93,24 @@ describe("private situation API", () => {
 
   it("provides owner data and exports a protected workspace zip", async () => {
     const { agent, csrf } = await ownerAgent();
+    await agent
+      .get("/api/articles?scope=trondheim&limit=2")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.items).toHaveLength(2);
+      });
+    await agent
+      .get("/api/situations")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.items.length).toBeGreaterThan(0);
+      });
+    await agent
+      .get("/api/operations/status")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.articleCount).toBeGreaterThan(0);
+      });
     await agent
       .get("/api/bootstrap")
       .expect(200)
@@ -144,5 +165,20 @@ describe("private situation API", () => {
       .delete(`/api/situations/skogbrann-bymarka/tasks/${task.body.id}`)
       .set("X-CSRF-Token", csrf)
       .expect(204);
+  });
+
+  it("dismisses a false-positive situation while keeping it visible in history", async () => {
+    const { agent, csrf } = await ownerAgent();
+    const dismissed = await agent
+      .patch("/api/situations/skogbrann-bymarka/status")
+      .set("X-CSRF-Token", csrf)
+      .send({ status: "dismissed", dismissalReason: "false_positive" })
+      .expect(200);
+    expect(dismissed.body.status).toBe("dismissed");
+    expect(dismissed.body.dismissalReason).toBe("false_positive");
+    const active = await agent.get("/api/situations").expect(200);
+    expect(active.body.items).toHaveLength(0);
+    const history = await agent.get("/api/situations?status=dismissed").expect(200);
+    expect(history.body.items[0].id).toBe("skogbrann-bymarka");
   });
 });

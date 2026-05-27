@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type {
   Article,
+  ArticlePage,
   Attachment,
   BootstrapPayload,
   EvidenceItem,
   MapFeature,
+  OperationsStatus,
   Situation,
+  SituationPage,
   SituationWorkspace,
   SourceHealth,
   TimelineEntry,
@@ -27,6 +30,15 @@ export interface ArticleFilters {
   category?: string;
   q?: string;
   cursor?: string;
+  limit?: number;
+}
+
+export interface SituationFilters {
+  status?: Situation["status"];
+  saved?: boolean;
+  includeDismissed?: boolean;
+  cursor?: string;
+  limit?: number;
 }
 
 export interface AttachmentRecord extends Attachment {
@@ -44,12 +56,16 @@ export interface ExportRecord {
 
 export interface Store {
   getBootstrap(login: string): Promise<BootstrapPayload>;
-  listArticles(filters: ArticleFilters, login: string): Promise<Article[]>;
+  listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
   listSavedArticles(login: string): Promise<Article[]>;
   setSaved(articleId: string, saved: boolean, login: string): Promise<void>;
-  listSituations(login: string): Promise<Situation[]>;
+  listSituations(filters: SituationFilters, login: string): Promise<SituationPage>;
   setSavedSituation(situationId: string, saved: boolean, login: string): Promise<void>;
-  setSituationStatus(id: string, status: Situation["status"]): Promise<Situation | undefined>;
+  setSituationStatus(
+    id: string,
+    status: Situation["status"],
+    dismissalReason?: Situation["dismissalReason"],
+  ): Promise<Situation | undefined>;
   getWorkspace(id: string, login?: string): Promise<SituationWorkspace | undefined>;
   addPrivateFeature(situationId: string, feature: MapFeature): Promise<MapFeature>;
   updatePrivateFeature(
@@ -80,6 +96,7 @@ export interface Store {
   recordExport(record: ExportRecord): Promise<void>;
   getExport(id: string, situationId: string, login: string): Promise<ExportRecord | undefined>;
   listSourceHealth(): Promise<SourceHealth[]>;
+  getOperationsStatus(): Promise<OperationsStatus>;
 }
 
 function clone<T>(value: T): T {
@@ -103,21 +120,20 @@ export class MemoryStore implements Store {
     };
   }
 
-  async listArticles(filters: ArticleFilters): Promise<Article[]> {
+  async listArticles(filters: ArticleFilters): Promise<ArticlePage> {
     const search = filters.q?.toLocaleLowerCase("nb");
-    return clone(
-      this.articles.filter(
-        (article) =>
-          (!filters.scope || article.scope === filters.scope) &&
-          (!filters.category ||
-            filters.category === "Alle" ||
-            article.category === filters.category) &&
-          (!search ||
-            `${article.title} ${article.excerpt} ${article.places.join(" ")}`
-              .toLocaleLowerCase("nb")
-              .includes(search)),
-      ),
+    const items = this.articles.filter(
+      (article) =>
+        (!filters.scope || article.scope === filters.scope) &&
+        (!filters.category ||
+          filters.category === "Alle" ||
+          article.category === filters.category) &&
+        (!search ||
+          `${article.title} ${article.excerpt} ${article.places.join(" ")}`
+            .toLocaleLowerCase("nb")
+            .includes(search)),
     );
+    return { items: clone(items.slice(0, filters.limit ?? 40)) };
   }
 
   async listSavedArticles(): Promise<Article[]> {
@@ -129,11 +145,20 @@ export class MemoryStore implements Store {
     if (article) article.saved = saved;
   }
 
-  async listSituations(): Promise<Situation[]> {
-    return [...this.situations.values()].map((situation) => ({
-      ...clone(situation),
-      saved: this.savedSituations.has(situation.id),
-    }));
+  async listSituations(filters: SituationFilters): Promise<SituationPage> {
+    return {
+      items: [...this.situations.values()]
+        .filter(
+          (situation) =>
+            (!filters.status && (filters.includeDismissed || situation.status !== "dismissed")) ||
+            situation.status === filters.status,
+        )
+        .filter((situation) => !filters.saved || this.savedSituations.has(situation.id))
+        .map((situation) => ({
+          ...clone(situation),
+          saved: this.savedSituations.has(situation.id),
+        })),
+    };
   }
 
   async setSavedSituation(situationId: string, saved: boolean): Promise<void> {
@@ -144,10 +169,16 @@ export class MemoryStore implements Store {
   async setSituationStatus(
     id: string,
     status: Situation["status"],
+    dismissalReason?: Situation["dismissalReason"],
   ): Promise<Situation | undefined> {
     const situation = this.situations.get(id);
     if (!situation) return undefined;
     situation.status = status;
+    situation.updatedAt = new Date().toISOString();
+    if (status === "dismissed") {
+      situation.dismissedAt = new Date().toISOString();
+      situation.dismissalReason = dismissalReason ?? "owner_dismissed";
+    }
     return clone(situation);
   }
 
@@ -294,6 +325,19 @@ export class MemoryStore implements Store {
   async listSourceHealth() {
     return clone(sampleBootstrap.sourceHealth);
   }
+
+  async getOperationsStatus(): Promise<OperationsStatus> {
+    return {
+      sources: await this.listSourceHealth(),
+      articleCount: this.articles.length,
+      situationCounts: {
+        preliminary: 0,
+        active: this.situations.size,
+        resolved: 0,
+        dismissed: 0,
+      },
+    };
+  }
 }
 
 export class PgStore implements Store {
@@ -342,16 +386,14 @@ export class PgStore implements Store {
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
     const [articles, situations, sourceHealth] = await Promise.all([
-      this.listArticles({}, login),
-      this.pool.query<{ payload: Situation }>(
-        "SELECT payload FROM situations ORDER BY updated_at DESC",
-      ),
+      this.listArticles({ limit: 100 }, login),
+      this.listSituations({ includeDismissed: false, limit: 100 }, login),
       this.listSourceHealth(),
     ]);
-    return { articles, situations: situations.rows.map((row) => row.payload), sourceHealth };
+    return { articles: articles.items, situations: situations.items, sourceHealth };
   }
 
-  async listArticles(filters: ArticleFilters, login: string): Promise<Article[]> {
+  async listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage> {
     const params: unknown[] = [login];
     const where: string[] = [];
     if (filters.scope) {
@@ -372,14 +414,20 @@ export class PgStore implements Store {
       params.push(filters.cursor);
       where.push(`a.published_at < $${params.length}`);
     }
+    params.push((filters.limit ?? 40) + 1);
     const result = await this.pool.query<{ payload: Article; saved: boolean }>(
       `SELECT a.payload, (s.article_id IS NOT NULL) AS saved
        FROM articles a LEFT JOIN saved_articles s ON s.article_id = a.id AND s.github_login = $1
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY a.published_at DESC LIMIT 200`,
+       ORDER BY a.published_at DESC LIMIT $${params.length}`,
       params,
     );
-    return result.rows.map((row) => ({ ...row.payload, saved: row.saved }));
+    const limit = filters.limit ?? 40;
+    const items = result.rows.slice(0, limit).map((row) => ({ ...row.payload, saved: row.saved }));
+    return {
+      items,
+      nextCursor: result.rows.length > limit ? items.at(-1)?.publishedAt : undefined,
+    };
   }
 
   async listSavedArticles(login: string) {
@@ -406,14 +454,34 @@ export class PgStore implements Store {
     }
   }
 
-  async listSituations(login: string) {
+  async listSituations(filters: SituationFilters, login: string): Promise<SituationPage> {
+    const params: unknown[] = [login];
+    const where: string[] = [];
+    if (filters.status) {
+      params.push(filters.status);
+      where.push(`s.status = $${params.length}`);
+    } else if (!filters.includeDismissed) {
+      where.push("s.status <> 'dismissed'");
+    }
+    if (filters.saved) where.push("ss.situation_id IS NOT NULL");
+    if (filters.cursor) {
+      params.push(filters.cursor);
+      where.push(`s.updated_at < $${params.length}`);
+    }
+    params.push((filters.limit ?? 30) + 1);
     const result = await this.pool.query<{ payload: Situation; saved: boolean }>(
       `SELECT s.payload, (ss.situation_id IS NOT NULL) AS saved FROM situations s
        LEFT JOIN saved_situations ss ON ss.situation_id=s.id AND ss.github_login=$1
-       ORDER BY s.updated_at DESC`,
-      [login],
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY s.updated_at DESC LIMIT $${params.length}`,
+      params,
     );
-    return result.rows.map((row) => ({ ...row.payload, saved: row.saved }));
+    const limit = filters.limit ?? 30;
+    const items = result.rows.slice(0, limit).map((row) => ({ ...row.payload, saved: row.saved }));
+    return {
+      items,
+      nextCursor: result.rows.length > limit ? items.at(-1)?.updatedAt : undefined,
+    };
   }
 
   async setSavedSituation(situationId: string, saved: boolean, login: string) {
@@ -430,14 +498,62 @@ export class PgStore implements Store {
     }
   }
 
-  async setSituationStatus(id: string, status: Situation["status"]) {
-    const result = await this.pool.query<{ payload: Situation }>(
-      `UPDATE situations SET status=$2, updated_at=now(),
-       payload=jsonb_set(payload, '{status}', to_jsonb($2::text), true)
-       WHERE id=$1 RETURNING payload`,
-      [id, status],
+  async setSituationStatus(
+    id: string,
+    status: Situation["status"],
+    dismissalReason?: Situation["dismissalReason"],
+  ) {
+    const current = await this.pool.query<{ payload: Situation }>(
+      "SELECT payload FROM situations WHERE id=$1",
+      [id],
     );
-    return result.rows[0]?.payload;
+    if (!current.rows[0]) return undefined;
+    const existing = current.rows[0].payload;
+    const updatedAt = new Date().toISOString();
+    const updated: Situation = {
+      ...existing,
+      status,
+      updatedAt,
+      ...(status === "dismissed"
+        ? {
+            dismissedAt: updatedAt,
+            dismissalReason: dismissalReason ?? "owner_dismissed",
+            incidentSignature: existing.incidentSignature ?? `legacy:${id}`,
+            detectionVersion: existing.detectionVersion ?? "1-legacy",
+            activationBasis: existing.activationBasis ?? {
+              rule: "two_independent_sources",
+              sourceIds: [],
+              articleIds: existing.relatedArticleIds,
+              activatedAt: existing.createdAt,
+            },
+          }
+        : {}),
+    };
+    await this.pool.query(
+      "UPDATE situations SET status=$2, updated_at=$3, payload=$4 WHERE id=$1",
+      [id, status, updatedAt, updated],
+    );
+    if (status === "dismissed" && updated.incidentSignature && updated.activationBasis) {
+      await this.pool.query(
+        `INSERT INTO situation_activations
+         (situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at,
+          dismissed_at, dismissal_reason)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (situation_id) DO UPDATE SET dismissed_at=EXCLUDED.dismissed_at,
+         dismissal_reason=EXCLUDED.dismissal_reason`,
+        [
+          id,
+          updated.incidentSignature,
+          updated.detectionVersion ?? "2",
+          JSON.stringify(updated.activationBasis.sourceIds),
+          JSON.stringify(updated.activationBasis.articleIds),
+          updated.activationBasis.activatedAt,
+          updated.dismissedAt,
+          updated.dismissalReason,
+        ],
+      );
+    }
+    return updated;
   }
 
   async getWorkspace(id: string, login?: string): Promise<SituationWorkspace | undefined> {
@@ -671,5 +787,43 @@ export class PgStore implements Store {
        FROM source_health ORDER BY label`,
     );
     return result.rows;
+  }
+
+  async getOperationsStatus(): Promise<OperationsStatus> {
+    const [sources, articleCount, situationCounts, latestAiRun] = await Promise.all([
+      this.listSourceHealth(),
+      this.pool.query<{ count: string }>("SELECT count(*)::text AS count FROM articles"),
+      this.pool.query<{ status: Situation["status"]; count: string }>(
+        "SELECT status, count(*)::text AS count FROM situations GROUP BY status",
+      ),
+      this.pool.query<{
+        provider: "deepseek" | "deterministic";
+        model: string;
+        status: "ok" | "degraded" | "disabled";
+        completedAt: string;
+        error?: string;
+      }>(
+        `SELECT provider, model, status, completed_at AS "completedAt", error
+         FROM ai_processing_runs ORDER BY completed_at DESC LIMIT 1`,
+      ),
+    ]);
+    const counts: OperationsStatus["situationCounts"] = {
+      preliminary: 0,
+      active: 0,
+      resolved: 0,
+      dismissed: 0,
+    };
+    for (const row of situationCounts.rows) counts[row.status] = Number(row.count);
+    return {
+      sources,
+      articleCount: Number(articleCount.rows[0]?.count ?? 0),
+      situationCounts: counts,
+      latestAiRun: latestAiRun.rows[0],
+      latestCollectionAt: sources
+        .map((source) => source.lastCheckedAt)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1),
+    };
   }
 }
