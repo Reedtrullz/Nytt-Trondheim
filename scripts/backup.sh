@@ -13,6 +13,7 @@ docker compose --env-file .env.production exec -T postgres pg_dump -Fc -U nytt n
 docker run --rm -v nytt_uploads:/source:ro -v "$BACKUP_STAGE:/backup" alpine \
   sh -c 'tar -czf /backup/uploads.tar.gz -C /source .'
 
+restic unlock >/dev/null 2>&1 || true
 restic backup --retry-lock 2m "$BACKUP_STAGE/nytt.dump" "$BACKUP_STAGE/uploads.tar.gz" --tag nytt-trondheim
 
 if [[ "${BACKUP_APPLY_RETENTION:-false}" == "true" ]]; then
