@@ -177,7 +177,18 @@
           if restic cat config >/dev/null 2>&1; then
             exit 0
           fi
-          restic init
+          init_error="$(mktemp)"
+          if restic init 2>"$init_error"; then
+            rm -f "$init_error"
+            exit 0
+          fi
+          if grep -q "config file already exists" "$init_error"; then
+            rm -f "$init_error"
+            exit 0
+          fi
+          cat "$init_error" >&2
+          rm -f "$init_error"
+          exit 1
         fi
       args:
         executable: /bin/bash
