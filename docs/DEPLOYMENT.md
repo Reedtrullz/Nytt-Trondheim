@@ -7,7 +7,7 @@ The repository follows the RFMC release pattern:
 3. GitHub Actions connects to the VPS as `deploy` and runs `ansible-playbook.yml`; the VPS uses its own repository-scoped read-only deploy key at `~/.ssh/nytt_github_deploy` to clone this private repository.
 4. Ansible installs/configures restic first, verifies an encrypted pre-migration backup, builds Docker images, applies migrations, health-checks a canary API container, promotes API/worker, validates and reloads Caddy, then verifies `https://nytt.reidar.tech/health`.
 
-The deploy workflow and playbook fail before changing the VPS if any required SSH, application, OAuth, AI or backup secret is absent.
+The deploy workflow and playbook fail before changing the VPS if any required SSH, application, OAuth, AI or backup secret is absent. The workflow also rejects the deployment before SSH/Ansible work if public TLS is still failing, such as Cloudflare HTTP `525`.
 
 ## Production Services
 
@@ -38,3 +38,14 @@ Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.ti
 ## Rollback
 
 The deployment preserves the prior API and worker images as `:previous` before building candidates and does not promote containers if backup verification, migration or canary health fails. If post-promotion validation fails, re-tag `:previous` as `:latest`, restart `app` and `worker`, and restore the latest verified restic snapshot before attempting any incompatible migration recovery.
+
+## Current Provisioning State
+
+As inspected on May 27, 2026:
+
+- GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false`.
+- The repository-scoped read-only GitHub deploy key is registered; install its corresponding private key as `/home/deploy/.ssh/nytt_github_deploy` once VPS shell access is restored.
+- `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
+- OAuth, OpenAI, backup target credentials and the GitHub Actions VPS SSH key remain to be provisioned.
+- `https://nytt.reidar.tech/health` returns Cloudflare HTTP `525`; direct origin probing shows Caddy HTTP redirection is present but the origin TLS handshake fails.
+- New SSH connections to `198.23.137.16:22` are refused, so server-side Caddy and key provisioning require recovery through the VPS console before deployment.

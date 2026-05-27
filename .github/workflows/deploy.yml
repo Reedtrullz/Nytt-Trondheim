@@ -54,6 +54,20 @@ jobs:
               exit 1
             fi
           done
+      - name: Require repaired public TLS routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://nytt.reidar.tech/health)"
+          case "$status" in
+            200|401|404|502|503)
+              echo "Public TLS is reachable (HTTP ${status}); deployment may proceed."
+              ;;
+            *)
+              echo "::error::Public TLS/routing is not ready (HTTP ${status}). Repair Cloudflare/Caddy before deployment."
+              exit 1
+              ;;
+          esac
       - name: Install Ansible
         run: sudo apt-get update && sudo apt-get install -y ansible
       - name: Install Docker collection
