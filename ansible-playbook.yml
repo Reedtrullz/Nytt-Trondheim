@@ -8,6 +8,23 @@
     app_port: "8090"
     canary_port: "8091"
     public_origin: "https://nytt.reidar.tech"
+  pre_tasks:
+    - name: Require production deployment values
+      ansible.builtin.assert:
+        that:
+          - lookup('env', item) | length > 0
+        fail_msg: "Required deployment value is missing."
+      no_log: true
+      loop:
+        - NYTT_POSTGRES_PASSWORD
+        - NYTT_SESSION_SECRET
+        - NYTT_GITHUB_CLIENT_ID
+        - NYTT_GITHUB_CLIENT_SECRET
+        - NYTT_OPENAI_API_KEY
+        - NYTT_RESTIC_REPOSITORY
+        - NYTT_RESTIC_PASSWORD
+        - NYTT_BACKUP_ACCESS_KEY
+        - NYTT_BACKUP_SECRET_KEY
   tasks:
     - name: Ensure app and backup directories exist
       become: true

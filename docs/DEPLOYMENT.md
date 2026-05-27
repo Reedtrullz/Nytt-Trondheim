@@ -7,6 +7,8 @@ The repository follows the RFMC release pattern:
 3. GitHub Actions connects to the VPS as `deploy` and runs `ansible-playbook.yml`; the VPS uses its own repository-scoped read-only deploy key at `~/.ssh/nytt_github_deploy` to clone this private repository.
 4. Ansible installs/configures restic first, verifies an encrypted pre-migration backup, builds Docker images, applies migrations, health-checks a canary API container, promotes API/worker, validates and reloads Caddy, then verifies `https://nytt.reidar.tech/health`.
 
+The deploy workflow and playbook fail before changing the VPS if any required SSH, application, OAuth, AI or backup secret is absent.
+
 ## Production Services
 
 `docker-compose.yml` runs:
