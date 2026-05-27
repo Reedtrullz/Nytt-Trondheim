@@ -1,0 +1,83 @@
+---
+- name: Bootstrap Nytt Trondheim origin access
+  hosts: vps
+  gather_facts: false
+  vars:
+    app_port: "8090"
+  pre_tasks:
+    - name: Require repository deployment key
+      ansible.builtin.assert:
+        that:
+          - lookup('env', 'NYTT_REPO_DEPLOY_KEY') | length > 0
+        fail_msg: "NYTT_REPO_DEPLOY_KEY is required for origin provisioning."
+      no_log: true
+  tasks:
+    - name: Ensure deploy SSH directory exists
+      ansible.builtin.file:
+        path: /home/deploy/.ssh
+        state: directory
+        owner: deploy
+        group: deploy
+        mode: "0700"
+
+    - name: Authorize dedicated GitHub Actions deployment key
+      ansible.builtin.lineinfile:
+        path: /home/deploy/.ssh/authorized_keys
+        create: true
+        owner: deploy
+        group: deploy
+        mode: "0600"
+        line: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPiDoQTHtZg3xUhYEw7w+03s43sfWSJjZGcILoic4f7B nytt-trondheim-actions-vps-20260527"
+
+    - name: Install read-only GitHub repository deploy key
+      ansible.builtin.copy:
+        dest: /home/deploy/.ssh/nytt_github_deploy
+        owner: deploy
+        group: deploy
+        mode: "0600"
+        content: "{{ lookup('env', 'NYTT_REPO_DEPLOY_KEY') }}\n"
+      no_log: true
+
+    - name: Trust GitHub SSH host key for repository checkout
+      ansible.builtin.known_hosts:
+        path: /home/deploy/.ssh/known_hosts
+        name: github.com
+        key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519 github.com') }}"
+
+    - name: Verify repository deploy key access
+      ansible.builtin.command:
+        cmd: git ls-remote git@github.com:Reedtrullz/Nytt-Trondheim.git HEAD
+      environment:
+        GIT_SSH_COMMAND: "ssh -i /home/deploy/.ssh/nytt_github_deploy -o IdentitiesOnly=yes"
+      changed_when: false
+
+    - name: Configure Caddy reverse proxy hostname
+      become: true
+      ansible.builtin.blockinfile:
+        path: /etc/caddy/Caddyfile
+        marker: "# {mark} ANSIBLE MANAGED - Nytt Trondheim"
+        block: |
+          nytt.reidar.tech {
+            reverse_proxy 127.0.0.1:{{ app_port }}
+          }
+
+    - name: Validate Caddy configuration
+      become: true
+      ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile
+      changed_when: false
+
+    - name: Reload validated Caddy
+      become: true
+      ansible.builtin.systemd:
+        name: caddy
+        state: reloaded
+
+    - name: Wait for public TLS routing
+      ansible.builtin.uri:
+        url: https://nytt.reidar.tech/health
+        status_code: [200, 401, 404, 502, 503]
+        validate_certs: true
+      register: public_route
+      until: public_route.status in [200, 401, 404, 502, 503]
+      retries: 12
+      delay: 5

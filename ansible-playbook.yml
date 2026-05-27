@@ -16,6 +16,7 @@
         fail_msg: "Required deployment value is missing."
       no_log: true
       loop:
+        - NYTT_REPO_DEPLOY_KEY
         - NYTT_POSTGRES_PASSWORD
         - NYTT_SESSION_SECRET
         - NYTT_GITHUB_CLIENT_ID
@@ -26,6 +27,32 @@
         - NYTT_BACKUP_ACCESS_KEY
         - NYTT_BACKUP_SECRET_KEY
   tasks:
+    - name: Ensure deploy SSH directory exists
+      ansible.builtin.file:
+        path: /home/deploy/.ssh
+        state: directory
+        owner: deploy
+        group: deploy
+        mode: "0700"
+
+    - name: Authorize dedicated GitHub Actions deployment key
+      ansible.builtin.lineinfile:
+        path: /home/deploy/.ssh/authorized_keys
+        create: true
+        owner: deploy
+        group: deploy
+        mode: "0600"
+        line: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPiDoQTHtZg3xUhYEw7w+03s43sfWSJjZGcILoic4f7B nytt-trondheim-actions-vps-20260527"
+
+    - name: Install read-only GitHub repository deploy key
+      ansible.builtin.copy:
+        dest: /home/deploy/.ssh/nytt_github_deploy
+        owner: deploy
+        group: deploy
+        mode: "0600"
+        content: "{{ lookup('env', 'NYTT_REPO_DEPLOY_KEY') }}\n"
+      no_log: true
+
     - name: Ensure app and backup directories exist
       become: true
       ansible.builtin.file:
@@ -37,16 +64,6 @@
       loop:
         - "{{ app_dir }}"
         - "/var/backups/nytt-trondheim"
-
-    - name: Require installed read-only GitHub repository deploy key
-      ansible.builtin.stat:
-        path: /home/deploy/.ssh/nytt_github_deploy
-      register: github_deploy_key
-
-    - name: Fail when private repository deploy key is not provisioned
-      ansible.builtin.assert:
-        that: github_deploy_key.stat.exists
-        fail_msg: "Install the Nytt-Trondheim read-only GitHub deploy key on the VPS first."
 
     - name: Trust GitHub SSH host key for repository checkout
       ansible.builtin.known_hosts:
