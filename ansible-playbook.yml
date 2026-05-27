@@ -216,6 +216,14 @@
       delay: 5
       changed_when: false
 
+    - name: Ensure persisted uploads volume exists
+      ansible.builtin.command: docker volume create nytt_uploads
+      changed_when: false
+
+    - name: Ensure API can write persisted uploads and exports
+      ansible.builtin.command: docker run --rm -v nytt_uploads:/data alpine chown -R 1000:1000 /data
+      changed_when: false
+
     - name: Create and verify encrypted pre-migration backup
       become: true
       ansible.builtin.shell: |

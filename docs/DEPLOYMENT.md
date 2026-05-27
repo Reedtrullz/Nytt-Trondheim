@@ -21,6 +21,8 @@ The deploy workflow and playbook fail before changing application state if any r
 
 PostgreSQL runs only on the internal `nytt_database` network. The playbook provisions the external `nytt_outbound` egress network before canary startup; `app` and `worker` join it so GitHub authorization, RSS, Kartverket, MET/NVE and DeepSeek requests can reach external services. The API remains bound only to VPS localhost for Caddy.
 
+The playbook also normalizes persisted upload-volume ownership for the non-root API container before promotion, so private attachments and protected ZIP exports remain writable after initial volume creation or restore.
+
 ## Backups
 
 Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.timer`. Database dumps and uploaded files are encrypted offsite with restic using its `rclone` backend to a dedicated Google Drive folder. Configure `NYTT_RESTIC_REPOSITORY`, `NYTT_RESTIC_PASSWORD` and the restricted Google Drive `NYTT_RCLONE_CONFIG` in GitHub deployment secrets before first production deployment.
