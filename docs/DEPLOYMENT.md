@@ -7,7 +7,7 @@ The repository follows the RFMC release pattern:
 3. GitHub Actions connects to the VPS as `deploy` and runs `ansible-playbook.yml`; the VPS uses its own repository-scoped read-only deploy key at `~/.ssh/nytt_github_deploy` to clone this private repository.
 4. Ansible installs/configures restic first, verifies an encrypted pre-migration backup, builds Docker images, applies migrations, health-checks a canary API container, promotes API/worker, validates and reloads Caddy, then verifies `https://nytt.reidar.tech/health`.
 
-The deploy workflow and playbook fail before changing the VPS if any required SSH, application, OAuth, AI or backup secret is absent. The workflow also rejects the deployment before SSH/Ansible work if public TLS is still failing, such as Cloudflare HTTP `525`.
+The deploy workflow and playbook fail before changing the VPS if any required SSH, application, GitHub authentication, AI or backup secret is absent. The workflow also rejects the deployment before SSH/Ansible work if public TLS is still failing, such as Cloudflare HTTP `525`.
 
 ## Production Services
 
@@ -26,7 +26,7 @@ Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.ti
 
 ## First Deployment Prerequisites
 
-- Create the GitHub OAuth application with callback `https://nytt.reidar.tech/auth/github/callback`.
+- Create a GitHub App with callback `https://nytt.reidar.tech/auth/github/callback`, generate a Client Secret, and configure its Client ID and Client Secret as `NYTT_GITHUB_CLIENT_ID` and `NYTT_GITHUB_CLIENT_SECRET`. The App ID and downloaded private key are not required for the user-login flow.
 - Add the listed repository secrets.
 - Add a read-only GitHub deploy key for this private repository and install its private key as `/home/deploy/.ssh/nytt_github_deploy` on the VPS.
 - After the first manual release succeeds, set repository variable `NYTT_DEPLOY_ENABLED=true` to permit automatic promotions from `main`.
@@ -46,6 +46,6 @@ As inspected on May 27, 2026:
 - GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false`.
 - The repository-scoped read-only GitHub deploy key is registered; install its corresponding private key as `/home/deploy/.ssh/nytt_github_deploy` once VPS shell access is restored.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
-- OAuth, OpenAI, backup target credentials and the GitHub Actions VPS SSH key remain to be provisioned.
+- The `nytt-trondheim` GitHub App Client ID is configured; its generated Client Secret, OpenAI credentials, backup target credentials and the GitHub Actions VPS SSH key remain to be provisioned.
 - `https://nytt.reidar.tech/health` returns Cloudflare HTTP `525`; direct origin probing shows Caddy HTTP redirection is present but the origin TLS handshake fails.
 - New SSH connections to `198.23.137.16:22` are refused, so server-side Caddy and key provisioning require recovery through the VPS console before deployment.

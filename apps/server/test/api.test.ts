@@ -72,6 +72,7 @@ describe("private situation API", () => {
     const response = await request.agent(app).get("/auth/github").expect(302);
     const target = new URL(response.headers.location as string);
     expect(target.searchParams.get("state")).toBeTruthy();
+    expect(target.searchParams.get("scope")).toBeNull();
   });
 
   it("forces user map drawings into the private layer", async () => {
