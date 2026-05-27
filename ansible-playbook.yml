@@ -146,15 +146,12 @@
           RESTIC_REPOSITORY={{ lookup('env', 'NYTT_RESTIC_REPOSITORY') }}
           RESTIC_PASSWORD={{ lookup('env', 'NYTT_RESTIC_PASSWORD') }}
           RCLONE_CONFIG=/etc/nytt-rclone.conf
-          RCLONE_TPSLIMIT=1
+          RCLONE_TPSLIMIT=4
           RCLONE_TPSLIMIT_BURST=1
-          RCLONE_TRANSFERS=1
-          RCLONE_CHECKERS=1
           RCLONE_RETRIES=10
           RCLONE_LOW_LEVEL_RETRIES=20
           RCLONE_RETRIES_SLEEP=10s
-          RCLONE_DRIVE_PACER_MIN_SLEEP=2s
-          RCLONE_DRIVE_PACER_BURST=1
+          RCLONE_DRIVE_PACER_MIN_SLEEP=250ms
           STATUS_DIR={{ app_dir }}/runtime-status
           XDG_CACHE_HOME=/var/cache/nytt-restic
           HOME=/var/lib/nytt-backup
