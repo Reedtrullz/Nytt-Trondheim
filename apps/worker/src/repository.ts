@@ -123,8 +123,8 @@ export class WorkerRepository {
         run.status,
         run.startedAt,
         run.completedAt,
-        run.articleIds,
-        run.result,
+        JSON.stringify(run.articleIds),
+        JSON.stringify(run.result),
         run.error ?? null,
       ],
     );
