@@ -277,7 +277,9 @@
         url: "http://127.0.0.1:{{ canary_port }}/health"
         return_content: true
       register: canary_health
-      until: canary_health.json.status == "ok"
+      until:
+        - canary_health.status | default(0) == 200
+        - (canary_health.json | default({})).get('status') == "ok"
       retries: 12
       delay: 5
 
