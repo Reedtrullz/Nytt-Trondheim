@@ -29,8 +29,7 @@ jobs:
       NYTT_DATEX_API_KEY: ${{ secrets.NYTT_DATEX_API_KEY }}
       NYTT_RESTIC_REPOSITORY: ${{ secrets.NYTT_RESTIC_REPOSITORY }}
       NYTT_RESTIC_PASSWORD: ${{ secrets.NYTT_RESTIC_PASSWORD }}
-      NYTT_BACKUP_ACCESS_KEY: ${{ secrets.NYTT_BACKUP_ACCESS_KEY }}
-      NYTT_BACKUP_SECRET_KEY: ${{ secrets.NYTT_BACKUP_SECRET_KEY }}
+      NYTT_RCLONE_CONFIG: ${{ secrets.NYTT_RCLONE_CONFIG }}
     steps:
       - uses: actions/checkout@v6
       - name: Require production deployment secrets
@@ -47,8 +46,7 @@ jobs:
             NYTT_DEEPSEEK_API_KEY
             NYTT_RESTIC_REPOSITORY
             NYTT_RESTIC_PASSWORD
-            NYTT_BACKUP_ACCESS_KEY
-            NYTT_BACKUP_SECRET_KEY
+            NYTT_RCLONE_CONFIG
           )
           for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
