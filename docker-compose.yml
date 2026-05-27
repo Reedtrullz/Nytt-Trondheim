@@ -90,6 +90,7 @@ networks:
     internal: true
   outbound:
     name: nytt_outbound
+    external: true
 
 volumes:
   postgres-data:

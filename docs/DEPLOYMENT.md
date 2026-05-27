@@ -19,7 +19,7 @@ The deploy workflow and playbook fail before changing application state if any r
 - `app`: authenticated API and built web interface, exposed only on VPS localhost for Caddy.
 - `worker`: scheduled ingestion and analysis process.
 
-PostgreSQL runs only on the internal `nytt_database` network. `app` and `worker` also join `nytt_outbound` so GitHub authorization, RSS, Kartverket, MET/NVE and DeepSeek requests can reach external services. The API remains bound only to VPS localhost for Caddy.
+PostgreSQL runs only on the internal `nytt_database` network. The playbook provisions the external `nytt_outbound` egress network before canary startup; `app` and `worker` join it so GitHub authorization, RSS, Kartverket, MET/NVE and DeepSeek requests can reach external services. The API remains bound only to VPS localhost for Caddy.
 
 ## Backups
 
