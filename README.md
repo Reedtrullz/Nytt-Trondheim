@@ -27,7 +27,7 @@ DATABASE_URL=postgres://nytt:nytt@localhost:5432/nytt npm run db:migrate
 - `Siste nytt`: chronological Trondheim/Trøndelag views, categories, search, saved links and nearby map.
 - `Situasjonsrom`: event timeline, attributed evidence, warning/context layers, related stories and private planning workspace.
 - Map provenance is explicit: official information, reporting-derived estimates, DSB preparedness context and private drawings are separate layers.
-- Situation processing stores MET/NVE official warning context, validated OpenAI-cited summaries and municipality corroboration without treating warnings as emergency confirmation.
+- Situation processing stores MET/NVE official warning context, validated DeepSeek-cited summaries and municipality corroboration without treating warnings as emergency confirmation.
 - Private workspace mutations use CSRF protection; persisted protected exports include manifests, checksums and provenance-separated GeoJSON.
 
 ## Services

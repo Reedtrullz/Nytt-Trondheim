@@ -11,7 +11,7 @@ export type SourceId =
   | "datex"
   | "dsb"
   | "politiloggen"
-  | "openai";
+  | "deepseek";
 
 export type GeographicScope = "trondheim" | "trondelag";
 export type ArticleCategory =
@@ -136,7 +136,7 @@ export interface OfficialEvent {
 
 export interface AiProcessingRun {
   id: string;
-  provider: "openai" | "deterministic";
+  provider: "deepseek" | "deterministic";
   model: string;
   status: "ok" | "degraded" | "disabled";
   startedAt: string;

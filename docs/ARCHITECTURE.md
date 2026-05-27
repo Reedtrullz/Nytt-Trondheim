@@ -21,6 +21,6 @@ The API ignores any client attempt to create an annotation under another provena
 
 ## AI Boundary
 
-The worker defines a provider interface and initially implements OpenAI-based structured clustering only when `OPENAI_API_KEY` is configured. Only public feed excerpts and public official data may enter that process. Private annotations, attachments, tasks and notes are excluded.
+The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only public feed excerpts and public official data may enter that process. Private annotations, attachments, tasks and notes are excluded.
 
 AI clusters are accepted only after each cited snippet matches an input excerpt and at least two independent sources remain. Deterministic multi-source detection remains available when AI is disabled or degraded.

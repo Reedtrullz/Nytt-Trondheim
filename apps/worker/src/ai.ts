@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import type { AiProcessingRun, Article, EvidenceItem, Situation } from "@nytt/shared";
 
@@ -70,14 +69,14 @@ export class NoopAnalyzer implements SituationAnalyzer {
   }
 }
 
-export class OpenAiAnalyzer implements SituationAnalyzer {
+export class DeepSeekAnalyzer implements SituationAnalyzer {
   private readonly client: OpenAI;
 
   constructor(
     apiKey: string,
-    private readonly model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
+    private readonly model = process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
   ) {
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({ apiKey, baseURL: "https://api.deepseek.com" });
   }
 
   async cluster(articles: Article[]): Promise<AnalysisOutcome> {
@@ -94,32 +93,35 @@ export class OpenAiAnalyzer implements SituationAnalyzer {
       }),
     );
     try {
-      const response = await this.client.responses.parse({
+      const response = await this.client.chat.completions.create({
         model: this.model,
-        input: [
+        messages: [
           {
             role: "system",
             content:
-              "Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Cite literal supporting excerpts. Do not infer locations, perimeters, responder activity, identities or private facts.",
+              'Return JSON only in the supplied shape. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Cite literal supporting excerpts. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}.',
           },
           {
             role: "user",
-            content: `Analyze these public feed excerpts as JSON: ${JSON.stringify(publicInputs)}`,
+            content: `Analyze these public feed excerpts and output JSON: ${JSON.stringify(publicInputs)}`,
           },
         ],
-        text: { format: zodTextFormat(resultSchema, "public_incident_clusters") },
+        response_format: { type: "json_object" },
+        max_tokens: 4096,
       });
-      const parsed = resultSchema.parse(response.output_parsed);
+      const content = response.choices[0]?.message.content;
+      if (!content) throw new Error("DeepSeek returned empty JSON content.");
+      const parsed = resultSchema.parse(JSON.parse(content));
       const validated = validateCitations(parsed, articles);
       return {
         result: validated,
-        run: run("openai", this.model, "ok", startedAt, articles, validated),
+        run: run("deepseek", this.model, "ok", startedAt, articles, validated),
       };
     } catch (error) {
       const result = { clusters: [] };
       return {
         result,
-        run: run("openai", this.model, "degraded", startedAt, articles, result, String(error)),
+        run: run("deepseek", this.model, "degraded", startedAt, articles, result, String(error)),
       };
     }
   }
@@ -188,7 +190,7 @@ export function enhanceSituations(
 }
 
 export function createAnalyzer(): SituationAnalyzer {
-  return process.env.OPENAI_API_KEY
-    ? new OpenAiAnalyzer(process.env.OPENAI_API_KEY)
+  return process.env.DEEPSEEK_API_KEY
+    ? new DeepSeekAnalyzer(process.env.DEEPSEEK_API_KEY)
     : new NoopAnalyzer();
 }

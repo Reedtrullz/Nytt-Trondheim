@@ -113,7 +113,7 @@ async function collectAll(): Promise<void> {
   const analysis = await analyzer.cluster(recentArticles);
   await repository.saveAiRun(analysis.run);
   await repository.setHealth({
-    source: "openai",
+    source: "deepseek",
     label: "AI-analyse",
     state: analysis.run.status === "disabled" ? "disabled" : analysis.run.status,
     lastCheckedAt: analysis.run.completedAt,
@@ -123,7 +123,7 @@ async function collectAll(): Promise<void> {
       analysis.run.status === "ok"
         ? `${analysis.result.clusters.length} validerte kandidatgrupper`
         : analysis.run.status === "disabled"
-          ? "OPENAI_API_KEY er ikke konfigurert"
+          ? "DEEPSEEK_API_KEY er ikke konfigurert"
           : (analysis.run.error ?? "AI-analyse feilet"),
   });
   const deterministicSituations = enhanceSituations(

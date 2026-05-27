@@ -19,7 +19,7 @@ The deploy workflow and playbook fail before changing application state if any r
 - `app`: authenticated API and built web interface, exposed only on VPS localhost for Caddy.
 - `worker`: scheduled ingestion and analysis process.
 
-PostgreSQL runs only on the internal `nytt_database` network. `app` and `worker` also join `nytt_outbound` so OAuth, RSS, Kartverket, MET/NVE and OpenAI requests can reach external services. The API remains bound only to VPS localhost for Caddy.
+PostgreSQL runs only on the internal `nytt_database` network. `app` and `worker` also join `nytt_outbound` so GitHub authorization, RSS, Kartverket, MET/NVE and DeepSeek requests can reach external services. The API remains bound only to VPS localhost for Caddy.
 
 ## Backups
 
@@ -47,6 +47,6 @@ As inspected on May 27, 2026:
 - GitHub Actions CI succeeds for `main`; automatic deployment remains disabled through `NYTT_DEPLOY_ENABLED=false`.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
-- The `nytt-trondheim` GitHub App Client ID is configured; its generated Client Secret, OpenAI credentials and backup target credentials remain to be provisioned.
+- The `nytt-trondheim` GitHub App Client ID and DeepSeek API credential are configured; its generated Client Secret and backup target credentials remain to be provisioned.
 - Caddy now serves valid TLS for `https://nytt.reidar.tech/health`; it returns HTTP `502` until the application is deployed to localhost port `8090`.
 - The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.

@@ -21,7 +21,7 @@
         - NYTT_SESSION_SECRET
         - NYTT_GITHUB_CLIENT_ID
         - NYTT_GITHUB_CLIENT_SECRET
-        - NYTT_OPENAI_API_KEY
+        - NYTT_DEEPSEEK_API_KEY
         - NYTT_RESTIC_REPOSITORY
         - NYTT_RESTIC_PASSWORD
         - NYTT_BACKUP_ACCESS_KEY
@@ -95,8 +95,8 @@
           GITHUB_CLIENT_ID={{ lookup('env', 'NYTT_GITHUB_CLIENT_ID') }}
           GITHUB_CLIENT_SECRET={{ lookup('env', 'NYTT_GITHUB_CLIENT_SECRET') }}
           GITHUB_ALLOWED_LOGIN=Reedtrullz
-          OPENAI_API_KEY={{ lookup('env', 'NYTT_OPENAI_API_KEY') }}
-          OPENAI_MODEL=gpt-4.1-mini
+          DEEPSEEK_API_KEY={{ lookup('env', 'NYTT_DEEPSEEK_API_KEY') }}
+          DEEPSEEK_MODEL=deepseek-v4-flash
           POLITILOGGEN_ENABLED={{ lookup('env', 'NYTT_POLITILOGGEN_ENABLED') | default('false', true) }}
           DATEX_ENDPOINT={{ lookup('env', 'NYTT_DATEX_ENDPOINT') | default('', true) }}
           DATEX_API_KEY={{ lookup('env', 'NYTT_DATEX_API_KEY') | default('', true) }}
