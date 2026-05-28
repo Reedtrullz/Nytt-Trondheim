@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<d2LogicalModel xmlns="http://datex2.eu/schema/3/d2Payload" modelBaseVersion="3">
+  <payloadPublication xsi:type="SituationPublication" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" lang="no">
+    <publicationTime>2026-05-28T10:00:00Z</publicationTime>
+    <publicationCreator><country>no</country><nationalIdentifier>NPRA</nationalIdentifier></publicationCreator>
+    <situation id="NO-SVV-1" version="3">
+      <overallSeverity>high</overallSeverity>
+      <headerInformation><confidentiality>noRestriction</confidentiality></headerInformation>
+      <situationRecord xsi:type="Accident" id="NO-SVV-1-R1" version="3">
+        <situationRecordCreationTime>2026-05-28T09:55:00Z</situationRecordCreationTime>
+        <situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime>
+        <probabilityOfOccurrence>certain</probabilityOfOccurrence>
+        <severity>high</severity>
+        <validity>
+          <validityStatus>active</validityStatus>
+          <validityTimeSpecification>
+            <overallStartTime>2026-05-28T09:55:00Z</overallStartTime>
+            <overallEndTime>2026-05-28T12:00:00Z</overallEndTime>
+          </validityTimeSpecification>
+        </validity>
+        <groupOfLocations>
+          <locationForDisplay>
+            <latitude>63.361</latitude>
+            <longitude>10.376</longitude>
+          </locationForDisplay>
+        </groupOfLocations>
+        <generalPublicComment>
+          <comment><values><value lang="no">Trafikkulykke på E6 ved Tiller. Ett felt stengt.</value></values></comment>
+        </generalPublicComment>
+        <roadInformation>
+          <roadNumber>E6</roadNumber>
+          <roadName>E6 Tiller</roadName>
+        </roadInformation>
+      </situationRecord>
+    </situation>
+  </payloadPublication>
+</d2LogicalModel>
