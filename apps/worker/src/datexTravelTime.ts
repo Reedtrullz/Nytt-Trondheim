@@ -158,10 +158,14 @@ function firstPredefinedLocationReferenceId(value: unknown): string {
 }
 
 function locationMapFromInput(
-  locations: DatexTravelTimeLocations | Record<string, DatexTravelTimeLocation> | DatexTravelTimeLocation[],
+  locations:
+    | DatexTravelTimeLocations
+    | Record<string, DatexTravelTimeLocation>
+    | DatexTravelTimeLocation[],
 ): Map<string, DatexTravelTimeLocation> {
   if (locations instanceof Map) return locations;
-  if (Array.isArray(locations)) return new Map(locations.map((location) => [location.id, location]));
+  if (Array.isArray(locations))
+    return new Map(locations.map((location) => [location.id, location]));
   return new Map(
     Object.entries(locations).flatMap(([id, location]) => {
       if (!isObject(location) || typeof location.name !== "string") return [];
@@ -194,7 +198,8 @@ export function parseDatexTravelTimeLocations(xml: string): DatexTravelTimeLocat
   const locations = new Map<string, DatexTravelTimeLocation>();
 
   for (const location of findDatexObjectsWithKey(tree, "predefinedLocationName")) {
-    const id = firstPredefinedLocationReferenceId(location) || datexAttribute(location, "id").trim();
+    const id =
+      firstPredefinedLocationReferenceId(location) || datexAttribute(location, "id").trim();
     const name = firstNestedTextForKey(location.predefinedLocationName, "value");
     if (id && name) locations.set(id, { id, name });
   }
@@ -285,7 +290,10 @@ export async function collectDatexTravelTimePulse({
 }
 
 export function trafficPulseFromDatexTravelTime(
-  locations: DatexTravelTimeLocations | Record<string, DatexTravelTimeLocation> | DatexTravelTimeLocation[],
+  locations:
+    | DatexTravelTimeLocations
+    | Record<string, DatexTravelTimeLocation>
+    | DatexTravelTimeLocation[],
   measurements: DatexTravelTimeMeasurement[],
   options: DatexTravelTimePulseOptions,
 ): TrafficPulseCorridor[] {

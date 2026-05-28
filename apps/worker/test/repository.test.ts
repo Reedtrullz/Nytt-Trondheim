@@ -254,6 +254,7 @@ function travelTimeCorridor(
     measurementTo: overrides.measurementTo ?? "2026-05-28T10:00:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-05-28T10:00:00.000Z",
     sourceUrl:
-      overrides.sourceUrl ?? "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata",
+      overrides.sourceUrl ??
+      "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata",
   };
 }

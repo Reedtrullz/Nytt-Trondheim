@@ -10,14 +10,12 @@ import {
   trafficPulseFromDatexTravelTime,
 } from "../src/datexTravelTime.js";
 
-const locationsFixturePath = new URL(
-  "./fixtures/datex-travel-time-locations.xml",
-  import.meta.url,
-);
+const locationsFixturePath = new URL("./fixtures/datex-travel-time-locations.xml", import.meta.url);
 const dataFixturePath = new URL("./fixtures/datex-travel-time-data.xml", import.meta.url);
 const travelTimeLocationsSourceUrl =
   "https://datex.example.test/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata";
-const travelTimeDataSourceUrl = "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata";
+const travelTimeDataSourceUrl =
+  "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata";
 const expectedTravelTimeAuthorization = "Basic ZGF0ZXgtdXNlcjpkYXRleC1wYXNz";
 const expectedTravelTimeUserAgent = "NyttTrondheim/0.1 kontakt@reidar.tech";
 
@@ -231,11 +229,10 @@ describe("DATEX travel time collection", () => {
     expect(locationMessage).not.toContain("datex-pass");
     expect(locationMessage).not.toContain(expectedTravelTimeAuthorization);
 
-    const dataFailureFetcher = vi.fn(
-      async (input: Parameters<typeof fetch>[0]) =>
-        String(input) === travelTimeLocationsSourceUrl
-          ? new Response(locationsXml)
-          : new Response("Bad gateway", { status: 502 }),
+    const dataFailureFetcher = vi.fn(async (input: Parameters<typeof fetch>[0]) =>
+      String(input) === travelTimeLocationsSourceUrl
+        ? new Response(locationsXml)
+        : new Response("Bad gateway", { status: 502 }),
     );
 
     const dataMessage = await rejectedMessage(
