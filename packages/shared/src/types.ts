@@ -110,8 +110,10 @@ export interface Situation {
   locationLabel: string;
   incidentSignature?: string;
   detectionVersion?: string;
+  officialSource?: Extract<SourceId, "datex">;
+  officialEventId?: string;
   activationBasis?: {
-    rule: "two_independent_sources";
+    rule: "two_independent_sources" | "official_source";
     sourceIds: SourceId[];
     articleIds: string[];
     activatedAt: string;
@@ -129,7 +131,7 @@ export type OfficialEventState = "active" | "updated" | "cancelled" | "expired";
 
 export interface OfficialEvent {
   id: string;
-  source: "met" | "nve";
+  source: "met" | "nve" | "datex";
   eventType: SituationType;
   title: string;
   detail: string;
