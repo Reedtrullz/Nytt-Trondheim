@@ -335,6 +335,52 @@ describe("DATEX travel time parsing", () => {
     expect(locationIds).not.toContain("non-travel-time-location");
   });
 
+  it("parses live physicalQuantity sibling location references and ignores TrafficStatus", () => {
+    const xml = travelTimeDataXml(`
+      <ns10:physicalQuantity xmlns:ns10="http://datex2.eu/schema/3/common" xmlns:ns8="http://datex2.eu/schema/3/locationReferencing" xsi:type="ns10:SinglePhysicalQuantity">
+        <ns10:pertinentLocation xsi:type="ns8:LocationByReference">
+          <ns8:predefinedLocationReference targetClass="loc:PredefinedLocation" id="100135" version="1" />
+        </ns10:pertinentLocation>
+        <ns10:basicData xsi:type="ns10:TravelTimeData">
+          <ns10:measurementOrCalculationTime>
+            <ns10:period>
+              <ns10:startOfPeriod>2026-05-28T16:15:00.010Z</ns10:startOfPeriod>
+              <ns10:endOfPeriod>2026-05-28T16:20:00.010Z</ns10:endOfPeriod>
+            </ns10:period>
+          </ns10:measurementOrCalculationTime>
+          <ns10:travelTime>
+            <ns10:duration>214.0</ns10:duration>
+          </ns10:travelTime>
+          <ns10:freeFlowTravelTime>
+            <ns10:duration>240.0</ns10:duration>
+          </ns10:freeFlowTravelTime>
+          <ns10:travelTimeTrendType>decreasing</ns10:travelTimeTrendType>
+        </ns10:basicData>
+      </ns10:physicalQuantity>
+      <ns10:physicalQuantity xmlns:ns10="http://datex2.eu/schema/3/common" xmlns:ns8="http://datex2.eu/schema/3/locationReferencing" xsi:type="ns10:SinglePhysicalQuantity">
+        <ns10:pertinentLocation xsi:type="ns8:LocationByReference">
+          <ns8:predefinedLocationReference targetClass="loc:PredefinedLocation" id="100135" version="1" />
+        </ns10:pertinentLocation>
+        <ns10:basicData xsi:type="ns10:TrafficStatus">
+          <ns10:trafficStatusValue>trafficFlowNormal</ns10:trafficStatusValue>
+        </ns10:basicData>
+      </ns10:physicalQuantity>
+    `);
+
+    const measurements = parseDatexTravelTimeData(xml);
+
+    expect(measurements).toEqual([
+      {
+        locationId: "100135",
+        travelTimeSeconds: 214,
+        freeFlowSeconds: 240,
+        measurementFrom: "2026-05-28T16:15:00.010Z",
+        measurementTo: "2026-05-28T16:20:00.010Z",
+        trend: "decreasing",
+      },
+    ]);
+  });
+
   it("drops TravelTimeData measurements with missing or empty travel-time duration", () => {
     const xml = travelTimeDataXml(`
       <d2:physicalQuantity>

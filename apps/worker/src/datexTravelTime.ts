@@ -215,7 +215,8 @@ export function parseDatexTravelTimeData(xml: string): DatexTravelTimeMeasuremen
     for (const basicData of asDatexArray(object.basicData)) {
       if (!isObject(basicData) || !isTravelTimeData(basicData)) continue;
 
-      const locationId = firstPredefinedLocationReferenceId(basicData);
+      const locationId =
+        firstPredefinedLocationReferenceId(object) || firstPredefinedLocationReferenceId(basicData);
       const travelTimeSeconds = numberFromDuration(
         isObject(basicData.travelTime) ? basicData.travelTime.duration : undefined,
       );
