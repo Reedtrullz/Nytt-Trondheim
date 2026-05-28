@@ -43,15 +43,18 @@ If Google Drive still reports `rateLimitExceeded` while backups recover after re
 
 ## DATEX Verification
 
-After deploying DATEX ingestion, verify production source health and event persistence:
+After deploying DATEX ingestion, verify live health, source status, worker stability and persisted official traffic rows:
 
 ```bash
-curl -s https://nytt.reidar.tech/health
-ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at from source_health where source='datex';\""
+curl -fsS https://nytt.reidar.tech/health
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production ps worker"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production logs --tail=80 worker"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at,next_poll_at from source_health where source='datex';\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from official_events where source='datex';\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from situations where payload->>'officialSource'='datex';\""
 ```
 
-Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
+A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on `source_health.state='ok'`, worker logs and container uptime to distinguish that from collector failure. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
 
 ## Rollback
 
@@ -59,9 +62,12 @@ The deployment preserves the prior API and worker images as `:previous` before b
 
 ## Current Provisioning State
 
-As inspected on May 27, 2026:
+As inspected on May 28, 2026:
 
 - The application is live at `https://nytt.reidar.tech`; `/health` returns healthy Postgres-backed status through Caddy and Cloudflare.
+- The DATEX ingestion release is deployed from commit `31bee84` after `CI` and `Deploy to VPS` completed successfully on `main`; the worker is running without the earlier full-snapshot Node heap OOM.
+- DATEX Basic Auth credentials are configured as GitHub repository secrets `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD`, mapped to runtime `DATEX_USERNAME` and `DATEX_PASSWORD` by the deploy workflow/playbook. Leave `NYTT_DATEX_ENDPOINT` blank unless intentionally overriding the SRTI-filtered default.
+- Production DATEX source health last verified as `ok` with `0 relevante DATEX trafikkhendelser hentet`; this reflects the current SRTI snapshot having no relevant Trondheim/Trøndelag events, not missing credentials.
 - The incident-correctness release was manually verified and `NYTT_DEPLOY_ENABLED=true`; successful `main` CI runs now trigger production promotion.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
@@ -69,4 +75,4 @@ As inspected on May 27, 2026:
 - Caddy serves the application from localhost port `8090` with valid TLS at `https://nytt.reidar.tech`.
 - The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.
 - Encrypted Google Drive/restic backups and restore verification are active. Runtime status files expose only successful completion timestamps to the owner-only operations view.
-- Persisted false-positive situations have been dismissed with retained audit history; new automatic incidents require explicit event type and a specific matching place.
+- Persisted false-positive situations have been dismissed with retained audit history; new automatic incidents require explicit event type and a specific matching place, except for high-impact official DATEX traffic records.

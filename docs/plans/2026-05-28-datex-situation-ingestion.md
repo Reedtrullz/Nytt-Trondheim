@@ -1,6 +1,8 @@
 # DATEX Situation Ingestion Implementation Plan
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
+>
+> **Status 2026-05-28:** Implemented and deployed. Production uses the SRTI-filtered DATEX default `GetSituation/pullsnapshotdata?srti=True` after the unfiltered national snapshot (~39.6 MB during verification) caused a memory-limited worker to OOM. Keep Basic Auth (`DATEX_USERNAME` / `DATEX_PASSWORD`), `If-Modified-Since` state, compact raw metadata and high-impact-only promotion; do not reintroduce single-key DATEX credential wiring or full parsed XML nodes in persisted event payloads.
 
 **Goal:** Turn the newly configured Statens vegvesen DATEX II v3.1 access from a health check into official traffic situation ingestion for Nytt, creating map-backed official road-disruption situations for Trondheim/Trøndelag while preserving source provenance and avoiding noisy roadwork spam.
 
@@ -12,7 +14,7 @@
 
 ## Scope
 
-Build the first DATEX product layer: `GetSituation/pullsnapshotdata` ingestion.
+Build the first DATEX product layer: SRTI-filtered `GetSituation/pullsnapshotdata?srti=True` ingestion by default, with `DATEX_ENDPOINT` available only as an explicit override.
 
 In scope:
 
@@ -67,7 +69,7 @@ Plan safety decisions:
 
 - Keep DATEX parsing isolated in `apps/worker/src/datex.ts`; do not add DATEX schema probing logic to generic RSS collectors.
 - Do not put DATEX credentials in frontend code or test fixtures.
-- Store raw parsed DATEX fragments in `OfficialEvent.raw` for debugging, but do not expose raw credential-bearing request metadata.
+- Store compact DATEX metadata in `OfficialEvent.raw.datex` for debugging, but do not expose raw credential-bearing request metadata or duplicate the full parsed XML `situation`/`record` objects into every event row.
 - DATEX can confirm road state, but DATEX by itself should only create/promote traffic situations for high-impact records. Low-impact/planned maintenance can remain in `official_events` for later traffic-layer UI.
 - Every task that changes the worker chain includes `npm run typecheck` or a targeted Vitest command using Node 22.
 
@@ -87,7 +89,7 @@ npm run lint
 Deployment verification discipline:
 
 - Do not report CI/CD success until `gh run list --json status,conclusion` shows the relevant run as completed success.
-- Do not report production deployed until `curl https://nytt.reidar.tech/health` and a DB/source-health check verify the live container.
+- Do not report production deployed until `curl https://nytt.reidar.tech/health`, worker logs/container status, and DB/source-health checks verify the live container. A `0` DATEX event count is acceptable when `source_health.state='ok'` and the SRTI snapshot currently has no Trondheim/Trøndelag matches.
 
 ---
 
@@ -1409,7 +1411,7 @@ git commit -m "feat: expire missing official snapshot events"
 In `apps/worker/src/index.ts`, import:
 
 ```ts
-import { collectDatexSituationEvents } from "./datex.js";
+import { collectDatexSituationEvents, defaultDatexSituationEndpoint } from "./datex.js";
 ```
 
 Near `const officialEvents = [];`, add DATEX after MET/NVE collection but before `upsertOfficialEvents`:
@@ -1417,9 +1419,7 @@ Near `const officialEvents = [];`, add DATEX after MET/NVE collection but before
 ```ts
 const datexUsername = process.env.DATEX_USERNAME?.trim();
 const datexPassword = process.env.DATEX_PASSWORD;
-const datexEndpoint =
-  process.env.DATEX_ENDPOINT?.trim() ||
-  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
+const datexEndpoint = process.env.DATEX_ENDPOINT?.trim() || defaultDatexSituationEndpoint;
 
 if (datexUsername && datexPassword) {
   try {
@@ -1945,7 +1945,9 @@ git commit -m "feat: distinguish official DATEX map features"
 Under `## Situation Activation`, add the explicit official-source exception:
 
 ```md
-High-impact official DATEX traffic records are the explicit exception to the two-independent-source activation rule. They may create active traffic situations with `activationBasis.rule="official_source"`, `sourceIds=["datex"]`, and `officialEventId` set. Low-impact/planned roadworks remain `official_events` only and do not activate the main situation feed.
+High-impact official DATEX traffic records are the explicit exception to the two-independent-source activation rule. They may create active traffic situations with `activationBasis.rule="official_source"`, `sourceIds=["datex"]`, `officialSource="datex"`, and `officialEventId` set. DATEX situation reuse is limited to existing DATEX-owned situations so official traffic evidence cannot accidentally attach to a news-created case. Low-impact/planned roadworks remain `official_events` only and do not activate the main situation feed.
+
+DATEX traffic events stay separate from MET/NVE warning context: weather and hazard warnings can enrich or contextualize a situation, but they are not fed into DATEX promotion logic. Conversely, DATEX records can confirm road state but are not treated as broader emergency confirmation outside the traffic layer without corroborating sources.
 ```
 
 **Step 2: Update `docs/SOURCES.md`**
@@ -1953,7 +1955,7 @@ High-impact official DATEX traffic records are the explicit exception to the two
 Replace the current DATEX deferred sentence with:
 
 ```md
-- Statens vegvesen DATEX II v3.1 `GetSituation/pullsnapshotdata` is collected with Basic Auth when `DATEX_USERNAME` and `DATEX_PASSWORD` are configured. The worker sends `If-Modified-Since` when a previous `Last-Modified` value exists, stores relevant Trondheim/Trøndelag traffic situations as official events, and promotes high-impact accidents/closures/obstructions into official traffic situations. Low-impact/planned roadworks are retained as official events for future traffic-layer UI, but do not currently spam the main situation feed.
+- Statens vegvesen DATEX II v3.1 `GetSituation/pullsnapshotdata?srti=True` is collected with Basic Auth when `DATEX_USERNAME` and `DATEX_PASSWORD` are configured. The SRTI-filtered default avoids repeatedly parsing the full national situation snapshot while preserving high-signal accidents, closures, obstructions and congestion records for the main traffic layer. The worker sends `If-Modified-Since` when a previous `Last-Modified` value exists, stores relevant Trondheim/Trøndelag traffic situations as official events, and promotes high-impact accidents/closures/obstructions into official traffic situations. Low-impact/planned roadworks are retained as official events for future traffic-layer UI, but do not currently spam the main situation feed. Persisted raw DATEX metadata is intentionally compact: stable IDs, record kind, impact, road labels, comments, validity and timing metadata are kept, but full parsed XML nodes are not duplicated into every event row.
 ```
 
 Add follow-up paragraph:
@@ -1967,22 +1969,25 @@ DATEX TravelTime, measured road weather, forecast points and CCTV site tables ar
 Add:
 
 ```md
-DATEX credentials are server-side worker secrets only. They are stored as GitHub Actions repository secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`), mapped to container runtime variables (`DATEX_USERNAME`, `DATEX_PASSWORD`) by the deploy workflow/playbook, and must never be exposed to the frontend bundle, logs, raw fixtures, or exported workspaces.
+DATEX credentials are server-side worker secrets only. They are stored as GitHub Actions repository secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`), mapped to container runtime variables (`DATEX_USERNAME`, `DATEX_PASSWORD`) by the deploy workflow/playbook, and must never be exposed to the frontend bundle, logs, raw fixtures, or exported workspaces. The default DATEX endpoint is SRTI-filtered (`GetSituation/pullsnapshotdata?srti=True`) so the worker does not poll the full national snapshot unless `NYTT_DATEX_ENDPOINT` is intentionally overridden.
 ```
 
 **Step 4: Update `docs/DEPLOYMENT.md`**
 
 Add a verification command section:
 
-After deploying DATEX ingestion, verify production source health and event persistence:
+After deploying DATEX ingestion, verify live health, source status, worker stability and persisted official traffic rows:
 
 ```bash
-curl -s https://nytt.reidar.tech/health
-ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at from source_health where source='datex';\""
+curl -fsS https://nytt.reidar.tech/health
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production ps worker"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production logs --tail=80 worker"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at,next_poll_at from source_health where source='datex';\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from official_events where source='datex';\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from situations where payload->>'officialSource'='datex';\""
 ```
 
-Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
+A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on `source_health.state='ok'`, worker logs and container uptime to distinguish that from collector failure. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
 
 **Step 5: Verify format check**
 
@@ -2101,7 +2106,7 @@ Expected: deploy run shows `completed` + `success`.
 Run:
 
 ```bash
-curl -s https://nytt.reidar.tech/health
+curl -fsS https://nytt.reidar.tech/health
 ```
 
 Expected:
@@ -2112,10 +2117,12 @@ Expected:
 
 **Step 5: Verify DATEX production state**
 
-Run an SSH/psql check using the existing deployment container names:
+Run an SSH/psql check using the existing deployment services:
 
 ```bash
-ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at from source_health where source='datex';\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production ps worker"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production logs --tail=80 worker"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at,next_poll_at from source_health where source='datex';\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,count(*) from official_events where source='datex' group by source,state;\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select id,status,verification_status,payload->>'officialEventId' as datex_event from situations where payload->>'officialSource'='datex' order by updated_at desc limit 5;\""
 ```

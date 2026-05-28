@@ -18,14 +18,12 @@ const originalDatexEnv = {
   DATEX_ENDPOINT: process.env.DATEX_ENDPOINT,
   DATEX_USERNAME: process.env.DATEX_USERNAME,
   DATEX_PASSWORD: process.env.DATEX_PASSWORD,
-  DATEX_API_KEY: process.env.DATEX_API_KEY,
 };
 
 beforeEach(() => {
   delete process.env.DATEX_ENDPOINT;
   delete process.env.DATEX_USERNAME;
   delete process.env.DATEX_PASSWORD;
-  delete process.env.DATEX_API_KEY;
 });
 
 afterEach(() => {
