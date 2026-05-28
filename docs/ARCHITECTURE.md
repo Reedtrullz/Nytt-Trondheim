@@ -31,4 +31,6 @@ Incident identity is lifecycle-aware: an open case may receive timely matching r
 
 Automatic Situation Room activation requires an explicit incident type and a shared specific place or event signature; broad references such as `Trondheim` alone never activate a situation. New incidents require two independent sources within 12 hours. Later matching reporting or municipal updates may update an already activated signature without reopening that activation rule.
 
+High-impact official DATEX traffic records are the explicit exception to the two-independent-source activation rule. They may create active traffic situations with `activationBasis.rule="official_source"`, `sourceIds=["datex"]`, and `officialEventId` set. Low-impact/planned roadworks remain `official_events` only and do not activate the main situation feed.
+
 Owner-dismissed false positives retain evidence, timelines and activation audit records under the `dismissed` lifecycle state, but are excluded from current-situation surfaces.

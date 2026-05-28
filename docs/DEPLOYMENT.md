@@ -39,7 +39,19 @@ If Google Drive still reports `rateLimitExceeded` while backups recover after re
 - Confirm DNS for `nytt.reidar.tech` resolves to the VPS.
 - Run origin provisioning to repair TLS/Cloudflare routing before release; the endpoint returned HTTP `525` before the `nytt.reidar.tech` Caddy hostname existed.
 - Confirm Docker, Caddy and the `deploy` SSH key are available on the same VPS used by RFMC.
-- Configure DATEX Basic Auth secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, optional `NYTT_DATEX_ENDPOINT`) if traffic-event source health should be tested against Vegvesen.
+- Configure DATEX Basic Auth secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, optional `NYTT_DATEX_ENDPOINT`) if traffic-event ingestion and source health should run against Vegvesen.
+
+## DATEX Verification
+
+After deploying DATEX ingestion, verify production source health and event persistence:
+
+```bash
+curl -s https://nytt.reidar.tech/health
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at from source_health where source='datex';\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from official_events where source='datex';\""
+```
+
+Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
 
 ## Rollback
 

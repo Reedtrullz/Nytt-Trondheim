@@ -16,6 +16,8 @@
 
 Optional: `NYTT_DATEX_ENDPOINT`, `NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`; legacy `NYTT_DATEX_API_KEY`; repository variables `NYTT_POLITILOGGEN_ENABLED` and `NYTT_DEPLOY_ENABLED`.
 
+DATEX credentials are server-side worker secrets only. They are stored as GitHub Actions repository secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`), mapped to container runtime variables (`DATEX_USERNAME`, `DATEX_PASSWORD`) by the deploy workflow/playbook, and must never be exposed to the frontend bundle, logs, raw fixtures, or exported workspaces.
+
 ## Known External Issue
 
 During planning, another local repository (`/Users/reidar/Documents/Lobster/Ine-bot`) exposed a GitHub token inside its `origin` remote URL. Revoke/rotate that token and replace that remote with a credential-free HTTPS URL independently of this application.

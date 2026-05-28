@@ -21,13 +21,13 @@ Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, inclu
 - NVE/Varsom flood and landslide municipality warnings for Trondheim are collected as official textual warning context. The worker does not invent map geometry where NVE supplies municipality scope without polygons.
 - Trondheim kommune stories matching the incident type and place can corroborate a situation as `Offentlig bekreftet`; general MET/NVE danger warnings cannot.
 - DSB public WMS/WFS supplies optional preparedness context. Its authenticated skogbrann functions for fire fronts, forecasts and resources are not consumed.
-- Statens vegvesen DATEX II v3.1 situation access is checked with Basic Auth when `DATEX_USERNAME` and `DATEX_PASSWORD` are configured. The default health-check endpoint is `https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata`, overrideable with `DATEX_ENDPOINT`.
+- Statens vegvesen DATEX II v3.1 `GetSituation/pullsnapshotdata` is collected with Basic Auth when `DATEX_USERNAME` and `DATEX_PASSWORD` are configured. The worker sends `If-Modified-Since` when a previous `Last-Modified` value exists, stores relevant Trondheim/Trøndelag traffic situations as official events, and promotes high-impact accidents/closures/obstructions into official traffic situations. Low-impact/planned roadworks are retained as official events for future traffic-layer UI, but do not currently spam the main situation feed.
+
+DATEX TravelTime, measured road weather, forecast points and CCTV site tables are intentionally separate follow-up integrations. TravelTime should be used as a traffic-pulse/delay signal, weather as road-context enrichment, and CCTV only with explicit freshness/staleness labeling.
 
 ## Politiloggen
 
 `POLITILOGGEN_ENABLED=false` by default. The optional adapter is isolated because the current web application's structured endpoint is not a documented stable public collection contract and `/api/` is disallowed in the site's robots policy. Enabling it is a personal-use operational choice; failure does not disable the Situation Room.
-
-DATEX and Politiloggen are intentionally deferred from the safe core production release. DATEX credentials currently enable source-health verification only; ingesting and normalizing DATEX situation payloads remains a separate implementation step.
 
 ## Situation Matching
 

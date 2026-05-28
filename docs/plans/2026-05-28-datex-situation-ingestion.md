@@ -15,6 +15,7 @@
 Build the first DATEX product layer: `GetSituation/pullsnapshotdata` ingestion.
 
 In scope:
+
 - Basic Auth reuse through `DATEX_USERNAME` / `DATEX_PASSWORD`.
 - `If-Modified-Since` request header and `Last-Modified` persistence.
 - DATEX XML parsing with namespace removal.
@@ -25,6 +26,7 @@ In scope:
 - Docs updated so future work knows TravelTime/weather/CCTV are follow-up data products.
 
 Out of scope for this plan:
+
 - Travel-time dashboard (`GetTravelTimeData`) — follow-up after situation ingestion.
 - Road weather enrichment (`GetMeasuredWeatherData`) — follow-up, parser-isolated because Vegvesen changed weather publications in 2025.
 - CCTV thumbnails — follow-up with explicit freshness/privacy UI.
@@ -33,6 +35,7 @@ Out of scope for this plan:
 ## Architecture Audit
 
 Architecture docs read:
+
 - `docs/ARCHITECTURE.md`
 - `docs/SOURCES.md`
 
@@ -55,11 +58,13 @@ frontend
 ```
 
 Failure behavior:
+
 - Worker collector failures are caught per official source in `apps/worker/src/index.ts`; this is intentional degraded-state behavior, not silent import swallowing.
 - Import/type errors in `datex.ts`, `official.ts`, `clusters.ts`, or shared types should fail `npm run typecheck` or worker startup loudly.
 - Parser errors during one DATEX poll must degrade only DATEX health and must not prevent RSS, MET, NVE, or AI processing.
 
 Plan safety decisions:
+
 - Keep DATEX parsing isolated in `apps/worker/src/datex.ts`; do not add DATEX schema probing logic to generic RSS collectors.
 - Do not put DATEX credentials in frontend code or test fixtures.
 - Store raw parsed DATEX fragments in `OfficialEvent.raw` for debugging, but do not expose raw credential-bearing request metadata.
@@ -80,6 +85,7 @@ npm run lint
 ```
 
 Deployment verification discipline:
+
 - Do not report CI/CD success until `gh run list --json status,conclusion` shows the relevant run as completed success.
 - Do not report production deployed until `curl https://nytt.reidar.tech/health` and a DB/source-health check verify the live container.
 
@@ -90,6 +96,7 @@ Deployment verification discipline:
 **Objective:** Allow `OfficialEvent` and `Situation.activationBasis` to represent DATEX-origin official traffic situations.
 
 **Files:**
+
 - Modify: `packages/shared/src/types.ts`
 - Test: Typecheck through later DATEX tests and `npm run typecheck`
 
@@ -106,7 +113,8 @@ const event = {
   eventType: "traffic",
   title: "E6 stengt",
   detail: "Stengt ved Tiller",
-  sourceUrl: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+  sourceUrl:
+    "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
   areaLabel: "Tiller",
   state: "active",
   publishedAt: "2026-05-28T10:00:00.000Z",
@@ -176,6 +184,7 @@ git commit -m "feat: allow DATEX official traffic event types"
 **Objective:** Establish a local DATEX XML fixture and verify a collector can parse one active accident into an `OfficialEvent`.
 
 **Files:**
+
 - Create: `apps/worker/test/fixtures/datex-situation-snapshot.xml`
 - Create: `apps/worker/test/datex.test.ts`
 - Create: `apps/worker/src/datex.ts` as an empty/skeleton module only after the RED test is written
@@ -243,7 +252,8 @@ const _datexEventTypeCheck = {
   eventType: "traffic",
   title: "E6 stengt",
   detail: "Stengt ved Tiller",
-  sourceUrl: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+  sourceUrl:
+    "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
   areaLabel: "Tiller",
   state: "active",
   publishedAt: "2026-05-28T10:00:00.000Z",
@@ -348,6 +358,7 @@ git commit -m "test: define DATEX situation parser expectations"
 **Objective:** Add low-level XML/object helpers in `datex.ts` without yet completing full event conversion.
 
 **Files:**
+
 - Modify: `apps/worker/src/datex.ts`
 - Test: `apps/worker/test/datex.test.ts`
 
@@ -448,6 +459,7 @@ git commit -m "feat: add DATEX XML traversal helpers"
 **Objective:** Make the first fixture test pass by extracting situation IDs, timestamps, validity, comments, coordinates, road fields, and severity.
 
 **Files:**
+
 - Modify: `apps/worker/src/datex.ts`
 - Test: `apps/worker/test/datex.test.ts`
 
@@ -535,8 +547,9 @@ function fallbackValidTo(anchorIso: string): string {
   // Use receivedAt/publication time as the fallback anchor, not overallStartTime.
   // DATEX snapshots may keep open-ended incidents active for days; using the
   // original start time would make currentOfficialEvents drop still-active rows.
-  return new Date(new Date(anchorIso).getTime() + defaultSituationValidHours * 60 * 60 * 1000)
-    .toISOString();
+  return new Date(
+    new Date(anchorIso).getTime() + defaultSituationValidHours * 60 * 60 * 1000,
+  ).toISOString();
 }
 
 function pointGeometry(record: Record<string, unknown>): Geometry | undefined {
@@ -567,7 +580,8 @@ function validityStatus(record: Record<string, unknown>): string {
 
 function eventState(record: Record<string, unknown>): OfficialEvent["state"] {
   const status = validityStatus(record);
-  if (["suspended", "cancelled", "definedbyvaliditytimeperiod"].includes(status)) return "cancelled";
+  if (["suspended", "cancelled", "definedbyvaliditytimeperiod"].includes(status))
+    return "cancelled";
   return "active";
 }
 
@@ -581,7 +595,9 @@ function roadName(record: Record<string, unknown>): string {
 
 function commentText(record: Record<string, unknown>): string {
   const comments = findDatexObjectsWithKey(record, "generalPublicComment");
-  return comments.flatMap((comment) => recursiveTexts(comment.generalPublicComment)).find(Boolean) ?? "";
+  return (
+    comments.flatMap((comment) => recursiveTexts(comment.generalPublicComment)).find(Boolean) ?? ""
+  );
 }
 
 function recordKind(record: Record<string, unknown>): string {
@@ -628,7 +644,8 @@ export function parseDatexSituationPublication(
       const road = roadName(rawRecord);
       const title = titleForRecord(rawRecord, road);
       const detail = commentText(rawRecord) || title;
-      const severity = firstText(rawRecord, ["severity"]) || firstText(situation, ["overallSeverity"]);
+      const severity =
+        firstText(rawRecord, ["severity"]) || firstText(situation, ["overallSeverity"]);
 
       events.push({
         id: datexId(`${situationId}:${recordId}`),
@@ -691,6 +708,7 @@ git commit -m "feat: parse DATEX situation records"
 **Objective:** Prevent national DATEX noise from entering Nytt by retaining only events with coordinates in a rough Trøndelag bounding box or explicit local text.
 
 **Files:**
+
 - Modify: `apps/worker/src/datex.ts`
 - Modify: `apps/worker/test/datex.test.ts`
 
@@ -739,7 +757,8 @@ Add in `apps/worker/src/datex.ts`:
 
 ```ts
 const trondelagBounds = { minLat: 62.0, maxLat: 65.6, minLng: 8.0, maxLng: 14.8 };
-const localTextPattern = /\b(trondheim|trøndelag|trondelag|tiller|heimdal|ranheim|lade|byåsen|bymarka|sjetnemarka|e6\s+(ved\s+)?(tiller|heimdal|trondheim)|omkjøringsvegen|stavne|singsaker)\b/i;
+const localTextPattern =
+  /\b(trondheim|trøndelag|trondelag|tiller|heimdal|ranheim|lade|byåsen|bymarka|sjetnemarka|e6\s+(ved\s+)?(tiller|heimdal|trondheim)|omkjøringsvegen|stavne|singsaker)\b/i;
 
 function pointInTrondelag(geometry: Geometry | undefined): boolean {
   if (!geometry || geometry.type !== "Point") return false;
@@ -755,7 +774,10 @@ function pointInTrondelag(geometry: Geometry | undefined): boolean {
 }
 
 function isRelevantToNytt(event: OfficialEvent): boolean {
-  return pointInTrondelag(event.geometry) || localTextPattern.test(`${event.title} ${event.detail} ${event.areaLabel}`);
+  return (
+    pointInTrondelag(event.geometry) ||
+    localTextPattern.test(`${event.title} ${event.detail} ${event.areaLabel}`)
+  );
 }
 ```
 
@@ -789,6 +811,7 @@ git commit -m "feat: filter DATEX events for Trondheim relevance"
 **Objective:** Mark which DATEX events should create visible situations now, while keeping lower-impact roadworks available as official events for future traffic-layer UI.
 
 **Files:**
+
 - Modify: `apps/worker/src/datex.ts`
 - Modify: `apps/worker/test/datex.test.ts`
 
@@ -836,7 +859,11 @@ Expected: raw payload lacks `promoteToSituation` / `impact`.
 Add in `apps/worker/src/datex.ts`:
 
 ```ts
-function datexImpact(kind: string, severity: string, detail: string): { impact: "high" | "normal"; promoteToSituation: boolean } {
+function datexImpact(
+  kind: string,
+  severity: string,
+  detail: string,
+): { impact: "high" | "normal"; promoteToSituation: boolean } {
   const text = `${kind} ${severity} ${detail}`.toLocaleLowerCase("nb");
   const high =
     /accident|ulykke|closed|closure|stengt|blockage|obstruction|hindring|kø|queue|congestion|srti/.test(
@@ -888,6 +915,7 @@ git commit -m "feat: tag high impact DATEX situations"
 **Objective:** Fetch DATEX snapshots with Basic Auth and conditional requests without exposing credentials to tests or frontend code.
 
 **Files:**
+
 - Modify: `apps/worker/src/datex.ts`
 - Modify: `apps/worker/test/datex.test.ts`
 
@@ -1027,6 +1055,7 @@ git commit -m "feat: fetch DATEX snapshots conditionally"
 **Objective:** Remove duplicate Basic Auth code from `collectors.ts` and ensure health probing uses the same DATEX credentials/header behavior as ingestion.
 
 **Files:**
+
 - Modify: `apps/worker/src/datex.ts`
 - Modify: `apps/worker/src/collectors.ts`
 - Modify: `apps/worker/test/collectors.test.ts`
@@ -1090,17 +1119,17 @@ import { probeDatexAccess } from "./datex.js";
 Then change `probeDatex` internals:
 
 ```ts
-  try {
-    await probeDatexAccess({ endpoint, username, password, fetcher });
-    return {
-      source: "datex",
-      label: "Vegvesen DATEX",
-      state: "ok",
-      detail: "Tilgang konfigurert og testet mot DATEX GetSituation",
-    };
-  } catch (error) {
-    return { source: "datex", label: "Vegvesen DATEX", state: "degraded", detail: String(error) };
-  }
+try {
+  await probeDatexAccess({ endpoint, username, password, fetcher });
+  return {
+    source: "datex",
+    label: "Vegvesen DATEX",
+    state: "ok",
+    detail: "Tilgang konfigurert og testet mot DATEX GetSituation",
+  };
+} catch (error) {
+  return { source: "datex", label: "Vegvesen DATEX", state: "degraded", detail: String(error) };
+}
 ```
 
 **Step 5: Verify GREEN**
@@ -1127,6 +1156,7 @@ git commit -m "refactor: share DATEX auth probe logic"
 **Objective:** Persist `Last-Modified` per collector so the worker can send `If-Modified-Since` across restarts.
 
 **Files:**
+
 - Modify: `apps/server/src/db/schema.sql`
 - Modify: `apps/worker/src/repository.ts`
 - Modify: `apps/worker/test/repository.test.ts`
@@ -1136,25 +1166,22 @@ git commit -m "refactor: share DATEX auth probe logic"
 Append to `apps/worker/test/repository.test.ts`:
 
 ```ts
-  it("loads and stores collector state values", async () => {
-    const query = vi
-      .fn()
-      .mockResolvedValueOnce({ rows: [{ value: "Thu, 28 May 2026 10:00:00 GMT" }] })
-      .mockResolvedValueOnce({ rows: [] });
-    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+it("loads and stores collector state values", async () => {
+  const query = vi
+    .fn()
+    .mockResolvedValueOnce({ rows: [{ value: "Thu, 28 May 2026 10:00:00 GMT" }] })
+    .mockResolvedValueOnce({ rows: [] });
+  const repository = new WorkerRepository({ query } as unknown as pg.Pool);
 
-    await expect(repository.collectorState("datex:lastModified")).resolves.toBe(
-      "Thu, 28 May 2026 10:00:00 GMT",
-    );
-    await repository.setCollectorState("datex:lastModified", "Thu, 28 May 2026 10:10:00 GMT");
+  await expect(repository.collectorState("datex:lastModified")).resolves.toBe(
+    "Thu, 28 May 2026 10:00:00 GMT",
+  );
+  await repository.setCollectorState("datex:lastModified", "Thu, 28 May 2026 10:10:00 GMT");
 
-    expect(query.mock.calls[0]?.[0]).toContain("SELECT value FROM collector_state");
-    expect(query.mock.calls[1]?.[0]).toContain("INSERT INTO collector_state");
-    expect(query.mock.calls[1]?.[1]).toEqual([
-      "datex:lastModified",
-      "Thu, 28 May 2026 10:10:00 GMT",
-    ]);
-  });
+  expect(query.mock.calls[0]?.[0]).toContain("SELECT value FROM collector_state");
+  expect(query.mock.calls[1]?.[0]).toContain("INSERT INTO collector_state");
+  expect(query.mock.calls[1]?.[1]).toEqual(["datex:lastModified", "Thu, 28 May 2026 10:10:00 GMT"]);
+});
 ```
 
 **Step 2: Run RED**
@@ -1228,6 +1255,7 @@ git commit -m "feat: persist collector state"
 **Objective:** Ensure production Postgres accepts `official_events.source='datex'` even when the table already exists with the old check constraint.
 
 **Files:**
+
 - Modify: `apps/server/src/db/schema.sql`
 - Test: `npm run typecheck` plus schema inspection
 
@@ -1295,6 +1323,7 @@ git commit -m "fix: allow DATEX official event rows"
 **Objective:** When a successful DATEX snapshot no longer contains an earlier DATEX event ID, mark that `official_events` row expired instead of leaving stale road closures active forever.
 
 **Files:**
+
 - Modify: `apps/worker/src/repository.ts`
 - Modify: `apps/worker/test/repository.test.ts`
 
@@ -1303,19 +1332,19 @@ git commit -m "fix: allow DATEX official event rows"
 Append to `apps/worker/test/repository.test.ts`:
 
 ```ts
-  it("expires DATEX official events missing from a successful snapshot", async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [] });
-    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+it("expires DATEX official events missing from a successful snapshot", async () => {
+  const query = vi.fn().mockResolvedValue({ rows: [] });
+  const repository = new WorkerRepository({ query } as unknown as pg.Pool);
 
-    await repository.expireMissingOfficialEvents("datex", ["datex-keep-one", "datex-keep-two"]);
+  await repository.expireMissingOfficialEvents("datex", ["datex-keep-one", "datex-keep-two"]);
 
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE official_events"), [
-      "datex",
-      ["datex-keep-one", "datex-keep-two"],
-    ]);
-    expect(query.mock.calls[0]?.[0]).toContain("state='expired'");
-    expect(query.mock.calls[0]?.[0]).toContain("payload=jsonb_set");
-  });
+  expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE official_events"), [
+    "datex",
+    ["datex-keep-one", "datex-keep-two"],
+  ]);
+  expect(query.mock.calls[0]?.[0]).toContain("state='expired'");
+  expect(query.mock.calls[0]?.[0]).toContain("payload=jsonb_set");
+});
 ```
 
 **Step 2: Run RED**
@@ -1371,6 +1400,7 @@ git commit -m "feat: expire missing official snapshot events"
 **Objective:** On each worker poll, collect DATEX situation events, persist them, update health, update Last-Modified, and expire missing DATEX official events only after a successful non-304 snapshot.
 
 **Files:**
+
 - Modify: `apps/worker/src/index.ts`
 - Test: `npm run typecheck`, `npm test -- apps/worker/test/datex.test.ts apps/worker/test/repository.test.ts apps/worker/test/collectors.test.ts`
 
@@ -1385,54 +1415,56 @@ import { collectDatexSituationEvents } from "./datex.js";
 Near `const officialEvents = [];`, add DATEX after MET/NVE collection but before `upsertOfficialEvents`:
 
 ```ts
-  const datexUsername = process.env.DATEX_USERNAME?.trim();
-  const datexPassword = process.env.DATEX_PASSWORD;
-  const datexEndpoint =
-    process.env.DATEX_ENDPOINT?.trim() ||
-    "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
+const datexUsername = process.env.DATEX_USERNAME?.trim();
+const datexPassword = process.env.DATEX_PASSWORD;
+const datexEndpoint =
+  process.env.DATEX_ENDPOINT?.trim() ||
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
 
-  if (datexUsername && datexPassword) {
-    try {
-      const lastModified = await repository.collectorState("datex:lastModified");
-      const result = await collectDatexSituationEvents({
-        endpoint: datexEndpoint,
-        username: datexUsername,
-        password: datexPassword,
-        lastModified,
-      });
-      officialEvents.push(...result.events);
-      if (result.lastModified) await repository.setCollectorState("datex:lastModified", result.lastModified);
-      if (!result.notModified) {
-        await repository.expireMissingOfficialEvents(
-          "datex",
-          result.events.map((event) => event.id),
-        );
-      }
-      await repository.setHealth({
-        source: "datex",
-        label: "Vegvesen DATEX",
-        state: "ok",
-        lastCheckedAt: new Date().toISOString(),
-        nextPollAt,
-        detail: result.notModified
-          ? "Ingen endringer siden forrige DATEX-snapshot"
-          : `${result.events.length} relevante DATEX trafikkhendelser hentet`,
-      });
-    } catch (error) {
-      await repository.setHealth({
-        source: "datex",
-        label: "Vegvesen DATEX",
-        state: "degraded",
-        lastCheckedAt: new Date().toISOString(),
-        lastFailureAt: new Date().toISOString(),
-        nextPollAt,
-        detail: `DATEX-innhenting feilet: ${String(error)}`,
-      });
+if (datexUsername && datexPassword) {
+  try {
+    const lastModified = await repository.collectorState("datex:lastModified");
+    const result = await collectDatexSituationEvents({
+      endpoint: datexEndpoint,
+      username: datexUsername,
+      password: datexPassword,
+      lastModified,
+    });
+    officialEvents.push(...result.events);
+    if (result.lastModified)
+      await repository.setCollectorState("datex:lastModified", result.lastModified);
+    if (!result.notModified) {
+      await repository.expireMissingOfficialEvents(
+        "datex",
+        result.events.map((event) => event.id),
+      );
     }
+    await repository.setHealth({
+      source: "datex",
+      label: "Vegvesen DATEX",
+      state: "ok",
+      lastCheckedAt: new Date().toISOString(),
+      nextPollAt,
+      detail: result.notModified
+        ? "Ingen endringer siden forrige DATEX-snapshot"
+        : `${result.events.length} relevante DATEX trafikkhendelser hentet`,
+    });
+  } catch (error) {
+    await repository.setHealth({
+      source: "datex",
+      label: "Vegvesen DATEX",
+      state: "degraded",
+      lastCheckedAt: new Date().toISOString(),
+      lastFailureAt: new Date().toISOString(),
+      nextPollAt,
+      detail: `DATEX-innhenting feilet: ${String(error)}`,
+    });
   }
+}
 ```
 
 Important:
+
 - Do not remove the earlier `probeOfficialSources()` call yet unless you deliberately replace its DATEX health behavior. The simplest MVP will set DATEX health twice; the later DATEX collection health should win because it runs later. If this feels noisy, patch `probeOfficialSources` later to skip DATEX when ingestion is enabled.
 - Never call `expireMissingOfficialEvents` on `304` or failed DATEX requests.
 
@@ -1475,6 +1507,7 @@ git commit -m "feat: collect DATEX official traffic events"
 **Objective:** Convert active high-impact DATEX official events into normal Nytt `Situation` records with official evidence, timeline entries, and official map features.
 
 **Files:**
+
 - Modify: `apps/worker/src/clusters.ts`
 - Create or modify: `apps/worker/test/clusters.test.ts` if it exists; otherwise create it
 
@@ -1581,7 +1614,11 @@ function rawDatex(event: OfficialEvent): Record<string, unknown> {
 }
 
 function shouldPromoteDatex(event: OfficialEvent): boolean {
-  return event.source === "datex" && event.state !== "cancelled" && rawDatex(event).promoteToSituation === true;
+  return (
+    event.source === "datex" &&
+    event.state !== "cancelled" &&
+    rawDatex(event).promoteToSituation === true
+  );
 }
 
 export function officialTrafficSituationsFromEvents(
@@ -1596,12 +1633,16 @@ export function officialTrafficSituationsFromEvents(
 
   return events.filter(shouldPromoteDatex).map((event) => {
     const existing = openByEventId.get(event.id);
-    const id = existing?.id ?? `datex-${createHash("sha1").update(event.id).digest("hex").slice(0, 12)}`;
+    const id =
+      existing?.id ?? `datex-${createHash("sha1").update(event.id).digest("hex").slice(0, 12)}`;
     const updatedAt = event.publishedAt;
     const feature: MapFeature[] = event.geometry
       ? [
           {
-            id: createHash("sha1").update(`${id}:official-feature:${event.id}`).digest("hex").slice(0, 18),
+            id: createHash("sha1")
+              .update(`${id}:official-feature:${event.id}`)
+              .digest("hex")
+              .slice(0, 18),
             type: "Feature",
             geometry: event.geometry,
             properties: {
@@ -1729,6 +1770,7 @@ git commit -m "feat: promote official DATEX traffic situations"
 **Objective:** Persist DATEX-created traffic situations in the normal situation table after deterministic news-derived situations are built, while keeping DATEX out of the MET/NVE warning-context path.
 
 **Files:**
+
 - Modify: `apps/worker/src/index.ts`
 - Test: `npm run typecheck`, worker targeted tests
 
@@ -1755,17 +1797,17 @@ import {
 First replace the current official-event load in `apps/worker/src/index.ts`:
 
 ```ts
-  const currentWarnings = await repository.currentOfficialEvents();
+const currentWarnings = await repository.currentOfficialEvents();
 ```
 
 with:
 
 ```ts
-  const currentOfficialEvents = await repository.currentOfficialEvents();
-  const currentWarnings = currentOfficialEvents.filter(
-    (event) => event.source === "met" || event.source === "nve",
-  );
-  const currentDatexEvents = currentOfficialEvents.filter((event) => event.source === "datex");
+const currentOfficialEvents = await repository.currentOfficialEvents();
+const currentWarnings = currentOfficialEvents.filter(
+  (event) => event.source === "met" || event.source === "nve",
+);
+const currentDatexEvents = currentOfficialEvents.filter((event) => event.source === "datex");
 ```
 
 Use `currentWarnings` only in `detectPreliminarySituations(...)`. DATEX must not enter `warningEventsForSituation(...)` because that path is MET/NVE danger-warning context and `warningFeature()` currently labels non-NVE geometry as MET.
@@ -1773,21 +1815,21 @@ Use `currentWarnings` only in `detectPreliminarySituations(...)`. DATEX must not
 After `const deterministicSituations = enhanceSituations(...);`, add:
 
 ```ts
-  const trackedSituations = await repository.trackedSituations();
-  const officialTrafficSituations = officialTrafficSituationsFromEvents(
-    currentDatexEvents,
-    trackedSituations,
-  );
-  const resolvedDatexSituations = resolvedOfficialTrafficSituationsForMissingDatex(
-    trackedSituations,
-    new Set(currentDatexEvents.map((event) => event.id)),
-    new Date().toISOString(),
-  );
-  const situationsToPersist = [
-    ...deterministicSituations,
-    ...officialTrafficSituations,
-    ...resolvedDatexSituations,
-  ];
+const trackedSituations = await repository.trackedSituations();
+const officialTrafficSituations = officialTrafficSituationsFromEvents(
+  currentDatexEvents,
+  trackedSituations,
+);
+const resolvedDatexSituations = resolvedOfficialTrafficSituationsForMissingDatex(
+  trackedSituations,
+  new Set(currentDatexEvents.map((event) => event.id)),
+  new Date().toISOString(),
+);
+const situationsToPersist = [
+  ...deterministicSituations,
+  ...officialTrafficSituations,
+  ...resolvedDatexSituations,
+];
 ```
 
 Then replace:
@@ -1805,7 +1847,7 @@ with:
 And update log text:
 
 ```ts
-`[worker] stored ${articles.length} articles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX); AI identified ${analysis.result.clusters.length} validated candidates`
+`[worker] stored ${articles.length} articles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX); AI identified ${analysis.result.clusters.length} validated candidates`;
 ```
 
 **Step 3: Add/verify separation test**
@@ -1846,6 +1888,7 @@ git commit -m "feat: persist official DATEX traffic situations"
 **Objective:** Make existing map UI label DATEX traffic features distinctly without building a new traffic dashboard yet.
 
 **Files:**
+
 - Modify: `apps/frontend/src/components/MapViews.tsx`
 - Test: `npm run typecheck`
 
@@ -1854,9 +1897,9 @@ git commit -m "feat: persist official DATEX traffic situations"
 In `featureStyle`, before the warning branch or after it, add traffic handling:
 
 ```ts
-  if (feature?.properties.layer === "traffic") {
-    return { color: "#1f6feb", weight: 3, fillColor: "#1f6feb", fillOpacity: 0.18 };
-  }
+if (feature?.properties.layer === "traffic") {
+  return { color: "#1f6feb", weight: 3, fillColor: "#1f6feb", fillOpacity: 0.18 };
+}
 ```
 
 In the layer controls, add a traffic label only if needed later. For MVP, always show official traffic features with the normal `Hendelser` layer, but update legend:
@@ -1891,6 +1934,7 @@ git commit -m "feat: distinguish official DATEX map features"
 **Objective:** Document how Nytt now uses DATEX, what remains deferred, and how credentials remain protected.
 
 **Files:**
+
 - Modify: `docs/ARCHITECTURE.md`
 - Modify: `docs/SOURCES.md`
 - Modify: `docs/SECURITY.md`
@@ -1964,6 +2008,7 @@ git commit -m "docs: describe DATEX traffic ingestion"
 **Objective:** Prove the full implementation is internally consistent before pushing.
 
 **Files:**
+
 - No code changes expected unless gates uncover issues.
 
 **Step 1: Run all gates**
@@ -1978,6 +2023,7 @@ source ~/.nvm/nvm.sh && nvm use 22 && npm run format:check
 ```
 
 Expected:
+
 - Typecheck passes.
 - Vitest passes.
 - ESLint passes.
@@ -1994,6 +2040,7 @@ git diff --stat HEAD~17..HEAD
 ```
 
 Expected:
+
 - Working tree clean.
 - Recent commits match tasks.
 - Diff touches only planned files.
@@ -2012,6 +2059,7 @@ git commit -m "fix: stabilize DATEX ingestion gates"
 **Objective:** Ship DATEX ingestion safely and prove it works live before claiming success.
 
 **Files:**
+
 - No source changes expected.
 
 **Step 1: Push**
@@ -2059,7 +2107,7 @@ curl -s https://nytt.reidar.tech/health
 Expected:
 
 ```json
-{"status":"ok","storage":"postgres"}
+{ "status": "ok", "storage": "postgres" }
 ```
 
 **Step 5: Verify DATEX production state**
@@ -2073,6 +2121,7 @@ ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file
 ```
 
 Expected:
+
 - `source_health.datex` is `ok` or `ok` with `Ingen endringer...` detail.
 - `official_events` contains DATEX rows if current relevant events exist; zero rows is acceptable only if source health says zero relevant DATEX traffic events were fetched.
 - `situations` contains DATEX rows only for high-impact/promotable events.
@@ -2080,6 +2129,7 @@ Expected:
 **Step 6: Final user report**
 
 Report only after all checks complete. Include:
+
 - CI run status/conclusion.
 - Deploy run status/conclusion.
 - Live health result.
