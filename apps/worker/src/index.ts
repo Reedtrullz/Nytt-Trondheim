@@ -9,6 +9,11 @@ import {
 } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
 import {
+  collectDatexTravelTimePulse,
+  defaultDatexTravelTimeDataEndpoint,
+  defaultDatexTravelTimeLocationsEndpoint,
+} from "./datexTravelTime.js";
+import {
   detectPreliminarySituations,
   officialTrafficSituationsFromEvents,
   resolvedOfficialTrafficSituationsForMissingDatex,
@@ -116,6 +121,11 @@ async function collectAll(): Promise<void> {
   const datexUsername = process.env.DATEX_USERNAME?.trim();
   const datexPassword = process.env.DATEX_PASSWORD;
   const datexEndpoint = process.env.DATEX_ENDPOINT?.trim() || defaultDatexSituationEndpoint;
+  const datexTravelTimeLocationsEndpoint =
+    process.env.DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT?.trim() ||
+    defaultDatexTravelTimeLocationsEndpoint;
+  const datexTravelTimeDataEndpoint =
+    process.env.DATEX_TRAVEL_TIME_DATA_ENDPOINT?.trim() || defaultDatexTravelTimeDataEndpoint;
 
   if (datexUsername && datexPassword) {
     try {
@@ -156,6 +166,46 @@ async function collectAll(): Promise<void> {
         detail: `DATEX-innhenting feilet: ${String(error)}`,
       });
     }
+
+    try {
+      const result = await collectDatexTravelTimePulse({
+        locationsEndpoint: datexTravelTimeLocationsEndpoint,
+        dataEndpoint: datexTravelTimeDataEndpoint,
+        username: datexUsername,
+        password: datexPassword,
+      });
+      await repository.upsertDatexTravelTimes(result.corridors);
+      await repository.markMissingDatexTravelTimesStale(
+        result.corridors.map((corridor) => corridor.id),
+      );
+      await repository.setHealth({
+        source: "datex_travel_time",
+        label: "Vegvesen reisetid",
+        state: "ok",
+        lastCheckedAt: new Date().toISOString(),
+        nextPollAt,
+        detail: `${result.corridors.length} DATEX reisetidskorridorer oppdatert`,
+      });
+    } catch (error) {
+      await repository.setHealth({
+        source: "datex_travel_time",
+        label: "Vegvesen reisetid",
+        state: "degraded",
+        lastCheckedAt: new Date().toISOString(),
+        lastFailureAt: new Date().toISOString(),
+        nextPollAt,
+        detail: `DATEX reisetidsinnhenting feilet: ${String(error)}`,
+      });
+    }
+  } else {
+    await repository.setHealth({
+      source: "datex_travel_time",
+      label: "Vegvesen reisetid",
+      state: "awaiting_access",
+      lastCheckedAt: new Date().toISOString(),
+      nextPollAt,
+      detail: "DATEX Basic Auth mangler for reisetidsdata",
+    });
   }
   await repository.upsertOfficialEvents(officialEvents);
   const recentArticles = await repository.recentArticles(12);

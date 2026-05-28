@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { OperationsStatus, SourceHealth, TrafficPulseCorridor } from "@nytt/shared";
 import {
   collectDatexTravelTimePulse,
+  defaultDatexTravelTimeDataEndpoint,
+  defaultDatexTravelTimeLocationsEndpoint,
   parseDatexTravelTimeData,
   parseDatexTravelTimeLocations,
   trafficPulseFromDatexTravelTime,
@@ -127,6 +129,15 @@ describe("DATEX travel time shared types", () => {
 });
 
 describe("DATEX travel time collection", () => {
+  it("uses the planned Vegvesen TravelTime snapshot endpoints by default", () => {
+    expect(defaultDatexTravelTimeLocationsEndpoint).toBe(
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata",
+    );
+    expect(defaultDatexTravelTimeDataEndpoint).toBe(
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata",
+    );
+  });
+
   it("fetches both snapshots with Basic Auth and no conditional headers", async () => {
     const [locationsXml, dataXml] = await Promise.all([
       readFile(locationsFixturePath, "utf8"),
