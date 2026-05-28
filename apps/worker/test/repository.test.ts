@@ -22,10 +22,22 @@ describe("WorkerRepository", () => {
 
     await repository.upsertArticles([article]);
 
-    expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.calls[0]?.[0]).toContain("payload ? 'situationId'");
     expect(query.mock.calls[0]?.[0]).toContain("NOT EXISTS");
     expect(query.mock.calls[0]?.[1]?.[7]).toBe(article);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO source_items"),
+      expect.any(Array),
+    );
+    const sourceItemCall = query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO source_items"),
+    );
+    expect(sourceItemCall).toBeTruthy();
+    expect(String(sourceItemCall?.[0])).toContain("ON CONFLICT (provider, kind, external_id)");
+    expect(String(sourceItemCall?.[0])).toContain("WHERE external_id IS NOT NULL");
+    expect(sourceItemCall?.[1]).toEqual(
+      expect.arrayContaining([article.source, "article", article.id, article.url, article.title]),
+    );
   });
 
   it("serializes AI processing arrays and results for jsonb columns", async () => {

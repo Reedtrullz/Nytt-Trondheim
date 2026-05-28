@@ -14,6 +14,7 @@ export class WorkerRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   async upsertArticles(articles: Article[]): Promise<void> {
+    const fetchedAt = new Date().toISOString();
     for (const article of articles) {
       const values = [
         article.id,
@@ -39,14 +40,59 @@ export class WorkerRepository {
          )`,
         values,
       );
-      if ((updated.rowCount ?? 0) > 0) continue;
-      await this.pool.query(
-        `INSERT INTO articles (id, canonical_url, dedupe_key, source, published_at, scope, category, payload)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT DO NOTHING`,
-        values,
-      );
+      if ((updated.rowCount ?? 0) === 0) {
+        await this.pool.query(
+          `INSERT INTO articles (id, canonical_url, dedupe_key, source, published_at, scope, category, payload)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT DO NOTHING`,
+          values,
+        );
+      }
+      await this.upsertSourceItem(articleSourceItemInput(article, fetchedAt));
     }
+  }
+
+  private async upsertSourceItem(item: SourceItemInput): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO source_items
+        (id, provider, kind, external_id, original_url, title, summary, author, published_at,
+         fetched_at, raw_payload, normalized_payload, capture_hash, geo_hint, reliability_tier)
+       VALUES
+        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+         CASE WHEN $14::text IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($14),4326) END,
+         $15)
+       ON CONFLICT (provider, kind, external_id) WHERE external_id IS NOT NULL
+       DO UPDATE SET
+         original_url=EXCLUDED.original_url,
+         title=EXCLUDED.title,
+         summary=EXCLUDED.summary,
+         author=EXCLUDED.author,
+         published_at=EXCLUDED.published_at,
+         fetched_at=EXCLUDED.fetched_at,
+         raw_payload=EXCLUDED.raw_payload,
+         normalized_payload=EXCLUDED.normalized_payload,
+         capture_hash=EXCLUDED.capture_hash,
+         geo_hint=EXCLUDED.geo_hint,
+         reliability_tier=EXCLUDED.reliability_tier,
+         updated_at=now()`,
+      [
+        item.id,
+        item.provider,
+        item.kind,
+        item.externalId ?? null,
+        item.originalUrl ?? null,
+        item.title ?? null,
+        item.summary ?? null,
+        item.author ?? null,
+        item.publishedAt ?? null,
+        item.fetchedAt,
+        item.rawPayload,
+        item.normalizedPayload,
+        item.captureHash,
+        item.geoHint ? JSON.stringify(item.geoHint) : null,
+        item.reliabilityTier,
+      ],
+    );
   }
 
   async setHealth(health: SourceHealth): Promise<void> {
