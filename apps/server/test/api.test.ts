@@ -3,10 +3,11 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
+import { PgStore } from "../src/store.js";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
@@ -111,6 +112,7 @@ describe("private situation API", () => {
       .expect(200)
       .expect((response) => {
         expect(response.body.articleCount).toBeGreaterThan(0);
+        expect(response.body.trafficPulse).toEqual([]);
       });
     await agent
       .get("/api/bootstrap")
@@ -151,6 +153,100 @@ describe("private situation API", () => {
       .expect(201);
     expect(response.body.filename).toBe("notat.txt");
     expect(response.body.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+  });
+
+  it("includes DATEX traffic pulse rows in PgStore operations status with stale overlay", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-28T12:00:00.000Z"));
+
+    const queries: string[] = [];
+    const fakePool = {
+      async query(sql: string) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        queries.push(normalizedSql);
+
+        if (normalizedSql.includes("FROM source_health")) return { rows: [] };
+        if (normalizedSql.includes("FROM articles")) return { rows: [{ count: "7" }] };
+        if (normalizedSql.includes("FROM situations GROUP BY status")) {
+          return { rows: [{ status: "active", count: "2" }] };
+        }
+        if (normalizedSql.includes("FROM ai_processing_runs")) return { rows: [] };
+        if (normalizedSql.includes("FROM datex_travel_times")) {
+          expect(normalizedSql).toContain(
+            "FROM datex_travel_times ORDER BY delay_seconds DESC NULLS LAST, name ASC LIMIT 30",
+          );
+          return {
+            rows: [
+              {
+                measurementTo: "not-a-date",
+                payload: {
+                  id: "e6-omkjoring",
+                  name: "E6 Omkjøring",
+                  state: "slow",
+                  travelTimeSeconds: 900,
+                  freeFlowSeconds: 780,
+                  delaySeconds: 120,
+                  measurementTo: "2026-05-28T11:30:00.000Z",
+                  updatedAt: "2026-05-28T11:59:00.000Z",
+                  sourceUrl: "https://example.test/datex",
+                },
+              },
+              {
+                measurementTo: "2026-05-28T11:35:00.000Z",
+                payload: {
+                  id: "e6-sluppen",
+                  name: "E6 Sluppen",
+                  state: "congested",
+                  travelTimeSeconds: 700,
+                  freeFlowSeconds: 600,
+                  delaySeconds: 100,
+                  measurementTo: "2026-05-28T11:59:00.000Z",
+                  updatedAt: "2026-05-28T11:59:00.000Z",
+                  sourceUrl: "https://example.test/datex",
+                },
+              },
+              {
+                measurementTo: "2026-05-28T11:58:00.000Z",
+                payload: {
+                  id: "rv706-stavne",
+                  name: "Rv706 Stavne",
+                  state: "free_flow",
+                  travelTimeSeconds: 300,
+                  freeFlowSeconds: 300,
+                  delaySeconds: 0,
+                  measurementTo: "2026-05-28T11:58:00.000Z",
+                  updatedAt: "2026-05-28T11:58:00.000Z",
+                  sourceUrl: "https://example.test/datex",
+                },
+              },
+            ],
+          };
+        }
+
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+
+    try {
+      const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+      const status = await store.getOperationsStatus();
+
+      expect(status.articleCount).toBe(7);
+      expect(status.situationCounts.active).toBe(2);
+      expect(status.trafficPulse?.map((corridor) => corridor.name)).toEqual([
+        "E6 Omkjøring",
+        "E6 Sluppen",
+        "Rv706 Stavne",
+      ]);
+      expect(status.trafficPulse?.map((corridor) => corridor.state)).toEqual([
+        "stale",
+        "stale",
+        "free_flow",
+      ]);
+      expect(queries.some((sql) => sql.includes("FROM datex_travel_times"))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sanitizes private filenames before they enter downloads and export paths", () => {

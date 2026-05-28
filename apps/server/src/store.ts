@@ -12,6 +12,7 @@ import type {
   SituationWorkspace,
   SourceHealth,
   TimelineEntry,
+  TrafficPulseCorridor,
   WorkspaceNote,
   WorkspaceTask,
 } from "@nytt/shared";
@@ -135,6 +136,26 @@ function beforeCursor(
     timestamp < cursor.timestamp ||
     (timestamp === cursor.timestamp && Boolean(cursor.id && id < cursor.id))
   );
+}
+
+const TRAFFIC_PULSE_STALE_AFTER_MS = 20 * 60 * 1000;
+
+function isOlderThan(value: Date | string | null | undefined, cutoffMs: number): boolean {
+  if (!value) return false;
+  const timestampMs = value instanceof Date ? value.getTime() : Date.parse(value);
+  return Number.isFinite(timestampMs) && timestampMs < cutoffMs;
+}
+
+function withTrafficPulseStaleOverlay(
+  corridor: TrafficPulseCorridor,
+  measurementTo: Date | string | null | undefined,
+  nowMs: number,
+): TrafficPulseCorridor {
+  const cutoffMs = nowMs - TRAFFIC_PULSE_STALE_AFTER_MS;
+  if (isOlderThan(measurementTo, cutoffMs) || isOlderThan(corridor.measurementTo, cutoffMs)) {
+    return { ...corridor, state: "stale" };
+  }
+  return corridor;
 }
 
 export class MemoryStore implements Store {
@@ -394,6 +415,7 @@ export class MemoryStore implements Store {
         resolved: 0,
         dismissed: 0,
       },
+      trafficPulse: [],
     };
   }
 }
@@ -872,23 +894,33 @@ export class PgStore implements Store {
   }
 
   async getOperationsStatus(): Promise<OperationsStatus> {
-    const [sources, articleCount, situationCounts, latestAiRun] = await Promise.all([
-      this.listSourceHealth(),
-      this.pool.query<{ count: string }>("SELECT count(*)::text AS count FROM articles"),
-      this.pool.query<{ status: Situation["status"]; count: string }>(
-        "SELECT status, count(*)::text AS count FROM situations GROUP BY status",
-      ),
-      this.pool.query<{
-        provider: "deepseek" | "deterministic";
-        model: string;
-        status: "ok" | "degraded" | "disabled";
-        completedAt: string;
-        error?: string;
-      }>(
-        `SELECT provider, model, status, completed_at AS "completedAt", error
+    const [sources, articleCount, situationCounts, latestAiRun, trafficPulseRows] =
+      await Promise.all([
+        this.listSourceHealth(),
+        this.pool.query<{ count: string }>("SELECT count(*)::text AS count FROM articles"),
+        this.pool.query<{ status: Situation["status"]; count: string }>(
+          "SELECT status, count(*)::text AS count FROM situations GROUP BY status",
+        ),
+        this.pool.query<{
+          provider: "deepseek" | "deterministic";
+          model: string;
+          status: "ok" | "degraded" | "disabled";
+          completedAt: string;
+          error?: string;
+        }>(
+          `SELECT provider, model, status, completed_at AS "completedAt", error
          FROM ai_processing_runs ORDER BY completed_at DESC LIMIT 1`,
-      ),
-    ]);
+        ),
+        this.pool.query<{
+          payload: TrafficPulseCorridor;
+          measurementTo?: Date | string | null;
+        }>(
+          `SELECT payload, measurement_to AS "measurementTo"
+         FROM datex_travel_times
+         ORDER BY delay_seconds DESC NULLS LAST, name ASC
+         LIMIT 30`,
+        ),
+      ]);
     const counts: OperationsStatus["situationCounts"] = {
       preliminary: 0,
       active: 0,
@@ -896,11 +928,16 @@ export class PgStore implements Store {
       dismissed: 0,
     };
     for (const row of situationCounts.rows) counts[row.status] = Number(row.count);
+    const responseTimeMs = Date.now();
+    const trafficPulse = trafficPulseRows.rows.map((row) =>
+      withTrafficPulseStaleOverlay(row.payload, row.measurementTo, responseTimeMs),
+    );
     return {
       sources,
       articleCount: Number(articleCount.rows[0]?.count ?? 0),
       situationCounts: counts,
       latestAiRun: latestAiRun.rows[0],
+      trafficPulse,
       latestCollectionAt: sources
         .map((source) => source.lastCheckedAt)
         .filter((value): value is string => Boolean(value))
