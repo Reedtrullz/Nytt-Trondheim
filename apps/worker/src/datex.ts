@@ -9,6 +9,17 @@ type DatexObject = Record<string, unknown>;
 export const defaultDatexSituationEndpoint =
   "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=True";
 
+export function normalizeDatexSituationEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  try {
+    const url = new URL(trimmed);
+    url.searchParams.set("srti", "True");
+    return url.toString();
+  } catch {
+    throw new Error("DATEX_ENDPOINT must be an absolute URL");
+  }
+}
+
 function isObject(value: unknown): value is DatexObject {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

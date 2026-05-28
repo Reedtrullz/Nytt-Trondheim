@@ -88,22 +88,32 @@ describe("WorkerRepository", () => {
   });
 
   it("expires DATEX official events missing from a successful snapshot", async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [] });
-    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const query = vi.fn().mockResolvedValue({ rows: [{ id: "datex-expired" }] });
+    const repository = new WorkerRepository(transactionalPool(query));
 
     await repository.expireMissingOfficialEvents("datex", ["datex-keep-one", "datex-keep-two"]);
 
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE official_events"), [
-      "datex",
-      ["datex-keep-one", "datex-keep-two"],
-    ]);
-    expect(query.mock.calls[0]?.[0]).toContain("state='expired'");
-    expect(query.mock.calls[0]?.[0]).toContain("payload=jsonb_set");
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+    expect(sqlCalls[0]).toBe("BEGIN");
+    expect(sqlCalls.at(-1)).toBe("COMMIT");
+    const officialUpdate = query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE official_events"),
+    );
+    expect(officialUpdate?.[1]).toEqual(["datex", ["datex-keep-one", "datex-keep-two"]]);
+    expect(String(officialUpdate?.[0])).toContain("state='expired'");
+    expect(String(officialUpdate?.[0])).toContain("payload=jsonb_set");
+    expect(String(officialUpdate?.[0])).toContain("RETURNING id");
+    const sourceItemUpdate = query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE source_items"),
+    );
+    expect(sourceItemUpdate?.[1]).toEqual(["datex", ["datex-expired"], "expired"]);
+    expect(String(sourceItemUpdate?.[0])).toContain("normalized_payload=jsonb_set");
+    expect(String(sourceItemUpdate?.[0])).toContain("raw_payload=CASE");
   });
 
   it("mirrors official events into source item rows", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
-    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const repository = new WorkerRepository(transactionalPool(query));
     const event = {
       id: "datex-event-one",
       source: "datex",
@@ -121,6 +131,14 @@ describe("WorkerRepository", () => {
 
     await repository.upsertOfficialEvents([event]);
 
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+    expect(sqlCalls[0]).toBe("BEGIN");
+    expect(sqlCalls.at(-1)).toBe("COMMIT");
+    expect(
+      sqlCalls.indexOf(sqlCalls.find((sql) => sql.includes("INSERT INTO official_events"))!),
+    ).toBeLessThan(
+      sqlCalls.indexOf(sqlCalls.find((sql) => sql.includes("INSERT INTO source_items"))!),
+    );
     const sourceItemCall = query.mock.calls.find(([sql]) =>
       String(sql).includes("INSERT INTO source_items"),
     );
@@ -137,11 +155,8 @@ describe("WorkerRepository", () => {
   });
 
   it("links source items for situation article and official event relationships", async () => {
-    const query = vi
-      .fn()
-      .mockResolvedValueOnce({ rows: [] }) // previous situation
-      .mockResolvedValue({ rows: [] });
-    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository(transactionalPool(query));
     const situation: Situation = {
       id: "traffic-datex-one",
       type: "traffic",
@@ -169,6 +184,9 @@ describe("WorkerRepository", () => {
 
     await repository.upsertSituation(situation);
 
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+    expect(sqlCalls[0]).toBe("BEGIN");
+    expect(sqlCalls.at(-1)).toBe("COMMIT");
     const linkCalls = query.mock.calls.filter(([sql]) =>
       String(sql).includes("INSERT INTO situation_source_items"),
     );
@@ -181,7 +199,7 @@ describe("WorkerRepository", () => {
 
   it("cancels replaced official events before mirroring the source item", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
-    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const repository = new WorkerRepository(transactionalPool(query));
     const event: OfficialEvent = {
       id: "datex-event-new",
       source: "datex",
@@ -202,13 +220,19 @@ describe("WorkerRepository", () => {
 
     const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
 
-    expect(sqlCalls).toHaveLength(3);
-    expect(sqlCalls[0]).toContain("INSERT INTO official_events");
-    expect(sqlCalls[1]).toContain("UPDATE official_events");
-    expect(sqlCalls[1]).toContain("state='cancelled'");
-    expect(sqlCalls[2]).toContain("INSERT INTO source_items");
-    expect(query.mock.calls[1]?.[1]).toEqual([["old-event"]]);
-    expect(query.mock.calls[2]?.[1]).toEqual(
+    expect(sqlCalls).toHaveLength(6);
+    expect(sqlCalls[0]).toBe("BEGIN");
+    expect(sqlCalls[1]).toContain("INSERT INTO official_events");
+    expect(sqlCalls[2]).toContain("UPDATE official_events");
+    expect(sqlCalls[2]).toContain("state='cancelled'");
+    expect(sqlCalls[3]).toContain("UPDATE source_items");
+    expect(sqlCalls[3]).toContain("normalized_payload=jsonb_set");
+    expect(sqlCalls[3]).toContain("raw_payload=CASE");
+    expect(sqlCalls[4]).toContain("INSERT INTO source_items");
+    expect(sqlCalls[5]).toBe("COMMIT");
+    expect(query.mock.calls[2]?.[1]).toEqual([["old-event"]]);
+    expect(query.mock.calls[3]?.[1]).toEqual(["datex", ["old-event"], "cancelled"]);
+    expect(query.mock.calls[4]?.[1]).toEqual(
       expect.arrayContaining([
         "datex",
         "official_event",
@@ -377,6 +401,11 @@ describe("WorkerRepository", () => {
     expect(payloadOldColumnFresh.state).toBe("slow");
   });
 });
+
+function transactionalPool(query: ReturnType<typeof vi.fn>): pg.Pool {
+  const client = { query, release: vi.fn() };
+  return { connect: vi.fn().mockResolvedValue(client) } as unknown as pg.Pool;
+}
 
 function travelTimeCorridor(
   overrides: Partial<TrafficPulseCorridor> & Pick<TrafficPulseCorridor, "id" | "name">,

@@ -155,10 +155,19 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function sourceItemHash(parts: unknown[]): string {
+  return sha256(JSON.stringify(parts));
+}
+
+function sourceItemId(provider: string, kind: string, stableKey: string): string {
+  return `source:${sourceItemHash([provider, kind, stableKey])}`;
+}
+
 function memorySourceItemFromArticle(article: Article): SourceItem {
   const normalizedPayload = {
     id: article.id,
     source: article.source,
+    sourceLabel: article.sourceLabel,
     title: article.title,
     excerpt: article.excerpt,
     url: article.url,
@@ -168,13 +177,12 @@ function memorySourceItemFromArticle(article: Article): SourceItem {
     places: article.places,
     location: article.location,
   };
-  const stableKey = article.id || article.url;
   const geoHint: SourceItem["geoHint"] = article.location
     ? { type: "Point", coordinates: [article.location.lng, article.location.lat] }
     : undefined;
 
   return {
-    id: `source:${sha256(`${article.source}:article:${stableKey}`)}`,
+    id: sourceItemId(article.source, "article", article.id),
     provider: article.source,
     kind: "article",
     externalId: article.id,
@@ -183,18 +191,16 @@ function memorySourceItemFromArticle(article: Article): SourceItem {
     summary: article.excerpt,
     publishedAt: article.publishedAt,
     fetchedAt: article.publishedAt,
-    captureHash: sha256(
-      JSON.stringify({
-        provider: article.source,
-        kind: "article",
-        externalId: article.id,
-        originalUrl: article.url,
-        publishedAt: article.publishedAt,
-        normalizedPayload,
-      }),
-    ),
+    captureHash: sourceItemHash([
+      article.source,
+      "article",
+      article.id,
+      article.url,
+      article.publishedAt,
+      normalizedPayload,
+    ]),
     geoHint,
-    reliabilityTier: "trusted_media",
+    reliabilityTier: article.source === "trondheim_kommune" ? "official" : "trusted_media",
     linkedSituationIds: [],
   };
 }
@@ -288,7 +294,27 @@ export class MemoryStore implements Store {
       linkedBy: string;
       linkedAt: string;
     }
-  >();
+  >(
+    sampleArticles.flatMap((article) => {
+      const linkedSituationId =
+        article.situationId ??
+        (sampleSituation.relatedArticleIds.includes(article.id) ? sampleSituation.id : undefined);
+      if (!linkedSituationId) return [];
+      const sourceId = sourceItemId(article.source, "article", article.id);
+      return [
+        [
+          `${linkedSituationId}:${sourceId}`,
+          {
+            situationId: linkedSituationId,
+            sourceItemId: sourceId,
+            relationship: "supports" as SourceItemRelationship,
+            linkedBy: "sample-data",
+            linkedAt: article.publishedAt,
+          },
+        ],
+      ];
+    }),
+  );
 
   private linkedSituationIdsForSourceItem(sourceItemId: string): string[] {
     return [...this.sourceLinks.values()]

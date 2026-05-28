@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { sampleArticles, sampleSituation } from "@nytt/shared";
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryStore, PgStore } from "../src/store.js";
@@ -26,6 +28,11 @@ const pgSourceItemRow = sourceItemRow;
 const decodeCursor = (cursor: string) =>
   JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as [string, string];
 
+const workerSourceItemId = (provider: string, kind: string, stableKey: string) =>
+  `source:${createHash("sha256")
+    .update(JSON.stringify([provider, kind, stableKey]))
+    .digest("hex")}`;
+
 describe("source item store", () => {
   it("lists seeded MemoryStore source items with unlinked filtering", async () => {
     const store = new MemoryStore();
@@ -34,7 +41,31 @@ describe("source item store", () => {
 
     expect(page.items.length).toBeGreaterThan(0);
     expect(page.items[0]).toMatchObject({ kind: "article", reliabilityTier: expect.any(String) });
-    expect(page.items[0]?.linkedSituationIds).toEqual([]);
+    expect(page.items.every((item) => item.linkedSituationIds.length === 0)).toBe(true);
+    expect(page.items.map((item) => item.externalId)).not.toContain("a-fire");
+  });
+
+  it("uses worker-compatible JSON-array source item IDs in MemoryStore", async () => {
+    const store = new MemoryStore();
+    const article = sampleArticles.find((item) => item.id === "a-fire");
+    expect(article).toBeDefined();
+
+    const page = await store.listSourceItems({ limit: 20 });
+
+    expect(page.items.find((item) => item.externalId === "a-fire")?.id).toBe(
+      workerSourceItemId(article!.source, "article", article!.id),
+    );
+  });
+
+  it("prelinks sample situation source items in MemoryStore", async () => {
+    const store = new MemoryStore();
+
+    const items = await store.listSituationSourceItems(sampleSituation.id, "Reedtrullz");
+
+    expect(items.map((item) => item.externalId)).toContain("a-fire");
+    expect(items.find((item) => item.externalId === "a-fire")?.linkedSituationIds).toContain(
+      sampleSituation.id,
+    );
   });
 
   it("queries PgStore source items by fetched_at desc cursor order", async () => {

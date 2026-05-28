@@ -33,10 +33,14 @@ describe("official warning collection", () => {
     expect(events[0]?.replacesIds).toEqual([officialId("met", "cap-original")]);
 
     const alreadyStored = await collectMetWarnings(
-      async () => new Response(rss, { status: 200 }),
+      async (url) =>
+        String(url).includes("current.rss")
+          ? new Response(rss, { status: 200 })
+          : new Response(cap, { status: 200 }),
       new Set([officialId("met", "cap-1")]),
     );
-    expect(alreadyStored).toEqual([]);
+    expect(alreadyStored[0]?.id).toBe(officialId("met", "cap-1"));
+    expect(alreadyStored[0]?.state).toBe("cancelled");
   });
 
   it("stores only raised NVE municipality warning levels as textual official context", async () => {

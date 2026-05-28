@@ -6,9 +6,9 @@ The repository follows the RFMC release pattern:
 2. When repository variable `NYTT_DEPLOY_ENABLED=true` is configured, a successful `CI` workflow on `main` triggers `Deploy to VPS`; manual dispatch remains available for an intentional first release.
 3. For a new or repaired origin, the manual `Provision Origin` workflow connects with the existing VPS key, installs the dedicated Actions key and repository-scoped read-only checkout key, and provisions the Caddy hostname.
 4. GitHub Actions connects to the VPS as `deploy` and runs `ansible-playbook.yml`; the VPS uses its own repository-scoped read-only deploy key at `~/.ssh/nytt_github_deploy` to clone this private repository.
-5. Ansible installs/configures restic first, verifies an encrypted pre-migration backup, builds Docker images, applies migrations, health-checks a canary API container, promotes API/worker, validates and reloads Caddy, then verifies `https://nytt.reidar.tech/health`.
+5. Ansible checks out the exact CI-verified commit, installs/configures backup tooling, pulls/builds fresh Docker images, stops the current API/worker before backup and migration, verifies an encrypted pre-migration backup, applies locked transactional migrations, health-checks a canary API container, promotes API/worker, validates and reloads Caddy, then runs production health, worker, source-health and source-item sanity checks.
 
-The deploy workflow and playbook fail before changing application state if any required SSH, application, GitHub authentication, AI or backup secret is absent. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
+The deploy workflow and playbook fail before changing application state if any required SSH, application, GitHub authentication, AI, DATEX or backup secret is absent. Automatic deploys set `NYTT_DEPLOY_REF` from the successful CI workflow run SHA so the VPS checkout matches the commit CI verified; manual dispatch falls back to the dispatch SHA. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
 
 ## Production Services
 
@@ -25,7 +25,7 @@ The playbook also normalizes persisted upload-volume ownership for the non-root 
 
 ## Backups
 
-Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.timer`. Database dumps and uploaded files are encrypted offsite with restic using its `rclone` backend to a dedicated Google Drive folder. Deploy-time safety backups are created and restore-verified without running retention pruning; the scheduled nightly backup applies the retention policy and prune step. The backup environment runs rclone with conservative Google Drive request pacing, single-transfer concurrency and expanded retries to reduce release-time quota bursts. Configure `NYTT_RESTIC_REPOSITORY`, `NYTT_RESTIC_PASSWORD` and the restricted Google Drive `NYTT_RCLONE_CONFIG` in GitHub deployment secrets before first production deployment.
+Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.timer`. Database dumps and uploaded files are encrypted offsite with restic using its `rclone` backend to a dedicated Google Drive folder. Deploy-time safety backups are created and restore-verified without running retention pruning; the scheduled nightly backup applies the retention policy and prune step. Restore verification now restores both `nytt.dump` and `uploads.tar.gz` to a temporary directory, runs `pg_restore --list` against the database dump and runs `tar -tzf` against the uploads archive before reporting success. The backup environment runs rclone with conservative Google Drive request pacing, single-transfer concurrency and expanded retries to reduce release-time quota bursts. Configure `NYTT_RESTIC_REPOSITORY`, `NYTT_RESTIC_PASSWORD` and the restricted Google Drive `NYTT_RCLONE_CONFIG` in GitHub deployment secrets before first production deployment.
 
 If Google Drive still reports `rateLimitExceeded` while backups recover after retries, the remaining cause is usually the shared default rclone Google API project rather than Nytt Trondheim traffic volume. Create a dedicated Google Cloud OAuth client for this backup remote, reauthorize the rclone Drive config with its `client_id` and `client_secret`, then update the `NYTT_RCLONE_CONFIG` GitHub secret.
 
@@ -43,7 +43,7 @@ If Google Drive still reports `rateLimitExceeded` while backups recover after re
 
 ## DATEX Verification
 
-After deploying DATEX ingestion, verify live health, source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
+The deployment playbook now automatically verifies live health, worker container status, DATEX/datex_travel_time `source_health` row presence when DATEX credentials are enabled, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
 
 ```bash
 curl -fsS https://nytt.reidar.tech/health

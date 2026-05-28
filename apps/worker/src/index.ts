@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import type { OfficialEvent } from "@nytt/shared";
 import {
@@ -18,22 +20,51 @@ import {
   officialTrafficSituationsFromEvents,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "./clusters.js";
-import { collectDatexSituationEvents, defaultDatexSituationEndpoint } from "./datex.js";
+import {
+  collectDatexSituationEvents,
+  defaultDatexSituationEndpoint,
+  normalizeDatexSituationEndpoint,
+} from "./datex.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL is required for the collection worker.");
-
-const pool = new pg.Pool({ connectionString: databaseUrl });
-const repository = new WorkerRepository(pool);
-const analyzer = createAnalyzer();
-const once = process.argv.includes("--once");
 const municipalityIntervalMs = 60 * 60 * 1000;
 let lastMunicipalityCollection = 0;
 
-async function collectAll(): Promise<void> {
+export { normalizeDatexSituationEndpoint };
+
+interface CollectionContext {
+  repository: WorkerRepository;
+  analyzer: ReturnType<typeof createAnalyzer>;
+  once: boolean;
+}
+
+export function shouldResolveMissingDatexSituations(freshSnapshot: boolean): boolean {
+  return freshSnapshot;
+}
+
+export function createCollectionGuard(
+  collect: () => Promise<void>,
+  onSkip: () => void = () =>
+    console.warn("[worker] skipping collection tick; previous cycle still running"),
+): () => Promise<void> {
+  let collectionRunning = false;
+  return async () => {
+    if (collectionRunning) {
+      onSkip();
+      return;
+    }
+    collectionRunning = true;
+    try {
+      await collect();
+    } finally {
+      collectionRunning = false;
+    }
+  };
+}
+
+async function collectAll({ repository, analyzer, once }: CollectionContext): Promise<void> {
   console.log(`[worker] collection started ${new Date().toISOString()}`);
   const nextPollAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const articleSets = await Promise.all(
@@ -99,9 +130,8 @@ async function collectAll(): Promise<void> {
     );
   }
   const officialEvents: OfficialEvent[] = [];
-  const knownMetEventIds = await repository.knownOfficialEventIds("met");
   for (const [source, collector] of [
-    ["met", () => collectMetWarnings(fetch, knownMetEventIds)],
+    ["met", () => collectMetWarnings(fetch)],
     ["nve", collectNveWarnings],
   ] as const) {
     try {
@@ -120,15 +150,19 @@ async function collectAll(): Promise<void> {
   }
   const datexUsername = process.env.DATEX_USERNAME?.trim();
   const datexPassword = process.env.DATEX_PASSWORD;
-  const datexEndpoint = process.env.DATEX_ENDPOINT?.trim() || defaultDatexSituationEndpoint;
   const datexTravelTimeLocationsEndpoint =
     process.env.DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT?.trim() ||
     defaultDatexTravelTimeLocationsEndpoint;
   const datexTravelTimeDataEndpoint =
     process.env.DATEX_TRAVEL_TIME_DATA_ENDPOINT?.trim() || defaultDatexTravelTimeDataEndpoint;
+  let freshDatexSnapshotEventIds: string[] | undefined;
+  let pendingDatexLastModified: string | undefined;
 
   if (datexUsername && datexPassword) {
     try {
+      const datexEndpoint = normalizeDatexSituationEndpoint(
+        process.env.DATEX_ENDPOINT?.trim() || defaultDatexSituationEndpoint,
+      );
       const lastModified = await repository.collectorState("datex:lastModified");
       const result = await collectDatexSituationEvents({
         endpoint: datexEndpoint,
@@ -137,13 +171,9 @@ async function collectAll(): Promise<void> {
         lastModified,
       });
       officialEvents.push(...result.events);
-      if (result.lastModified)
-        await repository.setCollectorState("datex:lastModified", result.lastModified);
       if (!result.notModified) {
-        await repository.expireMissingOfficialEvents(
-          "datex",
-          result.events.map((event) => event.id),
-        );
+        freshDatexSnapshotEventIds = result.events.map((event) => event.id);
+        pendingDatexLastModified = result.lastModified;
       }
       await repository.setHealth({
         source: "datex",
@@ -208,6 +238,12 @@ async function collectAll(): Promise<void> {
     });
   }
   await repository.upsertOfficialEvents(officialEvents);
+  if (freshDatexSnapshotEventIds) {
+    await repository.expireMissingOfficialEvents("datex", freshDatexSnapshotEventIds);
+  }
+  if (pendingDatexLastModified) {
+    await repository.setCollectorState("datex:lastModified", pendingDatexLastModified);
+  }
   const recentArticles = await repository.recentArticles(12);
   const situationUpdateArticles = await repository.recentArticles(72);
   const currentOfficialEvents = await repository.currentOfficialEvents();
@@ -241,11 +277,15 @@ async function collectAll(): Promise<void> {
     currentDatexEvents,
     trackedSituations,
   );
-  const resolvedDatexSituations = resolvedOfficialTrafficSituationsForMissingDatex(
-    trackedSituations,
-    new Set(currentDatexEvents.map((event) => event.id)),
-    new Date().toISOString(),
-  );
+  const resolvedDatexSituations = shouldResolveMissingDatexSituations(
+    freshDatexSnapshotEventIds !== undefined,
+  )
+    ? resolvedOfficialTrafficSituationsForMissingDatex(
+        trackedSituations,
+        new Set(currentDatexEvents.map((event) => event.id)),
+        new Date().toISOString(),
+      )
+    : [];
   const situationsToPersist = [
     ...deterministicSituations,
     ...officialTrafficSituations,
@@ -257,13 +297,35 @@ async function collectAll(): Promise<void> {
   );
 }
 
-await collectAll();
-if (once) {
-  await pool.end();
-} else {
-  setInterval(() => void collectAll().catch(console.error), 10 * 60 * 1000);
-  process.on("SIGTERM", async () => {
-    await pool.end();
-    process.exit(0);
-  });
+export async function runWorker(): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL is required for the collection worker.");
+
+  const pool = new pg.Pool({ connectionString: databaseUrl });
+  const repository = new WorkerRepository(pool);
+  const analyzer = createAnalyzer();
+  const once = process.argv.includes("--once");
+  const guardedCollectAll = createCollectionGuard(() => collectAll({ repository, analyzer, once }));
+
+  try {
+    await guardedCollectAll();
+    if (!once) {
+      setInterval(() => void guardedCollectAll().catch(console.error), 10 * 60 * 1000);
+      process.on("SIGTERM", async () => {
+        await pool.end();
+        process.exit(0);
+      });
+    }
+  } finally {
+    if (once) await pool.end();
+  }
 }
+
+function isDirectRun(): boolean {
+  return (
+    process.argv[1] !== undefined &&
+    path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  );
+}
+
+if (isDirectRun()) await runWorker();

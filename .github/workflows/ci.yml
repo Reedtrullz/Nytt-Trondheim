@@ -42,6 +42,46 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
 
+  migration-smoke:
+    name: PostGIS Migration Smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: nytt
+          POSTGRES_USER: nytt
+          POSTGRES_PASSWORD: smoke_postgres_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nytt -d nytt"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://nytt:smoke_postgres_password@localhost:5432/nytt
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @nytt/shared
+      - run: npm run build -w @nytt/server
+      - run: npm run db:migrate
+      - run: npm run db:migrate
+      - name: Run migration sanity queries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT postgis_version();
+          SELECT count(*) AS schema_migration_count FROM schema_migrations;
+          SELECT count(*) AS source_item_count FROM source_items;
+          SQL
+
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest

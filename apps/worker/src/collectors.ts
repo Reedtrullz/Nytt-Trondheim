@@ -3,7 +3,11 @@ import * as cheerio from "cheerio";
 import { XMLParser } from "fast-xml-parser";
 import type { Article, SourceId } from "@nytt/shared";
 import { categorize, detectScope, extractPlaces } from "./classify.js";
-import { probeDatexAccess, defaultDatexSituationEndpoint } from "./datex.js";
+import {
+  defaultDatexSituationEndpoint,
+  normalizeDatexSituationEndpoint,
+  probeDatexAccess,
+} from "./datex.js";
 
 interface FeedSource {
   id: SourceId;
@@ -192,7 +196,9 @@ async function probeDatex(fetcher: typeof fetch): Promise<OfficialProbeResult> {
     };
   }
 
-  const endpoint = nonEmptyEnv(process.env.DATEX_ENDPOINT) ?? defaultDatexSituationEndpoint;
+  const endpoint = normalizeDatexSituationEndpoint(
+    nonEmptyEnv(process.env.DATEX_ENDPOINT) ?? defaultDatexSituationEndpoint,
+  );
   try {
     await probeDatexAccess({ endpoint, username, password, fetcher });
     return {

@@ -109,13 +109,15 @@ describe("DATEX official source probe", () => {
 
   it("checks the DATEX endpoint with Basic Auth when username and password are configured", async () => {
     process.env.DATEX_ENDPOINT =
-      "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata";
+      "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata?srti=false&foo=bar";
     process.env.DATEX_USERNAME = "svv-user";
     process.env.DATEX_PASSWORD = "svv-pass";
+    let datexUrl: string | undefined;
     let datexAuthorization: string | undefined;
 
     const statuses = await probeOfficialSources(async (url, init) => {
       if (String(url).includes("GetSituation")) {
+        datexUrl = String(url);
         const headers = new Headers(init?.headers);
         datexAuthorization = headers.get("Authorization") ?? undefined;
       }
@@ -124,6 +126,8 @@ describe("DATEX official source probe", () => {
 
     const datex = statuses.find((status) => status.source === "datex");
 
+    expect(new URL(datexUrl!).searchParams.get("srti")).toBe("True");
+    expect(new URL(datexUrl!).searchParams.get("foo")).toBe("bar");
     expect(datexAuthorization).toBe("Basic c3Z2LXVzZXI6c3Z2LXBhc3M=");
     expect(datex).toMatchObject({
       label: "Vegvesen DATEX",

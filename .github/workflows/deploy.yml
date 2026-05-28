@@ -25,6 +25,7 @@ jobs:
       NYTT_GITHUB_CLIENT_SECRET: ${{ secrets.NYTT_GITHUB_CLIENT_SECRET }}
       NYTT_DEEPSEEK_API_KEY: ${{ secrets.NYTT_DEEPSEEK_API_KEY }}
       NYTT_POLITILOGGEN_ENABLED: ${{ vars.NYTT_POLITILOGGEN_ENABLED }}
+      NYTT_DEPLOY_REF: ${{ github.event.workflow_run.head_sha || github.sha }}
       NYTT_DATEX_ENDPOINT: ${{ secrets.NYTT_DATEX_ENDPOINT }}
       NYTT_DATEX_USERNAME: ${{ secrets.NYTT_DATEX_USERNAME }}
       NYTT_DATEX_PASSWORD: ${{ secrets.NYTT_DATEX_PASSWORD }}
@@ -45,6 +46,8 @@ jobs:
             NYTT_GITHUB_CLIENT_ID
             NYTT_GITHUB_CLIENT_SECRET
             NYTT_DEEPSEEK_API_KEY
+            NYTT_DATEX_USERNAME
+            NYTT_DATEX_PASSWORD
             NYTT_RESTIC_REPOSITORY
             NYTT_RESTIC_PASSWORD
             NYTT_RCLONE_CONFIG
@@ -68,4 +71,4 @@ jobs:
       - name: Smoke test SSH
         run: ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 "echo SSH_OK"
       - name: Run Ansible deployment
-        run: ansible-playbook -i inventory/hosts.yml ansible-playbook.yml -vv
+        run: ansible-playbook -i inventory/hosts.yml ansible-playbook.yml

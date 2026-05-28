@@ -14,11 +14,23 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
+function safeExternalUrl(value?: string) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function SituationPage() {
   const { id = "" } = useParams();
   const [workspace, setWorkspace] = useState<SituationWorkspace>();
   const [sourceItems, setSourceItems] = useState<SourceItem[]>([]);
+  const [sourceItemsLoading, setSourceItemsLoading] = useState(false);
   const [sourceItemsError, setSourceItemsError] = useState<string>();
+  const [sourceItemsRetry, setSourceItemsRetry] = useState(0);
   const [taskText, setTaskText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -30,9 +42,7 @@ export function SituationPage() {
     let ignore = false;
 
     setWorkspace(undefined);
-    setSourceItems([]);
     setError(undefined);
-    setSourceItemsError(undefined);
 
     void api
       .workspace(id)
@@ -43,6 +53,18 @@ export function SituationPage() {
         if (!ignore) setError(reason.message);
       });
 
+    return () => {
+      ignore = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    setSourceItems([]);
+    setSourceItemsError(undefined);
+    setSourceItemsLoading(true);
+
     void api
       .situationSourceItems(id)
       .then((sourceItemResult) => {
@@ -50,12 +72,19 @@ export function SituationPage() {
       })
       .catch((reason: Error) => {
         if (!ignore) setSourceItemsError(reason.message);
+      })
+      .finally(() => {
+        if (!ignore) setSourceItemsLoading(false);
       });
 
     return () => {
       ignore = true;
     };
-  }, [id]);
+  }, [id, sourceItemsRetry]);
+
+  function retrySourceItems() {
+    setSourceItemsRetry((attempt) => attempt + 1);
+  }
 
   if (error) return <main className="loading">Kunne ikke åpne situasjonsrom: {error}</main>;
   if (!workspace) return <main className="loading">Åpner situasjonsrom...</main>;
@@ -391,22 +420,36 @@ export function SituationPage() {
           </section>
           <section className="source-items-panel">
             <h2>Kildegrunnlag</h2>
-            {sourceItemsError ? (
-              <p>Kunne ikke hente kildegrunnlag: {sourceItemsError}</p>
+            {sourceItemsLoading ? (
+              <p aria-live="polite">Henter kildegrunnlag...</p>
+            ) : sourceItemsError ? (
+              <div className="source-items-error" role="alert" aria-live="assertive">
+                <p>Kunne ikke hente kildegrunnlag: {sourceItemsError}</p>
+                <button type="button" onClick={retrySourceItems}>
+                  Prøv igjen
+                </button>
+              </div>
             ) : sourceItems.length === 0 ? (
               <p>Ingen kildeelementer er koblet ennå.</p>
             ) : (
               <ul>
-                {sourceItems.map((item) => (
-                  <li key={item.id}>
-                    <strong>{item.title ?? item.externalId ?? item.id}</strong>
-                    <span>
-                      {item.provider} · {item.kind} · {item.reliabilityTier}
-                    </span>
-                    {item.summary ? <p>{item.summary}</p> : null}
-                    {item.originalUrl ? <a href={item.originalUrl}>Åpne kilde</a> : null}
-                  </li>
-                ))}
+                {sourceItems.map((item) => {
+                  const originalUrl = safeExternalUrl(item.originalUrl);
+                  return (
+                    <li key={item.id}>
+                      <strong>{item.title ?? item.externalId ?? item.id}</strong>
+                      <span>
+                        {item.provider} · {item.kind} · {item.reliabilityTier}
+                      </span>
+                      {item.summary ? <p>{item.summary}</p> : null}
+                      {originalUrl ? (
+                        <a href={originalUrl} target="_blank" rel="noreferrer noopener">
+                          Åpne kilde
+                        </a>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -463,7 +506,10 @@ export function SituationPage() {
           {workspace.attachments.length ? (
             workspace.attachments.map((attachment) => (
               <div className="workspace-item" key={attachment.id}>
-                <a className="muted" href={`/api/situations/${id}/attachments/${attachment.id}`}>
+                <a
+                  className="muted"
+                  href={`/api/situations/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachment.id)}`}
+                >
                   {attachment.filename}
                 </a>
                 <button className="remove" onClick={() => void deleteAttachment(attachment.id)}>

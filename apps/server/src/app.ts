@@ -6,6 +6,7 @@ import express from "express";
 import helmet from "helmet";
 import multer from "multer";
 import pg from "pg";
+import { ZodError } from "zod";
 import {
   articleQuerySchema,
   labelInputSchema,
@@ -23,6 +24,86 @@ import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from
 import { buildWorkspaceExport, safeFilename } from "./export.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
 
+const EXPORT_ATTACHMENT_COUNT_LIMIT = 25;
+const EXPORT_ATTACHMENT_BYTE_LIMIT = 50 * 1024 * 1024;
+
+function attachmentSizeBytes(size: unknown): number {
+  const bytes =
+    typeof size === "number" ? size : typeof size === "string" ? Number(size) : Number.NaN;
+  return Number.isFinite(bytes) && bytes >= 0 ? bytes : Number.POSITIVE_INFINITY;
+}
+
+interface RateLimitRule {
+  name: string;
+  max: number;
+  windowMs: number;
+}
+
+const rateLimitRules = {
+  auth: { name: "auth", max: 20, windowMs: 15 * 60 * 1000 },
+  api: { name: "api", max: 120, windowMs: 60 * 1000 },
+  write: { name: "write", max: 20, windowMs: 60 * 1000 },
+  export: { name: "export", max: 5, windowMs: 60 * 1000 },
+  upload: { name: "upload", max: 10, windowMs: 60 * 1000 },
+} satisfies Record<string, RateLimitRule>;
+
+function selectRateLimitRule(req: express.Request): RateLimitRule | undefined {
+  if (req.path.startsWith("/auth/")) return rateLimitRules.auth;
+  if (!req.path.startsWith("/api/")) return undefined;
+  if (req.path.includes("/attachments")) return rateLimitRules.upload;
+  if (req.path.includes("/exports")) return rateLimitRules.export;
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return rateLimitRules.write;
+  return rateLimitRules.api;
+}
+
+function createRateLimiter(): express.RequestHandler {
+  const buckets = new Map<string, { count: number; resetAt: number }>();
+
+  return (req, res, next) => {
+    const rule = selectRateLimitRule(req);
+    if (!rule) {
+      next();
+      return;
+    }
+
+    const now = Date.now();
+    if (buckets.size > 10_000) {
+      for (const [key, bucket] of buckets) {
+        if (bucket.resetAt <= now) buckets.delete(key);
+      }
+    }
+
+    const key = `${rule.name}:${req.ip ?? req.socket.remoteAddress ?? "unknown"}`;
+    const current = buckets.get(key);
+    const bucket =
+      !current || current.resetAt <= now ? { count: 0, resetAt: now + rule.windowMs } : current;
+    bucket.count += 1;
+    buckets.set(key, bucket);
+
+    if (bucket.count > rule.max) {
+      res.set("Retry-After", String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
+      res.status(429).json({ error: "For mange forespørsler. Prøv igjen senere." });
+      return;
+    }
+
+    next();
+  };
+}
+
+function validationDetails(error: ZodError) {
+  return error.issues.map((issue) => ({
+    path: issue.path.join("."),
+    message: issue.message,
+  }));
+}
+
+function errorStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const status =
+    "status" in error ? error.status : "statusCode" in error ? error.statusCode : undefined;
+  return typeof status === "number" ? status : undefined;
+}
+
 export interface AppRuntime {
   app: express.Express;
   store: Store;
@@ -39,6 +120,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   await mkdir(config.uploadDir, { recursive: true });
   app.set("trust proxy", 1);
+  app.use(createRateLimiter());
   app.use(
     helmet({
       contentSecurityPolicy:
@@ -383,29 +465,47 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   });
 
   const upload = multer({ dest: config.uploadDir, limits: { fileSize: 20 * 1024 * 1024 } });
-  app.post("/api/situations/:id/attachments", upload.single("file"), async (req, res, next) => {
+  const ensureSituationExists: express.RequestHandler = async (req, res, next) => {
     try {
-      if (!req.file) {
-        res.status(400).json({ error: "Vedlegg mangler." });
+      const situationId = String(req.params.id);
+      const workspace = await store.getWorkspace(situationId, currentLogin(req));
+      if (!workspace) {
+        res.status(404).json({ error: "Situasjonen finnes ikke." });
         return;
       }
-      const attachmentBytes = await readFile(req.file.path);
-      const attachment = await store.addAttachment({
-        id: randomUUID(),
-        situationId: String(req.params.id),
-        filename: req.file.originalname,
-        storagePath: req.file.path,
-        contentType: req.file.mimetype,
-        size: req.file.size,
-        sha256: createHash("sha256").update(attachmentBytes).digest("hex"),
-        createdAt: new Date().toISOString(),
-      });
-      res.status(201).json(attachment);
+      next();
     } catch (error) {
-      if (req.file) await unlink(req.file.path).catch(() => undefined);
       next(error);
     }
-  });
+  };
+  app.post(
+    "/api/situations/:id/attachments",
+    ensureSituationExists,
+    upload.single("file"),
+    async (req, res, next) => {
+      try {
+        if (!req.file) {
+          res.status(400).json({ error: "Vedlegg mangler." });
+          return;
+        }
+        const attachmentBytes = await readFile(req.file.path);
+        const attachment = await store.addAttachment({
+          id: randomUUID(),
+          situationId: String(req.params.id),
+          filename: req.file.originalname,
+          storagePath: req.file.path,
+          contentType: req.file.mimetype,
+          size: req.file.size,
+          sha256: createHash("sha256").update(attachmentBytes).digest("hex"),
+          createdAt: new Date().toISOString(),
+        });
+        res.status(201).json(attachment);
+      } catch (error) {
+        if (req.file) await unlink(req.file.path).catch(() => undefined);
+        next(error);
+      }
+    },
+  );
 
   app.get("/api/situations/:id/attachments/:attachmentId", async (req, res, next) => {
     try {
@@ -434,15 +534,27 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      const attachmentCount = workspace.attachments.length;
+      const attachmentSizes = workspace.attachments.map((attachment) =>
+        attachmentSizeBytes(attachment.size),
+      );
+      const attachmentBytes = attachmentSizes.reduce((total, size) => total + size, 0);
+      if (
+        attachmentCount > EXPORT_ATTACHMENT_COUNT_LIMIT ||
+        attachmentBytes > EXPORT_ATTACHMENT_BYTE_LIMIT
+      ) {
+        res.status(413).json({ error: "Arbeidsmappen er for stor til eksport." });
+        return;
+      }
       const exportId = randomUUID();
       const manifest = {
         exportId,
         situationId: workspace.situation.id,
         createdAt: new Date().toISOString(),
-        attachmentChecksums: workspace.attachments.map(({ filename, sha256, size }) => ({
-          filename: safeFilename(filename),
-          sha256,
-          size,
+        attachmentChecksums: workspace.attachments.map((attachment, index) => ({
+          filename: safeFilename(attachment.filename),
+          sha256: attachment.sha256,
+          size: attachmentSizes[index] ?? 0,
         })),
       };
       const storagePath = path.join(config.uploadDir, `export-${exportId}.zip`);
@@ -461,7 +573,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         await unlink(storagePath).catch(() => undefined);
         throw error;
       }
-      res.set("Location", `/api/situations/${req.params.id}/exports/${exportId}`);
+      res.set(
+        "Location",
+        `/api/situations/${encodeURIComponent(req.params.id)}/exports/${exportId}`,
+      );
       res.set("X-Export-Id", exportId);
       res.attachment(`${workspace.situation.id}-arbeidsmappe.zip`).send(contents);
     } catch (error) {
@@ -512,6 +627,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "API-ruten finnes ikke." });
+  });
+
   const here = path.dirname(fileURLToPath(import.meta.url));
   const frontendDist = path.resolve(here, "../../frontend/dist");
   app.use(express.static(frontendDist));
@@ -519,9 +638,39 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.use(
     (error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-      void next;
-      const message = error instanceof Error ? error.message : "Ukjent serverfeil";
-      res.status(400).json({ error: message });
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
+
+      if (error instanceof ZodError) {
+        res.status(400).json({
+          error: "Ugyldig forespørsel.",
+          details: validationDetails(error),
+        });
+        return;
+      }
+
+      if (error instanceof multer.MulterError) {
+        res
+          .status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400)
+          .json({ error: "Ugyldig vedlegg." });
+        return;
+      }
+
+      if (error instanceof Error && error.message === "Ugyldig sidepeker.") {
+        res.status(400).json({ error: "Ugyldig sidepeker." });
+        return;
+      }
+
+      const status = errorStatus(error);
+      if (status === 400) {
+        res.status(400).json({ error: "Ugyldig forespørsel." });
+        return;
+      }
+
+      console.error("Unexpected API error", error);
+      res.status(500).json({ error: "Intern serverfeil." });
     },
   );
 

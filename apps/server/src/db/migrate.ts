@@ -12,10 +12,23 @@ const filename = fileURLToPath(import.meta.url);
 const schemaPath = path.resolve(path.dirname(filename), "schema.sql");
 const sql = await readFile(schemaPath, "utf8");
 const pool = new pg.Pool({ connectionString: databaseUrl });
+const migrationLockName = "nytt-trondheim:schema-migrations";
 
+const client = await pool.connect();
 try {
-  await pool.query(sql);
-  console.log("Database schema applied.");
+  await client.query("BEGIN");
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [migrationLockName]);
+  await client.query(sql);
+  await client.query("COMMIT");
+  console.log("Database schema applied with migration lock.");
+} catch (error) {
+  try {
+    await client.query("ROLLBACK");
+  } catch (rollbackError) {
+    console.error("Database migration rollback failed.", rollbackError);
+  }
+  throw error;
 } finally {
+  client.release();
   await pool.end();
 }

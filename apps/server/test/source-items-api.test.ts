@@ -43,9 +43,18 @@ describe("source item API", () => {
     await request(app).get("/api/source-items?kind=travel_time").expect(400);
   });
 
-  it("returns an empty linked-source list for a situation with no linked items", async () => {
+  it("returns prelinked sample source items for a situation", async () => {
     const { app } = await testApp();
-    await request(app).get("/api/situations/skogbrann-bymarka/source-items").expect(200, []);
+    await request(app)
+      .get("/api/situations/skogbrann-bymarka/source-items")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.map((item: { externalId?: string }) => item.externalId)).toContain(
+          "a-fire",
+        );
+        expect(response.body[0]).not.toHaveProperty("rawPayload");
+        expect(response.body[0]).not.toHaveProperty("normalizedPayload");
+      });
   });
 
   it("links and unlinks source items with CSRF and relationship validation", async () => {
@@ -53,7 +62,7 @@ describe("source item API", () => {
     const agent = request.agent(app);
     const session = await agent.get("/api/session").expect(200);
     const csrf = session.body.csrfToken as string;
-    const sourceItems = await agent.get("/api/source-items?limit=1").expect(200);
+    const sourceItems = await agent.get("/api/source-items?unlinked=true&limit=1").expect(200);
     const sourceItemId = sourceItems.body.items[0].id as string;
     const encoded = encodeURIComponent(sourceItemId);
 
@@ -83,6 +92,15 @@ describe("source item API", () => {
       .set("X-CSRF-Token", csrf)
       .expect(204);
 
-    await agent.get("/api/situations/skogbrann-bymarka/source-items").expect(200, []);
+    await agent
+      .get("/api/situations/skogbrann-bymarka/source-items")
+      .expect(200)
+      .expect((response) => {
+        const ids = response.body.map((item: { id: string }) => item.id);
+        expect(ids).not.toContain(sourceItemId);
+        expect(response.body.map((item: { externalId?: string }) => item.externalId)).toContain(
+          "a-fire",
+        );
+      });
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import request from "supertest";
@@ -11,7 +11,7 @@ import { PgStore } from "../src/store.js";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-  return createApp({
+  const runtime = await createApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
@@ -22,6 +22,7 @@ async function testApp() {
     uploadDir,
     runtimeStatusDir: uploadDir,
   });
+  return { ...runtime, uploadDir };
 }
 
 async function ownerAgent() {
@@ -260,6 +261,116 @@ describe("private situation API", () => {
       .post("/api/situations/skogbrann-bymarka/tasks")
       .send({ text: "Test" })
       .expect(403);
+  });
+
+  it("returns JSON 404 responses for unknown API routes", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent
+      .get("/api/does-not-exist")
+      .expect("Content-Type", /json/)
+      .expect(404);
+    expect(response.body.error).toBe("API-ruten finnes ikke.");
+  });
+
+  it("sanitizes unexpected internal errors while logging server-side detail", async () => {
+    const { app, store } = await testApp();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(store, "getBootstrap").mockRejectedValue(new Error("database password leaked"));
+
+    try {
+      const response = await request.agent(app).get("/api/bootstrap").expect(500);
+      expect(response.body).toEqual({ error: "Intern serverfeil." });
+      expect(JSON.stringify(response.body)).not.toContain("database password leaked");
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("does not persist uploaded files when the situation is missing", async () => {
+    const { app, uploadDir } = await testApp();
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+
+    await agent
+      .post("/api/situations/missing-situation/attachments")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .attach("file", Buffer.from("skal ikke lagres"), "missing.txt")
+      .expect(404);
+
+    await expect(readdir(uploadDir)).resolves.toEqual([]);
+  });
+
+  it("rejects workspace exports that exceed the attachment quota before building a zip", async () => {
+    const { app, store } = await testApp();
+    await store.addAttachment({
+      id: "oversized-export-attachment",
+      situationId: "skogbrann-bymarka",
+      filename: "huge.bin",
+      storagePath: path.join(os.tmpdir(), "does-not-need-to-exist.bin"),
+      contentType: "application/octet-stream",
+      size: 51 * 1024 * 1024,
+      sha256: "0".repeat(64),
+      createdAt: new Date().toISOString(),
+    });
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+
+    const response = await agent
+      .post("/api/situations/skogbrann-bymarka/exports")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .expect(413);
+
+    expect(response.body.error).toBe("Arbeidsmappen er for stor til eksport.");
+  });
+
+  it("treats PostgreSQL bigint attachment sizes as numbers when enforcing export quotas", async () => {
+    const { app, store, uploadDir } = await testApp();
+    const paths = [
+      path.join(uploadDir, "pg-size-one.txt"),
+      path.join(uploadDir, "pg-size-two.txt"),
+    ];
+    await Promise.all(paths.map((filePath, index) => writeFile(filePath, `attachment ${index}`)));
+    for (const [index, storagePath] of paths.entries()) {
+      await store.addAttachment({
+        id: `pg-size-${index}`,
+        situationId: "skogbrann-bymarka",
+        filename: `pg-size-${index}.txt`,
+        storagePath,
+        contentType: "text/plain",
+        size: String(1024 * 1024) as unknown as number,
+        sha256: createHash("sha256").update(`attachment ${index}`).digest("hex"),
+        createdAt: new Date().toISOString(),
+      });
+    }
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+
+    await agent
+      .post("/api/situations/skogbrann-bymarka/exports")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .expect("Content-Type", /zip/)
+      .expect(200);
+  });
+
+  it("rate limits abusive write bursts", async () => {
+    const { agent, csrf } = await ownerAgent();
+    let limited = false;
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const response = await agent
+        .post("/api/situations/skogbrann-bymarka/tasks")
+        .set("X-CSRF-Token", csrf)
+        .send({ text: `Oppgave ${attempt}` });
+      if (response.status === 429) {
+        limited = true;
+        expect(response.body.error).toBe("For mange forespørsler. Prøv igjen senere.");
+        break;
+      }
+      expect(response.status).toBe(201);
+    }
+
+    expect(limited).toBe(true);
   });
 
   it("supports saved situation and private workspace deletion operations", async () => {

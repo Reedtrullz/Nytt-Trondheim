@@ -9,8 +9,15 @@ CHECK_DIR="$(mktemp -d)"
 trap 'rm -rf "$CHECK_DIR"' EXIT
 mkdir -p "$STATUS_DIR" "$CACHE_DIR"
 restic check --retry-lock 2m
-restic restore --retry-lock 2m latest --tag nytt-trondheim --target "$CHECK_DIR" --include "*/nytt.dump"
-test -s "$(find "$CHECK_DIR" -name nytt.dump -print -quit)"
+restic restore --retry-lock 2m latest --tag nytt-trondheim --target "$CHECK_DIR" \
+  --include "*/nytt.dump" \
+  --include "*/uploads.tar.gz"
+dump_path="$(find "$CHECK_DIR" -name nytt.dump -print -quit)"
+uploads_path="$(find "$CHECK_DIR" -name uploads.tar.gz -print -quit)"
+test -s "$dump_path"
+test -s "$uploads_path"
+pg_restore --list "$dump_path" >/dev/null
+tar -tzf "$uploads_path" >/dev/null
 printf '{"status":"ok","completedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATUS_DIR/restore-check.json.tmp"
 chmod 0644 "$STATUS_DIR/restore-check.json.tmp"
 mv "$STATUS_DIR/restore-check.json.tmp" "$STATUS_DIR/restore-check.json"

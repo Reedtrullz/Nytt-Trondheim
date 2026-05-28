@@ -50,6 +50,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
+function situationPath(id: string) {
+  return `/api/situations/${encodeURIComponent(id)}`;
+}
+
 export const api = {
   bootstrap: () => request<BootstrapPayload>("/api/bootstrap"),
   articles: (
@@ -68,18 +72,18 @@ export const api = {
     }
     return request<SourceItemPage>(`/api/source-items?${parameters.toString()}`);
   },
-  situationSourceItems: (id: string) => request<SourceItem[]>(`/api/situations/${id}/source-items`),
+  situationSourceItems: (id: string) => request<SourceItem[]>(`${situationPath(id)}/source-items`),
   linkSourceItem: (
     id: string,
     sourceItemId: string,
     relationship: SourceItemRelationship = "supports",
   ) =>
-    request<SourceItem>(`/api/situations/${id}/source-items/${encodeURIComponent(sourceItemId)}`, {
+    request<SourceItem>(`${situationPath(id)}/source-items/${encodeURIComponent(sourceItemId)}`, {
       method: "POST",
       body: JSON.stringify({ relationship }),
     }),
   unlinkSourceItem: (id: string, sourceItemId: string) =>
-    request<void>(`/api/situations/${id}/source-items/${encodeURIComponent(sourceItemId)}`, {
+    request<void>(`${situationPath(id)}/source-items/${encodeURIComponent(sourceItemId)}`, {
       method: "DELETE",
     }),
   situations: (
@@ -98,70 +102,70 @@ export const api = {
   },
   savedArticles: () => request<ArticlePage["items"]>("/api/saved/articles"),
   operations: () => request<OperationsStatus>("/api/operations/status"),
-  workspace: (id: string) => request<SituationWorkspace>(`/api/situations/${id}`),
+  workspace: (id: string) => request<SituationWorkspace>(situationPath(id)),
   saveArticle: (id: string, saved: boolean) =>
     request<void>(`/api/saved/articles/${id}`, { method: saved ? "PUT" : "DELETE" }),
   saveSituation: (id: string, saved: boolean) =>
-    request<void>(`/api/situations/${id}/saved`, { method: saved ? "PUT" : "DELETE" }),
+    request<void>(`${situationPath(id)}/saved`, { method: saved ? "PUT" : "DELETE" }),
   setSituationStatus: (
     id: string,
     status: "active" | "resolved" | "dismissed",
     dismissalReason?: "false_positive" | "owner_dismissed",
   ) =>
-    request<SituationWorkspace["situation"]>(`/api/situations/${id}/status`, {
+    request<SituationWorkspace["situation"]>(`${situationPath(id)}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status, dismissalReason }),
     }),
   addFeature: (id: string, feature: Pick<MapFeature, "geometry" | "properties">) =>
-    request<MapFeature>(`/api/situations/${id}/features`, {
+    request<MapFeature>(`${situationPath(id)}/features`, {
       method: "POST",
       body: JSON.stringify({ geometry: feature.geometry, properties: feature.properties }),
     }),
   updateFeature: (id: string, featureId: string, label: string) =>
-    request<MapFeature>(`/api/situations/${id}/features/${featureId}`, {
+    request<MapFeature>(`${situationPath(id)}/features/${featureId}`, {
       method: "PATCH",
       body: JSON.stringify({ label }),
     }),
   deleteFeature: (id: string, featureId: string) =>
-    request<void>(`/api/situations/${id}/features/${featureId}`, { method: "DELETE" }),
+    request<void>(`${situationPath(id)}/features/${featureId}`, { method: "DELETE" }),
   addTask: (id: string, text: string) =>
-    request<WorkspaceTask>(`/api/situations/${id}/tasks`, {
+    request<WorkspaceTask>(`${situationPath(id)}/tasks`, {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
   toggleTask: (id: string, taskId: string, completed: boolean) =>
-    request<WorkspaceTask>(`/api/situations/${id}/tasks/${taskId}`, {
+    request<WorkspaceTask>(`${situationPath(id)}/tasks/${taskId}`, {
       method: "PATCH",
       body: JSON.stringify({ completed }),
     }),
   updateTask: (id: string, taskId: string, text: string) =>
-    request<WorkspaceTask>(`/api/situations/${id}/tasks/${taskId}`, {
+    request<WorkspaceTask>(`${situationPath(id)}/tasks/${taskId}`, {
       method: "PATCH",
       body: JSON.stringify({ text }),
     }),
   deleteTask: (id: string, taskId: string) =>
-    request<void>(`/api/situations/${id}/tasks/${taskId}`, { method: "DELETE" }),
+    request<void>(`${situationPath(id)}/tasks/${taskId}`, { method: "DELETE" }),
   addNote: (id: string, text: string) =>
-    request<WorkspaceNote>(`/api/situations/${id}/notes`, {
+    request<WorkspaceNote>(`${situationPath(id)}/notes`, {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
   deleteNote: (id: string, noteId: string) =>
-    request<void>(`/api/situations/${id}/notes/${noteId}`, { method: "DELETE" }),
+    request<void>(`${situationPath(id)}/notes/${noteId}`, { method: "DELETE" }),
   updateNote: (id: string, noteId: string, text: string) =>
-    request<WorkspaceNote>(`/api/situations/${id}/notes/${noteId}`, {
+    request<WorkspaceNote>(`${situationPath(id)}/notes/${noteId}`, {
       method: "PATCH",
       body: JSON.stringify({ text }),
     }),
   addAttachment: (id: string, file: File) => {
     const body = new FormData();
     body.append("file", file);
-    return request<Attachment>(`/api/situations/${id}/attachments`, { method: "POST", body });
+    return request<Attachment>(`${situationPath(id)}/attachments`, { method: "POST", body });
   },
   deleteAttachment: (id: string, attachmentId: string) =>
-    request<void>(`/api/situations/${id}/attachments/${attachmentId}`, { method: "DELETE" }),
+    request<void>(`${situationPath(id)}/attachments/${attachmentId}`, { method: "DELETE" }),
   exportWorkspace: async (id: string) => {
-    const response = await fetch(`/api/situations/${id}/exports`, {
+    const response = await fetch(`${situationPath(id)}/exports`, {
       method: "POST",
       credentials: "include",
       headers: { "X-CSRF-Token": await csrfToken() },

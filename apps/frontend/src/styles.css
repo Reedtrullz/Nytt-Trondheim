@@ -1277,10 +1277,33 @@ button {
   font-size: 11px;
 }
 
-.source-items-panel > p {
+.source-items-panel > p,
+.source-items-error p {
   margin: 14px 0 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+.source-items-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  color: #8a2f21;
+  background: #fff1ed;
+  border: 1px solid #ead8cf;
+}
+
+.source-items-error p {
+  margin: 0;
+  color: inherit;
+}
+
+.source-items-error button {
+  margin-top: 8px;
+  padding: 6px 10px;
+  color: #8a2f21;
+  background: var(--paper);
+  border: 1px solid #ead8cf;
+  font-size: 11px;
 }
 
 .source-items-panel ul {

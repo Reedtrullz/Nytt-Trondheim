@@ -22,6 +22,8 @@
         - NYTT_GITHUB_CLIENT_ID
         - NYTT_GITHUB_CLIENT_SECRET
         - NYTT_DEEPSEEK_API_KEY
+        - NYTT_DATEX_USERNAME
+        - NYTT_DATEX_PASSWORD
         - NYTT_RESTIC_REPOSITORY
         - NYTT_RESTIC_PASSWORD
         - NYTT_RCLONE_CONFIG
@@ -87,7 +89,7 @@
       ansible.builtin.git:
         repo: "{{ repo_url }}"
         dest: "{{ app_dir }}"
-        version: main
+        version: "{{ lookup('env', 'NYTT_DEPLOY_REF') | default('main', true) }}"
         force: true
         key_file: /home/deploy/.ssh/nytt_github_deploy
 
@@ -102,7 +104,7 @@
           PORT=8080
           PUBLIC_ORIGIN={{ public_origin }}
           POSTGRES_PASSWORD={{ lookup('env', 'NYTT_POSTGRES_PASSWORD') }}
-          DATABASE_URL=postgres://nytt:{{ lookup('env', 'NYTT_POSTGRES_PASSWORD') }}@postgres:5432/nytt
+          DATABASE_URL=postgres://nytt:{{ lookup('env', 'NYTT_POSTGRES_PASSWORD') | urlencode | replace('/', '%2F') }}@postgres:5432/nytt
           SESSION_SECRET={{ lookup('env', 'NYTT_SESSION_SECRET') }}
           GITHUB_CLIENT_ID={{ lookup('env', 'NYTT_GITHUB_CLIENT_ID') }}
           GITHUB_CLIENT_SECRET={{ lookup('env', 'NYTT_GITHUB_CLIENT_SECRET') }}
@@ -114,11 +116,13 @@
           DATEX_USERNAME={{ lookup('env', 'NYTT_DATEX_USERNAME') | default('', true) }}
           DATEX_PASSWORD={{ lookup('env', 'NYTT_DATEX_PASSWORD') | default('', true) }}
           RUNTIME_STATUS_DIR=/data/runtime-status
+      no_log: true
 
-    - name: Ensure restic and rclone are installed before database changes
+    - name: Ensure restore and backup dependencies are installed before database changes
       become: true
       ansible.builtin.apt:
         name:
+          - postgresql-client
           - restic
           - rclone
         state: present
@@ -156,6 +160,7 @@
           STATUS_DIR={{ app_dir }}/runtime-status
           XDG_CACHE_HOME=/var/cache/nytt-restic
           HOME=/var/lib/nytt-backup
+      no_log: true
 
     - name: Install Google Drive rclone configuration before database changes
       become: true
@@ -203,8 +208,14 @@
       ansible.builtin.shell: docker image tag nytt-trondheim-worker:latest nytt-trondheim-worker:previous || true
       changed_when: false
 
+    - name: Pull base service images
+      ansible.builtin.command: docker compose --env-file .env.production pull postgres
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
     - name: Build application images
-      ansible.builtin.command: docker compose --env-file .env.production build
+      ansible.builtin.command: docker compose --env-file .env.production build --pull
       args:
         chdir: "{{ app_dir }}"
       changed_when: true
@@ -284,7 +295,6 @@
         state: started
         env_file: "{{ app_dir }}/.env.production"
         env:
-          DATABASE_URL: "postgres://nytt:{{ lookup('env', 'NYTT_POSTGRES_PASSWORD') }}@postgres:5432/nytt"
           PORT: "8080"
         networks:
           - name: "nytt_database"
@@ -399,3 +409,43 @@
       until: production_health.json.status == "ok"
       retries: 6
       delay: 5
+
+    - name: Verify worker container is running
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker compose --env-file .env.production ps --services --filter status=running worker | grep -qx worker
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Verify DATEX source health rows when DATEX is enabled
+      ansible.builtin.shell: |
+        set -euo pipefail
+        count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "SELECT count(*) FROM source_health WHERE source IN ('datex','datex_travel_time');")"
+        test "$count" -eq 2
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      changed_when: false
+      when:
+        - lookup('env', 'NYTT_DATEX_USERNAME') | length > 0
+        - lookup('env', 'NYTT_DATEX_PASSWORD') | length > 0
+
+    - name: Verify source item query sanity
+      ansible.builtin.command: >-
+        docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt
+        -c "SELECT provider, kind, count(*) FROM source_items GROUP BY provider, kind ORDER BY provider, kind LIMIT 20;"
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: false
+
+    - name: Verify TravelTime rows are excluded from source items
+      ansible.builtin.shell: |
+        set -euo pipefail
+        count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "SELECT count(*) FROM source_items WHERE provider='datex_travel_time' OR kind='travel_time';")"
+        test "$count" -eq 0
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      changed_when: false

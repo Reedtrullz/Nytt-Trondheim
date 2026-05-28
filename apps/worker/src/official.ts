@@ -67,8 +67,9 @@ function capReferences(value: unknown): string[] {
 
 export async function collectMetWarnings(
   fetcher: typeof fetch = fetch,
-  knownIds = new Set<string>(),
+  _knownIds?: Set<string>,
 ): Promise<OfficialEvent[]> {
+  void _knownIds;
   const response = await fetcher(metRssUrl, { headers: userAgent });
   if (!response.ok) throw new Error(`MET MetAlerts returned ${response.status}`);
   const rss = object(
@@ -87,7 +88,7 @@ export async function collectMetWarnings(
     const id = officialId("met", identifier);
     const sourceUrl = xmlText(item.link);
     const geometry = parsePolygon(item["georss:polygon"]);
-    if (!identifier || !sourceUrl || knownIds.has(id)) continue;
+    if (!identifier || !sourceUrl) continue;
     const capResponse = await fetcher(sourceUrl, { headers: userAgent });
     if (!capResponse.ok) throw new Error(`MET CAP document returned ${capResponse.status}`);
     const parsedCap = object(
@@ -213,11 +214,4 @@ export async function collectNveWarnings(fetcher: typeof fetch = fetch): Promise
     if (!uniqueEvents.has(event.id)) uniqueEvents.set(event.id, event);
   }
   return [...uniqueEvents.values()];
-}
-
-export async function collectOfficialWarnings(
-  fetcher: typeof fetch = fetch,
-): Promise<OfficialEvent[]> {
-  const [met, nve] = await Promise.all([collectMetWarnings(fetcher), collectNveWarnings(fetcher)]);
-  return [...met, ...nve];
 }

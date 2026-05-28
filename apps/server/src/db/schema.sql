@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version text PRIMARY KEY,
@@ -131,6 +132,184 @@ CREATE INDEX IF NOT EXISTS situation_source_items_source_item_idx
   ON situation_source_items (source_item_id);
 CREATE INDEX IF NOT EXISTS situation_source_items_situation_idx
   ON situation_source_items (situation_id);
+
+-- Backfill existing articles into the source item ledger.
+INSERT INTO source_items (
+  id,
+  provider,
+  kind,
+  external_id,
+  original_url,
+  title,
+  summary,
+  published_at,
+  fetched_at,
+  raw_payload,
+  normalized_payload,
+  capture_hash,
+  geo_hint,
+  reliability_tier
+)
+SELECT
+  'source:' || encode(
+    digest(
+      format('[%s,%s,%s]', to_jsonb(a.source)::text, to_jsonb('article'::text)::text, to_jsonb(a.id)::text),
+      'sha256'
+    ),
+    'hex'
+  ) AS id,
+  a.source AS provider,
+  'article' AS kind,
+  a.id AS external_id,
+  COALESCE(a.payload->>'url', a.canonical_url) AS original_url,
+  a.payload->>'title' AS title,
+  a.payload->>'excerpt' AS summary,
+  a.published_at AS published_at,
+  COALESCE(a.created_at, a.published_at) AS fetched_at,
+  a.payload AS raw_payload,
+  jsonb_strip_nulls(
+    jsonb_build_object(
+      'id', a.id,
+      'source', a.source,
+      'sourceLabel', a.payload->>'sourceLabel',
+      'title', a.payload->>'title',
+      'excerpt', a.payload->>'excerpt',
+      'url', COALESCE(a.payload->>'url', a.canonical_url),
+      'publishedAt', a.payload->>'publishedAt',
+      'scope', a.scope,
+      'category', a.category,
+      'places', a.payload->'places',
+      'location', a.payload->'location'
+    )
+  ) AS normalized_payload,
+  encode(
+    digest(jsonb_build_array(a.source, 'article', a.id)::text, 'sha256'),
+    'hex'
+  ) AS capture_hash,
+  CASE
+    WHEN jsonb_typeof(a.payload->'location'->'lng') = 'number'
+      AND jsonb_typeof(a.payload->'location'->'lat') = 'number'
+    THEN ST_SetSRID(
+      ST_MakePoint(
+        (a.payload->'location'->>'lng')::double precision,
+        (a.payload->'location'->>'lat')::double precision
+      ),
+      4326
+    )
+    ELSE NULL
+  END AS geo_hint,
+  CASE WHEN a.source = 'trondheim_kommune' THEN 'official' ELSE 'trusted_media' END AS reliability_tier
+FROM articles a
+ON CONFLICT (id) DO UPDATE SET
+  provider = EXCLUDED.provider,
+  kind = EXCLUDED.kind,
+  external_id = EXCLUDED.external_id,
+  original_url = EXCLUDED.original_url,
+  title = EXCLUDED.title,
+  summary = EXCLUDED.summary,
+  published_at = EXCLUDED.published_at,
+  fetched_at = EXCLUDED.fetched_at,
+  raw_payload = EXCLUDED.raw_payload,
+  normalized_payload = EXCLUDED.normalized_payload,
+  capture_hash = EXCLUDED.capture_hash,
+  geo_hint = EXCLUDED.geo_hint,
+  reliability_tier = EXCLUDED.reliability_tier,
+  updated_at = now();
+
+-- Backfill existing official events into the source item ledger.
+INSERT INTO source_items (
+  id,
+  provider,
+  kind,
+  external_id,
+  original_url,
+  title,
+  summary,
+  published_at,
+  fetched_at,
+  raw_payload,
+  normalized_payload,
+  capture_hash,
+  geo_hint,
+  reliability_tier
+)
+SELECT
+  'source:' || encode(
+    digest(
+      format('[%s,%s,%s]', to_jsonb(oe.source)::text, to_jsonb('official_event'::text)::text, to_jsonb(oe.id)::text),
+      'sha256'
+    ),
+    'hex'
+  ) AS id,
+  oe.source AS provider,
+  'official_event' AS kind,
+  oe.id AS external_id,
+  oe.source_url AS original_url,
+  oe.payload->>'title' AS title,
+  oe.payload->>'detail' AS summary,
+  oe.published_at AS published_at,
+  COALESCE(oe.updated_at, oe.published_at) AS fetched_at,
+  COALESCE(oe.payload->'raw', oe.payload) AS raw_payload,
+  jsonb_strip_nulls(
+    jsonb_build_object(
+      'id', oe.id,
+      'source', oe.source,
+      'eventType', oe.event_type,
+      'title', oe.payload->>'title',
+      'detail', oe.payload->>'detail',
+      'sourceUrl', oe.source_url,
+      'areaLabel', oe.payload->>'areaLabel',
+      'state', oe.state,
+      'severity', oe.payload->>'severity',
+      'publishedAt', oe.payload->>'publishedAt',
+      'validFrom', oe.payload->>'validFrom',
+      'validTo', oe.payload->>'validTo',
+      'geometry', oe.payload->'geometry',
+      'replacesIds', oe.payload->'replacesIds'
+    )
+  ) AS normalized_payload,
+  encode(
+    digest(jsonb_build_array(oe.source, 'official_event', oe.id)::text, 'sha256'),
+    'hex'
+  ) AS capture_hash,
+  oe.geometry AS geo_hint,
+  'official' AS reliability_tier
+FROM official_events oe
+ON CONFLICT (id) DO UPDATE SET
+  provider = EXCLUDED.provider,
+  kind = EXCLUDED.kind,
+  external_id = EXCLUDED.external_id,
+  original_url = EXCLUDED.original_url,
+  title = EXCLUDED.title,
+  summary = EXCLUDED.summary,
+  published_at = EXCLUDED.published_at,
+  fetched_at = EXCLUDED.fetched_at,
+  raw_payload = EXCLUDED.raw_payload,
+  normalized_payload = EXCLUDED.normalized_payload,
+  capture_hash = EXCLUDED.capture_hash,
+  geo_hint = EXCLUDED.geo_hint,
+  reliability_tier = EXCLUDED.reliability_tier,
+  updated_at = now();
+
+-- Backfill source-item links for legacy situation/article joins.
+INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_at, linked_by)
+SELECT sa.situation_id, si.id, 'supports', COALESCE(sa.created_at, now()), 'backfill'
+FROM situation_articles sa
+JOIN source_items si ON si.external_id = sa.article_id
+WHERE si.kind = 'article'
+ON CONFLICT (situation_id, source_item_id) DO NOTHING;
+
+-- Backfill source-item links for situations created directly from official events.
+INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_at, linked_by)
+SELECT s.id, si.id, 'supports', COALESCE(s.updated_at, now()), 'backfill'
+FROM situations s
+JOIN source_items si
+  ON si.provider = s.payload->>'officialSource'
+  AND si.external_id = s.payload->>'officialEventId'
+WHERE si.kind = 'official_event'
+  AND s.payload->>'officialSource' IS NOT NULL
+  AND s.payload->>'officialEventId' IS NOT NULL
+ON CONFLICT (situation_id, source_item_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS datex_travel_times (
   id text PRIMARY KEY,

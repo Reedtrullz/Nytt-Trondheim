@@ -10,8 +10,25 @@ import type {
   TrafficPulseCorridor,
 } from "@nytt/shared";
 
+type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
+
 export class WorkerRepository {
   constructor(private readonly pool: pg.Pool) {}
+
+  private async withTransaction<T>(work: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 
   async upsertArticles(articles: Article[]): Promise<void> {
     const fetchedAt = new Date().toISOString();
@@ -52,8 +69,11 @@ export class WorkerRepository {
     }
   }
 
-  private async upsertSourceItem(item: SourceItemInput): Promise<void> {
-    await this.pool.query(
+  private async upsertSourceItem(
+    item: SourceItemInput,
+    client: Queryable = this.pool,
+  ): Promise<void> {
+    await client.query(
       `INSERT INTO source_items
         (id, provider, kind, external_id, original_url, title, summary, author, published_at,
          fetched_at, raw_payload, normalized_payload, capture_hash, geo_hint, reliability_tier)
@@ -147,57 +167,100 @@ export class WorkerRepository {
 
   async upsertOfficialEvents(events: OfficialEvent[]): Promise<void> {
     const fetchedAt = new Date().toISOString();
-    for (const event of events) {
-      await this.pool.query(
-        `INSERT INTO official_events
-         (id, source, event_type, state, source_url, published_at, valid_from, valid_to, geometry, payload)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
-           CASE WHEN $9::text IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($9),4326) END,
-           $10)
-         ON CONFLICT (id) DO UPDATE SET state=EXCLUDED.state, source_url=EXCLUDED.source_url,
-           published_at=EXCLUDED.published_at, valid_from=EXCLUDED.valid_from,
-           valid_to=EXCLUDED.valid_to, geometry=EXCLUDED.geometry, payload=EXCLUDED.payload,
-           updated_at=now()`,
-        [
-          event.id,
-          event.source,
-          event.eventType,
-          event.state,
-          event.sourceUrl,
-          event.publishedAt,
-          event.validFrom,
-          event.validTo,
-          event.geometry ? JSON.stringify(event.geometry) : null,
-          event,
-        ],
-      );
-      if ((event.state === "updated" || event.state === "cancelled") && event.replacesIds?.length) {
-        await this.pool.query(
-          `UPDATE official_events
-           SET state='cancelled',
-               payload=jsonb_set(payload, '{state}', to_jsonb('cancelled'::text), true),
-               updated_at=now()
-           WHERE id = ANY($1::text[])`,
-          [event.replacesIds],
+    await this.withTransaction(async (client) => {
+      for (const event of events) {
+        await client.query(
+          `INSERT INTO official_events
+           (id, source, event_type, state, source_url, published_at, valid_from, valid_to, geometry, payload)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+             CASE WHEN $9::text IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($9),4326) END,
+             $10)
+           ON CONFLICT (id) DO UPDATE SET state=EXCLUDED.state, source_url=EXCLUDED.source_url,
+             published_at=EXCLUDED.published_at, valid_from=EXCLUDED.valid_from,
+             valid_to=EXCLUDED.valid_to, geometry=EXCLUDED.geometry, payload=EXCLUDED.payload,
+             updated_at=now()`,
+          [
+            event.id,
+            event.source,
+            event.eventType,
+            event.state,
+            event.sourceUrl,
+            event.publishedAt,
+            event.validFrom,
+            event.validTo,
+            event.geometry ? JSON.stringify(event.geometry) : null,
+            event,
+          ],
         );
+        if (
+          (event.state === "updated" || event.state === "cancelled") &&
+          event.replacesIds?.length
+        ) {
+          await client.query(
+            `UPDATE official_events
+             SET state='cancelled',
+                 payload=jsonb_set(payload, '{state}', to_jsonb('cancelled'::text), true),
+                 updated_at=now()
+             WHERE id = ANY($1::text[])`,
+            [event.replacesIds],
+          );
+          await this.updateOfficialEventSourceItemState(
+            client,
+            event.source,
+            event.replacesIds,
+            "cancelled",
+          );
+        }
+        await this.upsertSourceItem(officialEventSourceItemInput(event, fetchedAt), client);
       }
-      await this.upsertSourceItem(officialEventSourceItemInput(event, fetchedAt));
-    }
+    });
   }
 
   async expireMissingOfficialEvents(
     source: OfficialEvent["source"],
     activeIds: string[],
   ): Promise<void> {
-    await this.pool.query(
-      `UPDATE official_events
-       SET state='expired',
-           payload=jsonb_set(payload, '{state}', to_jsonb('expired'::text), true),
+    await this.withTransaction(async (client) => {
+      const expired = await client.query<{ id: string }>(
+        `UPDATE official_events
+         SET state='expired',
+             payload=jsonb_set(payload, '{state}', to_jsonb('expired'::text), true),
+             updated_at=now()
+         WHERE source=$1
+         AND state IN ('active', 'updated')
+         AND NOT (id = ANY($2::text[]))
+         RETURNING id`,
+        [source, activeIds],
+      );
+      await this.updateOfficialEventSourceItemState(
+        client,
+        source,
+        expired.rows.map((row) => row.id),
+        "expired",
+      );
+    });
+  }
+
+  private async updateOfficialEventSourceItemState(
+    client: Queryable,
+    source: OfficialEvent["source"],
+    eventIds: string[],
+    state: "cancelled" | "expired",
+  ): Promise<void> {
+    if (eventIds.length === 0) return;
+    await client.query(
+      `UPDATE source_items
+       SET normalized_payload=jsonb_set(normalized_payload, '{state}', to_jsonb($3::text), true),
+           raw_payload=CASE
+             WHEN jsonb_typeof(raw_payload)='object'
+             THEN jsonb_set(raw_payload, '{state}', to_jsonb($3::text), true)
+             ELSE raw_payload
+           END,
            updated_at=now()
-       WHERE source=$1
-       AND state IN ('active', 'updated')
-       AND NOT (id = ANY($2::text[]))`,
-      [source, activeIds],
+       WHERE provider=$1
+       AND kind='official_event'
+       AND external_id = ANY($2::text[])`,
+      [source, eventIds, state],
     );
   }
 
@@ -299,133 +362,135 @@ export class WorkerRepository {
   }
 
   async upsertSituation(situation: Situation): Promise<void> {
-    const previous = await this.pool.query<{ payload: Situation }>(
-      "SELECT payload FROM situations WHERE id=$1",
-      [situation.id],
-    );
-    const merged = mergeSituation(previous.rows[0]?.payload, situation);
-    await this.pool.query(
-      `INSERT INTO situations (id, type, status, verification_status, importance, updated_at, payload)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,
-       verification_status=EXCLUDED.verification_status, importance=EXCLUDED.importance,
-       updated_at=EXCLUDED.updated_at, payload=EXCLUDED.payload`,
-      [
-        merged.id,
-        merged.type,
-        merged.status,
-        merged.verificationStatus,
-        merged.importance,
-        merged.updatedAt,
-        merged,
-      ],
-    );
-    if (merged.incidentSignature && merged.activationBasis) {
-      await this.pool.query(
-        `INSERT INTO situation_activations
-         (situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at,
-          dismissed_at, dismissal_reason)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (situation_id) DO UPDATE SET incident_signature=EXCLUDED.incident_signature,
-         detection_version=EXCLUDED.detection_version, source_ids=EXCLUDED.source_ids,
-         article_ids=EXCLUDED.article_ids, activated_at=EXCLUDED.activated_at,
-         dismissed_at=EXCLUDED.dismissed_at, dismissal_reason=EXCLUDED.dismissal_reason`,
+    await this.withTransaction(async (client) => {
+      const previous = await client.query<{ payload: Situation }>(
+        "SELECT payload FROM situations WHERE id=$1",
+        [situation.id],
+      );
+      const merged = mergeSituation(previous.rows[0]?.payload, situation);
+      await client.query(
+        `INSERT INTO situations (id, type, status, verification_status, importance, updated_at, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,
+         verification_status=EXCLUDED.verification_status, importance=EXCLUDED.importance,
+         updated_at=EXCLUDED.updated_at, payload=EXCLUDED.payload`,
         [
           merged.id,
-          merged.incidentSignature,
-          merged.detectionVersion ?? "2",
-          JSON.stringify(merged.activationBasis.sourceIds),
-          JSON.stringify(merged.activationBasis.articleIds),
-          merged.activationBasis.activatedAt,
-          merged.dismissedAt ?? null,
-          merged.dismissalReason ?? null,
+          merged.type,
+          merged.status,
+          merged.verificationStatus,
+          merged.importance,
+          merged.updatedAt,
+          merged,
         ],
       );
-    }
-    for (const evidence of merged.evidence) {
-      await this.pool.query(
-        `INSERT INTO evidence_items
-         (id, situation_id, source, source_url, provenance, confidence, payload, extracted_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (id) DO UPDATE SET source_url=EXCLUDED.source_url,
-         provenance=EXCLUDED.provenance, confidence=EXCLUDED.confidence,
-         payload=EXCLUDED.payload, extracted_at=EXCLUDED.extracted_at`,
-        [
-          evidence.id,
-          merged.id,
-          evidence.source,
-          evidence.sourceUrl,
-          evidence.provenance,
-          evidence.confidence,
-          evidence,
-          evidence.extractedAt,
-        ],
+      if (merged.incidentSignature && merged.activationBasis) {
+        await client.query(
+          `INSERT INTO situation_activations
+           (situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at,
+            dismissed_at, dismissal_reason)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (situation_id) DO UPDATE SET incident_signature=EXCLUDED.incident_signature,
+           detection_version=EXCLUDED.detection_version, source_ids=EXCLUDED.source_ids,
+           article_ids=EXCLUDED.article_ids, activated_at=EXCLUDED.activated_at,
+           dismissed_at=EXCLUDED.dismissed_at, dismissal_reason=EXCLUDED.dismissal_reason`,
+          [
+            merged.id,
+            merged.incidentSignature,
+            merged.detectionVersion ?? "2",
+            JSON.stringify(merged.activationBasis.sourceIds),
+            JSON.stringify(merged.activationBasis.articleIds),
+            merged.activationBasis.activatedAt,
+            merged.dismissedAt ?? null,
+            merged.dismissalReason ?? null,
+          ],
+        );
+      }
+      for (const evidence of merged.evidence) {
+        await client.query(
+          `INSERT INTO evidence_items
+           (id, situation_id, source, source_url, provenance, confidence, payload, extracted_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (id) DO UPDATE SET source_url=EXCLUDED.source_url,
+           provenance=EXCLUDED.provenance, confidence=EXCLUDED.confidence,
+           payload=EXCLUDED.payload, extracted_at=EXCLUDED.extracted_at`,
+          [
+            evidence.id,
+            merged.id,
+            evidence.source,
+            evidence.sourceUrl,
+            evidence.provenance,
+            evidence.confidence,
+            evidence,
+            evidence.extractedAt,
+          ],
+        );
+      }
+      const currentWarningIds = merged.features
+        .filter((feature) => feature.properties.layer === "warning")
+        .map((feature) => feature.id);
+      await client.query(
+        `DELETE FROM map_features
+         WHERE situation_id=$1 AND properties->>'layer'='warning'
+         AND NOT (id = ANY($2::text[]))`,
+        [merged.id, currentWarningIds],
       );
-    }
-    const currentWarningIds = merged.features
-      .filter((feature) => feature.properties.layer === "warning")
-      .map((feature) => feature.id);
-    await this.pool.query(
-      `DELETE FROM map_features
-       WHERE situation_id=$1 AND properties->>'layer'='warning'
-       AND NOT (id = ANY($2::text[]))`,
-      [merged.id, currentWarningIds],
-    );
-    for (const feature of merged.features) {
-      if (feature.properties.provenance === "private_annotation") continue;
-      await this.pool.query(
-        `INSERT INTO map_features (id, situation_id, provenance, geometry, properties)
-         VALUES ($1,$2,$3,ST_SetSRID(ST_GeomFromGeoJSON($4),4326),$5)
-         ON CONFLICT (id) DO UPDATE SET provenance=EXCLUDED.provenance,
-         geometry=EXCLUDED.geometry, properties=EXCLUDED.properties`,
-        [
-          feature.id,
-          merged.id,
-          feature.properties.provenance,
-          JSON.stringify(feature.geometry),
-          feature.properties,
-        ],
-      );
-    }
-    for (const timeline of merged.timeline) {
-      await this.pool.query(
-        `INSERT INTO timeline_entries (id, situation_id, occurred_at, payload)
-         VALUES ($1,$2,$3,$4)
-         ON CONFLICT (id) DO UPDATE SET occurred_at=EXCLUDED.occurred_at, payload=EXCLUDED.payload`,
-        [timeline.id, merged.id, timeline.timestamp, timeline],
-      );
-    }
-    for (const articleId of merged.relatedArticleIds) {
-      await this.pool.query(
-        `INSERT INTO situation_articles (situation_id, article_id) VALUES ($1,$2)
-         ON CONFLICT DO NOTHING`,
-        [merged.id, articleId],
-      );
-      await this.pool.query(
-        `UPDATE articles
-         SET payload = jsonb_set(payload, '{situationId}', to_jsonb($2::text), true)
-         WHERE id = $1`,
-        [articleId, merged.id],
-      );
-      await this.pool.query(
-        `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
-         SELECT $1, id, 'supports', 'worker'
-         FROM source_items
-         WHERE kind='article' AND external_id=$2
-         ON CONFLICT (situation_id, source_item_id) DO NOTHING`,
-        [merged.id, articleId],
-      );
-    }
-    if (merged.officialEventId && merged.officialSource) {
-      await this.pool.query(
-        `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
-         SELECT $1, id, 'supports', 'worker'
-         FROM source_items
-         WHERE provider=$2 AND kind='official_event' AND external_id=$3
-         ON CONFLICT (situation_id, source_item_id) DO NOTHING`,
-        [merged.id, merged.officialSource, merged.officialEventId],
-      );
-    }
+      for (const feature of merged.features) {
+        if (feature.properties.provenance === "private_annotation") continue;
+        await client.query(
+          `INSERT INTO map_features (id, situation_id, provenance, geometry, properties)
+           VALUES ($1,$2,$3,ST_SetSRID(ST_GeomFromGeoJSON($4),4326),$5)
+           ON CONFLICT (id) DO UPDATE SET provenance=EXCLUDED.provenance,
+           geometry=EXCLUDED.geometry, properties=EXCLUDED.properties`,
+          [
+            feature.id,
+            merged.id,
+            feature.properties.provenance,
+            JSON.stringify(feature.geometry),
+            feature.properties,
+          ],
+        );
+      }
+      for (const timeline of merged.timeline) {
+        await client.query(
+          `INSERT INTO timeline_entries (id, situation_id, occurred_at, payload)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (id) DO UPDATE SET occurred_at=EXCLUDED.occurred_at, payload=EXCLUDED.payload`,
+          [timeline.id, merged.id, timeline.timestamp, timeline],
+        );
+      }
+      for (const articleId of merged.relatedArticleIds) {
+        await client.query(
+          `INSERT INTO situation_articles (situation_id, article_id) VALUES ($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [merged.id, articleId],
+        );
+        await client.query(
+          `UPDATE articles
+           SET payload = jsonb_set(payload, '{situationId}', to_jsonb($2::text), true)
+           WHERE id = $1`,
+          [articleId, merged.id],
+        );
+        await client.query(
+          `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
+           SELECT $1, id, 'supports', 'worker'
+           FROM source_items
+           WHERE kind='article' AND external_id=$2
+           ON CONFLICT (situation_id, source_item_id) DO NOTHING`,
+          [merged.id, articleId],
+        );
+      }
+      if (merged.officialEventId && merged.officialSource) {
+        await client.query(
+          `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
+           SELECT $1, id, 'supports', 'worker'
+           FROM source_items
+           WHERE provider=$2 AND kind='official_event' AND external_id=$3
+           ON CONFLICT (situation_id, source_item_id) DO NOTHING`,
+          [merged.id, merged.officialSource, merged.officialEventId],
+        );
+      }
+    });
   }
 }
 
