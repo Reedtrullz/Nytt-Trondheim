@@ -365,6 +365,7 @@ function warningEventsForSituation(
 ): OfficialEvent[] {
   const location = article.location;
   return events.filter((event) => {
+    if (event.source !== "met" && event.source !== "nve") return false;
     if (event.state === "cancelled" || new Date(event.validTo).getTime() < Date.now()) return false;
     if (event.eventType !== type) return false;
     if (event.source === "nve") {

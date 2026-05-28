@@ -8,7 +8,11 @@ import {
   rssSources,
 } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
-import { detectPreliminarySituations } from "./clusters.js";
+import {
+  detectPreliminarySituations,
+  officialTrafficSituationsFromEvents,
+  resolvedOfficialTrafficSituationsForMissingDatex,
+} from "./clusters.js";
 import { collectDatexSituationEvents } from "./datex.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
@@ -158,7 +162,11 @@ async function collectAll(): Promise<void> {
   await repository.upsertOfficialEvents(officialEvents);
   const recentArticles = await repository.recentArticles(12);
   const situationUpdateArticles = await repository.recentArticles(72);
-  const currentWarnings = await repository.currentOfficialEvents();
+  const currentOfficialEvents = await repository.currentOfficialEvents();
+  const currentWarnings = currentOfficialEvents.filter(
+    (event) => event.source === "met" || event.source === "nve",
+  );
+  const currentDatexEvents = currentOfficialEvents.filter((event) => event.source === "datex");
   const analysis = await analyzer.cluster(recentArticles);
   await repository.saveAiRun(analysis.run);
   await repository.setHealth({
@@ -175,20 +183,29 @@ async function collectAll(): Promise<void> {
           ? "DEEPSEEK_API_KEY er ikke konfigurert"
           : (analysis.run.error ?? "AI-analyse feilet"),
   });
+  const trackedSituations = await repository.trackedSituations();
   const deterministicSituations = enhanceSituations(
-    detectPreliminarySituations(
-      situationUpdateArticles,
-      currentWarnings,
-      await repository.trackedSituations(),
-    ),
+    detectPreliminarySituations(situationUpdateArticles, currentWarnings, trackedSituations),
     analysis.result,
     recentArticles,
   );
-  await Promise.all(
-    deterministicSituations.map((situation) => repository.upsertSituation(situation)),
+  const officialTrafficSituations = officialTrafficSituationsFromEvents(
+    currentDatexEvents,
+    trackedSituations,
   );
+  const resolvedDatexSituations = resolvedOfficialTrafficSituationsForMissingDatex(
+    trackedSituations,
+    new Set(currentDatexEvents.map((event) => event.id)),
+    new Date().toISOString(),
+  );
+  const situationsToPersist = [
+    ...deterministicSituations,
+    ...officialTrafficSituations,
+    ...resolvedDatexSituations,
+  ];
+  await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
   console.log(
-    `[worker] stored ${articles.length} articles; persisted ${deterministicSituations.length} multi-source situations; AI identified ${analysis.result.clusters.length} validated candidates`,
+    `[worker] stored ${articles.length} articles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX); AI identified ${analysis.result.clusters.length} validated candidates`,
   );
 }
 

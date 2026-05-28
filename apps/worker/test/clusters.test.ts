@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { OfficialEvent } from "@nytt/shared";
+import type { Article, OfficialEvent } from "@nytt/shared";
 import {
+  detectPreliminarySituations,
   officialTrafficSituationsFromEvents,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "../src/clusters.js";
@@ -93,5 +94,44 @@ describe("official traffic situation promotion", () => {
       title: "DATEX-hendelsen er ikke lenger aktiv",
       official: true,
     });
+  });
+
+  it("does not treat DATEX traffic events as MET/NVE warning context", () => {
+    const base: Article = {
+      id: "nrk-tiller",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Trafikkulykke på E6 ved Tiller",
+      excerpt: "Trafikkulykke ved Tiller skaper kø på E6.",
+      url: "https://example.test/nrk-tiller",
+      publishedAt: "2026-05-28T10:00:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["Tiller"],
+      location: { label: "Tiller", lat: 63.361, lng: 10.376 },
+    };
+    const situations = detectPreliminarySituations(
+      [
+        base,
+        {
+          ...base,
+          id: "adressa-tiller",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          url: "https://example.test/adressa-tiller",
+          publishedAt: "2026-05-28T10:10:00.000Z",
+        },
+      ],
+      [datexEvent],
+      [],
+    );
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]?.features.some((feature) => feature.properties.layer === "warning")).toBe(
+      false,
+    );
+    expect(
+      situations[0]?.evidence.some((evidence) => evidence.claimType === "official_warning_context"),
+    ).toBe(false);
   });
 });
