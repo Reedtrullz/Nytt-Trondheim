@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { MapFeature, SituationWorkspace } from "@nytt/shared";
+import type { MapFeature, SituationWorkspace, SourceItem } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
@@ -17,6 +17,8 @@ function formatTime(value: string) {
 export function SituationPage() {
   const { id = "" } = useParams();
   const [workspace, setWorkspace] = useState<SituationWorkspace>();
+  const [sourceItems, setSourceItems] = useState<SourceItem[]>([]);
+  const [sourceItemsError, setSourceItemsError] = useState<string>();
   const [taskText, setTaskText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -25,10 +27,34 @@ export function SituationPage() {
   const [actionMessage, setActionMessage] = useState<string>();
 
   useEffect(() => {
+    let ignore = false;
+
+    setWorkspace(undefined);
+    setSourceItems([]);
+    setError(undefined);
+    setSourceItemsError(undefined);
+
     void api
       .workspace(id)
-      .then(setWorkspace)
-      .catch((reason: Error) => setError(reason.message));
+      .then((workspaceResult) => {
+        if (!ignore) setWorkspace(workspaceResult);
+      })
+      .catch((reason: Error) => {
+        if (!ignore) setError(reason.message);
+      });
+
+    void api
+      .situationSourceItems(id)
+      .then((sourceItemResult) => {
+        if (!ignore) setSourceItems(sourceItemResult);
+      })
+      .catch((reason: Error) => {
+        if (!ignore) setSourceItemsError(reason.message);
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [id]);
 
   if (error) return <main className="loading">Kunne ikke åpne situasjonsrom: {error}</main>;
@@ -362,6 +388,27 @@ export function SituationPage() {
                 <span>{entry.sourceLabel}</span>
               </article>
             ))}
+          </section>
+          <section className="source-items-panel">
+            <h2>Kildegrunnlag</h2>
+            {sourceItemsError ? (
+              <p>Kunne ikke hente kildegrunnlag: {sourceItemsError}</p>
+            ) : sourceItems.length === 0 ? (
+              <p>Ingen kildeelementer er koblet ennå.</p>
+            ) : (
+              <ul>
+                {sourceItems.map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.title ?? item.externalId ?? item.id}</strong>
+                    <span>
+                      {item.provider} · {item.kind} · {item.reliabilityTier}
+                    </span>
+                    {item.summary ? <p>{item.summary}</p> : null}
+                    {item.originalUrl ? <a href={item.originalUrl}>Åpne kilde</a> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
           <section className="related">
             <h2>Relaterte saker</h2>

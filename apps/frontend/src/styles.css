@@ -1277,6 +1277,52 @@ button {
   font-size: 11px;
 }
 
+.source-items-panel > p {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.source-items-panel ul {
+  padding: 0;
+  margin: 14px 0 0;
+  list-style: none;
+}
+
+.source-items-panel li {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.source-items-panel strong,
+.source-items-panel span {
+  display: block;
+}
+
+.source-items-panel strong {
+  font-size: 13px;
+}
+
+.source-items-panel span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.source-items-panel li p {
+  margin: 7px 0 0;
+  color: #3b4549;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.source-items-panel a {
+  display: inline-block;
+  margin-top: 7px;
+  color: var(--blue);
+  font-size: 10px;
+}
+
 .related a {
   display: block;
   margin-top: 14px;

@@ -13,6 +13,11 @@ test("reader opens the active situation and keeps private map controls distinct"
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
   await expect(page.getByText("Mine markeringer")).toBeVisible();
   await expect(page.getByText("Viser ressurser i området - ikke aktiv innsats")).toBeVisible();
+  const sourceItemsPanel = page.locator(".source-items-panel");
+  await expect(sourceItemsPanel.getByRole("heading", { name: "Kildegrunnlag" })).toBeVisible();
+  await expect(
+    sourceItemsPanel.getByText(/Ingen kildeelementer er koblet ennå|NRK|Adresseavisen|Vegvesen/),
+  ).toBeVisible();
 });
 
 test("primary surfaces have no automatically detectable accessibility violations", async ({
