@@ -12,6 +12,7 @@ import {
   lifecycleInputSchema,
   noteInputSchema,
   privateMapFeatureInputSchema,
+  sourceItemLinkInputSchema,
   sourceItemQuerySchema,
   situationQuerySchema,
   taskInputSchema,
@@ -192,6 +193,34 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.json(await store.listSituationSourceItems(req.params.id, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/situations/:id/source-items/:sourceItemId", async (req, res, next) => {
+    try {
+      const { relationship } = sourceItemLinkInputSchema.parse(req.body ?? {});
+      const linked = await store.linkSourceItem(
+        req.params.id,
+        req.params.sourceItemId,
+        relationship,
+        currentLogin(req),
+      );
+      if (!linked) {
+        res.status(404).json({ error: "Situasjon eller kildeelement finnes ikke." });
+        return;
+      }
+      res.status(201).json(linked);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/situations/:id/source-items/:sourceItemId", async (req, res, next) => {
+    try {
+      await store.unlinkSourceItem(req.params.id, req.params.sourceItemId, currentLogin(req));
+      res.status(204).end();
     } catch (error) {
       next(error);
     }

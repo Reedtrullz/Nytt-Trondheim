@@ -47,4 +47,42 @@ describe("source item API", () => {
     const { app } = await testApp();
     await request(app).get("/api/situations/skogbrann-bymarka/source-items").expect(200, []);
   });
+
+  it("links and unlinks source items with CSRF and relationship validation", async () => {
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    const csrf = session.body.csrfToken as string;
+    const sourceItems = await agent.get("/api/source-items?limit=1").expect(200);
+    const sourceItemId = sourceItems.body.items[0].id as string;
+    const encoded = encodeURIComponent(sourceItemId);
+
+    await agent
+      .post(`/api/situations/skogbrann-bymarka/source-items/${encoded}`)
+      .send({ relationship: "supports" })
+      .expect(403);
+
+    await agent
+      .post(`/api/situations/skogbrann-bymarka/source-items/${encoded}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ relationship: "bad" })
+      .expect(400);
+
+    await agent
+      .post(`/api/situations/skogbrann-bymarka/source-items/${encoded}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ relationship: "supports" })
+      .expect(201)
+      .expect((response) => {
+        expect(response.body.id).toBe(sourceItemId);
+        expect(response.body.linkedSituationIds).toContain("skogbrann-bymarka");
+      });
+
+    await agent
+      .delete(`/api/situations/skogbrann-bymarka/source-items/${encoded}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(204);
+
+    await agent.get("/api/situations/skogbrann-bymarka/source-items").expect(200, []);
+  });
 });
