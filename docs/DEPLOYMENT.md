@@ -39,22 +39,24 @@ If Google Drive still reports `rateLimitExceeded` while backups recover after re
 - Confirm DNS for `nytt.reidar.tech` resolves to the VPS.
 - Run origin provisioning to repair TLS/Cloudflare routing before release; the endpoint returned HTTP `525` before the `nytt.reidar.tech` Caddy hostname existed.
 - Confirm Docker, Caddy and the `deploy` SSH key are available on the same VPS used by RFMC.
-- Configure DATEX Basic Auth secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, optional `NYTT_DATEX_ENDPOINT`) if traffic-event ingestion and source health should run against Vegvesen. Leave `NYTT_DATEX_ENDPOINT` empty to use the SRTI-filtered default (`GetSituation/pullsnapshotdata?srti=True`); only override it deliberately because the unfiltered national snapshot is much larger.
+- Configure DATEX Basic Auth secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, optional `NYTT_DATEX_ENDPOINT`) if traffic-event ingestion, DATEX TravelTime traffic pulse and source health should run against Vegvesen. These secrets map to runtime `DATEX_USERNAME` and `DATEX_PASSWORD` and are shared by DATEX situation and TravelTime collectors. Leave `NYTT_DATEX_ENDPOINT` empty to use the SRTI-filtered default (`GetSituation/pullsnapshotdata?srti=True`); only override it deliberately because the unfiltered national snapshot is much larger. Optional runtime TravelTime endpoint overrides are `DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT` and `DATEX_TRAVEL_TIME_DATA_ENDPOINT`; blank values use `https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata` and `https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata`.
 
 ## DATEX Verification
 
-After deploying DATEX ingestion, verify live health, source status, worker stability and persisted official traffic rows:
+After deploying DATEX ingestion, verify live health, source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
 
 ```bash
 curl -fsS https://nytt.reidar.tech/health
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production ps worker"
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production logs --tail=80 worker"
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at,next_poll_at from source_health where source='datex';\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at,next_poll_at from source_health where source in ('datex','datex_travel_time') order by source;\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from official_events where source='datex';\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from situations where payload->>'officialSource'='datex';\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select id,name,state,travel_time_seconds,free_flow_seconds,delay_seconds,measurement_to from datex_travel_times order by delay_seconds desc nulls last, name asc limit 10;\""
 ```
 
-A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on `source_health.state='ok'`, worker logs and container uptime to distinguish that from collector failure. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
+A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on `source_health.state='ok'`, worker logs and container uptime to distinguish that from collector failure. TravelTime source health appears as `datex_travel_time`; rows in `datex_travel_times` are measured/estimated travel time and delay pulse data only. They do not create `official_events`, do not promote or create `OfficialEvent` rows, and do not create or update `situations`. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
 
 ## Rollback
 
@@ -66,7 +68,8 @@ As inspected on May 28, 2026:
 
 - The application is live at `https://nytt.reidar.tech`; `/health` returns healthy Postgres-backed status through Caddy and Cloudflare.
 - The DATEX ingestion release is deployed from commit `31bee84` after `CI` and `Deploy to VPS` completed successfully on `main`; the worker is running without the earlier full-snapshot Node heap OOM.
-- DATEX Basic Auth credentials are configured as GitHub repository secrets `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD`, mapped to runtime `DATEX_USERNAME` and `DATEX_PASSWORD` by the deploy workflow/playbook. Leave `NYTT_DATEX_ENDPOINT` blank unless intentionally overriding the SRTI-filtered default.
+- DATEX Basic Auth credentials are configured as GitHub repository secrets `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD`, mapped to runtime `DATEX_USERNAME` and `DATEX_PASSWORD` by the deploy workflow/playbook. DATEX TravelTime uses the same credentials. Leave `NYTT_DATEX_ENDPOINT` blank unless intentionally overriding the SRTI-filtered default; leave `DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT` and `DATEX_TRAVEL_TIME_DATA_ENDPOINT` blank unless intentionally overriding the Vegvesen TravelTime defaults.
+- DATEX TravelTime production verification should check `source_health.source='datex_travel_time'` and the `datex_travel_times` table. Treat the data as Drift/source-health traffic pulse only, not as incident cause or situation activation evidence.
 - Production DATEX source health last verified as `ok` with `0 relevante DATEX trafikkhendelser hentet`; this reflects the current SRTI snapshot having no relevant Trondheim/Trøndelag events, not missing credentials.
 - The incident-correctness release was manually verified and `NYTT_DEPLOY_ENABLED=true`; successful `main` CI runs now trigger production promotion.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
