@@ -87,6 +87,51 @@ ALTER TABLE official_events DROP CONSTRAINT IF EXISTS official_events_source_che
 ALTER TABLE official_events ADD CONSTRAINT official_events_source_check
   CHECK (source IN ('met', 'nve', 'datex'));
 
+CREATE TABLE IF NOT EXISTS source_items (
+  id text PRIMARY KEY,
+  provider text NOT NULL,
+  kind text NOT NULL,
+  external_id text,
+  original_url text,
+  title text,
+  summary text,
+  author text,
+  published_at timestamptz,
+  fetched_at timestamptz NOT NULL,
+  raw_payload jsonb NOT NULL,
+  normalized_payload jsonb NOT NULL,
+  capture_hash text NOT NULL,
+  geo_hint geometry(Geometry, 4326),
+  reliability_tier text NOT NULL CHECK (reliability_tier IN ('official', 'trusted_media', 'internal', 'unverified')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (kind IN ('article', 'official_event', 'warning', 'reporter_note', 'reader_tip', 'media_asset'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_kind_external_id_unique
+  ON source_items (provider, kind, external_id)
+  WHERE external_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS source_items_capture_hash_unique
+  ON source_items (capture_hash);
+CREATE INDEX IF NOT EXISTS source_items_provider_kind_idx ON source_items (provider, kind);
+CREATE INDEX IF NOT EXISTS source_items_fetched_at_idx ON source_items (fetched_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS source_items_geo_hint_idx ON source_items USING gist (geo_hint);
+
+CREATE TABLE IF NOT EXISTS situation_source_items (
+  situation_id text NOT NULL REFERENCES situations(id) ON DELETE CASCADE,
+  source_item_id text NOT NULL REFERENCES source_items(id) ON DELETE CASCADE,
+  relationship text NOT NULL DEFAULT 'supports'
+    CHECK (relationship IN ('supports', 'contradicts', 'context', 'duplicate')),
+  confidence_contribution real,
+  linked_at timestamptz NOT NULL DEFAULT now(),
+  linked_by text,
+  PRIMARY KEY (situation_id, source_item_id)
+);
+CREATE INDEX IF NOT EXISTS situation_source_items_source_item_idx
+  ON situation_source_items (source_item_id);
+CREATE INDEX IF NOT EXISTS situation_source_items_situation_idx
+  ON situation_source_items (situation_id);
+
 CREATE TABLE IF NOT EXISTS datex_travel_times (
   id text PRIMARY KEY,
   name text NOT NULL,
