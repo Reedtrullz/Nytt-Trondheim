@@ -228,6 +228,8 @@ describe("WorkerRepository", () => {
     expect(sql).toContain("INSERT INTO datex_travel_times");
     expect(sql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(sql).toContain("updated_at=now()");
+    expect(sql).not.toContain("source_items");
+    expect(sql).not.toContain("situation_source_items");
     expect(parameters).toEqual([
       corridor.id,
       corridor.name,
@@ -259,6 +261,8 @@ describe("WorkerRepository", () => {
     expect(sql).toContain("to_jsonb('stale'::text)");
     expect(sql).toContain("NOT (id = ANY($1::text[]))");
     expect(sql).toContain("updated_at=now()");
+    expect(sql).not.toContain("source_items");
+    expect(sql).not.toContain("situation_source_items");
   });
 
   it("reads DATEX travel time rows ordered by largest delay first, then name", async () => {
