@@ -12,6 +12,7 @@ import {
   lifecycleInputSchema,
   noteInputSchema,
   privateMapFeatureInputSchema,
+  sourceItemQuerySchema,
   situationQuerySchema,
   taskInputSchema,
   type MapFeature,
@@ -86,6 +87,15 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = articleQuerySchema.parse(req.query);
       res.json(await store.listArticles(query, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/source-items", async (req, res, next) => {
+    try {
+      const query = sourceItemQuerySchema.parse(req.query);
+      res.json(await store.listSourceItems(query, currentLogin(req)));
     } catch (error) {
       next(error);
     }
