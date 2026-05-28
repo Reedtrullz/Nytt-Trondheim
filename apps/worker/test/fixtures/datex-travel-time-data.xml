@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<d2:d2LogicalModel xmlns:d2="http://datex2.eu/schema/3/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" modelBaseVersion="3">
+  <d2:payloadPublication xsi:type="d2:MeasuredDataPublication" lang="no">
+    <d2:publicationTime>2026-05-28T18:20:00.010+02:00</d2:publicationTime>
+    <d2:siteMeasurements>
+      <d2:physicalQuantity>
+        <d2:basicData xsi:type="d2:TravelTimeData">
+          <d2:pertinentLocation xsi:type="d2:LocationByReference">
+            <d2:predefinedLocationReference id="100135" />
+          </d2:pertinentLocation>
+          <d2:measurementOrCalculationTime>
+            <d2:period>
+              <d2:startOfPeriod>2026-05-28T18:15:00.010+02:00</d2:startOfPeriod>
+              <d2:endOfPeriod>2026-05-28T18:20:00.010+02:00</d2:endOfPeriod>
+            </d2:period>
+          </d2:measurementOrCalculationTime>
+          <d2:travelTime>
+            <d2:duration>360</d2:duration>
+          </d2:travelTime>
+          <d2:freeFlowTravelTime>
+            <d2:duration>240</d2:duration>
+          </d2:freeFlowTravelTime>
+          <d2:travelTimeTrendType>increasing</d2:travelTimeTrendType>
+        </d2:basicData>
+      </d2:physicalQuantity>
+      <d2:physicalQuantity>
+        <d2:basicData xsi:type="d2:TravelTimeData">
+          <d2:pertinentLocation xsi:type="d2:LocationByReference">
+            <d2:predefinedLocationReference id="100139" />
+          </d2:pertinentLocation>
+          <d2:measurementOrCalculationTime>
+            <d2:period>
+              <d2:startOfPeriod>2026-05-28T18:15:00.010+02:00</d2:startOfPeriod>
+              <d2:endOfPeriod>2026-05-28T18:20:00.010+02:00</d2:endOfPeriod>
+            </d2:period>
+          </d2:measurementOrCalculationTime>
+          <d2:travelTime>
+            <d2:duration>150</d2:duration>
+          </d2:travelTime>
+          <d2:freeFlowTravelTime>
+            <d2:duration>120</d2:duration>
+          </d2:freeFlowTravelTime>
+          <d2:travelTimeTrendType>stable</d2:travelTimeTrendType>
+        </d2:basicData>
+      </d2:physicalQuantity>
+      <d2:physicalQuantity>
+        <d2:basicData xsi:type="d2:TravelTimeData">
+          <d2:pertinentLocation xsi:type="d2:LocationByReference">
+            <d2:predefinedLocationReference id="local-future-1" />
+          </d2:pertinentLocation>
+          <d2:measurementOrCalculationTime>
+            <d2:period>
+              <d2:startOfPeriod>2026-05-28T18:15:00.010+02:00</d2:startOfPeriod>
+              <d2:endOfPeriod>2026-05-28T18:20:00.010+02:00</d2:endOfPeriod>
+            </d2:period>
+          </d2:measurementOrCalculationTime>
+          <d2:travelTime>
+            <d2:duration>180</d2:duration>
+          </d2:travelTime>
+          <d2:freeFlowTravelTime>
+            <d2:duration>180</d2:duration>
+          </d2:freeFlowTravelTime>
+        </d2:basicData>
+      </d2:physicalQuantity>
+      <d2:physicalQuantity>
+        <d2:basicData xsi:type="d2:TravelTimeData">
+          <d2:pertinentLocation xsi:type="d2:LocationByReference">
+            <d2:predefinedLocationReference id="999999" />
+          </d2:pertinentLocation>
+          <d2:measurementOrCalculationTime>
+            <d2:period>
+              <d2:startOfPeriod>2026-05-28T18:15:00.010+02:00</d2:startOfPeriod>
+              <d2:endOfPeriod>2026-05-28T18:20:00.010+02:00</d2:endOfPeriod>
+            </d2:period>
+          </d2:measurementOrCalculationTime>
+          <d2:travelTime>
+            <d2:duration>600</d2:duration>
+          </d2:travelTime>
+          <d2:freeFlowTravelTime>
+            <d2:duration>300</d2:duration>
+          </d2:freeFlowTravelTime>
+        </d2:basicData>
+      </d2:physicalQuantity>
+      <d2:physicalQuantity>
+        <d2:basicData xsi:type="d2:TravelTimeData">
+          <d2:pertinentLocation xsi:type="d2:LocationByReference">
+            <d2:predefinedLocationReference id="888888" />
+          </d2:pertinentLocation>
+          <d2:measurementOrCalculationTime>
+            <d2:period>
+              <d2:startOfPeriod>2026-05-28T18:15:00.010+02:00</d2:startOfPeriod>
+              <d2:endOfPeriod>2026-05-28T18:20:00.010+02:00</d2:endOfPeriod>
+            </d2:period>
+          </d2:measurementOrCalculationTime>
+          <d2:travelTime>
+            <d2:duration>1200</d2:duration>
+          </d2:travelTime>
+          <d2:freeFlowTravelTime>
+            <d2:duration>300</d2:duration>
+          </d2:freeFlowTravelTime>
+        </d2:basicData>
+      </d2:physicalQuantity>
+      <d2:physicalQuantity>
+        <d2:basicData xsi:type="d2:TravelTimeData">
+          <d2:pertinentLocation xsi:type="d2:LocationByReference">
+            <d2:predefinedLocationReference id="missing-location-1" />
+          </d2:pertinentLocation>
+          <d2:measurementOrCalculationTime>
+            <d2:period>
+              <d2:startOfPeriod>2026-05-28T18:15:00.010+02:00</d2:startOfPeriod>
+              <d2:endOfPeriod>2026-05-28T18:20:00.010+02:00</d2:endOfPeriod>
+            </d2:period>
+          </d2:measurementOrCalculationTime>
+          <d2:travelTime>
+            <d2:duration>210</d2:duration>
+          </d2:travelTime>
+          <d2:freeFlowTravelTime>
+            <d2:duration>180</d2:duration>
+          </d2:freeFlowTravelTime>
+        </d2:basicData>
+      </d2:physicalQuantity>
+      <d2:physicalQuantity>
+        <d2:basicData xsi:type="d2:TrafficFlow">
+          <d2:pertinentLocation xsi:type="d2:LocationByReference">
+            <d2:predefinedLocationReference id="non-travel-time-location" />
+          </d2:pertinentLocation>
+          <d2:measurementOrCalculationTime>
+            <d2:period>
+              <d2:startOfPeriod>2026-05-28T18:15:00.010+02:00</d2:startOfPeriod>
+              <d2:endOfPeriod>2026-05-28T18:20:00.010+02:00</d2:endOfPeriod>
+            </d2:period>
+          </d2:measurementOrCalculationTime>
+          <d2:vehicleFlowRate>42</d2:vehicleFlowRate>
+        </d2:basicData>
+      </d2:physicalQuantity>
+    </d2:siteMeasurements>
+  </d2:payloadPublication>
+</d2:d2LogicalModel>

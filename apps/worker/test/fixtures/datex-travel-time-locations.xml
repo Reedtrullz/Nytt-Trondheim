@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<d2:d2LogicalModel xmlns:d2="http://datex2.eu/schema/3/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" modelBaseVersion="3">
+  <d2:payloadPublication xsi:type="d2:PredefinedLocationsPublication" lang="no">
+    <d2:publicationTime>2026-05-28T18:14:00.000+02:00</d2:publicationTime>
+    <d2:predefinedLocationSet id="trondheim-travel-time-test" version="1">
+      <d2:predefinedLocation id="location-100135" version="1">
+        <d2:predefinedLocationReference id="100135" />
+        <d2:predefinedLocationName>
+          <d2:values>
+            <d2:value lang="no">E6 Moholt - E6 Ranheim</d2:value>
+          </d2:values>
+        </d2:predefinedLocationName>
+      </d2:predefinedLocation>
+      <d2:predefinedLocation id="location-100139" version="1">
+        <d2:predefinedLocationReference id="100139" />
+        <d2:predefinedLocationName>
+          <d2:values>
+            <d2:value lang="no">Rv706 Sluppen - E6 Sluppenrampene</d2:value>
+          </d2:values>
+        </d2:predefinedLocationName>
+      </d2:predefinedLocation>
+      <d2:predefinedLocation id="location-local-future-1" version="1">
+        <d2:predefinedLocationReference id="local-future-1" />
+        <d2:predefinedLocationName>
+          <d2:values>
+            <d2:value lang="no">Trondheim sentrum - Lade</d2:value>
+          </d2:values>
+        </d2:predefinedLocationName>
+      </d2:predefinedLocation>
+      <d2:predefinedLocation id="location-999999" version="1">
+        <d2:predefinedLocationReference id="999999" />
+        <d2:predefinedLocationName>
+          <d2:values>
+            <d2:value lang="no">Ring 3 Oslo - Sinsen</d2:value>
+          </d2:values>
+        </d2:predefinedLocationName>
+      </d2:predefinedLocation>
+      <d2:predefinedLocation id="location-888888" version="1">
+        <d2:predefinedLocationReference id="888888" />
+        <d2:predefinedLocationName>
+          <d2:values>
+            <d2:value lang="no">E6 Lillehammer - Hamar</d2:value>
+          </d2:values>
+        </d2:predefinedLocationName>
+      </d2:predefinedLocation>
+    </d2:predefinedLocationSet>
+  </d2:payloadPublication>
+</d2:d2LogicalModel>
