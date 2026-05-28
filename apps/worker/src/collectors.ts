@@ -1,9 +1,9 @@
-import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { XMLParser } from "fast-xml-parser";
 import type { Article, SourceId } from "@nytt/shared";
 import { categorize, detectScope, extractPlaces } from "./classify.js";
+import { probeDatexAccess } from "./datex.js";
 
 interface FeedSource {
   id: SourceId;
@@ -49,10 +49,6 @@ const defaultDatexSituationEndpoint =
 function nonEmptyEnv(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function datexBasicAuthHeader(username: string, password: string): string {
-  return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
 }
 
 export function canonicalUrl(rawUrl: string, base?: string): string {
@@ -201,17 +197,12 @@ async function probeDatex(fetcher: typeof fetch): Promise<OfficialProbeResult> {
 
   const endpoint = nonEmptyEnv(process.env.DATEX_ENDPOINT) ?? defaultDatexSituationEndpoint;
   try {
-    const response = await fetcher(endpoint, {
-      headers: {
-        "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
-        Authorization: datexBasicAuthHeader(username, password),
-      },
-    });
+    await probeDatexAccess({ endpoint, username, password, fetcher });
     return {
       source: "datex",
       label: "Vegvesen DATEX",
-      state: response.ok ? "ok" : "degraded",
-      detail: response.ok ? "Tilgang konfigurert og testet" : `HTTP ${response.status}`,
+      state: "ok",
+      detail: "Tilgang konfigurert og testet mot DATEX GetSituation",
     };
   } catch (error) {
     return { source: "datex", label: "Vegvesen DATEX", state: "degraded", detail: String(error) };

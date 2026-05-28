@@ -130,7 +130,7 @@ describe("DATEX official source probe", () => {
     expect(datex).toMatchObject({
       label: "Vegvesen DATEX",
       state: "ok",
-      detail: "Tilgang konfigurert og testet",
+      detail: "Tilgang konfigurert og testet mot DATEX GetSituation",
     });
   });
 });

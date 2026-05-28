@@ -65,6 +65,21 @@ export function datexBasicAuthHeader(username: string, password: string): string
   return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
 }
 
+export async function probeDatexAccess(options: {
+  endpoint: string;
+  username: string;
+  password: string;
+  fetcher?: typeof fetch;
+}): Promise<void> {
+  const response = await (options.fetcher ?? fetch)(options.endpoint, {
+    headers: {
+      "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+      Authorization: datexBasicAuthHeader(options.username, options.password),
+    },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
 export async function collectDatexSituationEvents({
   endpoint,
   username,
