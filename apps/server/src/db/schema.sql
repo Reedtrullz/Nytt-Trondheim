@@ -87,6 +87,22 @@ ALTER TABLE official_events DROP CONSTRAINT IF EXISTS official_events_source_che
 ALTER TABLE official_events ADD CONSTRAINT official_events_source_check
   CHECK (source IN ('met', 'nve', 'datex'));
 
+CREATE TABLE IF NOT EXISTS datex_travel_times (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  state text NOT NULL CHECK (state IN ('free_flow', 'slow', 'congested', 'stale')),
+  travel_time_seconds real,
+  free_flow_seconds real,
+  delay_seconds real,
+  delay_ratio real,
+  trend text,
+  measurement_from timestamptz,
+  measurement_to timestamptz,
+  source_url text NOT NULL,
+  payload jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS ai_processing_runs (
   id text PRIMARY KEY,
   provider text NOT NULL,

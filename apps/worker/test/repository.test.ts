@@ -1,5 +1,5 @@
 import type pg from "pg";
-import type { AiProcessingRun, Article } from "@nytt/shared";
+import type { AiProcessingRun, Article, TrafficPulseCorridor } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerRepository } from "../src/repository.js";
 
@@ -82,4 +82,178 @@ describe("WorkerRepository", () => {
     expect(query.mock.calls[0]?.[0]).toContain("state='expired'");
     expect(query.mock.calls[0]?.[0]).toContain("payload=jsonb_set");
   });
+
+  it("upserts DATEX travel time corridors with compact payload and numeric columns", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const corridor = travelTimeCorridor({
+      id: "e6-sluppen-sandmoen",
+      name: "E6 Sluppen–Sandmoen",
+      state: "slow",
+      travelTimeSeconds: 720,
+      freeFlowSeconds: 540,
+      delaySeconds: 180,
+      delayRatio: 1.33,
+      trend: "increasing",
+    });
+
+    await repository.upsertDatexTravelTimes([corridor]);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("INSERT INTO datex_travel_times");
+    expect(sql).toContain("ON CONFLICT (id) DO UPDATE");
+    expect(sql).toContain("updated_at=now()");
+    expect(parameters).toEqual([
+      corridor.id,
+      corridor.name,
+      corridor.state,
+      corridor.travelTimeSeconds,
+      corridor.freeFlowSeconds,
+      corridor.delaySeconds,
+      corridor.delayRatio,
+      corridor.trend,
+      corridor.measurementFrom,
+      corridor.measurementTo,
+      corridor.sourceUrl,
+      corridor,
+    ]);
+  });
+
+  it("marks DATEX travel time rows missing from a successful complete snapshot stale", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.markMissingDatexTravelTimesStale(["datex-keep-one", "datex-keep-two"]);
+
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE datex_travel_times"), [
+      ["datex-keep-one", "datex-keep-two"],
+    ]);
+    const sql = query.mock.calls[0]?.[0] as string;
+    expect(sql).toContain("state='stale'");
+    expect(sql).toContain("payload=jsonb_set");
+    expect(sql).toContain("to_jsonb('stale'::text)");
+    expect(sql).toContain("NOT (id = ANY($1::text[]))");
+    expect(sql).toContain("updated_at=now()");
+  });
+
+  it("reads DATEX travel time rows ordered by largest delay first, then name", async () => {
+    const sluppen = travelTimeCorridor({
+      id: "e6-sluppen-sandmoen",
+      name: "E6 Sluppen–Sandmoen",
+      state: "slow",
+      delaySeconds: 180,
+    });
+    const omkjoringsvegen = travelTimeCorridor({
+      id: "rv706-omkjoringsvegen",
+      name: "Rv706 Omkjøringsvegen",
+      state: "free_flow",
+      delaySeconds: 0,
+    });
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        { payload: sluppen, measurement_to: sluppen.measurementTo },
+        { payload: omkjoringsvegen, measurement_to: omkjoringsvegen.measurementTo },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.datexTravelTimes(new Date("2026-05-28T10:10:00.000Z")),
+    ).resolves.toEqual([sluppen, omkjoringsvegen]);
+
+    const sql = query.mock.calls[0]?.[0] as string;
+    expect(sql).toContain("FROM datex_travel_times");
+    expect(sql).toContain("ORDER BY delay_seconds DESC NULLS LAST, name ASC");
+  });
+
+  it("overlays stale state for old DATEX travel time measurements without rewriting rows", async () => {
+    const staleFromColumn = travelTimeCorridor({
+      id: "e6-old-column",
+      name: "E6 old column",
+      state: "slow",
+      measurementTo: "2026-05-28T09:50:00.000Z",
+    });
+    const staleFromPayload = travelTimeCorridor({
+      id: "e6-old-payload",
+      name: "E6 old payload",
+      state: "congested",
+      measurementTo: "2026-05-28T09:39:59.000Z",
+    });
+    const fresh = travelTimeCorridor({
+      id: "e6-fresh",
+      name: "E6 fresh",
+      state: "free_flow",
+      measurementTo: "2026-05-28T09:45:00.000Z",
+    });
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          payload: staleFromColumn,
+          measurement_to: new Date("2026-05-28T09:39:59.000Z"),
+        },
+        { payload: staleFromPayload, measurement_to: null },
+        { payload: fresh, measurement_to: new Date("2026-05-28T09:45:00.000Z") },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.datexTravelTimes(new Date("2026-05-28T10:00:00.000Z")),
+    ).resolves.toEqual([
+      { ...staleFromColumn, state: "stale" },
+      { ...staleFromPayload, state: "stale" },
+      fresh,
+    ]);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0]?.[0]).toContain("SELECT");
+    expect(query.mock.calls[0]?.[0]).not.toContain("UPDATE datex_travel_times");
+    expect(staleFromColumn.state).toBe("slow");
+    expect(staleFromPayload.state).toBe("congested");
+  });
+
+  it("overlays stale state when payload measurementTo is old even if measurement_to column is fresh", async () => {
+    const payloadOldColumnFresh = travelTimeCorridor({
+      id: "e6-old-payload-fresh-column",
+      name: "E6 old payload fresh column",
+      state: "slow",
+      measurementTo: "2026-05-28T09:39:59.000Z",
+    });
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          payload: payloadOldColumnFresh,
+          measurement_to: new Date("2026-05-28T09:55:00.000Z"),
+        },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.datexTravelTimes(new Date("2026-05-28T10:00:00.000Z")),
+    ).resolves.toEqual([{ ...payloadOldColumnFresh, state: "stale" }]);
+
+    expect(payloadOldColumnFresh.state).toBe("slow");
+  });
 });
+
+function travelTimeCorridor(
+  overrides: Partial<TrafficPulseCorridor> & Pick<TrafficPulseCorridor, "id" | "name">,
+): TrafficPulseCorridor {
+  return {
+    id: overrides.id,
+    name: overrides.name,
+    state: overrides.state ?? "free_flow",
+    travelTimeSeconds: overrides.travelTimeSeconds ?? 600,
+    freeFlowSeconds: overrides.freeFlowSeconds ?? 540,
+    delaySeconds: overrides.delaySeconds ?? 60,
+    delayRatio: overrides.delayRatio ?? 1.11,
+    trend: overrides.trend ?? "stable",
+    measurementFrom: overrides.measurementFrom ?? "2026-05-28T09:55:00.000Z",
+    measurementTo: overrides.measurementTo ?? "2026-05-28T10:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-05-28T10:00:00.000Z",
+    sourceUrl:
+      overrides.sourceUrl ?? "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata",
+  };
+}

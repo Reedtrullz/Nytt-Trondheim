@@ -6,6 +6,7 @@ import type {
   OfficialEvent,
   Situation,
   SourceHealth,
+  TrafficPulseCorridor,
 } from "@nytt/shared";
 
 export class WorkerRepository {
@@ -166,6 +167,69 @@ export class WorkerRepository {
     return result.rows.map((row) => row.payload);
   }
 
+  async upsertDatexTravelTimes(corridors: TrafficPulseCorridor[]): Promise<void> {
+    for (const corridor of corridors) {
+      await this.pool.query(
+        `INSERT INTO datex_travel_times
+         (id, name, state, travel_time_seconds, free_flow_seconds, delay_seconds, delay_ratio,
+          trend, measurement_from, measurement_to, source_url, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, state=EXCLUDED.state,
+           travel_time_seconds=EXCLUDED.travel_time_seconds,
+           free_flow_seconds=EXCLUDED.free_flow_seconds,
+           delay_seconds=EXCLUDED.delay_seconds,
+           delay_ratio=EXCLUDED.delay_ratio,
+           trend=EXCLUDED.trend,
+           measurement_from=EXCLUDED.measurement_from,
+           measurement_to=EXCLUDED.measurement_to,
+           source_url=EXCLUDED.source_url,
+           payload=EXCLUDED.payload,
+           updated_at=now()`,
+        [
+          corridor.id,
+          corridor.name,
+          corridor.state,
+          corridor.travelTimeSeconds ?? null,
+          corridor.freeFlowSeconds ?? null,
+          corridor.delaySeconds ?? null,
+          corridor.delayRatio ?? null,
+          corridor.trend ?? null,
+          corridor.measurementFrom ?? null,
+          corridor.measurementTo ?? null,
+          corridor.sourceUrl,
+          corridor,
+        ],
+      );
+    }
+  }
+
+  async markMissingDatexTravelTimesStale(activeIds: string[]): Promise<void> {
+    await this.pool.query(
+      `UPDATE datex_travel_times
+       SET state='stale',
+           payload=jsonb_set(payload, '{state}', to_jsonb('stale'::text), true),
+           updated_at=now()
+       WHERE NOT (id = ANY($1::text[]))`,
+      [activeIds],
+    );
+  }
+
+  async datexTravelTimes(now: Date = new Date()): Promise<TrafficPulseCorridor[]> {
+    const result = await this.pool.query<{
+      payload: TrafficPulseCorridor;
+      measurement_to: Date | string | null;
+    }>(
+      `SELECT payload, measurement_to
+       FROM datex_travel_times
+       ORDER BY delay_seconds DESC NULLS LAST, name ASC`,
+    );
+    return result.rows.map((row) =>
+      isStaleDatexTravelTime(row.payload, row.measurement_to, now)
+        ? { ...row.payload, state: "stale" }
+        : row.payload,
+    );
+  }
+
   async saveAiRun(run: AiProcessingRun): Promise<void> {
     await this.pool.query(
       `INSERT INTO ai_processing_runs
@@ -296,6 +360,31 @@ export class WorkerRepository {
       );
     }
   }
+}
+
+const datexTravelTimeStaleAfterMs = 20 * 60 * 1000;
+
+function isStaleDatexTravelTime(
+  corridor: TrafficPulseCorridor,
+  measurementToColumn: Date | string | null,
+  now: Date,
+): boolean {
+  const staleBefore = now.getTime() - datexTravelTimeStaleAfterMs;
+  return (
+    isOldDatexMeasurementTo(measurementToColumn, staleBefore) ||
+    isOldDatexMeasurementTo(corridor.measurementTo, staleBefore)
+  );
+}
+
+function isOldDatexMeasurementTo(
+  measurementTo: Date | string | null | undefined,
+  staleBefore: number,
+): boolean {
+  if (!measurementTo) return false;
+  const measuredAt =
+    measurementTo instanceof Date ? measurementTo.getTime() : Date.parse(measurementTo);
+  if (Number.isNaN(measuredAt)) return false;
+  return measuredAt < staleBefore;
 }
 
 function mergeSituation(existing: Situation | undefined, incoming: Situation): Situation {
