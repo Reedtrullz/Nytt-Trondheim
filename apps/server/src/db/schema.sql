@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS timeline_entries (
 
 CREATE TABLE IF NOT EXISTS official_events (
   id text PRIMARY KEY,
-  source text NOT NULL CHECK (source IN ('met', 'nve')),
+  source text NOT NULL,
   event_type text NOT NULL,
   state text NOT NULL,
   source_url text NOT NULL,
@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS official_events (
   payload jsonb NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE official_events DROP CONSTRAINT IF EXISTS official_events_source_check;
+ALTER TABLE official_events ADD CONSTRAINT official_events_source_check
+  CHECK (source IN ('met', 'nve', 'datex'));
 
 CREATE TABLE IF NOT EXISTS ai_processing_runs (
   id text PRIMARY KEY,
