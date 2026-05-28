@@ -8,6 +8,10 @@ import type {
   Situation,
   SituationPage,
   SituationWorkspace,
+  SourceItem,
+  SourceItemFilters,
+  SourceItemPage,
+  SourceItemRelationship,
   WorkspaceNote,
   WorkspaceTask,
 } from "@nytt/shared";
@@ -57,6 +61,27 @@ export const api = {
     }
     return request<ArticlePage>(`/api/articles?${parameters.toString()}`);
   },
+  sourceItems: (query: SourceItemFilters = {}) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) parameters.set(key, String(value));
+    }
+    return request<SourceItemPage>(`/api/source-items?${parameters.toString()}`);
+  },
+  situationSourceItems: (id: string) => request<SourceItem[]>(`/api/situations/${id}/source-items`),
+  linkSourceItem: (
+    id: string,
+    sourceItemId: string,
+    relationship: SourceItemRelationship = "supports",
+  ) =>
+    request<SourceItem>(`/api/situations/${id}/source-items/${encodeURIComponent(sourceItemId)}`, {
+      method: "POST",
+      body: JSON.stringify({ relationship }),
+    }),
+  unlinkSourceItem: (id: string, sourceItemId: string) =>
+    request<void>(`/api/situations/${id}/source-items/${encodeURIComponent(sourceItemId)}`, {
+      method: "DELETE",
+    }),
   situations: (
     query: {
       status?: Situation["status"];
