@@ -58,6 +58,9 @@ function CaptureClicks({
 
 function featureStyle(feature?: MapFeature) {
   const provenance = feature?.properties.provenance;
+  if (feature?.properties.layer === "traffic") {
+    return { color: "#1f6feb", weight: 3, fillColor: "#1f6feb", fillOpacity: 0.18 };
+  }
   if (feature?.properties.layer === "warning") {
     return { color: "#d79132", weight: 1, fillColor: "#e9bd62", fillOpacity: 0.13 };
   }
@@ -222,7 +225,7 @@ export function SituationMap({
         <CaptureClicks mode={mode} onClick={capture} />
       </MapContainer>
       <div className="map-legend">
-        <span className="legend official">Offentlig oppgitt</span>
+        <span className="legend official">Offentlig oppgitt / DATEX trafikk</span>
         <span className="legend estimated">Anslag fra rapportering</span>
         <span className="legend warning">Farevarsel</span>
         <span className="legend private">Privat markering</span>
