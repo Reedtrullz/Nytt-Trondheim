@@ -89,6 +89,20 @@ function recordKind(record: DatexObject): string {
   return datexAttribute(record, "type") || datexAttribute(record, "xsi:type") || "DATEX situation";
 }
 
+function datexImpact(
+  kind: string,
+  severity: string,
+  detail: string,
+): { impact: "high" | "normal"; promoteToSituation: boolean } {
+  const text = `${kind} ${severity} ${detail}`.toLocaleLowerCase("nb");
+  const high =
+    /accident|ulykke|closed|closure|stengt|blockage|obstruction|hindring|kø|queue|congestion|srti/.test(
+      text,
+    ) || severity.toLocaleLowerCase("en") === "high";
+  const lowMaintenance = /maintenanceworks|roadworks|vegarbeid|kantklipp/.test(text) && !high;
+  return { impact: high ? "high" : "normal", promoteToSituation: high && !lowMaintenance };
+}
+
 function humanizeRecordKind(kind: string): string {
   return kind
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -204,6 +218,9 @@ export function parseDatexSituationPublication(
         const roadName = firstTextForKey(record.roadInformation, "roadName");
         const comments = publicComments(record);
         const title = titleForRecord(record, kind, roadName, roadNumber);
+        const detail = comments.join("\n") || title;
+        const severity = datexText(record.severity).trim() || overallSeverity;
+        const impact = datexImpact(kind, severity, detail);
         const geometry = pointGeometry(record);
 
         events.push({
@@ -211,11 +228,11 @@ export function parseDatexSituationPublication(
           source: "datex",
           eventType: "traffic",
           title,
-          detail: comments.join("\n") || title,
+          detail,
           sourceUrl: options.endpoint,
           areaLabel: roadName || roadNumber || "Vegtrafikk",
           state: recordState(validityStatus),
-          severity: datexText(record.severity).trim() || overallSeverity || undefined,
+          severity: severity || undefined,
           publishedAt: publicationTime ?? versionTime ?? creationTime ?? options.receivedAt,
           validFrom,
           validTo,
@@ -226,6 +243,8 @@ export function parseDatexSituationPublication(
               recordId,
               version,
               recordKind: kind,
+              impact: impact.impact,
+              promoteToSituation: impact.promoteToSituation,
               roadNumber,
               roadName,
               receivedAt: options.receivedAt,

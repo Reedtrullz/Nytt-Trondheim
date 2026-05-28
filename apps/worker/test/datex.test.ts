@@ -79,6 +79,29 @@ describe("DATEX situation parsing", () => {
     });
   });
 
+  it("marks accidents and closures as promotable traffic situations", async () => {
+    const xml = await readFile(fixturePath, "utf8");
+    const result = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test",
+      receivedAt: "2026-05-28T10:05:00.000Z",
+    });
+
+    expect(result.events[0]?.raw).toMatchObject({
+      datex: { promoteToSituation: true, impact: "high" },
+    });
+  });
+
+  it("keeps low-impact planned roadworks as official events without promotion", () => {
+    const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-WORK" version="1"><situationRecord xsi:type="MaintenanceWorks" id="R1" version="1"><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><severity>low</severity><validity><validityStatus>active</validityStatus></validity><generalPublicComment><comment><values><value>Planlagt kantklipp i Trondheim.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
+    const result = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test",
+      receivedAt: "2026-05-28T10:05:00.000Z",
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]?.raw).toMatchObject({ datex: { promoteToSituation: false } });
+  });
+
   it("keeps the same official event id across DATEX record version updates", async () => {
     const xml = await readFile(fixturePath, "utf8");
     const updated = xml.replaceAll('version="3"', 'version="4"');
