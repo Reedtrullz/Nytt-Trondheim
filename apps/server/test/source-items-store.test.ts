@@ -21,6 +21,8 @@ const sourceItemRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const pgSourceItemRow = sourceItemRow;
+
 const decodeCursor = (cursor: string) =>
   JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as [string, string];
 
@@ -110,5 +112,58 @@ describe("source item store", () => {
       "2026-05-28T10:01:00.123456Z",
       "source:visible",
     ]);
+  });
+
+  it("links and unlinks source items in MemoryStore", async () => {
+    const store = new MemoryStore();
+    const [item] = (await store.listSourceItems({ limit: 1 }, "Reedtrullz")).items;
+    expect(item).toBeTruthy();
+
+    const linked = await store.linkSourceItem(
+      "skogbrann-bymarka",
+      item.id,
+      "supports",
+      "Reedtrullz",
+    );
+    expect(linked?.linkedSituationIds).toContain("skogbrann-bymarka");
+
+    const situationItems = await store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz");
+    expect(situationItems.map((source) => source.id)).toContain(item.id);
+
+    await expect(
+      store.unlinkSourceItem("skogbrann-bymarka", item.id, "Reedtrullz"),
+    ).resolves.toBe(true);
+    await expect(store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz")).resolves.toEqual([]);
+  });
+
+  it("uses idempotent PgStore SQL for source item links", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ id: "source:one" }] })
+      .mockResolvedValueOnce({ rows: [pgSourceItemRow({ linked_situation_ids: ["skogbrann-bymarka"] })] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const linked = await store.linkSourceItem("skogbrann-bymarka", "source:one", "supports", "Reedtrullz");
+    expect(linked?.linkedSituationIds).toEqual(["skogbrann-bymarka"]);
+    expect(query.mock.calls[0]?.[0]).toContain("INSERT INTO situation_source_items");
+    expect(query.mock.calls[0]?.[0]).toContain("ON CONFLICT");
+
+    await expect(store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz")).resolves.toBe(true);
+    expect(query.mock.calls[2]?.[0]).toContain("DELETE FROM situation_source_items");
+  });
+
+  it("returns undefined when PgStore cannot link missing source items or situations", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    await expect(
+      store.linkSourceItem("missing-situation", "missing-source", "supports", "Reedtrullz"),
+    ).resolves.toBeUndefined();
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const sql = query.mock.calls[0]?.[0] as string;
+    expect(sql).toContain("WHERE EXISTS (SELECT 1 FROM situations");
+    expect(sql).toContain("EXISTS (SELECT 1 FROM source_items");
   });
 });

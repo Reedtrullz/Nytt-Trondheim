@@ -13,6 +13,7 @@ import type {
   SourceItem,
   SourceItemFilters,
   SourceItemPage,
+  SourceItemRelationship,
   SourceHealth,
   TimelineEntry,
   TrafficPulseCorridor,
@@ -62,6 +63,14 @@ export interface Store {
   getBootstrap(login: string): Promise<BootstrapPayload>;
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
+  listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
+  linkSourceItem(
+    situationId: string,
+    sourceItemId: string,
+    relationship: SourceItemRelationship,
+    login: string,
+  ): Promise<SourceItem | undefined>;
+  unlinkSourceItem(situationId: string, sourceItemId: string, login: string): Promise<boolean>;
   listSavedArticles(login: string): Promise<Article[]>;
   setSaved(articleId: string, saved: boolean, login: string): Promise<void>;
   listSituations(filters: SituationFilters, login: string): Promise<SituationPage>;
@@ -227,6 +236,15 @@ function sourceItemFromRow(row: SourceItemRow): SourceItem {
   };
 }
 
+function sourceItemSelectColumns(alias = "si"): string {
+  return `${alias}.id, ${alias}.provider, ${alias}.kind, ${alias}.external_id, ${alias}.original_url,
+       ${alias}.title, ${alias}.summary, ${alias}.author, ${alias}.published_at, ${alias}.fetched_at,
+       to_char(${alias}.fetched_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fetched_at_cursor,
+       ${alias}.capture_hash,
+       ST_AsGeoJSON(${alias}.geo_hint)::json AS geo_hint, ${alias}.reliability_tier,
+       links.linked_situation_ids`;
+}
+
 const TRAFFIC_PULSE_STALE_AFTER_MS = 20 * 60 * 1000;
 
 function isOlderThan(value: Date | string | null | undefined, cutoffMs: number): boolean {
@@ -263,8 +281,21 @@ export class MemoryStore implements Store {
   );
   private sourceLinks = new Map<
     string,
-    { situationId: string; sourceItemId: string; relationship: string }
+    {
+      situationId: string;
+      sourceItemId: string;
+      relationship: SourceItemRelationship;
+      linkedBy: string;
+      linkedAt: string;
+    }
   >();
+
+  private linkedSituationIdsForSourceItem(sourceItemId: string): string[] {
+    return [...this.sourceLinks.values()]
+      .filter((link) => link.sourceItemId === sourceItemId)
+      .map((link) => link.situationId)
+      .sort();
+  }
 
   async getBootstrap(): Promise<BootstrapPayload> {
     return {
@@ -337,6 +368,52 @@ export class MemoryStore implements Store {
       items: clone(page),
       nextCursor: items.length > limit && last ? encodeCursor(last.fetchedAt, last.id) : undefined,
     };
+  }
+
+  async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
+    if (!this.situations.has(situationId)) return [];
+    const links = [...this.sourceLinks.values()]
+      .filter((link) => link.situationId === situationId)
+      .sort(
+        (left, right) =>
+          right.linkedAt.localeCompare(left.linkedAt) ||
+          right.sourceItemId.localeCompare(left.sourceItemId),
+      );
+    return links.flatMap((link) => {
+      const item = this.sourceItems.get(link.sourceItemId);
+      if (!item) return [];
+      return [
+        clone({
+          ...item,
+          linkedSituationIds: this.linkedSituationIdsForSourceItem(item.id),
+        }),
+      ];
+    });
+  }
+
+  async linkSourceItem(
+    situationId: string,
+    sourceItemId: string,
+    relationship: SourceItemRelationship,
+    login: string,
+  ): Promise<SourceItem | undefined> {
+    const item = this.sourceItems.get(sourceItemId);
+    if (!this.situations.has(situationId) || !item) return undefined;
+    this.sourceLinks.set(`${situationId}:${sourceItemId}`, {
+      situationId,
+      sourceItemId,
+      relationship,
+      linkedBy: login,
+      linkedAt: new Date().toISOString(),
+    });
+    return clone({
+      ...item,
+      linkedSituationIds: this.linkedSituationIdsForSourceItem(sourceItemId),
+    });
+  }
+
+  async unlinkSourceItem(situationId: string, sourceItemId: string): Promise<boolean> {
+    return this.sourceLinks.delete(`${situationId}:${sourceItemId}`);
   }
 
   async listSavedArticles(): Promise<Article[]> {
@@ -693,12 +770,7 @@ export class PgStore implements Store {
     }
     params.push((filters.limit ?? 40) + 1);
     const result = await this.pool.query<SourceItemRow>(
-      `SELECT si.id, si.provider, si.kind, si.external_id, si.original_url, si.title, si.summary,
-       si.author, si.published_at, si.fetched_at,
-       to_char(si.fetched_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fetched_at_cursor,
-       si.capture_hash,
-       ST_AsGeoJSON(si.geo_hint)::json AS geo_hint, si.reliability_tier,
-       links.linked_situation_ids
+      `SELECT ${sourceItemSelectColumns("si")}
        FROM source_items si
        LEFT JOIN LATERAL (
          SELECT COALESCE(array_agg(ssi.situation_id ORDER BY ssi.situation_id), '{}') AS linked_situation_ids
@@ -719,6 +791,67 @@ export class PgStore implements Store {
           ? encodeCursor(lastRow.fetched_at_cursor, lastRow.id)
           : undefined,
     };
+  }
+
+  async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
+    const result = await this.pool.query<SourceItemRow>(
+      `SELECT ${sourceItemSelectColumns("si")}
+       FROM situation_source_items ssi
+       JOIN source_items si ON si.id = ssi.source_item_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(array_agg(source_links.situation_id ORDER BY source_links.situation_id), '{}') AS linked_situation_ids
+         FROM situation_source_items source_links WHERE source_links.source_item_id = si.id
+       ) links ON true
+       WHERE ssi.situation_id = $1
+       ORDER BY ssi.linked_at DESC, ssi.source_item_id DESC`,
+      [situationId],
+    );
+    return result.rows.map(sourceItemFromRow);
+  }
+
+  async linkSourceItem(
+    situationId: string,
+    sourceItemId: string,
+    relationship: SourceItemRelationship,
+    login: string,
+  ): Promise<SourceItem | undefined> {
+    const result = await this.pool.query<{ id: string }>(
+      `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
+       SELECT $1, $2, $3, $4
+       WHERE EXISTS (SELECT 1 FROM situations WHERE id = $1)
+         AND EXISTS (SELECT 1 FROM source_items WHERE id = $2)
+       ON CONFLICT (situation_id, source_item_id) DO UPDATE SET
+         relationship = EXCLUDED.relationship,
+         linked_by = EXCLUDED.linked_by,
+         linked_at = now()
+       RETURNING source_item_id AS id`,
+      [situationId, sourceItemId, relationship, login],
+    );
+    const linkedId = result.rows[0]?.id;
+    return linkedId ? this.getSourceItem(linkedId) : undefined;
+  }
+
+  async unlinkSourceItem(situationId: string, sourceItemId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "DELETE FROM situation_source_items WHERE situation_id = $1 AND source_item_id = $2",
+      [situationId, sourceItemId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  private async getSourceItem(id: string): Promise<SourceItem | undefined> {
+    const result = await this.pool.query<SourceItemRow>(
+      `SELECT ${sourceItemSelectColumns("si")}
+       FROM source_items si
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(array_agg(ssi.situation_id ORDER BY ssi.situation_id), '{}') AS linked_situation_ids
+         FROM situation_source_items ssi WHERE ssi.source_item_id = si.id
+       ) links ON true
+       WHERE si.id = $1`,
+      [id],
+    );
+    const row = result.rows[0];
+    return row ? sourceItemFromRow(row) : undefined;
   }
 
   async listSavedArticles(login: string) {
