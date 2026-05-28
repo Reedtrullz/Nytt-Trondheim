@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   Article,
   ArticlePage,
@@ -10,6 +10,9 @@ import type {
   Situation,
   SituationPage,
   SituationWorkspace,
+  SourceItem,
+  SourceItemFilters,
+  SourceItemPage,
   SourceHealth,
   TimelineEntry,
   TrafficPulseCorridor,
@@ -58,6 +61,7 @@ export interface ExportRecord {
 export interface Store {
   getBootstrap(login: string): Promise<BootstrapPayload>;
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
+  listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   listSavedArticles(login: string): Promise<Article[]>;
   setSaved(articleId: string, saved: boolean, login: string): Promise<void>;
   listSituations(filters: SituationFilters, login: string): Promise<SituationPage>;
@@ -138,6 +142,91 @@ function beforeCursor(
   );
 }
 
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function memorySourceItemFromArticle(article: Article): SourceItem {
+  const normalizedPayload = {
+    id: article.id,
+    source: article.source,
+    title: article.title,
+    excerpt: article.excerpt,
+    url: article.url,
+    publishedAt: article.publishedAt,
+    scope: article.scope,
+    category: article.category,
+    places: article.places,
+    location: article.location,
+  };
+  const stableKey = article.id || article.url;
+  const geoHint: SourceItem["geoHint"] = article.location
+    ? { type: "Point", coordinates: [article.location.lng, article.location.lat] }
+    : undefined;
+
+  return {
+    id: `source:${sha256(`${article.source}:article:${stableKey}`)}`,
+    provider: article.source,
+    kind: "article",
+    externalId: article.id,
+    originalUrl: article.url,
+    title: article.title,
+    summary: article.excerpt,
+    publishedAt: article.publishedAt,
+    fetchedAt: article.publishedAt,
+    captureHash: sha256(
+      JSON.stringify({
+        provider: article.source,
+        kind: "article",
+        externalId: article.id,
+        originalUrl: article.url,
+        publishedAt: article.publishedAt,
+        normalizedPayload,
+      }),
+    ),
+    geoHint,
+    reliabilityTier: "trusted_media",
+    linkedSituationIds: [],
+  };
+}
+
+interface SourceItemRow {
+  id: string;
+  provider: SourceItem["provider"];
+  kind: SourceItem["kind"];
+  external_id: string | null;
+  original_url: string | null;
+  title: string | null;
+  summary: string | null;
+  author: string | null;
+  published_at: Date | string | null;
+  fetched_at: Date | string;
+  fetched_at_cursor: string;
+  capture_hash: string;
+  geo_hint: SourceItem["geoHint"] | null;
+  reliability_tier: SourceItem["reliabilityTier"];
+  linked_situation_ids: string[] | null;
+}
+
+function sourceItemFromRow(row: SourceItemRow): SourceItem {
+  return {
+    id: row.id,
+    provider: row.provider,
+    kind: row.kind,
+    externalId: row.external_id ?? undefined,
+    originalUrl: row.original_url ?? undefined,
+    title: row.title ?? undefined,
+    summary: row.summary ?? undefined,
+    author: row.author ?? undefined,
+    publishedAt: row.published_at ? new Date(row.published_at).toISOString() : undefined,
+    fetchedAt: new Date(row.fetched_at).toISOString(),
+    captureHash: row.capture_hash,
+    geoHint: row.geo_hint ?? undefined,
+    reliabilityTier: row.reliability_tier,
+    linkedSituationIds: row.linked_situation_ids ?? [],
+  };
+}
+
 const TRAFFIC_PULSE_STALE_AFTER_MS = 20 * 60 * 1000;
 
 function isOlderThan(value: Date | string | null | undefined, cutoffMs: number): boolean {
@@ -166,6 +255,16 @@ export class MemoryStore implements Store {
   private attachments: AttachmentRecord[] = [];
   private exports: ExportRecord[] = [];
   private savedSituations = new Set<string>();
+  private sourceItems = new Map<string, SourceItem>(
+    sampleArticles.map((article) => {
+      const item = memorySourceItemFromArticle(article);
+      return [item.id, item];
+    }),
+  );
+  private sourceLinks = new Map<
+    string,
+    { situationId: string; sourceItemId: string; relationship: string }
+  >();
 
   async getBootstrap(): Promise<BootstrapPayload> {
     return {
@@ -202,6 +301,41 @@ export class MemoryStore implements Store {
       items: clone(page),
       nextCursor:
         items.length > limit && last ? encodeCursor(last.publishedAt, last.id) : undefined,
+    };
+  }
+
+  async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {
+    const search = filters.q?.toLocaleLowerCase("nb");
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const limit = filters.limit ?? 40;
+    const withLinks = [...this.sourceItems.values()].map((item) => ({
+      ...item,
+      linkedSituationIds: [...this.sourceLinks.values()]
+        .filter((link) => link.sourceItemId === item.id)
+        .map((link) => link.situationId)
+        .sort(),
+    }));
+    const items = withLinks
+      .filter(
+        (item) =>
+          (!filters.provider || item.provider === filters.provider) &&
+          (!filters.kind || item.kind === filters.kind) &&
+          (!filters.unlinked || item.linkedSituationIds.length === 0) &&
+          (!search ||
+            `${item.title ?? ""} ${item.summary ?? ""} ${item.originalUrl ?? ""}`
+              .toLocaleLowerCase("nb")
+              .includes(search)) &&
+          beforeCursor(item.fetchedAt, item.id, cursor),
+      )
+      .sort(
+        (left, right) =>
+          right.fetchedAt.localeCompare(left.fetchedAt) || right.id.localeCompare(left.id),
+      );
+    const page = items.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: clone(page),
+      nextCursor: items.length > limit && last ? encodeCursor(last.fetchedAt, last.id) : undefined,
     };
   }
 
@@ -518,6 +652,71 @@ export class PgStore implements Store {
       nextCursor:
         result.rows.length > limit && items.at(-1)
           ? encodeCursor(items.at(-1)!.publishedAt, items.at(-1)!.id)
+          : undefined,
+    };
+  }
+
+  async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.provider) {
+      params.push(filters.provider);
+      where.push(`si.provider = $${params.length}`);
+    }
+    if (filters.kind) {
+      params.push(filters.kind);
+      where.push(`si.kind = $${params.length}`);
+    }
+    if (filters.q) {
+      params.push(`%${filters.q}%`);
+      where.push(
+        `(si.title ILIKE $${params.length} OR si.summary ILIKE $${params.length} OR si.original_url ILIKE $${params.length})`,
+      );
+    }
+    if (filters.unlinked) {
+      where.push(
+        "NOT EXISTS (SELECT 1 FROM situation_source_items unlinked_ssi WHERE unlinked_ssi.source_item_id = si.id)",
+      );
+    }
+    if (filters.cursor) {
+      const cursor = decodeCursor(filters.cursor);
+      params.push(cursor.timestamp);
+      const timestampIndex = params.length;
+      if (cursor.id) {
+        params.push(cursor.id);
+        where.push(
+          `(si.fetched_at < $${timestampIndex} OR (si.fetched_at = $${timestampIndex} AND si.id < $${params.length}))`,
+        );
+      } else {
+        where.push(`si.fetched_at < $${timestampIndex}`);
+      }
+    }
+    params.push((filters.limit ?? 40) + 1);
+    const result = await this.pool.query<SourceItemRow>(
+      `SELECT si.id, si.provider, si.kind, si.external_id, si.original_url, si.title, si.summary,
+       si.author, si.published_at, si.fetched_at,
+       to_char(si.fetched_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fetched_at_cursor,
+       si.capture_hash,
+       ST_AsGeoJSON(si.geo_hint)::json AS geo_hint, si.reliability_tier,
+       links.linked_situation_ids
+       FROM source_items si
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(array_agg(ssi.situation_id ORDER BY ssi.situation_id), '{}') AS linked_situation_ids
+         FROM situation_source_items ssi WHERE ssi.source_item_id = si.id
+       ) links ON true
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY si.fetched_at DESC, si.id DESC LIMIT $${params.length}`,
+      params,
+    );
+    const limit = filters.limit ?? 40;
+    const visibleRows = result.rows.slice(0, limit);
+    const items = visibleRows.map(sourceItemFromRow);
+    const lastRow = visibleRows.at(-1);
+    return {
+      items,
+      nextCursor:
+        result.rows.length > limit && lastRow
+          ? encodeCursor(lastRow.fetched_at_cursor, lastRow.id)
           : undefined,
     };
   }
