@@ -1,4 +1,5 @@
 import pg from "pg";
+import type { OfficialEvent } from "@nytt/shared";
 import {
   collectMunicipality,
   collectPolitiloggenPersonalUse,
@@ -8,6 +9,7 @@ import {
 } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
 import { detectPreliminarySituations } from "./clusters.js";
+import { collectDatexSituationEvents } from "./datex.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
@@ -87,7 +89,7 @@ async function collectAll(): Promise<void> {
       console.warn(`[worker] Politiloggen adapter failed: ${String(error)}`),
     );
   }
-  const officialEvents = [];
+  const officialEvents: OfficialEvent[] = [];
   const knownMetEventIds = await repository.knownOfficialEventIds("met");
   for (const [source, collector] of [
     ["met", () => collectMetWarnings(fetch, knownMetEventIds)],
@@ -104,6 +106,52 @@ async function collectAll(): Promise<void> {
         lastFailureAt: new Date().toISOString(),
         nextPollAt,
         detail: `Varselinnhenting feilet: ${String(error)}`,
+      });
+    }
+  }
+  const datexUsername = process.env.DATEX_USERNAME?.trim();
+  const datexPassword = process.env.DATEX_PASSWORD;
+  const datexEndpoint =
+    process.env.DATEX_ENDPOINT?.trim() ||
+    "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
+
+  if (datexUsername && datexPassword) {
+    try {
+      const lastModified = await repository.collectorState("datex:lastModified");
+      const result = await collectDatexSituationEvents({
+        endpoint: datexEndpoint,
+        username: datexUsername,
+        password: datexPassword,
+        lastModified,
+      });
+      officialEvents.push(...result.events);
+      if (result.lastModified)
+        await repository.setCollectorState("datex:lastModified", result.lastModified);
+      if (!result.notModified) {
+        await repository.expireMissingOfficialEvents(
+          "datex",
+          result.events.map((event) => event.id),
+        );
+      }
+      await repository.setHealth({
+        source: "datex",
+        label: "Vegvesen DATEX",
+        state: "ok",
+        lastCheckedAt: new Date().toISOString(),
+        nextPollAt,
+        detail: result.notModified
+          ? "Ingen endringer siden forrige DATEX-snapshot"
+          : `${result.events.length} relevante DATEX trafikkhendelser hentet`,
+      });
+    } catch (error) {
+      await repository.setHealth({
+        source: "datex",
+        label: "Vegvesen DATEX",
+        state: "degraded",
+        lastCheckedAt: new Date().toISOString(),
+        lastFailureAt: new Date().toISOString(),
+        nextPollAt,
+        detail: `DATEX-innhenting feilet: ${String(error)}`,
       });
     }
   }
