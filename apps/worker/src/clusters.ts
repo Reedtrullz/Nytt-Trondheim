@@ -19,6 +19,162 @@ function slug(value: string): string {
     .replaceAll(/^-|-$/g, "");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function rawDatex(event: OfficialEvent): Record<string, unknown> {
+  if (!isRecord(event.raw)) return {};
+  const datex = event.raw.datex;
+  return isRecord(datex) ? datex : {};
+}
+
+function shouldPromoteDatex(event: OfficialEvent): boolean {
+  return (
+    event.source === "datex" &&
+    event.eventType === "traffic" &&
+    event.state !== "cancelled" &&
+    event.state !== "expired" &&
+    rawDatex(event).promoteToSituation === true
+  );
+}
+
+export function officialTrafficSituationsFromEvents(
+  events: OfficialEvent[],
+  existingSituations: Situation[] = [],
+): Situation[] {
+  const existingByOfficialEventId = new Map(
+    existingSituations
+      .filter((situation) => situation.officialSource === "datex" && situation.officialEventId)
+      .map((situation) => [situation.officialEventId, situation]),
+  );
+
+  return events.filter(shouldPromoteDatex).map((event) => {
+    const existing = existingByOfficialEventId.get(event.id);
+    const id =
+      existing?.id ?? `datex-${createHash("sha1").update(event.id).digest("hex").slice(0, 12)}`;
+    const datex = rawDatex(event);
+    const sourceLabel = "Statens vegvesen DATEX";
+    const evidence: EvidenceItem[] = [
+      {
+        id: createHash("sha1")
+          .update(`${id}:datex-evidence:${event.id}`)
+          .digest("hex")
+          .slice(0, 18),
+        situationId: id,
+        source: "datex",
+        sourceLabel,
+        sourceUrl: event.sourceUrl,
+        supportingSnippet: event.detail,
+        claim: event.title,
+        claimType: "official_traffic_status",
+        provenance: "official",
+        confidence: 1,
+        extractedAt: new Date().toISOString(),
+        publishedAt: event.publishedAt,
+      },
+    ];
+    const features: MapFeature[] = event.geometry
+      ? [
+          {
+            id: createHash("sha1")
+              .update(`${id}:datex-feature:${event.id}`)
+              .digest("hex")
+              .slice(0, 18),
+            type: "Feature",
+            geometry: event.geometry,
+            properties: {
+              label: event.title,
+              provenance: "official",
+              sourceLabel,
+              sourceUrl: event.sourceUrl,
+              updatedAt: event.publishedAt,
+              layer: "traffic",
+            },
+          },
+        ]
+      : [];
+
+    return {
+      id,
+      type: "traffic",
+      title: event.title,
+      summary: event.detail,
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      importance: datex.impact === "high" ? "high" : "normal",
+      updatedAt: event.publishedAt,
+      createdAt: existing?.createdAt ?? event.validFrom,
+      locationLabel: event.areaLabel,
+      incidentSignature: `datex:${event.id}`,
+      detectionVersion: "datex-1",
+      officialSource: "datex",
+      officialEventId: event.id,
+      activationBasis: existing?.activationBasis ?? {
+        rule: "official_source",
+        sourceIds: ["datex"],
+        articleIds: [],
+        activatedAt: event.publishedAt,
+      },
+      relatedArticleIds: existing?.relatedArticleIds ?? [],
+      evidence,
+      features,
+      timeline: [
+        {
+          id: `timeline-${event.id}`,
+          situationId: id,
+          timestamp: event.publishedAt,
+          title: event.title,
+          detail: event.detail,
+          sourceLabel,
+          sourceUrl: event.sourceUrl,
+          official: true,
+        },
+      ],
+    } satisfies Situation;
+  });
+}
+
+export function resolvedOfficialTrafficSituationsForMissingDatex(
+  existingSituations: Situation[],
+  activeDatexEventIds: Set<string>,
+  resolvedAt: string,
+): Situation[] {
+  const sourceLabel = "Statens vegvesen DATEX";
+  return existingSituations
+    .filter(
+      (situation) =>
+        situation.status === "active" &&
+        situation.officialSource === "datex" &&
+        situation.officialEventId &&
+        !activeDatexEventIds.has(situation.officialEventId),
+    )
+    .map((situation) => {
+      const sourceUrl =
+        situation.evidence.find(
+          (evidence) => evidence.source === "datex" && evidence.provenance === "official",
+        )?.sourceUrl ?? "";
+      return {
+        ...situation,
+        status: "resolved",
+        updatedAt: resolvedAt,
+        timeline: [
+          ...situation.timeline,
+          {
+            id: `timeline-datex-resolved-${situation.officialEventId}`,
+            situationId: situation.id,
+            timestamp: resolvedAt,
+            title: "DATEX-hendelsen er ikke lenger aktiv",
+            detail: "Statens vegvesen DATEX-snapshot inneholder ikke lenger denne hendelsen.",
+            sourceLabel,
+            sourceUrl,
+            official: true,
+          },
+        ],
+      } satisfies Situation;
+    });
+}
+
 export function detectPreliminarySituations(
   articles: Article[],
   officialEvents: OfficialEvent[] = [],
