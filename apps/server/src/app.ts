@@ -187,6 +187,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.get("/api/situations/:id/source-items", async (req, res, next) => {
+    try {
+      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      res.json(await store.listSituationSourceItems(req.params.id, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/situations/:id/features", async (req, res, next) => {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));

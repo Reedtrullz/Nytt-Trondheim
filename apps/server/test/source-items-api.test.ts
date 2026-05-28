@@ -42,4 +42,9 @@ describe("source item API", () => {
 
     await request(app).get("/api/source-items?kind=travel_time").expect(400);
   });
+
+  it("returns an empty linked-source list for a situation with no linked items", async () => {
+    const { app } = await testApp();
+    await request(app).get("/api/situations/skogbrann-bymarka/source-items").expect(200, []);
+  });
 });
