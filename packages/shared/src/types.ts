@@ -98,6 +98,64 @@ export interface TimelineEntry {
   official: boolean;
 }
 
+export type SourceItemKind =
+  | "article"
+  | "official_event"
+  | "warning"
+  | "reporter_note"
+  | "reader_tip"
+  | "media_asset";
+
+export type SourceReliabilityTier = "official" | "trusted_media" | "internal" | "unverified";
+export type SourceItemRelationship = "supports" | "contradicts" | "context" | "duplicate";
+
+export interface SourceItem {
+  id: string;
+  provider: SourceId;
+  kind: SourceItemKind;
+  externalId?: string;
+  originalUrl?: string;
+  title?: string;
+  summary?: string;
+  author?: string;
+  publishedAt?: string;
+  fetchedAt: string;
+  captureHash: string;
+  geoHint?: MapFeature["geometry"];
+  reliabilityTier: SourceReliabilityTier;
+  linkedSituationIds: string[];
+}
+
+export interface SourceItemRecord extends SourceItem {
+  rawPayload: unknown;
+  normalizedPayload: unknown;
+}
+
+export type SourceItemInput = Omit<SourceItemRecord, "linkedSituationIds">;
+
+export interface SourceItemPage {
+  items: SourceItem[];
+  nextCursor?: string;
+}
+
+export interface SourceItemFilters {
+  provider?: SourceId;
+  kind?: SourceItemKind;
+  unlinked?: boolean;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface SituationSourceItemLink {
+  situationId: string;
+  sourceItemId: string;
+  relationship: SourceItemRelationship;
+  confidenceContribution?: number;
+  linkedAt: string;
+  linkedBy?: string;
+}
+
 export interface Situation {
   id: string;
   type: SituationType;
