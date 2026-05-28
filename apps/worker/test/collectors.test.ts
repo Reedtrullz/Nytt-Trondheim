@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { canonicalUrl, collectMunicipality, collectRss } from "../src/collectors.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  canonicalUrl,
+  collectMunicipality,
+  collectRss,
+  probeOfficialSources,
+} from "../src/collectors.js";
 import { articleDedupeKey } from "../src/repository.js";
 
 const rss = `<?xml version="1.0"?><rss><channel>
@@ -8,6 +13,30 @@ const rss = `<?xml version="1.0"?><rss><channel>
 <item><title>Nyheter fra Oslo</title><description>Ikke lokalt.</description>
 <link>https://example.test/oslo</link><pubDate>Tue, 26 May 2026 12:00:00 GMT</pubDate></item>
 </channel></rss>`;
+
+const originalDatexEnv = {
+  DATEX_ENDPOINT: process.env.DATEX_ENDPOINT,
+  DATEX_USERNAME: process.env.DATEX_USERNAME,
+  DATEX_PASSWORD: process.env.DATEX_PASSWORD,
+  DATEX_API_KEY: process.env.DATEX_API_KEY,
+};
+
+beforeEach(() => {
+  delete process.env.DATEX_ENDPOINT;
+  delete process.env.DATEX_USERNAME;
+  delete process.env.DATEX_PASSWORD;
+  delete process.env.DATEX_API_KEY;
+});
+
+afterEach(() => {
+  for (const [key, value] of Object.entries(originalDatexEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+});
 
 describe("RSS collection policy", () => {
   it("retains Trondheim-relevant national stories and drops unrelated national items", async () => {
@@ -64,5 +93,44 @@ describe("RSS collection policy", () => {
         new Response(String(url).includes("/aktuelt/vinter/") ? detail : listing, { status: 200 }),
     );
     expect(articles[0]?.publishedAt).toBe("2026-01-26T12:15:00.000Z");
+  });
+});
+
+describe("DATEX official source probe", () => {
+  it("waits for Basic Auth credentials when DATEX username and password are missing", async () => {
+    const statuses = await probeOfficialSources(async () => new Response("ok", { status: 200 }));
+
+    const datex = statuses.find((status) => status.source === "datex");
+
+    expect(datex).toMatchObject({
+      label: "Vegvesen DATEX",
+      state: "awaiting_access",
+      detail: "Venter på DATEX Basic Auth-brukernavn og passord",
+    });
+  });
+
+  it("checks the DATEX endpoint with Basic Auth when username and password are configured", async () => {
+    process.env.DATEX_ENDPOINT =
+      "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata";
+    process.env.DATEX_USERNAME = "svv-user";
+    process.env.DATEX_PASSWORD = "svv-pass";
+    let datexAuthorization: string | undefined;
+
+    const statuses = await probeOfficialSources(async (url, init) => {
+      if (String(url).includes("GetSituation")) {
+        const headers = new Headers(init?.headers);
+        datexAuthorization = headers.get("Authorization") ?? undefined;
+      }
+      return new Response("ok", { status: 200 });
+    });
+
+    const datex = statuses.find((status) => status.source === "datex");
+
+    expect(datexAuthorization).toBe("Basic c3Z2LXVzZXI6c3Z2LXBhc3M=");
+    expect(datex).toMatchObject({
+      label: "Vegvesen DATEX",
+      state: "ok",
+      detail: "Tilgang konfigurert og testet",
+    });
   });
 });

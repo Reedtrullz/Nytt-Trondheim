@@ -237,7 +237,12 @@ export const sampleSourceHealth: SourceHealth[] = [
     lastCheckedAt: now,
     detail: "Aktuelt",
   },
-  { source: "datex", label: "Vegvesen DATEX", state: "awaiting_access", detail: "Krever tilgang" },
+  {
+    source: "datex",
+    label: "Vegvesen DATEX",
+    state: "awaiting_access",
+    detail: "Venter på DATEX Basic Auth-brukernavn og passord",
+  },
   {
     source: "politiloggen",
     label: "Politiloggen",

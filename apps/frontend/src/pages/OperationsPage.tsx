@@ -68,7 +68,7 @@ export function OperationsPage() {
           <p>
             Siste gjenopprettingstest: <strong>{time(status.restoreCheck?.completedAt)}</strong>
           </p>
-          <p className="muted">DATEX venter på tilgang. Politiloggen er slått av.</p>
+          <p className="muted">DATEX og Politiloggen vises i kildelisten over.</p>
         </div>
       </section>
     </main>

@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { XMLParser } from "fast-xml-parser";
@@ -40,6 +41,18 @@ function textValue(value: unknown): string {
 
 function stableId(source: SourceId, url: string): string {
   return `${source}-${createHash("sha1").update(url).digest("hex").slice(0, 16)}`;
+}
+
+const defaultDatexSituationEndpoint =
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
+
+function nonEmptyEnv(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function datexBasicAuthHeader(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
 }
 
 export function canonicalUrl(rawUrl: string, base?: string): string {
@@ -174,6 +187,37 @@ export interface OfficialProbeResult {
   detail: string;
 }
 
+async function probeDatex(fetcher: typeof fetch): Promise<OfficialProbeResult> {
+  const username = nonEmptyEnv(process.env.DATEX_USERNAME);
+  const password = process.env.DATEX_PASSWORD;
+  if (!username || !password) {
+    return {
+      source: "datex",
+      label: "Vegvesen DATEX",
+      state: "awaiting_access",
+      detail: "Venter på DATEX Basic Auth-brukernavn og passord",
+    };
+  }
+
+  const endpoint = nonEmptyEnv(process.env.DATEX_ENDPOINT) ?? defaultDatexSituationEndpoint;
+  try {
+    const response = await fetcher(endpoint, {
+      headers: {
+        "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+        Authorization: datexBasicAuthHeader(username, password),
+      },
+    });
+    return {
+      source: "datex",
+      label: "Vegvesen DATEX",
+      state: response.ok ? "ok" : "degraded",
+      detail: response.ok ? "Tilgang konfigurert og testet" : `HTTP ${response.status}`,
+    };
+  } catch (error) {
+    return { source: "datex", label: "Vegvesen DATEX", state: "degraded", detail: String(error) };
+  }
+}
+
 export async function probeOfficialSources(
   fetcher: typeof fetch = fetch,
 ): Promise<OfficialProbeResult[]> {
@@ -210,12 +254,7 @@ export async function probeOfficialSources(
       results.push({ source, label, state: "degraded", detail: String(error) });
     }
   }
-  results.push({
-    source: "datex",
-    label: "Vegvesen DATEX",
-    state: process.env.DATEX_API_KEY ? "ok" : "awaiting_access",
-    detail: process.env.DATEX_API_KEY ? "Tilgang konfigurert" : "Venter på registrert tilgang",
-  });
+  results.push(await probeDatex(fetcher));
   results.push({
     source: "politiloggen",
     label: "Politiloggen",

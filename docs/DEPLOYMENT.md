@@ -39,7 +39,7 @@ If Google Drive still reports `rateLimitExceeded` while backups recover after re
 - Confirm DNS for `nytt.reidar.tech` resolves to the VPS.
 - Run origin provisioning to repair TLS/Cloudflare routing before release; the endpoint returned HTTP `525` before the `nytt.reidar.tech` Caddy hostname existed.
 - Confirm Docker, Caddy and the `deploy` SSH key are available on the same VPS used by RFMC.
-- Register DATEX access later if traffic-event enrichment is required.
+- Configure DATEX Basic Auth secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, optional `NYTT_DATEX_ENDPOINT`) if traffic-event source health should be tested against Vegvesen.
 
 ## Rollback
 
