@@ -41,7 +41,12 @@ describe("source item store", () => {
     const query = vi.fn().mockResolvedValue({ rows: [sourceItemRow()] });
     const store = new PgStore({ query } as unknown as pg.Pool);
 
-    const page = await store.listSourceItems({ provider: "nrk", kind: "article", q: "Brann", limit: 1 });
+    const page = await store.listSourceItems({
+      provider: "nrk",
+      kind: "article",
+      q: "Brann",
+      limit: 1,
+    });
 
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({ id: "source:one", externalId: "article-one" });
@@ -130,26 +135,37 @@ describe("source item store", () => {
     const situationItems = await store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz");
     expect(situationItems.map((source) => source.id)).toContain(item.id);
 
+    await expect(store.unlinkSourceItem("skogbrann-bymarka", item.id, "Reedtrullz")).resolves.toBe(
+      true,
+    );
     await expect(
-      store.unlinkSourceItem("skogbrann-bymarka", item.id, "Reedtrullz"),
-    ).resolves.toBe(true);
-    await expect(store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz")).resolves.toEqual([]);
+      store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz"),
+    ).resolves.toEqual([]);
   });
 
   it("uses idempotent PgStore SQL for source item links", async () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({ rows: [{ id: "source:one" }] })
-      .mockResolvedValueOnce({ rows: [pgSourceItemRow({ linked_situation_ids: ["skogbrann-bymarka"] })] })
+      .mockResolvedValueOnce({
+        rows: [pgSourceItemRow({ linked_situation_ids: ["skogbrann-bymarka"] })],
+      })
       .mockResolvedValueOnce({ rowCount: 1, rows: [] });
     const store = new PgStore({ query } as unknown as pg.Pool);
 
-    const linked = await store.linkSourceItem("skogbrann-bymarka", "source:one", "supports", "Reedtrullz");
+    const linked = await store.linkSourceItem(
+      "skogbrann-bymarka",
+      "source:one",
+      "supports",
+      "Reedtrullz",
+    );
     expect(linked?.linkedSituationIds).toEqual(["skogbrann-bymarka"]);
     expect(query.mock.calls[0]?.[0]).toContain("INSERT INTO situation_source_items");
     expect(query.mock.calls[0]?.[0]).toContain("ON CONFLICT");
 
-    await expect(store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz")).resolves.toBe(true);
+    await expect(
+      store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz"),
+    ).resolves.toBe(true);
     expect(query.mock.calls[2]?.[0]).toContain("DELETE FROM situation_source_items");
   });
 

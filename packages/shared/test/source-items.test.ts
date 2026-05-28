@@ -13,7 +13,12 @@ describe("source item validation schemas", () => {
     expect(sourceReliabilityTierSchema.parse("official")).toBe("official");
     expect(sourceItemRelationshipSchema.parse("context")).toBe("context");
     expect(
-      sourceItemQuerySchema.parse({ provider: "nrk", kind: "article", unlinked: "true", limit: "5" }),
+      sourceItemQuerySchema.parse({
+        provider: "nrk",
+        kind: "article",
+        unlinked: "true",
+        limit: "5",
+      }),
     ).toMatchObject({ provider: "nrk", kind: "article", unlinked: true, limit: 5 });
     expect(sourceItemLinkInputSchema.parse({})).toEqual({ relationship: "supports" });
     expect(() => sourceItemLinkInputSchema.parse({ relationship: "travel_time" })).toThrow();

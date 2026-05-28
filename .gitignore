@@ -13,4 +13,5 @@ runtime-status/
 *.log
 *.tsbuildinfo
 .DS_Store
+.hermes/
 NPRA_DATEXII_3_1_Specification.pdf

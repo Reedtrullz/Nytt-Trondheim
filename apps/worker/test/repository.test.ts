@@ -126,7 +126,13 @@ describe("WorkerRepository", () => {
     );
     expect(sourceItemCall).toBeTruthy();
     expect(sourceItemCall?.[1]).toEqual(
-      expect.arrayContaining(["datex", "official_event", "datex-event-one", event.sourceUrl, event.title]),
+      expect.arrayContaining([
+        "datex",
+        "official_event",
+        "datex-event-one",
+        event.sourceUrl,
+        event.title,
+      ]),
     );
   });
 
@@ -203,7 +209,13 @@ describe("WorkerRepository", () => {
     expect(sqlCalls[2]).toContain("INSERT INTO source_items");
     expect(query.mock.calls[1]?.[1]).toEqual([["old-event"]]);
     expect(query.mock.calls[2]?.[1]).toEqual(
-      expect.arrayContaining(["datex", "official_event", "datex-event-new", event.sourceUrl, event.title]),
+      expect.arrayContaining([
+        "datex",
+        "official_event",
+        "datex-event-new",
+        event.sourceUrl,
+        event.title,
+      ]),
     );
   });
 

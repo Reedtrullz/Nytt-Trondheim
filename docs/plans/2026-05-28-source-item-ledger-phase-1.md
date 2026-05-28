@@ -356,7 +356,12 @@ describe("source item validation schemas", () => {
     expect(sourceReliabilityTierSchema.parse("official")).toBe("official");
     expect(sourceItemRelationshipSchema.parse("context")).toBe("context");
     expect(
-      sourceItemQuerySchema.parse({ provider: "nrk", kind: "article", unlinked: "true", limit: "5" }),
+      sourceItemQuerySchema.parse({
+        provider: "nrk",
+        kind: "article",
+        unlinked: "true",
+        limit: "5",
+      }),
     ).toMatchObject({ provider: "nrk", kind: "article", unlinked: true, limit: 5 });
     expect(sourceItemLinkInputSchema.parse({})).toEqual({ relationship: "supports" });
     expect(() => sourceItemLinkInputSchema.parse({ relationship: "travel_time" })).toThrow();
@@ -629,7 +634,10 @@ describe("source item store", () => {
     });
     const store = new PgStore({ query } as unknown as pg.Pool);
 
-    const page = await store.listSourceItems({ provider: "nrk", kind: "article", q: "Brann", limit: 1 }, "Reedtrullz");
+    const page = await store.listSourceItems(
+      { provider: "nrk", kind: "article", q: "Brann", limit: 1 },
+      "Reedtrullz",
+    );
 
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({ id: "source:one", externalId: "article-one" });
@@ -753,37 +761,43 @@ it("links and unlinks source items in MemoryStore", async () => {
   const [item] = (await store.listSourceItems({ limit: 1 }, "Reedtrullz")).items;
   expect(item).toBeTruthy();
 
-  const linked = await store.linkSourceItem(
-    "skogbrann-bymarka",
-    item.id,
-    "supports",
-    "Reedtrullz",
-  );
+  const linked = await store.linkSourceItem("skogbrann-bymarka", item.id, "supports", "Reedtrullz");
   expect(linked?.linkedSituationIds).toContain("skogbrann-bymarka");
 
   const situationItems = await store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz");
   expect(situationItems.map((source) => source.id)).toContain(item.id);
 
-  await expect(
-    store.unlinkSourceItem("skogbrann-bymarka", item.id, "Reedtrullz"),
-  ).resolves.toBe(true);
-  await expect(store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz")).resolves.toEqual([]);
+  await expect(store.unlinkSourceItem("skogbrann-bymarka", item.id, "Reedtrullz")).resolves.toBe(
+    true,
+  );
+  await expect(store.listSituationSourceItems("skogbrann-bymarka", "Reedtrullz")).resolves.toEqual(
+    [],
+  );
 });
 
 it("uses idempotent PgStore SQL for source item links", async () => {
   const query = vi
     .fn()
     .mockResolvedValueOnce({ rows: [{ id: "source:one" }] })
-    .mockResolvedValueOnce({ rows: [pgSourceItemRow({ linked_situation_ids: ["skogbrann-bymarka"] })] })
+    .mockResolvedValueOnce({
+      rows: [pgSourceItemRow({ linked_situation_ids: ["skogbrann-bymarka"] })],
+    })
     .mockResolvedValueOnce({ rowCount: 1, rows: [] });
   const store = new PgStore({ query } as unknown as pg.Pool);
 
-  const linked = await store.linkSourceItem("skogbrann-bymarka", "source:one", "supports", "Reedtrullz");
+  const linked = await store.linkSourceItem(
+    "skogbrann-bymarka",
+    "source:one",
+    "supports",
+    "Reedtrullz",
+  );
   expect(linked?.linkedSituationIds).toEqual(["skogbrann-bymarka"]);
   expect(query.mock.calls[0]?.[0]).toContain("INSERT INTO situation_source_items");
   expect(query.mock.calls[0]?.[0]).toContain("ON CONFLICT");
 
-  await expect(store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz")).resolves.toBe(true);
+  await expect(
+    store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz"),
+  ).resolves.toBe(true);
   expect(query.mock.calls[2]?.[0]).toContain("DELETE FROM situation_source_items");
 });
 ```
@@ -1388,7 +1402,14 @@ export function articleSourceItemInput(article: Article, fetchedAt: string): Sou
     fetchedAt,
     rawPayload: article,
     normalizedPayload,
-    captureHash: sourceItemHash([article.source, "article", article.id, article.url, article.publishedAt, normalizedPayload]),
+    captureHash: sourceItemHash([
+      article.source,
+      "article",
+      article.id,
+      article.url,
+      article.publishedAt,
+      normalizedPayload,
+    ]),
     geoHint: article.location
       ? { type: "Point", coordinates: [article.location.lng, article.location.lat] }
       : undefined,
@@ -1454,8 +1475,13 @@ git commit -m "feat: map collected records to source items"
 Update the existing `refreshes stored article metadata without replacing situation linkage` test so it no longer expects exactly one query. Add assertions:
 
 ```ts
-expect(query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO source_items"), expect.any(Array));
-const sourceItemCall = query.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO source_items"));
+expect(query).toHaveBeenCalledWith(
+  expect.stringContaining("INSERT INTO source_items"),
+  expect.any(Array),
+);
+const sourceItemCall = query.mock.calls.find(([sql]) =>
+  String(sql).includes("INSERT INTO source_items"),
+);
 expect(sourceItemCall).toBeTruthy();
 expect(String(sourceItemCall?.[0])).toContain("ON CONFLICT (provider, kind, external_id)");
 expect(String(sourceItemCall?.[0])).toContain("WHERE external_id IS NOT NULL");
@@ -1568,10 +1594,18 @@ it("mirrors official events into source item rows", async () => {
 
   await repository.upsertOfficialEvents([event]);
 
-  const sourceItemCall = query.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO source_items"));
+  const sourceItemCall = query.mock.calls.find(([sql]) =>
+    String(sql).includes("INSERT INTO source_items"),
+  );
   expect(sourceItemCall).toBeTruthy();
   expect(sourceItemCall?.[1]).toEqual(
-    expect.arrayContaining(["datex", "official_event", "datex-event-one", event.sourceUrl, event.title]),
+    expect.arrayContaining([
+      "datex",
+      "official_event",
+      "datex-event-one",
+      event.sourceUrl,
+      event.title,
+    ]),
   );
 });
 ```
@@ -1662,7 +1696,9 @@ it("links source items for situation article and official event relationships", 
 
   await repository.upsertSituation(situation);
 
-  const linkCalls = query.mock.calls.filter(([sql]) => String(sql).includes("INSERT INTO situation_source_items"));
+  const linkCalls = query.mock.calls.filter(([sql]) =>
+    String(sql).includes("INSERT INTO situation_source_items"),
+  );
   expect(linkCalls.length).toBeGreaterThanOrEqual(2);
   expect(String(linkCalls[0]?.[0])).toContain("SELECT $1, id, 'supports'");
   expect(String(linkCalls[0]?.[0])).toContain("FROM source_items");
@@ -1786,7 +1822,9 @@ In `e2e/app.spec.ts`, extend the first situation test:
 
 ```ts
 await expect(page.getByRole("heading", { name: "Kildegrunnlag" })).toBeVisible();
-await expect(page.getByText(/Ingen kildeelementer er koblet ennå|NRK|Adresseavisen|Vegvesen/)).toBeVisible();
+await expect(
+  page.getByText(/Ingen kildeelementer er koblet ennå|NRK|Adresseavisen|Vegvesen/),
+).toBeVisible();
 ```
 
 Expected before implementation: FAIL because the heading is missing.
@@ -1835,7 +1873,9 @@ void Promise.all([api.workspace(id), api.situationSourceItems(id)])
       {sourceItems.map((item) => (
         <li key={item.id}>
           <strong>{item.title ?? item.externalId ?? item.id}</strong>
-          <span>{item.provider} · {item.kind} · {item.reliabilityTier}</span>
+          <span>
+            {item.provider} · {item.kind} · {item.reliabilityTier}
+          </span>
           {item.summary ? <p>{item.summary}</p> : null}
           {item.originalUrl ? <a href={item.originalUrl}>Åpne kilde</a> : null}
         </li>
