@@ -9,6 +9,7 @@ export type SourceId =
   | "met"
   | "nve"
   | "datex"
+  | "datex_travel_time"
   | "dsb"
   | "politiloggen"
   | "deepseek";
@@ -194,6 +195,21 @@ export interface SourceHealth {
   detail: string;
 }
 
+export interface TrafficPulseCorridor {
+  id: string;
+  name: string;
+  state: "free_flow" | "slow" | "congested" | "stale";
+  travelTimeSeconds?: number;
+  freeFlowSeconds?: number;
+  delaySeconds?: number;
+  delayRatio?: number;
+  trend?: string;
+  measurementFrom?: string;
+  measurementTo?: string;
+  updatedAt: string;
+  sourceUrl: string;
+}
+
 export interface SituationWorkspace {
   situation: Situation;
   relatedArticles: Article[];
@@ -224,6 +240,7 @@ export interface OperationsStatus {
   situationCounts: Record<SituationLifecycle, number>;
   latestAiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt" | "error">;
   latestCollectionAt?: string;
+  trafficPulse?: TrafficPulseCorridor[];
   backup?: { status: "ok"; completedAt: string };
   restoreCheck?: { status: "ok"; completedAt: string };
 }
