@@ -78,4 +78,33 @@ describe("DATEX situation parsing", () => {
       datex: { situationId: "NO-SVV-1", recordId: "NO-SVV-1-R1", roadNumber: "E6" },
     });
   });
+
+  it("keeps the same official event id across DATEX record version updates", async () => {
+    const xml = await readFile(fixturePath, "utf8");
+    const updated = xml.replaceAll('version="3"', 'version="4"');
+
+    const first = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      receivedAt: "2026-05-28T10:05:00.000Z",
+    });
+    const second = parseDatexSituationPublication(updated, {
+      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      receivedAt: "2026-05-28T10:10:00.000Z",
+    });
+
+    expect(second.events[0]?.id).toBe(first.events[0]?.id);
+    expect(second.events[0]?.raw).toMatchObject({ datex: { version: "4" } });
+  });
+
+  it("uses receivedAt as fallback expiry for open-ended active records", () => {
+    const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-OPEN" version="1"><situationRecord xsi:type="Accident" id="R1" version="1"><situationRecordCreationTime>2026-05-26T09:55:00Z</situationRecordCreationTime><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><validity><validityStatus>active</validityStatus><validityTimeSpecification><overallStartTime>2026-05-26T09:55:00Z</overallStartTime></validityTimeSpecification></validity><groupOfLocations><locationForDisplay><latitude>63.361</latitude><longitude>10.376</longitude></locationForDisplay></groupOfLocations><generalPublicComment><comment><values><value>Ulykke på E6 ved Tiller.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
+    const result = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      receivedAt: "2026-05-28T10:05:00.000Z",
+    });
+
+    expect(new Date(result.events[0]!.validTo).getTime()).toBeGreaterThan(
+      new Date("2026-05-28T10:05:00.000Z").getTime(),
+    );
+  });
 });
