@@ -146,6 +146,7 @@ export class WorkerRepository {
   }
 
   async upsertOfficialEvents(events: OfficialEvent[]): Promise<void> {
+    const fetchedAt = new Date().toISOString();
     for (const event of events) {
       await this.pool.query(
         `INSERT INTO official_events
@@ -180,6 +181,7 @@ export class WorkerRepository {
           [event.replacesIds],
         );
       }
+      await this.upsertSourceItem(officialEventSourceItemInput(event, fetchedAt));
     }
   }
 

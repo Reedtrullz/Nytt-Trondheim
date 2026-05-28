@@ -1,5 +1,5 @@
 import type pg from "pg";
-import type { AiProcessingRun, Article, TrafficPulseCorridor } from "@nytt/shared";
+import type { AiProcessingRun, Article, OfficialEvent, TrafficPulseCorridor } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerRepository } from "../src/repository.js";
 
@@ -93,6 +93,69 @@ describe("WorkerRepository", () => {
     ]);
     expect(query.mock.calls[0]?.[0]).toContain("state='expired'");
     expect(query.mock.calls[0]?.[0]).toContain("payload=jsonb_set");
+  });
+
+  it("mirrors official events into source item rows", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const event = {
+      id: "datex-event-one",
+      source: "datex",
+      eventType: "traffic",
+      title: "E6 stengt",
+      detail: "Stengt ved Sluppen.",
+      sourceUrl: "https://datex.example.test/situation",
+      areaLabel: "Sluppen",
+      state: "active",
+      publishedAt: "2026-05-28T10:00:00.000Z",
+      validFrom: "2026-05-28T10:00:00.000Z",
+      validTo: "2026-05-28T11:00:00.000Z",
+      raw: { compact: true },
+    } as const;
+
+    await repository.upsertOfficialEvents([event]);
+
+    const sourceItemCall = query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO source_items"),
+    );
+    expect(sourceItemCall).toBeTruthy();
+    expect(sourceItemCall?.[1]).toEqual(
+      expect.arrayContaining(["datex", "official_event", "datex-event-one", event.sourceUrl, event.title]),
+    );
+  });
+
+  it("cancels replaced official events before mirroring the source item", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const event: OfficialEvent = {
+      id: "datex-event-new",
+      source: "datex",
+      eventType: "traffic",
+      title: "E6 fortsatt stengt",
+      detail: "Oppdatert stenging ved Sluppen.",
+      sourceUrl: "https://datex.example.test/situation/new",
+      areaLabel: "Sluppen",
+      state: "updated",
+      publishedAt: "2026-05-28T10:05:00.000Z",
+      validFrom: "2026-05-28T10:05:00.000Z",
+      validTo: "2026-05-28T11:05:00.000Z",
+      replacesIds: ["old-event"],
+      raw: { compact: true },
+    };
+
+    await repository.upsertOfficialEvents([event]);
+
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+
+    expect(sqlCalls).toHaveLength(3);
+    expect(sqlCalls[0]).toContain("INSERT INTO official_events");
+    expect(sqlCalls[1]).toContain("UPDATE official_events");
+    expect(sqlCalls[1]).toContain("state='cancelled'");
+    expect(sqlCalls[2]).toContain("INSERT INTO source_items");
+    expect(query.mock.calls[1]?.[1]).toEqual([["old-event"]]);
+    expect(query.mock.calls[2]?.[1]).toEqual(
+      expect.arrayContaining(["datex", "official_event", "datex-event-new", event.sourceUrl, event.title]),
+    );
   });
 
   it("upserts DATEX travel time corridors with compact payload and numeric columns", async () => {
