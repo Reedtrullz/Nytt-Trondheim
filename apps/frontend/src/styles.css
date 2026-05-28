@@ -783,6 +783,112 @@ button {
   font-size: 12px;
 }
 
+.traffic-pulse-panel {
+  margin: -10px 0 34px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.traffic-pulse-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.traffic-pulse-heading h2 {
+  margin: 0;
+  font: 30px/1.1 var(--serif);
+}
+
+.traffic-pulse-heading p,
+.traffic-pulse-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.traffic-pulse-heading p {
+  max-width: 430px;
+}
+
+.traffic-pulse-list {
+  display: grid;
+  gap: 12px;
+}
+
+.traffic-pulse-row {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.65fr) 1fr;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  background: var(--page);
+}
+
+.traffic-pulse-row.slow {
+  border-left-color: var(--amber);
+}
+
+.traffic-pulse-row.congested {
+  border-left-color: var(--terracotta);
+}
+
+.traffic-pulse-row.stale {
+  border-left-color: var(--muted);
+}
+
+.traffic-pulse-row h3 {
+  margin: 0 0 9px;
+  font: 24px/1.1 var(--serif);
+}
+
+.traffic-pulse-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.traffic-pulse-row.slow .traffic-pulse-state {
+  color: var(--amber);
+}
+
+.traffic-pulse-row.congested .traffic-pulse-state {
+  color: var(--terracotta);
+}
+
+.traffic-pulse-row.stale .traffic-pulse-state {
+  color: var(--muted);
+}
+
+.traffic-pulse-row dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+
+.traffic-pulse-row dt {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.traffic-pulse-row dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .operations-detail {
   display: grid;
   grid-template-columns: 1.25fr 0.75fr;
@@ -1430,6 +1536,20 @@ button {
   .source-row {
     grid-template-columns: 1fr;
     gap: 5px;
+  }
+
+  .traffic-pulse-heading,
+  .traffic-pulse-row {
+    display: block;
+  }
+
+  .traffic-pulse-heading p {
+    margin-top: 8px;
+  }
+
+  .traffic-pulse-row dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 14px;
   }
 
   .incident-header h1 {
