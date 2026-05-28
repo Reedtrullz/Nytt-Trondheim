@@ -68,4 +68,18 @@ describe("WorkerRepository", () => {
       "Thu, 28 May 2026 10:10:00 GMT",
     ]);
   });
+
+  it("expires DATEX official events missing from a successful snapshot", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.expireMissingOfficialEvents("datex", ["datex-keep-one", "datex-keep-two"]);
+
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE official_events"), [
+      "datex",
+      ["datex-keep-one", "datex-keep-two"],
+    ]);
+    expect(query.mock.calls[0]?.[0]).toContain("state='expired'");
+    expect(query.mock.calls[0]?.[0]).toContain("payload=jsonb_set");
+  });
 });

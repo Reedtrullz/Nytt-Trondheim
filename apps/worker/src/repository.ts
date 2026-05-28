@@ -135,6 +135,22 @@ export class WorkerRepository {
     }
   }
 
+  async expireMissingOfficialEvents(
+    source: OfficialEvent["source"],
+    activeIds: string[],
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE official_events
+       SET state='expired',
+           payload=jsonb_set(payload, '{state}', to_jsonb('expired'::text), true),
+           updated_at=now()
+       WHERE source=$1
+       AND state IN ('active', 'updated')
+       AND NOT (id = ANY($2::text[]))`,
+      [source, activeIds],
+    );
+  }
+
   async knownOfficialEventIds(source: OfficialEvent["source"]): Promise<Set<string>> {
     const result = await this.pool.query<{ id: string }>(
       "SELECT id FROM official_events WHERE source=$1",
