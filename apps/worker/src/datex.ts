@@ -134,6 +134,30 @@ function pointGeometry(record: DatexObject): Geometry | undefined {
   return undefined;
 }
 
+const trondelagBounds = { minLat: 62.0, maxLat: 65.6, minLng: 8.0, maxLng: 14.8 };
+const localTextPattern =
+  /\b(trondheim|trøndelag|trondelag|tiller|heimdal|ranheim|lade|byåsen|bymarka|sjetnemarka|e6\s+(ved\s+)?(tiller|heimdal|trondheim)|omkjøringsvegen|stavne|singsaker)\b/i;
+
+function pointInTrondelag(geometry: Geometry | undefined): boolean {
+  if (!geometry || geometry.type !== "Point") return false;
+  const [lng, lat] = geometry.coordinates;
+  return (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    lat >= trondelagBounds.minLat &&
+    lat <= trondelagBounds.maxLat &&
+    lng >= trondelagBounds.minLng &&
+    lng <= trondelagBounds.maxLng
+  );
+}
+
+function isRelevantToNytt(event: OfficialEvent): boolean {
+  return (
+    pointInTrondelag(event.geometry) ||
+    localTextPattern.test(`${event.title} ${event.detail} ${event.areaLabel}`)
+  );
+}
+
 export function parseDatexSituationPublication(
   xml: string,
   options: DatexParseOptions,
@@ -189,7 +213,7 @@ export function parseDatexSituationPublication(
           title,
           detail: comments.join("\n") || title,
           sourceUrl: options.endpoint,
-          areaLabel: roadName || roadNumber || "Ukjent veg",
+          areaLabel: roadName || roadNumber || "Vegtrafikk",
           state: recordState(validityStatus),
           severity: datexText(record.severity).trim() || overallSeverity || undefined,
           publishedAt: publicationTime ?? versionTime ?? creationTime ?? options.receivedAt,
@@ -218,5 +242,5 @@ export function parseDatexSituationPublication(
     }
   }
 
-  return { events };
+  return { events: events.filter(isRelevantToNytt) };
 }

@@ -107,4 +107,27 @@ describe("DATEX situation parsing", () => {
       new Date("2026-05-28T10:05:00.000Z").getTime(),
     );
   });
+
+  it("drops DATEX events outside Trøndelag when no local text is present", () => {
+    const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-OSLO" version="1"><situationRecord id="R1" version="1"><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><validity><validityStatus>active</validityStatus></validity><groupOfLocations><locationForDisplay><latitude>59.91</latitude><longitude>10.75</longitude></locationForDisplay></groupOfLocations><generalPublicComment><comment><values><value>Ulykke på Ring 3.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
+
+    const result = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test",
+      receivedAt: "2026-05-28T10:05:00.000Z",
+    });
+
+    expect(result.events).toEqual([]);
+  });
+
+  it("keeps DATEX events with local Trondheim text even when coordinates are missing", () => {
+    const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-TRD" version="1"><situationRecord id="R1" version="1"><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><validity><validityStatus>active</validityStatus></validity><generalPublicComment><comment><values><value>Vegarbeid i Trondheim sentrum.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
+
+    const result = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test",
+      receivedAt: "2026-05-28T10:05:00.000Z",
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]?.areaLabel).toBe("Vegtrafikk");
+  });
 });
