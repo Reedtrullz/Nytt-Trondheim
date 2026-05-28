@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type { OfficialEvent, Situation } from "@nytt/shared";
-import { parseDatexSituationPublication } from "../src/datex.js";
+import {
+  asDatexArray,
+  datexText,
+  findDatexObjectsWithKey,
+  parseDatexSituationPublication,
+} from "../src/datex.js";
 
 const fixturePath = new URL("./fixtures/datex-situation-snapshot.xml", import.meta.url);
 
@@ -35,6 +40,19 @@ void _datexEventTypeCheck;
 void _officialActivationTypeCheck;
 
 describe("DATEX situation parsing", () => {
+  it("normalizes DATEX singleton arrays and text wrappers", () => {
+    expect(asDatexArray(undefined)).toEqual([]);
+    expect(asDatexArray("one")).toEqual(["one"]);
+    expect(asDatexArray(["one", "two"])).toEqual(["one", "two"]);
+    expect(datexText({ "#text": "Tiller" })).toBe("Tiller");
+    expect(datexText(63.361)).toBe("63.361");
+  });
+
+  it("finds nested DATEX objects by key after namespace removal", () => {
+    const tree = { root: { payloadPublication: { situation: [{ id: "one" }] } } };
+    expect(findDatexObjectsWithKey(tree, "situation")).toEqual([{ situation: [{ id: "one" }] }]);
+  });
+
   it("converts a relevant active accident into an official traffic event", async () => {
     const xml = await readFile(fixturePath, "utf8");
 
