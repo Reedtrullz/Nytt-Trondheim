@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { OfficialEvent, Situation } from "@nytt/shared";
 import {
   asDatexArray,
+  collectDatexSituationEvents,
   datexText,
   findDatexObjectsWithKey,
   parseDatexSituationPublication,
@@ -152,5 +153,44 @@ describe("DATEX situation parsing", () => {
 
     expect(result.events).toHaveLength(1);
     expect(result.events[0]?.areaLabel).toBe("Vegtrafikk");
+  });
+
+  it("fetches DATEX with Basic Auth and If-Modified-Since", async () => {
+    const xml = await readFile(fixturePath, "utf8");
+    let capturedHeaders: Headers | undefined;
+
+    const result = await collectDatexSituationEvents({
+      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      username: "svv-user",
+      password: "svv-pass",
+      lastModified: "Wed, 27 May 2026 10:00:00 GMT",
+      fetcher: async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers);
+        return new Response(xml, {
+          status: 200,
+          headers: { "Last-Modified": "Thu, 28 May 2026 10:00:00 GMT" },
+        });
+      },
+      now: () => new Date("2026-05-28T10:05:00.000Z"),
+    });
+
+    expect(capturedHeaders?.get("Authorization")).toBe("Basic c3Z2LXVzZXI6c3Z2LXBhc3M=");
+    expect(capturedHeaders?.get("If-Modified-Since")).toBe("Wed, 27 May 2026 10:00:00 GMT");
+    expect(result.notModified).toBe(false);
+    expect(result.lastModified).toBe("Thu, 28 May 2026 10:00:00 GMT");
+    expect(result.events).toHaveLength(1);
+  });
+
+  it("returns notModified without parsing a 304 DATEX response", async () => {
+    const result = await collectDatexSituationEvents({
+      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      username: "svv-user",
+      password: "svv-pass",
+      lastModified: "Wed, 27 May 2026 10:00:00 GMT",
+      fetcher: async () => new Response(null, { status: 304 }),
+      now: () => new Date("2026-05-28T10:05:00.000Z"),
+    });
+
+    expect(result).toMatchObject({ events: [], notModified: true });
   });
 });

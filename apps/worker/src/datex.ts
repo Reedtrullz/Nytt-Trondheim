@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import type { Geometry } from "geojson";
 import type { OfficialEvent, OfficialEventState } from "@nytt/shared";
@@ -44,6 +45,53 @@ export interface DatexParseOptions {
 
 export interface DatexParseResult {
   events: OfficialEvent[];
+}
+
+export interface DatexCollectOptions {
+  endpoint: string;
+  username: string;
+  password: string;
+  lastModified?: string;
+  fetcher?: typeof fetch;
+  now?: () => Date;
+}
+
+export interface DatexCollectResult extends DatexParseResult {
+  notModified: boolean;
+  lastModified?: string;
+}
+
+export function datexBasicAuthHeader(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
+}
+
+export async function collectDatexSituationEvents({
+  endpoint,
+  username,
+  password,
+  lastModified,
+  fetcher = fetch,
+  now = () => new Date(),
+}: DatexCollectOptions): Promise<DatexCollectResult> {
+  const headers: Record<string, string> = {
+    "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+    Authorization: datexBasicAuthHeader(username, password),
+  };
+  if (lastModified) headers["If-Modified-Since"] = lastModified;
+
+  const response = await fetcher(endpoint, { headers });
+  if (response.status === 304) return { events: [], notModified: true, lastModified };
+  if (!response.ok) throw new Error(`DATEX returned HTTP ${response.status}`);
+
+  const parsed = parseDatexSituationPublication(await response.text(), {
+    endpoint,
+    receivedAt: now().toISOString(),
+  });
+  return {
+    ...parsed,
+    notModified: false,
+    lastModified: response.headers.get("Last-Modified") ?? lastModified,
+  };
 }
 
 function datexAttribute(object: DatexObject, name: string): string {
