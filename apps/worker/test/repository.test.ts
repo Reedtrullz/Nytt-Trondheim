@@ -1,5 +1,11 @@
 import type pg from "pg";
-import type { AiProcessingRun, Article, OfficialEvent, TrafficPulseCorridor } from "@nytt/shared";
+import type {
+  AiProcessingRun,
+  Article,
+  OfficialEvent,
+  Situation,
+  TrafficPulseCorridor,
+} from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerRepository } from "../src/repository.js";
 
@@ -122,6 +128,49 @@ describe("WorkerRepository", () => {
     expect(sourceItemCall?.[1]).toEqual(
       expect.arrayContaining(["datex", "official_event", "datex-event-one", event.sourceUrl, event.title]),
     );
+  });
+
+  it("links source items for situation article and official event relationships", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] }) // previous situation
+      .mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const situation: Situation = {
+      id: "traffic-datex-one",
+      type: "traffic",
+      title: "E6 stengt",
+      summary: "E6 er stengt.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      importance: "high",
+      updatedAt: "2026-05-28T10:00:00.000Z",
+      createdAt: "2026-05-28T10:00:00.000Z",
+      locationLabel: "Sluppen",
+      officialSource: "datex",
+      officialEventId: "datex-event-one",
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["datex"],
+        articleIds: ["article-one"],
+        activatedAt: "2026-05-28T10:00:00.000Z",
+      },
+      relatedArticleIds: ["article-one"],
+      evidence: [],
+      features: [],
+      timeline: [],
+    };
+
+    await repository.upsertSituation(situation);
+
+    const linkCalls = query.mock.calls.filter(([sql]) =>
+      String(sql).includes("INSERT INTO situation_source_items"),
+    );
+    expect(linkCalls.length).toBeGreaterThanOrEqual(2);
+    expect(String(linkCalls[0]?.[0])).toContain("SELECT $1, id, 'supports'");
+    expect(String(linkCalls[0]?.[0])).toContain("FROM source_items");
+    expect(String(linkCalls[0]?.[0])).toContain("kind='article'");
+    expect(String(linkCalls[1]?.[0])).toContain("kind='official_event'");
   });
 
   it("cancels replaced official events before mirroring the source item", async () => {

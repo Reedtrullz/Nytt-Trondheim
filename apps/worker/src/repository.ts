@@ -407,6 +407,24 @@ export class WorkerRepository {
          WHERE id = $1`,
         [articleId, merged.id],
       );
+      await this.pool.query(
+        `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
+         SELECT $1, id, 'supports', 'worker'
+         FROM source_items
+         WHERE kind='article' AND external_id=$2
+         ON CONFLICT (situation_id, source_item_id) DO NOTHING`,
+        [merged.id, articleId],
+      );
+    }
+    if (merged.officialEventId && merged.officialSource) {
+      await this.pool.query(
+        `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
+         SELECT $1, id, 'supports', 'worker'
+         FROM source_items
+         WHERE provider=$2 AND kind='official_event' AND external_id=$3
+         ON CONFLICT (situation_id, source_item_id) DO NOTHING`,
+        [merged.id, merged.officialSource, merged.officialEventId],
+      );
     }
   }
 }
