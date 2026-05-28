@@ -16,7 +16,7 @@
 
 Optional: `NYTT_DATEX_ENDPOINT`, `NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`; legacy `NYTT_DATEX_API_KEY`; repository variables `NYTT_POLITILOGGEN_ENABLED` and `NYTT_DEPLOY_ENABLED`.
 
-DATEX credentials are server-side worker secrets only. They are stored as GitHub Actions repository secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`), mapped to container runtime variables (`DATEX_USERNAME`, `DATEX_PASSWORD`) by the deploy workflow/playbook, and must never be exposed to the frontend bundle, logs, raw fixtures, or exported workspaces.
+DATEX credentials are server-side worker secrets only. They are stored as GitHub Actions repository secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`), mapped to container runtime variables (`DATEX_USERNAME`, `DATEX_PASSWORD`) by the deploy workflow/playbook, and must never be exposed to the frontend bundle, logs, raw fixtures, or exported workspaces. The default DATEX endpoint is SRTI-filtered (`GetSituation/pullsnapshotdata?srti=True`) so the worker does not poll the full national snapshot unless `NYTT_DATEX_ENDPOINT` is intentionally overridden.
 
 ## Known External Issue
 

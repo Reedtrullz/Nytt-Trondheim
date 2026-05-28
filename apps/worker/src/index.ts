@@ -13,7 +13,7 @@ import {
   officialTrafficSituationsFromEvents,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "./clusters.js";
-import { collectDatexSituationEvents } from "./datex.js";
+import { collectDatexSituationEvents, defaultDatexSituationEndpoint } from "./datex.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
@@ -115,9 +115,7 @@ async function collectAll(): Promise<void> {
   }
   const datexUsername = process.env.DATEX_USERNAME?.trim();
   const datexPassword = process.env.DATEX_PASSWORD;
-  const datexEndpoint =
-    process.env.DATEX_ENDPOINT?.trim() ||
-    "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
+  const datexEndpoint = process.env.DATEX_ENDPOINT?.trim() || defaultDatexSituationEndpoint;
 
   if (datexUsername && datexPassword) {
     try {

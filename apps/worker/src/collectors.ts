@@ -3,7 +3,7 @@ import * as cheerio from "cheerio";
 import { XMLParser } from "fast-xml-parser";
 import type { Article, SourceId } from "@nytt/shared";
 import { categorize, detectScope, extractPlaces } from "./classify.js";
-import { probeDatexAccess } from "./datex.js";
+import { probeDatexAccess, defaultDatexSituationEndpoint } from "./datex.js";
 
 interface FeedSource {
   id: SourceId;
@@ -42,9 +42,6 @@ function textValue(value: unknown): string {
 function stableId(source: SourceId, url: string): string {
   return `${source}-${createHash("sha1").update(url).digest("hex").slice(0, 16)}`;
 }
-
-const defaultDatexSituationEndpoint =
-  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata";
 
 function nonEmptyEnv(value: string | undefined): string | undefined {
   const trimmed = value?.trim();

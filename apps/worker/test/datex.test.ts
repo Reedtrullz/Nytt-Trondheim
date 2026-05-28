@@ -5,6 +5,7 @@ import {
   asDatexArray,
   collectDatexSituationEvents,
   datexText,
+  defaultDatexSituationEndpoint,
   findDatexObjectsWithKey,
   parseDatexSituationPublication,
 } from "../src/datex.js";
@@ -78,6 +79,31 @@ describe("DATEX situation parsing", () => {
     expect(result.events[0]?.raw).toMatchObject({
       datex: { situationId: "NO-SVV-1", recordId: "NO-SVV-1-R1", roadNumber: "E6" },
     });
+  });
+
+  it("uses an SRTI-filtered DATEX endpoint by default to avoid full national snapshots", () => {
+    expect(defaultDatexSituationEndpoint).toBe(
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=True",
+    );
+  });
+
+  it("does not retain full parsed DATEX nodes in official event payloads", async () => {
+    const xml = await readFile(fixturePath, "utf8");
+
+    const result = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      receivedAt: "2026-05-28T10:05:00.000Z",
+    });
+
+    expect(result.events[0]?.raw).toMatchObject({
+      datex: {
+        situationId: "NO-SVV-1",
+        recordId: "NO-SVV-1-R1",
+        comments: ["Trafikkulykke på E6 ved Tiller. Ett felt stengt."],
+      },
+    });
+    expect(result.events[0]?.raw).not.toHaveProperty("situation");
+    expect(result.events[0]?.raw).not.toHaveProperty("record");
   });
 
   it("marks accidents and closures as promotable traffic situations", async () => {

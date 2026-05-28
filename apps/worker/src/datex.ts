@@ -6,6 +6,9 @@ import { XMLParser } from "fast-xml-parser";
 
 type DatexObject = Record<string, unknown>;
 
+export const defaultDatexSituationEndpoint =
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=True";
+
 function isObject(value: unknown): value is DatexObject {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -286,7 +289,7 @@ export function parseDatexSituationPublication(
         const impact = datexImpact(kind, severity, detail);
         const geometry = pointGeometry(record);
 
-        events.push({
+        const event: OfficialEvent = {
           id: datexId(situationId, recordId),
           source: "datex",
           eventType: "traffic",
@@ -310,19 +313,20 @@ export function parseDatexSituationPublication(
               promoteToSituation: impact.promoteToSituation,
               roadNumber,
               roadName,
+              comments,
               receivedAt: options.receivedAt,
               publicationTime,
               situationRecordCreationTime: creationTime,
               situationRecordVersionTime: versionTime,
               validityStatus,
             },
-            situation,
-            record,
           },
-        });
+        };
+
+        if (isRelevantToNytt(event)) events.push(event);
       }
     }
   }
 
-  return { events: events.filter(isRelevantToNytt) };
+  return { events };
 }
