@@ -166,6 +166,12 @@ CREATE TABLE IF NOT EXISTS source_health (
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_failure_at timestamptz;
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS next_poll_at timestamptz;
 
+CREATE TABLE IF NOT EXISTS collector_state (
+  key text PRIMARY KEY,
+  value text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "sid" varchar NOT NULL PRIMARY KEY,
   "sess" json NOT NULL,
@@ -175,3 +181,4 @@ CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
 
 INSERT INTO schema_migrations (version) VALUES ('001_safe_launch_schema') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('002_situation_trustworthiness') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('003_collector_state') ON CONFLICT DO NOTHING;

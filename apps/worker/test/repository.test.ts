@@ -48,4 +48,24 @@ describe("WorkerRepository", () => {
     expect(parameters[6]).toBe(JSON.stringify(run.articleIds));
     expect(parameters[7]).toBe(JSON.stringify(run.result));
   });
+
+  it("loads and stores collector state values", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ value: "Thu, 28 May 2026 10:00:00 GMT" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(repository.collectorState("datex:lastModified")).resolves.toBe(
+      "Thu, 28 May 2026 10:00:00 GMT",
+    );
+    await repository.setCollectorState("datex:lastModified", "Thu, 28 May 2026 10:10:00 GMT");
+
+    expect(query.mock.calls[0]?.[0]).toContain("SELECT value FROM collector_state");
+    expect(query.mock.calls[1]?.[0]).toContain("INSERT INTO collector_state");
+    expect(query.mock.calls[1]?.[1]).toEqual([
+      "datex:lastModified",
+      "Thu, 28 May 2026 10:10:00 GMT",
+    ]);
+  });
 });

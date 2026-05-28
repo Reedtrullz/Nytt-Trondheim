@@ -66,6 +66,22 @@ export class WorkerRepository {
     );
   }
 
+  async collectorState(key: string): Promise<string | undefined> {
+    const result = await this.pool.query<{ value: string }>(
+      "SELECT value FROM collector_state WHERE key=$1",
+      [key],
+    );
+    return result.rows[0]?.value;
+  }
+
+  async setCollectorState(key: string, value: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO collector_state (key, value) VALUES ($1,$2)
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
+      [key, value],
+    );
+  }
+
   async recentArticles(hours: number): Promise<Article[]> {
     const result = await this.pool.query<{ payload: Article }>(
       "SELECT payload FROM articles WHERE published_at >= now() - ($1 * interval '1 hour') ORDER BY published_at DESC",
