@@ -13,6 +13,8 @@
 Articles link to the publisher; this application does not republish complete articles. Nidaros is excluded until a suitable permitted collection route is confirmed.
 Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, including daylight-saving transitions. When a still-visible collected article is fetched again, corrected public classification and geocoding metadata are refreshed without removing an established situation link.
 
+Articles and official MET/NVE/DATEX situation events are mirrored into the internal `source_items` ledger. DATEX TravelTime is explicitly excluded from the editorial source stream and remains `datex_travel_times` plus `source_health` only.
+
 ## Official And Geographic Layers
 
 - Kartverket WMTS `topo` provides the map underlay and must be attributed `© Kartverket`.

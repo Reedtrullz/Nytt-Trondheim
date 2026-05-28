@@ -19,6 +19,8 @@ Map features carry one required provenance classification:
 
 The API ignores any client attempt to create an annotation under another provenance class.
 
+Inbound public records enter the `source_items` ledger before editorial linking or verification. `source_items` stores provider, kind, durable upstream identity, fetched time, raw/normalized payload, capture hash, optional geo hint and reliability tier. `situation_source_items` links those records to situations without making verification claims by itself.
+
 ## AI Boundary
 
 The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only public feed excerpts and public official data may enter that process. Private annotations, attachments, tasks and notes are excluded.

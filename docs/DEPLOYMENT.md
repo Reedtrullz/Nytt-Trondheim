@@ -53,6 +53,8 @@ ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select source,state,detail,last_checked_at,next_poll_at from source_health where source in ('datex','datex_travel_time') order by source;\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from official_events where source='datex';\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from situations where payload->>'officialSource'='datex';\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select provider, kind, count(*) from source_items group by provider, kind order by provider, kind;\""
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select count(*) from source_items where provider='datex_travel_time' or kind='travel_time';\""
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select id,name,state,travel_time_seconds,free_flow_seconds,delay_seconds,measurement_to from datex_travel_times order by delay_seconds desc nulls last, name asc limit 10;\""
 ```
 
