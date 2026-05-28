@@ -1,5 +1,6 @@
 import type { TrafficPulseCorridor } from "@nytt/shared";
 import { XMLParser } from "fast-xml-parser";
+import { datexBasicAuthHeader } from "./datex.js";
 
 export const defaultDatexTravelTimeLocationsEndpoint =
   "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata";
@@ -29,6 +30,21 @@ export interface DatexTravelTimePulseOptions {
   sourceUrl: string;
   receivedAt: string;
 }
+
+export interface DatexTravelTimeCollectOptions {
+  locationsEndpoint: string;
+  dataEndpoint: string;
+  username: string;
+  password: string;
+  fetcher?: typeof fetch;
+  now?: () => Date;
+}
+
+export interface DatexTravelTimeCollectResult {
+  corridors: TrafficPulseCorridor[];
+}
+
+const datexTravelTimeUserAgent = "NyttTrondheim/0.1 kontakt@reidar.tech";
 
 const localTravelTimeLocationIds = new Set([
   "100071",
@@ -220,6 +236,52 @@ export function parseDatexTravelTimeData(xml: string): DatexTravelTimeMeasuremen
   }
 
   return measurements;
+}
+
+async function fetchDatexTravelTimeSnapshot(
+  fetcher: typeof fetch,
+  endpointType: "locations" | "data",
+  endpoint: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const response = await fetcher(endpoint, { headers });
+  if (!response.ok) {
+    throw new Error(`DATEX TravelTime ${endpointType} returned HTTP ${response.status}`);
+  }
+  return response.text();
+}
+
+export async function collectDatexTravelTimePulse({
+  locationsEndpoint,
+  dataEndpoint,
+  username,
+  password,
+  fetcher = fetch,
+  now = () => new Date(),
+}: DatexTravelTimeCollectOptions): Promise<DatexTravelTimeCollectResult> {
+  const headers: Record<string, string> = {
+    "User-Agent": datexTravelTimeUserAgent,
+    Authorization: datexBasicAuthHeader(username, password),
+  };
+
+  const locationsXml = await fetchDatexTravelTimeSnapshot(
+    fetcher,
+    "locations",
+    locationsEndpoint,
+    headers,
+  );
+  const dataXml = await fetchDatexTravelTimeSnapshot(fetcher, "data", dataEndpoint, headers);
+
+  return {
+    corridors: trafficPulseFromDatexTravelTime(
+      parseDatexTravelTimeLocations(locationsXml),
+      parseDatexTravelTimeData(dataXml),
+      {
+        sourceUrl: dataEndpoint,
+        receivedAt: now().toISOString(),
+      },
+    ),
+  };
 }
 
 export function trafficPulseFromDatexTravelTime(

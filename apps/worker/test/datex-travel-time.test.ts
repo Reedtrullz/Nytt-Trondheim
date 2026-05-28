@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { OperationsStatus, SourceHealth, TrafficPulseCorridor } from "@nytt/shared";
 import {
+  collectDatexTravelTimePulse,
   parseDatexTravelTimeData,
   parseDatexTravelTimeLocations,
   trafficPulseFromDatexTravelTime,
@@ -12,7 +13,24 @@ const locationsFixturePath = new URL(
   import.meta.url,
 );
 const dataFixturePath = new URL("./fixtures/datex-travel-time-data.xml", import.meta.url);
+const travelTimeLocationsSourceUrl =
+  "https://datex.example.test/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata";
 const travelTimeDataSourceUrl = "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata";
+const expectedTravelTimeAuthorization = "Basic ZGF0ZXgtdXNlcjpkYXRleC1wYXNz";
+const expectedTravelTimeUserAgent = "NyttTrondheim/0.1 kontakt@reidar.tech";
+
+function responseHeaders(init: RequestInit | undefined): Headers {
+  return new Headers(init?.headers);
+}
+
+async function rejectedMessage(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error("Expected promise to reject");
+}
 
 function travelTimeDataXml(basicData: string): string {
   return `
@@ -105,6 +123,124 @@ function locationEntries(value: unknown): ParsedTravelTimeLocation[] {
 describe("DATEX travel time shared types", () => {
   it("exposes a dedicated source-health id for traffic pulse", () => {
     expect(_sourceHealthTypeCheck.source).toBe("datex_travel_time");
+  });
+});
+
+describe("DATEX travel time collection", () => {
+  it("fetches both snapshots with Basic Auth and no conditional headers", async () => {
+    const [locationsXml, dataXml] = await Promise.all([
+      readFile(locationsFixturePath, "utf8"),
+      readFile(dataFixturePath, "utf8"),
+    ]);
+    const fetcher = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url === travelTimeLocationsSourceUrl) return new Response(locationsXml);
+      if (url === travelTimeDataSourceUrl) return new Response(dataXml);
+      return new Response("Unexpected URL", { status: 500 });
+    });
+
+    const result = await collectDatexTravelTimePulse({
+      locationsEndpoint: travelTimeLocationsSourceUrl,
+      dataEndpoint: travelTimeDataSourceUrl,
+      username: "datex-user",
+      password: "datex-pass",
+      fetcher,
+      now: () => new Date("2026-05-28T16:21:00.000Z"),
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+      travelTimeLocationsSourceUrl,
+      travelTimeDataSourceUrl,
+    ]);
+
+    for (const [, init] of fetcher.mock.calls) {
+      const headers = responseHeaders(init);
+      expect(headers.get("Authorization")).toBe(expectedTravelTimeAuthorization);
+      expect(headers.get("User-Agent")).toBe(expectedTravelTimeUserAgent);
+      expect(headers.get("If-Modified-Since")).toBeNull();
+    }
+
+    expect(result.corridors).toHaveLength(3);
+    expect(result.corridors.map((corridor) => corridor.id)).toEqual(
+      expect.arrayContaining(["100135", "100139", "local-future-1"]),
+    );
+    expect(result.corridors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "100135",
+          name: "E6 Moholt - E6 Ranheim",
+          state: "congested",
+          travelTimeSeconds: 360,
+          freeFlowSeconds: 240,
+          delaySeconds: 120,
+          delayRatio: 1.5,
+          trend: "increasing",
+          measurementFrom: "2026-05-28T16:15:00.010Z",
+          measurementTo: "2026-05-28T16:20:00.010Z",
+          updatedAt: "2026-05-28T16:21:00.000Z",
+          sourceUrl: travelTimeDataSourceUrl,
+        }),
+        expect.objectContaining({
+          id: "100139",
+          name: "Rv706 Sluppen - E6 Sluppenrampene",
+          state: "slow",
+          travelTimeSeconds: 150,
+          freeFlowSeconds: 120,
+          sourceUrl: travelTimeDataSourceUrl,
+        }),
+        expect.objectContaining({
+          id: "local-future-1",
+          name: "Trondheim sentrum - Lade",
+          state: "free_flow",
+          travelTimeSeconds: 180,
+          freeFlowSeconds: 180,
+          sourceUrl: travelTimeDataSourceUrl,
+        }),
+      ]),
+    );
+  });
+
+  it("throws useful sanitized errors for failed TravelTime endpoints", async () => {
+    const locationsXml = await readFile(locationsFixturePath, "utf8");
+    const locationFailureFetcher = vi.fn(async () => new Response("Unavailable", { status: 503 }));
+
+    const locationMessage = await rejectedMessage(
+      collectDatexTravelTimePulse({
+        locationsEndpoint: travelTimeLocationsSourceUrl,
+        dataEndpoint: travelTimeDataSourceUrl,
+        username: "datex-user",
+        password: "datex-pass",
+        fetcher: locationFailureFetcher,
+      }),
+    );
+
+    expect(locationMessage).toBe("DATEX TravelTime locations returned HTTP 503");
+    expect(locationMessage).not.toContain("datex-user");
+    expect(locationMessage).not.toContain("datex-pass");
+    expect(locationMessage).not.toContain(expectedTravelTimeAuthorization);
+
+    const dataFailureFetcher = vi.fn(
+      async (input: Parameters<typeof fetch>[0]) =>
+        String(input) === travelTimeLocationsSourceUrl
+          ? new Response(locationsXml)
+          : new Response("Bad gateway", { status: 502 }),
+    );
+
+    const dataMessage = await rejectedMessage(
+      collectDatexTravelTimePulse({
+        locationsEndpoint: travelTimeLocationsSourceUrl,
+        dataEndpoint: travelTimeDataSourceUrl,
+        username: "datex-user",
+        password: "datex-pass",
+        fetcher: dataFailureFetcher,
+      }),
+    );
+
+    expect(dataMessage).toBe("DATEX TravelTime data returned HTTP 502");
+    expect(dataMessage).not.toContain("datex-user");
+    expect(dataMessage).not.toContain("datex-pass");
+    expect(dataMessage).not.toContain(expectedTravelTimeAuthorization);
   });
 });
 
