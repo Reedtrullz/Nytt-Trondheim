@@ -5,6 +5,7 @@ import type {
   Article,
   OfficialEvent,
   Situation,
+  SourceItemInput,
   SourceHealth,
   TrafficPulseCorridor,
 } from "@nytt/shared";
@@ -443,4 +444,99 @@ export function articleDedupeKey(article: Article): string {
   return createHash("sha256")
     .update(`${article.source}:${normalizedTitle}:${publishedHour}`)
     .digest("hex");
+}
+
+function sourceItemHash(parts: unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
+function sourceItemId(provider: string, kind: string, stableKey: string): string {
+  return `source:${sourceItemHash([provider, kind, stableKey])}`;
+}
+
+export function articleSourceItemInput(article: Article, fetchedAt: string): SourceItemInput {
+  const normalizedPayload = {
+    id: article.id,
+    source: article.source,
+    sourceLabel: article.sourceLabel,
+    title: article.title,
+    excerpt: article.excerpt,
+    url: article.url,
+    publishedAt: article.publishedAt,
+    scope: article.scope,
+    category: article.category,
+    places: article.places,
+    location: article.location,
+  };
+  return {
+    id: sourceItemId(article.source, "article", article.id),
+    provider: article.source,
+    kind: "article",
+    externalId: article.id,
+    originalUrl: article.url,
+    title: article.title,
+    summary: article.excerpt,
+    publishedAt: article.publishedAt,
+    fetchedAt,
+    rawPayload: article,
+    normalizedPayload,
+    captureHash: sourceItemHash([
+      article.source,
+      "article",
+      article.id,
+      article.url,
+      article.publishedAt,
+      normalizedPayload,
+    ]),
+    geoHint: article.location
+      ? { type: "Point", coordinates: [article.location.lng, article.location.lat] }
+      : undefined,
+    reliabilityTier: article.source === "trondheim_kommune" ? "official" : "trusted_media",
+  };
+}
+
+export function officialEventSourceItemInput(
+  event: OfficialEvent,
+  fetchedAt: string,
+): SourceItemInput {
+  const normalizedPayload = {
+    id: event.id,
+    source: event.source,
+    eventType: event.eventType,
+    title: event.title,
+    detail: event.detail,
+    sourceUrl: event.sourceUrl,
+    areaLabel: event.areaLabel,
+    state: event.state,
+    severity: event.severity,
+    publishedAt: event.publishedAt,
+    validFrom: event.validFrom,
+    validTo: event.validTo,
+    geometry: event.geometry,
+    replacesIds: event.replacesIds,
+  };
+  const publishedAt = event.publishedAt ?? event.validFrom ?? fetchedAt;
+  return {
+    id: sourceItemId(event.source, "official_event", event.id),
+    provider: event.source,
+    kind: "official_event",
+    externalId: event.id,
+    originalUrl: event.sourceUrl,
+    title: event.title,
+    summary: event.detail,
+    publishedAt,
+    fetchedAt,
+    rawPayload: event.raw ?? event,
+    normalizedPayload,
+    captureHash: sourceItemHash([
+      event.source,
+      "official_event",
+      event.id,
+      event.sourceUrl,
+      publishedAt,
+      normalizedPayload,
+    ]),
+    geoHint: event.geometry,
+    reliabilityTier: "official",
+  };
 }
