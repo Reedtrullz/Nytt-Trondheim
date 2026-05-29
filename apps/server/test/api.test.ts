@@ -8,7 +8,13 @@ import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { PgStore } from "../src/store.js";
-import type { Article, OfficialEvent, SourceHealth, TrafficMapEvent } from "@nytt/shared";
+import type {
+  Article,
+  OfficialEvent,
+  SourceHealth,
+  TrafficMapEvent,
+  TrafficPulseCorridor,
+} from "@nytt/shared";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
@@ -222,6 +228,20 @@ describe("private situation API", () => {
       },
       { source: "nrk", label: "NRK Trøndelag", state: "ok", detail: "RSS" },
     ] satisfies SourceHealth[]);
+    vi.spyOn(store, "listTrafficPulseCorridors").mockResolvedValue([
+      {
+        id: "100141",
+        name: "E6 Okstadbakken - E6 Sluppenrampene",
+        state: "slow",
+        travelTimeSeconds: 720,
+        freeFlowSeconds: 540,
+        delaySeconds: 180,
+        delayRatio: 1.33,
+        measurementTo: "2026-05-28T10:05:00.000Z",
+        updatedAt: "2026-05-28T10:05:30.000Z",
+        sourceUrl: "https://example.test/datex/travel-time/100141",
+      },
+    ] satisfies TrafficPulseCorridor[]);
 
     const agent = request.agent(app);
     await agent.get("/api/session").expect(200);
@@ -263,6 +283,11 @@ describe("private situation API", () => {
           eventCount: 1,
           affectedEventIds: ["datex:datex-roadwork-e6"],
           highestSeverity: "medium",
+          travelTime: expect.objectContaining({
+            id: "100141",
+            state: "slow",
+            delaySeconds: 180,
+          }),
         }),
       ]),
     );
@@ -297,6 +322,16 @@ describe("private situation API", () => {
         "Ingen trafikkhendelser i valgt kartutsnitt og filter. Prøv å zoome ut eller slå på planlagte veiarbeid.",
       counts: { total: 0 },
     });
+    expect(emptyCategoryResponse.body.corridorImpacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "e6-south",
+          eventCount: 0,
+          affectedEventIds: [],
+          travelTime: expect.objectContaining({ id: "100141", delaySeconds: 180 }),
+        }),
+      ]),
+    );
 
     await agent.get("/api/map/traffic-events?states=not-a-state").expect(400);
   });
@@ -591,8 +626,9 @@ describe("private situation API", () => {
     vi.setSystemTime(new Date("2026-05-28T12:00:00.000Z"));
 
     const queries: string[] = [];
+    let trafficPulseParams: unknown[] | undefined;
     const fakePool = {
-      async query(sql: string) {
+      async query(sql: string, params?: unknown[]) {
         const normalizedSql = sql.replace(/\s+/g, " ").trim();
         queries.push(normalizedSql);
 
@@ -603,8 +639,9 @@ describe("private situation API", () => {
         }
         if (normalizedSql.includes("FROM ai_processing_runs")) return { rows: [] };
         if (normalizedSql.includes("FROM datex_travel_times")) {
+          trafficPulseParams = params;
           expect(normalizedSql).toContain(
-            "FROM datex_travel_times ORDER BY delay_seconds DESC NULLS LAST, name ASC LIMIT 30",
+            "FROM datex_travel_times ORDER BY delay_seconds DESC NULLS LAST, name ASC LIMIT $1",
           );
           return {
             rows: [
@@ -674,6 +711,7 @@ describe("private situation API", () => {
         "stale",
         "free_flow",
       ]);
+      expect(trafficPulseParams).toEqual([30]);
       expect(queries.some((sql) => sql.includes("FROM datex_travel_times"))).toBe(true);
     } finally {
       vi.useRealTimers();

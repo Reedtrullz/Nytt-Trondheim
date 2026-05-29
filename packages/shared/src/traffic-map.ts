@@ -1,4 +1,5 @@
 import type { Geometry } from "geojson";
+import type { TrafficPulseCorridor } from "./types.js";
 
 export type TrafficEventCategory =
   | "roadworks"
@@ -75,6 +76,21 @@ export interface TrafficCorridorImpact {
   eventCount: number;
   affectedEventIds: string[];
   highestSeverity: TrafficEventSeverity;
+  travelTime?: Pick<
+    TrafficPulseCorridor,
+    | "id"
+    | "name"
+    | "state"
+    | "travelTimeSeconds"
+    | "freeFlowSeconds"
+    | "delaySeconds"
+    | "delayRatio"
+    | "trend"
+    | "measurementFrom"
+    | "measurementTo"
+    | "updatedAt"
+    | "sourceUrl"
+  >;
 }
 
 export interface TrafficMapSourceStatus {

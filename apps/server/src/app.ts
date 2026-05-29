@@ -284,7 +284,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         typeof query.west === "number"
           ? { north: query.north, south: query.south, east: query.east, west: query.west }
           : undefined;
-      const [trafficInfoEvents, officialEvents, sourceItems, articlesPage, sourceHealth] =
+      const [trafficInfoEvents, officialEvents, sourceItems, articlesPage, sourceHealth, trafficPulse] =
         await Promise.all([
           store.listTrafficMapEvents(
             {
@@ -302,6 +302,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           listAllDatexSourceItems(store, login),
           store.listArticles({ limit: 500 }, login),
           store.listSourceHealth(),
+          store.listTrafficPulseCorridors(50),
         ]);
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
@@ -327,7 +328,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       res.json({
         events,
         brief: buildTrafficBrief(events),
-        corridorImpacts: buildCorridorImpacts(events),
+        corridorImpacts: buildCorridorImpacts(events, trafficPulse),
         sources: trafficMapSourceStatuses(sourceHealth),
       });
     } catch (error) {

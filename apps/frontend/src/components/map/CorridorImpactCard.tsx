@@ -20,6 +20,23 @@ function severityLabel(severity: TrafficCorridorImpact["highestSeverity"]) {
   }
 }
 
+function minutesLabel(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `${minutes} min`;
+}
+
+function travelTimeSummary(impact: TrafficCorridorImpact): string | undefined {
+  const travelTime = impact.travelTime;
+  if (!travelTime) return undefined;
+  if (typeof travelTime.delaySeconds === "number" && travelTime.delaySeconds > 0) {
+    return `Forsinkelse ${minutesLabel(travelTime.delaySeconds)} · ${travelTime.state}`;
+  }
+  if (typeof travelTime.travelTimeSeconds === "number") {
+    return `Reisetid ${minutesLabel(travelTime.travelTimeSeconds)}`;
+  }
+  return travelTime.state;
+}
+
 export function CorridorImpactCard({
   impacts,
   events,
@@ -27,6 +44,7 @@ export function CorridorImpactCard({
   onSelectImpact,
 }: CorridorImpactCardProps) {
   const selectedImpact = impacts.find((impact) => impact.id === selectedImpactId);
+  const selectedTravelTimeSummary = selectedImpact ? travelTimeSummary(selectedImpact) : undefined;
   const affectedEvents = selectedImpact
     ? selectedImpact.affectedEventIds
         .map((eventId) => events.find((event) => event.id === eventId))
@@ -44,23 +62,30 @@ export function CorridorImpactCard({
         ) : null}
       </header>
       <div className="corridor-impact-list">
-        {impacts.map((impact) => (
-          <button
-            key={impact.id}
-            type="button"
-            className={impact.id === selectedImpactId ? "selected" : undefined}
-            onClick={() => onSelectImpact(impact.id === selectedImpactId ? undefined : impact.id)}
-          >
-            <span>{impact.name}</span>
-            <small>
-              {impact.eventCount} hendelser · {severityLabel(impact.highestSeverity)}
-            </small>
-          </button>
-        ))}
+        {impacts.map((impact) => {
+          const summary = travelTimeSummary(impact);
+          return (
+            <button
+              key={impact.id}
+              type="button"
+              className={impact.id === selectedImpactId ? "selected" : undefined}
+              onClick={() => onSelectImpact(impact.id === selectedImpactId ? undefined : impact.id)}
+            >
+              <span>{impact.name}</span>
+              <small>
+                {impact.eventCount} hendelser · {severityLabel(impact.highestSeverity)}
+                {summary ? ` · ${summary}` : ""}
+              </small>
+            </button>
+          );
+        })}
       </div>
       {selectedImpact ? (
         <div className="corridor-impact-events">
           <h3>{selectedImpact.name}</h3>
+          {selectedTravelTimeSummary ? (
+            <p className="corridor-impact-travel-time">{selectedTravelTimeSummary}</p>
+          ) : null}
           {affectedEvents.length > 0 ? (
             <ul>
               {affectedEvents.map((event) => (

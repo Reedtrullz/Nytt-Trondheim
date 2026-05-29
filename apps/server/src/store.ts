@@ -84,6 +84,7 @@ export interface Store {
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
+  listTrafficPulseCorridors(limit?: number): Promise<TrafficPulseCorridor[]>;
   listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
   linkSourceItem(
     situationId: string,
@@ -425,6 +426,10 @@ export class MemoryStore implements Store {
     return [];
   }
 
+  async listTrafficPulseCorridors(): Promise<TrafficPulseCorridor[]> {
+    return [];
+  }
+
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
     if (!this.situations.has(situationId)) return [];
     const links = [...this.sourceLinks.values()]
@@ -681,7 +686,7 @@ export class MemoryStore implements Store {
         resolved: 0,
         dismissed: 0,
       },
-      trafficPulse: [],
+      trafficPulse: await this.listTrafficPulseCorridors(),
     };
   }
 }
@@ -1380,34 +1385,42 @@ export class PgStore implements Store {
     return result.rows;
   }
 
+  async listTrafficPulseCorridors(limit = 30): Promise<TrafficPulseCorridor[]> {
+    const result = await this.pool.query<{
+      payload: TrafficPulseCorridor;
+      measurementTo?: Date | string | null;
+    }>(
+      `SELECT payload, measurement_to AS "measurementTo"
+       FROM datex_travel_times
+       ORDER BY delay_seconds DESC NULLS LAST, name ASC
+       LIMIT $1`,
+      [limit],
+    );
+    const responseTimeMs = Date.now();
+    return result.rows.map((row) =>
+      withTrafficPulseStaleOverlay(row.payload, row.measurementTo, responseTimeMs),
+    );
+  }
+
   async getOperationsStatus(): Promise<OperationsStatus> {
-    const [sources, articleCount, situationCounts, latestAiRun, trafficPulseRows] =
-      await Promise.all([
-        this.listSourceHealth(),
-        this.pool.query<{ count: string }>("SELECT count(*)::text AS count FROM articles"),
-        this.pool.query<{ status: Situation["status"]; count: string }>(
-          "SELECT status, count(*)::text AS count FROM situations GROUP BY status",
-        ),
-        this.pool.query<{
-          provider: "deepseek" | "deterministic";
-          model: string;
-          status: "ok" | "degraded" | "disabled";
-          completedAt: string;
-          error?: string;
-        }>(
-          `SELECT provider, model, status, completed_at AS "completedAt", error
+    const [sources, articleCount, situationCounts, latestAiRun, trafficPulse] = await Promise.all([
+      this.listSourceHealth(),
+      this.pool.query<{ count: string }>("SELECT count(*)::text AS count FROM articles"),
+      this.pool.query<{ status: Situation["status"]; count: string }>(
+        "SELECT status, count(*)::text AS count FROM situations GROUP BY status",
+      ),
+      this.pool.query<{
+        provider: "deepseek" | "deterministic";
+        model: string;
+        status: "ok" | "degraded" | "disabled";
+        completedAt: string;
+        error?: string;
+      }>(
+        `SELECT provider, model, status, completed_at AS "completedAt", error
          FROM ai_processing_runs ORDER BY completed_at DESC LIMIT 1`,
-        ),
-        this.pool.query<{
-          payload: TrafficPulseCorridor;
-          measurementTo?: Date | string | null;
-        }>(
-          `SELECT payload, measurement_to AS "measurementTo"
-         FROM datex_travel_times
-         ORDER BY delay_seconds DESC NULLS LAST, name ASC
-         LIMIT 30`,
-        ),
-      ]);
+      ),
+      this.listTrafficPulseCorridors(30),
+    ]);
     const counts: OperationsStatus["situationCounts"] = {
       preliminary: 0,
       active: 0,
@@ -1415,10 +1428,6 @@ export class PgStore implements Store {
       dismissed: 0,
     };
     for (const row of situationCounts.rows) counts[row.status] = Number(row.count);
-    const responseTimeMs = Date.now();
-    const trafficPulse = trafficPulseRows.rows.map((row) =>
-      withTrafficPulseStaleOverlay(row.payload, row.measurementTo, responseTimeMs),
-    );
     return {
       sources,
       articleCount: Number(articleCount.rows[0]?.count ?? 0),
