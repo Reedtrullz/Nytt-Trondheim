@@ -212,15 +212,24 @@ function titleForRecord(
   return [humanizeRecordKind(kind), location && `på ${location}`].filter(Boolean).join(" ");
 }
 
+function pointFromLatLngObject(value: unknown): Geometry | undefined {
+  if (!isObject(value)) return undefined;
+  const latitude = Number(datexText(value.latitude));
+  const longitude = Number(datexText(value.longitude));
+  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    return { type: "Point", coordinates: [longitude, latitude] };
+  }
+  return undefined;
+}
+
 function pointGeometry(record: DatexObject): Geometry | undefined {
   for (const object of findDatexObjectsWithKey(record, "locationForDisplay")) {
-    const location = object.locationForDisplay;
-    if (!isObject(location)) continue;
-    const latitude = Number(datexText(location.latitude));
-    const longitude = Number(datexText(location.longitude));
-    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-      return { type: "Point", coordinates: [longitude, latitude] };
-    }
+    const point = pointFromLatLngObject(object.locationForDisplay);
+    if (point) return point;
+  }
+  for (const object of findDatexObjectsWithKey(record, "coordinatesForDisplay")) {
+    const point = pointFromLatLngObject(object.coordinatesForDisplay);
+    if (point) return point;
   }
   return undefined;
 }
@@ -291,8 +300,10 @@ export function parseDatexSituationPublication(
         const validTo =
           firstIso(datexText(validityTimeSpecification.overallEndTime)) ??
           receivedAtPlusOneDay(options.receivedAt);
-        const roadNumber = firstTextForKey(record.roadInformation, "roadNumber");
-        const roadName = firstTextForKey(record.roadInformation, "roadName");
+        const roadNumber =
+          firstTextForKey(record.roadInformation, "roadNumber") || firstTextForKey(record, "roadNumber");
+        const roadName =
+          firstTextForKey(record.roadInformation, "roadName") || firstTextForKey(record, "roadName");
         const comments = publicComments(record);
         const title = titleForRecord(record, kind, roadName, roadNumber);
         const detail = comments.join("\n") || title;

@@ -81,6 +81,19 @@ describe("DATEX situation parsing", () => {
     });
   });
 
+  it("reads DATEX coordinatesForDisplay points used by SRTI payloads", () => {
+    const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-29T10:00:00Z</publicationTime><situation id="NO-SVV-COORDS" version="1"><situationRecord xsi:type="EnvironmentalObstruction" id="R1" version="1"><situationRecordVersionTime>2026-05-29T10:00:00Z</situationRecordVersionTime><severity>low</severity><validity><validityStatus>active</validityStatus></validity><groupOfLocations><locationContainedInGroup xsi:type="PointLocation"><coordinatesForDisplay><latitude>63.279343</latitude><longitude>9.641987</longitude></coordinatesForDisplay><supplementaryPositionalDescription><locationDescription><values><value lang="no">Kv. 1810 Gangåsen i Orkland, Trøndelag</value></values></locationDescription><roadInformation><roadName>Gangåsvegen</roadName><roadNumber>K1810</roadNumber></roadInformation></supplementaryPositionalDescription></locationContainedInGroup></groupOfLocations><generalPublicComment><comment><values><value>Hindring i vegbanen.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
+
+    const result = parseDatexSituationPublication(xml, {
+      endpoint: "https://datex.example.test",
+      receivedAt: "2026-05-29T10:05:00.000Z",
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]?.geometry).toEqual({ type: "Point", coordinates: [9.641987, 63.279343] });
+    expect(result.events[0]?.areaLabel).toBe("Gangåsvegen");
+  });
+
   it("uses an SRTI-filtered DATEX endpoint by default to avoid full national snapshots", () => {
     expect(defaultDatexSituationEndpoint).toBe(
       "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=True",
