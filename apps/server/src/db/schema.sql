@@ -327,6 +327,38 @@ CREATE TABLE IF NOT EXISTS datex_travel_times (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS traffic_map_events (
+  id text PRIMARY KEY,
+  source text NOT NULL,
+  source_event_id text NOT NULL,
+  category text NOT NULL CHECK (category IN ('roadworks', 'accident', 'closure', 'congestion', 'weather', 'restriction', 'obstruction', 'other')),
+  severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  state text NOT NULL CHECK (state IN ('planned', 'active', 'expired', 'cancelled')),
+  title text NOT NULL,
+  description text,
+  location_name text,
+  road_name text,
+  valid_from timestamptz,
+  valid_to timestamptz,
+  updated_at timestamptz NOT NULL,
+  source_url text,
+  geometry geometry(Geometry, 4326) NOT NULL,
+  raw_type text,
+  confidence real,
+  payload jsonb NOT NULL,
+  source_payload_hash text NOT NULL,
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (source, source_event_id)
+);
+
+CREATE INDEX IF NOT EXISTS traffic_map_events_source_state_idx
+  ON traffic_map_events (source, state, updated_at DESC);
+CREATE INDEX IF NOT EXISTS traffic_map_events_validity_idx
+  ON traffic_map_events (valid_from, valid_to);
+CREATE INDEX IF NOT EXISTS traffic_map_events_geometry_idx
+  ON traffic_map_events USING gist (geometry);
+
 CREATE TABLE IF NOT EXISTS ai_processing_runs (
   id text PRIMARY KEY,
   provider text NOT NULL,
@@ -426,3 +458,4 @@ CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
 INSERT INTO schema_migrations (version) VALUES ('001_safe_launch_schema') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('002_situation_trustworthiness') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('003_collector_state') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('004_traffic_map_events') ON CONFLICT DO NOTHING;
