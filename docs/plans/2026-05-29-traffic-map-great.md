@@ -22,6 +22,47 @@ Observed in production on 2026-05-29:
 - Existing Nytt DATEX collector intentionally uses `GetSituation/pullsnapshotdata?srti=True`, a much smaller high-signal safety feed. It should remain the high-impact official-situation source, not become the only traffic map source.
 - Existing DATEX parser also misses SRTI records that publish `coordinatesForDisplay` instead of `locationForDisplay`; fix that as a correctness patch, but it will not by itself make the map match Vegvesen.
 
+## Vegvesen data catalog review
+
+Reviewed `https://dataut.vegvesen.no/dataset/` on 2026-05-29 through the CKAN API (`https://dataut.vegvesen.no/api/3/action/package_search?rows=100`). The catalog returned 82 datasets. Only a subset is worth adding to a Trondheim live traffic product now.
+
+Recommended now or immediately after TrafficInfo parity:
+
+| Dataset/API | Catalog ID | Access | Product value | Plan decision |
+|---|---|---|---|---|
+| Trafikkmeldinger / TrafficInfo | `trafikkmeldinger-api`, `trafikkmeldinger` | TrafficInfo JSON is public with `X-System-ID: vvtraf`; DATEX Situation requires existing Basic Auth | Primary official roadworks/closure/restriction/event layer | Already core source in Phase 2 |
+| Reisetider | `reisetider-reiser-api`, `reisetider-lokasjoner-api`, `reisetider` | DATEX Basic Auth; updates every 5 minutes; covers Trondheim | Makes corridor cards honest: actual travel time, delay and stale state instead of only event counts | Add to corridor summaries; operational telemetry only |
+| Værdata | `vaerdata-malinger-api`, `vaerdata-malestasjoner-api`, `vaerdata` | DATEX Basic Auth; measurement endpoint updates every 10 minutes | Shows road-surface/air-temperature/precipitation context near incidents; valuable for winter/glatt føre explanations | Add as road-context overlay; operational telemetry only |
+| Webkamera | `webkamera-statuser-api`, `webkamera-oppdateringer-api`, `webkamera` | DATEX Basic Auth; CCTV site/status endpoints | Lets users visually verify conditions around bridges, tunnels, ferries and exposed roads | Add as optional camera markers/links; operations-only, no source item spam |
+| Trafikkdata.no GraphQL | `trafikkdata` | Public GraphQL at `https://trafikkdata-api.atlas.vegvesen.no/`; verified 282 operational Trøndelag points and 52 operational Trondheim points | Adds live-ish traffic volume context at counters such as Kroppanbrua, Holtermanns veg, Innherredsveien | Add after weather/camera; bounded low-frequency polling |
+
+Defer/not worth adding to this plan:
+
+- `ruteplandata-bil` / Ruteplan API: useful later for alternative route suggestions around a selected closure, but adds routing semantics, credentials/rate-limit handling and UX complexity. Do after map events + travel-time/counter context are stable.
+- NVDB static datasets (`nvdb-les`, `vegnett-og-vegregulering-i-nvdb`, `trafikkinformasjon-i-nvdb`, `bomstasjoner-i-nvdb`, `mobilitetstjenester-i-nvdb`): useful for future static layers (tunnels, tolls, height/weight restrictions, rest areas), but not needed to fix the current zero-event problem or make the live map trustworthy.
+- `skredhendelser`: mostly historical/static NVDB records; live closures/skredfare should come through TrafficInfo/DATEX and NVE, not a separate historic overlay.
+- `luftkvalitet`: relevant to a city dashboard but not enough to justify scope inside the traffic incident map.
+- Vehicle/parking/driver/inspection registries, bridge ontologies, RDS-TMC location tables, museums/photos/statistics: not relevant to Nytt's live traffic intelligence product.
+
+DATEX endpoints from Vegvesen's DATEX docs that matter for the accepted add-ons:
+
+```text
+Weather measurements: https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetMeasuredWeatherData/pullsnapshotdata
+Weather stations:     https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetMeasurementWeatherSiteTable/pullsnapshotdata
+Weather forecasts:    https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetForecastPointData/pullsnapshotdata
+Forecast locations:   https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetForecastPointLocations/pullsnapshotdata
+CCTV sites:           https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetCCTVSiteTable/pullsnapshotdata
+CCTV status:          https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetCCTVStatus/pullsnapshotdata
+Travel time data:     https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata
+Travel time locations:https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata
+```
+
+Catalog add-on boundary rules:
+
+- Weather, CCTV, travel times and Trafikkdata counters are operational context. They must not create `source_items`, `official_events`, or `situations` by themselves.
+- Source health must still cover them because stale context can mislead users.
+- The traffic brief may say "glattføre-kontekst" or "forsinkelse på korridor" only from telemetry labels; it must not claim telemetry caused a TrafficInfo event unless an official event says so.
+
 ## Architecture audit
 
 Docs read before writing this plan:
@@ -98,6 +139,10 @@ Geography:
 6. Sidebar shows a useful brief, count-by-category/severity, visible event list, presets, and a clear empty/stale state.
 7. Full gate passes: `npm run typecheck`, `npm test`, `npm run lint`, `npm run format:check`, `npm run build`.
 8. Deployment is not reported complete until GitHub Actions and deployment for the pushed SHA complete successfully and live DB/source-health/API checks verify real traffic events.
+9. Corridor summaries include DATEX TravelTime telemetry when available, but do not infer event causes from travel-time measurements.
+10. Road weather, CCTV and Trafikkdata counter context can be shown on the map with explicit freshness/source labels.
+11. Weather, CCTV, travel-time and counter telemetry remain operations-only: no `source_items`, no `official_events`, no `situations` unless a later explicit promotion rule is written.
+12. The plan documents why other Vegvesen catalog datasets are deferred or excluded.
 
 ---
 
@@ -2023,11 +2068,723 @@ git commit -m "feat: expose traffic source health in map payload"
 
 ---
 
-## Phase 7: Docs, operations and verification
+## Phase 7: Catalog-derived road context enhancements
 
-### Task 23: Update source documentation
+### Task 23: Attach DATEX TravelTime telemetry to corridor impacts
 
-**Objective:** Document that TrafficInfo is the map overlay source and DATEX/SRTI remains high-signal incident source.
+**Objective:** Make corridor impact cards show real travel-time/delay telemetry when DATEX TravelTime already knows the corridor, without treating measurements as incident causes.
+
+**Files:**
+
+- Modify: `packages/shared/src/traffic-map.ts`
+- Modify: `apps/server/src/store.ts`
+- Modify: `apps/server/src/traffic/corridors.ts`
+- Modify: `apps/server/src/traffic/corridor-impact.ts`
+- Modify or create: `apps/server/test/traffic-corridor-impact.test.ts`
+- Modify later: `apps/frontend/src/pages/TrafficMapPage.tsx`
+
+**Step 1: Write failing server test**
+
+Do not join TravelTime by `TrafficPulseCorridor.id` directly. Production DATEX TravelTime IDs are upstream predefined-location IDs such as `100071`, while map corridors use local IDs such as `e6-south`. Add an explicit mapping on corridor definitions first:
+
+```ts
+export interface CorridorDefinition {
+  id: string;
+  name: string;
+  polyline: Array<[number, number]>;
+  bufferMeters: number;
+  travelTimeLocationIds?: string[];
+}
+```
+
+Seed the first mapping from production rows inspected on 2026-05-29:
+
+```ts
+const corridorTravelTimeIds = {
+  "e6-south": ["100141", "100142", "100071", "100080"],
+  omkjoringsveien: ["100137", "100138", "100135", "100136"],
+  "e6-east": ["100135", "100136", "100322", "100323"],
+} satisfies Record<string, string[]>;
+```
+
+The names behind those IDs include `E6 Okstadbakken - E6 Sluppenrampene`, `E6 Moholt - E6 Sluppenrampene`, `E6 Moholt - E6 Ranheim`, and `E6 Ranheim - Fv6692 Havnegata`. Keep this mapping curated and visible in `apps/server/src/traffic/corridors.ts`.
+
+Add a test that gives `buildCorridorImpacts` one TrafficInfo roadwork and TravelTime rows whose IDs are upstream DATEX IDs from the mapping. Expected impact includes event count and the worst matching travel-time row:
+
+```ts
+expect(impact).toMatchObject({
+  id: "e6-south",
+  eventCount: 1,
+  travelTime: {
+    id: "100141",
+    state: "slow",
+    travelTimeSeconds: 720,
+    delaySeconds: 180,
+    measurementTo: "2026-05-29T11:45:00.000Z",
+  },
+});
+```
+
+Also add a negative assertion: travel-time delay alone does not create a `TrafficMapEvent` and does not increase `eventCount`.
+
+**Step 2: Run test to verify failure**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/server/test/traffic-corridor-impact.test.ts
+```
+
+Expected: FAIL because corridor impacts do not accept travel-time telemetry yet.
+
+**Step 3: Extend shared corridor impact type**
+
+In `packages/shared/src/traffic-map.ts`:
+
+```ts
+import type { TrafficPulseCorridor } from "./types.js";
+
+export interface TrafficCorridorImpact {
+  id: string;
+  name: string;
+  eventCount: number;
+  affectedEventIds: string[];
+  highestSeverity: TrafficEventSeverity;
+  travelTime?: Pick<
+    TrafficPulseCorridor,
+    "id" | "name" | "state" | "travelTimeSeconds" | "freeFlowSeconds" | "delaySeconds" | "delayRatio" | "trend" | "measurementFrom" | "measurementTo" | "updatedAt" | "sourceUrl"
+  >;
+}
+```
+
+**Step 4: Add store read method**
+
+In `apps/server/src/store.ts`, extract the existing operations-status query into a reusable method:
+
+```ts
+// Add this method to the Store interface, MemoryStore, and PgStore. MemoryStore can return [] for tests that do not seed traffic pulse rows.
+async listTrafficPulseCorridors(limit = 30): Promise<TrafficPulseCorridor[]> {
+  const result = await this.pool.query<{
+    payload: TrafficPulseCorridor;
+    measurementTo?: Date | string | null;
+  }>(
+    `SELECT payload, measurement_to AS "measurementTo"
+     FROM datex_travel_times
+     ORDER BY delay_seconds DESC NULLS LAST, name ASC
+     LIMIT $1`,
+    [limit],
+  );
+  const nowMs = Date.now();
+  return result.rows.map((row) => withTrafficPulseStaleOverlay(row.payload, row.measurementTo, nowMs));
+}
+```
+
+**Step 5: Join by corridor ID in API**
+
+In `/api/map/traffic-events`, load `const trafficPulse = await store.listTrafficPulseCorridors(50)` and pass it to `buildCorridorImpacts(events, trafficPulse)`. Do not pass `login` unless the `Store` interface signature is explicitly changed everywhere.
+
+**Step 6: Run tests**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/server/test/traffic-corridor-impact.test.ts apps/server/test/api.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npm run typecheck
+```
+
+Expected: PASS.
+
+**Step 7: Commit**
+
+```bash
+git add packages/shared/src/traffic-map.ts apps/server/src/store.ts apps/server/src/traffic/corridors.ts apps/server/src/traffic/corridor-impact.ts apps/server/test/traffic-corridor-impact.test.ts apps/server/test/api.test.ts
+git commit -m "feat: add travel time context to traffic corridors"
+```
+
+### Task 24: Add shared road-context source IDs and payload types
+
+**Objective:** Represent road weather, cameras and traffic counters in the traffic map payload without duplicating ad-hoc frontend/server types.
+
+**Files:**
+
+- Modify: `packages/shared/src/types.ts`
+- Modify: `packages/shared/src/schemas.ts`
+- Modify: `packages/shared/src/traffic-map.ts`
+- Test: `apps/worker/test/road-context-types.test.ts`
+
+**Step 1: Write failing type test**
+
+Create `apps/worker/test/road-context-types.test.ts`:
+
+```ts
+import type { RoadCamera, RoadWeatherObservation, TrafficCounterSnapshot, TrafficMapPayload, SourceHealth } from "@nytt/shared";
+
+const weather = {
+  id: "datex-weather:SN70690",
+  source: "datex_weather",
+  stationId: "SN70690",
+  stationName: "Klett",
+  observedAt: "2026-05-29T11:40:00.000Z",
+  updatedAt: "2026-05-29T11:45:00.000Z",
+  geometry: { type: "Point", coordinates: [10.3001, 63.324] },
+  airTemperatureC: 7.2,
+  roadSurfaceTemperatureC: 5.1,
+} satisfies RoadWeatherObservation;
+
+const camera = {
+  id: "datex-cctv:CCTV_1",
+  source: "datex_cctv",
+  cameraId: "CCTV_1",
+  name: "Kroppanbrua",
+  status: "ok",
+  updatedAt: "2026-05-29T11:45:00.000Z",
+  geometry: { type: "Point", coordinates: [10.3845, 63.3918] },
+  imageUrl: "https://example.test/camera.jpg",
+} satisfies RoadCamera;
+
+const counter = {
+  id: "trafikkdata:06970V72811",
+  source: "trafikkdata",
+  pointId: "06970V72811",
+  name: "Kroppanbrua",
+  updatedAt: "2026-05-29T11:00:00.000Z",
+  geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+  volumeLastHour: 1234,
+} satisfies TrafficCounterSnapshot;
+
+const payload = { events: [], brief: { headline: "", severity: "low", freshness: "fresh", generatedAt: "", bullets: [], primaryEventIds: [], counts: { total: 0, byCategory: {}, bySeverity: {} } }, weather: [weather], cameras: [camera], counters: [counter] } satisfies TrafficMapPayload;
+const health = { source: "trafikkdata", label: "Trafikkdata", state: "ok", detail: "52 punkt" } satisfies SourceHealth;
+
+void payload;
+void health;
+```
+
+**Step 2: Run test to verify failure**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/road-context-types.test.ts
+```
+
+Expected: FAIL because the source IDs and shared types do not exist.
+
+**Step 3: Add source IDs**
+
+Add to `SourceId` and `sourceIdSchema`:
+
+```ts
+| "datex_weather"
+| "datex_cctv"
+| "trafikkdata"
+```
+
+Also extend `TrafficMapSourceStatus.source` in `packages/shared/src/traffic-map.ts` so source-health warnings can include the new context feeds:
+
+```ts
+source: "datex" | "datex_travel_time" | "vegvesen_traffic_info" | "datex_weather" | "datex_cctv" | "trafikkdata";
+```
+
+**Step 4: Add shared types**
+
+In `packages/shared/src/traffic-map.ts`:
+
+```ts
+import type { Point } from "geojson";
+
+export interface RoadWeatherObservation {
+  id: string;
+  source: "datex_weather";
+  stationId: string;
+  stationName: string;
+  observedAt: string;
+  updatedAt: string;
+  geometry: Point;
+  airTemperatureC?: number;
+  roadSurfaceTemperatureC?: number;
+  precipitationMm?: number;
+  windSpeedMps?: number;
+  visibilityMeters?: number;
+  rawSummary?: string;
+}
+
+export interface RoadCamera {
+  id: string;
+  source: "datex_cctv";
+  cameraId: string;
+  name: string;
+  status: "ok" | "offline" | "unknown";
+  updatedAt: string;
+  geometry: Point;
+  imageUrl?: string;
+  sourceUrl?: string;
+}
+
+export interface TrafficCounterSnapshot {
+  id: string;
+  source: "trafikkdata";
+  pointId: string;
+  name: string;
+  updatedAt: string;
+  geometry: Point;
+  volumeLastHour?: number;
+  coveragePercent?: number;
+  baselineVolumeLastHour?: number;
+  anomalyRatio?: number;
+}
+
+export interface TrafficMapPayload {
+  events: TrafficMapEvent[];
+  brief: TrafficBrief;
+  corridorImpacts?: TrafficCorridorImpact[];
+  sources?: TrafficMapSourceStatus[];
+  weather?: RoadWeatherObservation[];
+  cameras?: RoadCamera[];
+  counters?: TrafficCounterSnapshot[];
+}
+```
+
+**Step 5: Run checks**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/road-context-types.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npm run typecheck
+```
+
+Expected: PASS.
+
+**Step 6: Commit**
+
+```bash
+git add packages/shared/src/types.ts packages/shared/src/schemas.ts packages/shared/src/traffic-map.ts apps/worker/test/road-context-types.test.ts
+git commit -m "feat: add road context map types"
+```
+
+### Task 25: Parse DATEX road weather observations
+
+**Objective:** Normalize road weather station metadata and latest measurements into map-safe context rows.
+
+**Files:**
+
+- Create: `apps/worker/src/datexRoadWeather.ts`
+- Create: `apps/worker/test/datex-road-weather.test.ts`
+- Create fixtures under: `apps/worker/test/fixtures/datex-weather-sites.xml`, `apps/worker/test/fixtures/datex-weather-measurements.xml`
+
+**Step 1: Write failing parser test**
+
+Use minimal real-shaped DATEX fixtures with one Trøndelag station. Test:
+
+```ts
+const observations = parseDatexRoadWeather(siteXml, measurementXml, {
+  receivedAt: "2026-05-29T11:45:00.000Z",
+});
+
+expect(observations).toEqual([
+  expect.objectContaining({
+    id: "datex-weather:SN70690",
+    source: "datex_weather",
+    stationId: "SN70690",
+    stationName: "Klett",
+    geometry: { type: "Point", coordinates: [10.3001, 63.324] },
+    airTemperatureC: 7.2,
+    roadSurfaceTemperatureC: 5.1,
+  }),
+]);
+```
+
+Also test outside-region weather stations are skipped and malformed/missing geometry is skipped.
+
+**Step 2: Run test to verify failure**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/datex-road-weather.test.ts
+```
+
+Expected: FAIL because parser does not exist.
+
+**Step 3: Implement parser**
+
+Implement tolerant XML parsing using the existing DATEX XML helper patterns from `apps/worker/src/datex.ts` and `apps/worker/src/datexTravelTime.ts` if present. Required exports:
+
+```ts
+export const defaultDatexWeatherMeasurementsEndpoint =
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetMeasuredWeatherData/pullsnapshotdata";
+export const defaultDatexWeatherSitesEndpoint =
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetMeasurementWeatherSiteTable/pullsnapshotdata";
+
+export function parseDatexRoadWeather(
+  siteXml: string,
+  measurementXml: string,
+  options: { receivedAt: string },
+): RoadWeatherObservation[];
+```
+
+Keep this telemetry operations-only: do not create source items and do not promote situations.
+
+**Step 4: Run tests and import check**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/datex-road-weather.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npm run build -w @nytt/worker && node -e "import('./apps/worker/dist/datexRoadWeather.js').then(() => console.log('datex road weather import ok'))"
+```
+
+Expected: PASS and `datex road weather import ok`.
+
+**Step 5: Commit**
+
+```bash
+git add apps/worker/src/datexRoadWeather.ts apps/worker/test/datex-road-weather.test.ts apps/worker/test/fixtures/datex-weather-sites.xml apps/worker/test/fixtures/datex-weather-measurements.xml
+git commit -m "feat: parse DATEX road weather context"
+```
+
+### Task 26: Parse DATEX CCTV camera context
+
+**Objective:** Normalize roadside camera locations/status/image URLs into map-safe context rows.
+
+**Files:**
+
+- Create: `apps/worker/src/datexCctv.ts`
+- Create: `apps/worker/test/datex-cctv.test.ts`
+- Create fixtures under: `apps/worker/test/fixtures/datex-cctv-sites.xml`, `apps/worker/test/fixtures/datex-cctv-status.xml`
+
+**Step 1: Write failing parser test**
+
+Test one Trondheim camera with status and still-image URL:
+
+```ts
+const cameras = parseDatexCctv(siteXml, statusXml, {
+  receivedAt: "2026-05-29T11:45:00.000Z",
+});
+
+expect(cameras[0]).toMatchObject({
+  id: "datex-cctv:CCTV_1",
+  source: "datex_cctv",
+  cameraId: "CCTV_1",
+  name: "Kroppanbrua",
+  status: "ok",
+  geometry: { type: "Point", coordinates: [10.3845, 63.3918] },
+  imageUrl: expect.stringContaining("http"),
+});
+```
+
+Add a negative test that cameras outside Trøndelag/Trondheim region are skipped.
+
+**Step 2: Run test to verify failure**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/datex-cctv.test.ts
+```
+
+Expected: FAIL because parser does not exist.
+
+**Step 3: Implement parser**
+
+Required exports:
+
+```ts
+export const defaultDatexCctvSitesEndpoint =
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetCCTVSiteTable/pullsnapshotdata";
+export const defaultDatexCctvStatusEndpoint =
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetCCTVStatus/pullsnapshotdata";
+
+export function parseDatexCctv(
+  siteXml: string,
+  statusXml: string,
+  options: { receivedAt: string },
+): RoadCamera[];
+```
+
+Privacy rule: the app may display the official still-image URL only as provided by Vegvesen; never cache images locally in this plan.
+
+**Step 4: Run tests and import check**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/datex-cctv.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npm run build -w @nytt/worker && node -e "import('./apps/worker/dist/datexCctv.js').then(() => console.log('datex cctv import ok'))"
+```
+
+Expected: PASS and `datex cctv import ok`.
+
+**Step 5: Commit**
+
+```bash
+git add apps/worker/src/datexCctv.ts apps/worker/test/datex-cctv.test.ts apps/worker/test/fixtures/datex-cctv-sites.xml apps/worker/test/fixtures/datex-cctv-status.xml
+git commit -m "feat: parse DATEX CCTV context"
+```
+
+### Task 27: Persist and serve road weather and camera context
+
+**Objective:** Store latest weather/camera context and include nearby rows in the traffic map payload with source-health freshness.
+
+**Files:**
+
+- Modify: `apps/server/src/db/schema.sql`
+- Modify: `apps/worker/src/repository.ts`
+- Modify: `apps/worker/src/index.ts`
+- Modify: `apps/server/src/store.ts`
+- Modify: `apps/server/src/app.ts`
+- Modify: `apps/worker/test/index.test.ts`
+- Modify tests: `apps/worker/test/repository.test.ts`, `apps/worker/test/index.test.ts`, `apps/server/test/api.test.ts`
+
+**Step 1: Write failing repository/API tests**
+
+Tests must prove:
+
+- `upsertRoadWeatherObservations` writes one latest row per `stationId`.
+- `upsertRoadCameras` writes one latest row per `cameraId`.
+- `/api/map/traffic-events` with bounds returns only context rows inside bounds.
+- Worker source health is written for `datex_weather` and `datex_cctv` (`ok`, `awaiting_access` when credentials are missing, and `degraded` on fetch/parse failure).
+- Weather/camera rows do not create `source_items`, `official_events`, or `situations`.
+
+**Step 2: Run tests to verify failure**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/repository.test.ts apps/server/test/api.test.ts
+```
+
+Expected: FAIL because tables/methods/API payload fields do not exist.
+
+**Step 3: Add tables**
+
+In `schema.sql`:
+
+```sql
+CREATE TABLE IF NOT EXISTS road_weather_observations (
+  station_id text PRIMARY KEY,
+  payload jsonb NOT NULL,
+  observed_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  geometry geometry(Point, 4326) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS road_weather_observations_geometry_idx ON road_weather_observations USING gist (geometry);
+
+CREATE TABLE IF NOT EXISTS road_cameras (
+  camera_id text PRIMARY KEY,
+  payload jsonb NOT NULL,
+  updated_at timestamptz NOT NULL,
+  geometry geometry(Point, 4326) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS road_cameras_geometry_idx ON road_cameras USING gist (geometry);
+
+INSERT INTO schema_migrations (version) VALUES ('005_road_context') ON CONFLICT DO NOTHING;
+```
+
+**Step 4: Wire worker collectors**
+
+Use existing DATEX credentials/config. Fetch site + data/status endpoints only after credentials are present. On missing credentials, set `datex_weather` and/or `datex_cctv` source health to `awaiting_access`, not `degraded`.
+
+**Step 5: Wire server map API**
+
+Add `store.listRoadWeatherObservations(bounds)` and `store.listRoadCameras(bounds)`. Also update the `/api/map/traffic-events` source-health filter from Task 22 so `sources` includes `datex_weather` and `datex_cctv` whenever those source-health rows exist. Add an API test that seeded `datex_weather`/`datex_cctv` health rows are present in `res.body.sources`.
+
+Then return:
+
+```ts
+res.json({
+  events,
+  brief: buildTrafficBrief(events),
+  corridorImpacts: buildCorridorImpacts(events, trafficPulse),
+  sources,
+  weather,
+  cameras,
+});
+```
+
+**Step 6: Run tests**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/repository.test.ts apps/worker/test/index.test.ts apps/server/test/api.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npm run typecheck
+```
+
+Expected: PASS.
+
+**Step 7: Commit**
+
+```bash
+git add apps/server/src/db/schema.sql apps/worker/src/repository.ts apps/worker/src/index.ts apps/server/src/store.ts apps/server/src/app.ts apps/worker/test/repository.test.ts apps/worker/test/index.test.ts apps/server/test/api.test.ts
+git commit -m "feat: serve road weather and camera context"
+```
+
+### Task 28: Add Trafikkdata counter context
+
+**Objective:** Use the public Trafikkdata GraphQL API to add bounded traffic-counter volume context around Trondheim without over-polling.
+
+**Files:**
+
+- Create: `apps/worker/src/trafikkdata.ts`
+- Create: `apps/worker/test/trafikkdata.test.ts`
+- Modify: `apps/server/src/db/schema.sql`
+- Modify: `apps/worker/src/repository.ts`
+- Modify: `apps/worker/src/index.ts`
+- Modify: `apps/server/src/store.ts`
+- Modify: `apps/server/src/app.ts`
+
+**Step 1: Write failing parser/client tests**
+
+Use the verified public endpoint and a fixture from a minimal GraphQL response:
+
+```ts
+export const defaultTrafikkdataGraphqlEndpoint = "https://trafikkdata-api.atlas.vegvesen.no/";
+
+expect(buildTrafficRegistrationPointsQuery()).toContain("trafficRegistrationPoints");
+expect(buildTrafficRegistrationPointsQuery()).toContain("countyNumbers:[50]");
+```
+
+Parser expectations:
+
+```ts
+expect(parseTrafikkdataPoints(fixture).filter((point) => point.municipalityName === "Trondheim")).toHaveLength(1);
+expect(parseTrafikkdataPoints(fixture)[0]).toMatchObject({
+  id: "trafikkdata:06970V72811",
+  source: "trafikkdata",
+  pointId: "06970V72811",
+  name: "Kroppanbrua",
+  geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+});
+```
+
+**Step 2: Run test to verify failure**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/trafikkdata.test.ts
+```
+
+Expected: FAIL because module does not exist.
+
+**Step 3: Implement bounded GraphQL client**
+
+Add tests that Trafikkdata rows do not create `source_items`, `official_events`, or `situations`, and that worker source health is written for `trafikkdata` on success/failure.
+
+Implement:
+
+```ts
+export async function fetchTrafikkdataCounterSnapshots(options: {
+  endpoint?: string;
+  fetcher?: typeof fetch;
+  now?: () => Date;
+}): Promise<TrafficCounterSnapshot[]>;
+```
+
+Rules:
+
+- Query only county `50`, `isOperational:true`.
+- Keep only points inside Trondheim-region bounds or municipality `Trondheim`.
+- Poll no more often than every 15 minutes.
+- For MVP, station metadata + latest hourly aggregate is enough; do not request per-vehicle data.
+- If volume data is unavailable for a point, still store point metadata with no `volumeLastHour` and explicit source freshness.
+- Write `source_health` for `trafikkdata` with point count, volume-count and next poll time.
+- Add worker orchestration tests in `apps/worker/test/index.test.ts` proving Trafikkdata skips fetches when the last successful poll is less than 15 minutes old, fetches after 15 minutes, and writes `ok`/`degraded` source health.
+
+**Step 4: Persist and serve counters**
+
+Add table:
+
+```sql
+CREATE TABLE IF NOT EXISTS traffic_counter_snapshots (
+  point_id text PRIMARY KEY,
+  payload jsonb NOT NULL,
+  updated_at timestamptz NOT NULL,
+  geometry geometry(Point, 4326) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshots_geometry_idx ON traffic_counter_snapshots USING gist (geometry);
+INSERT INTO schema_migrations (version) VALUES ('006_trafikkdata_counters') ON CONFLICT DO NOTHING;
+```
+
+Add worker repository upsert, server store bounds read, and `counters` in `TrafficMapPayload`. Update the `/api/map/traffic-events` source-health filter so `sources` includes `trafikkdata` when a health row exists, and add an API test for that.
+
+**Step 5: Run tests and import check**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm test -- apps/worker/test/trafikkdata.test.ts apps/worker/test/repository.test.ts apps/worker/test/index.test.ts apps/server/test/api.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npm run build -w @nytt/worker && node -e "import('./apps/worker/dist/trafikkdata.js').then(() => console.log('trafikkdata import ok'))"
+```
+
+Expected: PASS.
+
+**Step 6: Commit**
+
+```bash
+git add apps/worker/src/trafikkdata.ts apps/worker/test/trafikkdata.test.ts apps/worker/test/index.test.ts apps/server/src/db/schema.sql apps/worker/src/repository.ts apps/worker/src/index.ts apps/server/src/store.ts apps/server/src/app.ts
+git commit -m "feat: add Trafikkdata counter context"
+```
+
+### Task 29: Render road context layers and filters
+
+**Objective:** Let users toggle weather, cameras and traffic counters without crowding the core event map.
+
+**Files:**
+
+- Create: `apps/frontend/src/components/map/RoadContextLayer.tsx`
+- Modify: `apps/frontend/src/components/map/TrafficFilterPanel.tsx`
+- Modify: `apps/frontend/src/api/trafficMap.ts`
+- Modify: `apps/frontend/src/pages/TrafficMapPage.tsx`
+- Modify: `apps/server/src/app.ts` if camera previews require a CSP allowlist update
+- Modify: existing traffic CSS file
+
+**Step 1: Add UI state and failing type expectations**
+
+In `TrafficMapPage.tsx`, add state defaults:
+
+```ts
+const [visibleContextLayers, setVisibleContextLayers] = useState({
+  weather: true,
+  cameras: false,
+  counters: false,
+});
+```
+
+Expected initial typecheck failure until props/components are added.
+
+**Step 2: Create `RoadContextLayer`**
+
+Before rendering camera images, update Helmet CSP in `apps/server/src/app.ts` to allow only the concrete camera image hosts observed in fixtures/live payloads, for example `https://webkamera.atlas.vegvesen.no` and/or `https://www.vegvesen.no`. If the exact host cannot be safely allowlisted, render cameras as external links without inline previews.
+
+Render:
+
+- Weather as small circle markers with popup showing station, observed time, air/road temperature, precipitation/wind/visibility if present.
+- Cameras as marker/link popups. If `imageUrl` exists, show a small preview with `loading="lazy"`; otherwise show source link/status.
+- Counters as small markers with volume and anomaly ratio when available.
+
+Do not cache camera images locally. Do not auto-open many image previews.
+
+**Step 3: Add filter panel toggles**
+
+Add checkboxes:
+
+```tsx
+<label><input type="checkbox" checked={visible.weather} onChange={...} /> Værstasjoner</label>
+<label><input type="checkbox" checked={visible.cameras} onChange={...} /> Webkamera</label>
+<label><input type="checkbox" checked={visible.counters} onChange={...} /> Trafikktelling</label>
+```
+
+**Step 4: Add minimal CSS**
+
+Use CSS variables/classes, not inline colors:
+
+```css
+.road-context-marker-weather { --road-context-color: var(--traffic-weather, #0284c7); }
+.road-context-marker-camera { --road-context-color: var(--traffic-camera, #7c3aed); }
+.road-context-marker-counter { --road-context-color: var(--traffic-counter, #059669); }
+.road-context-popup img { max-width: 260px; border-radius: 8px; display: block; }
+```
+
+**Step 5: Run frontend checks**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm run typecheck -w @nytt/frontend && npm run build -w @nytt/frontend
+```
+
+Expected: PASS.
+
+**Step 6: Commit**
+
+```bash
+git add apps/frontend/src/components/map/RoadContextLayer.tsx apps/frontend/src/components/map/TrafficFilterPanel.tsx apps/frontend/src/api/trafficMap.ts apps/frontend/src/pages/TrafficMapPage.tsx apps/server/src/app.ts apps/frontend/src/*.css
+git commit -m "feat: render road context layers on traffic map"
+```
+
+---
+
+## Phase 8: Docs, operations and verification
+
+### Task 30: Update source documentation
+
+**Objective:** Document TrafficInfo as the primary map overlay source and the catalog-derived context feeds as operations-only road context.
 
 **Files:**
 
@@ -2036,10 +2793,13 @@ git commit -m "feat: expose traffic source health in map payload"
 
 **Step 1: Update `docs/SOURCES.md`**
 
-Add a bullet after DATEX/SRTI:
+Add bullets after DATEX/SRTI:
 
 ```md
 - Statens vegvesen TrafficInfo `traffic-information/messages` is collected without exposing credentials and with `X-System-ID: vvtraf`. It powers the live traffic map overlay for roadworks, closures, restrictions and warnings around Trondheim/Trøndelag. TrafficInfo rows are stored in `traffic_map_events` and mirrored to `source_items` as official evidence, but ordinary roadworks do not create `official_events` or promote `situations`.
+- DATEX TravelTime (`GetTravelTimeData` + `GetPredefinedTravelTimeLocations`) powers corridor delay context only. It remains in `datex_travel_times` and is not mirrored to source_items or promoted to incidents.
+- DATEX Weather (`GetMeasuredWeatherData` + `GetMeasurementWeatherSiteTable`) and CCTV (`GetCCTVSiteTable` + `GetCCTVStatus`) are road-context overlays with source-health/freshness labels. They are operations-only telemetry/context.
+- Trafikkdata.no GraphQL (`https://trafikkdata-api.atlas.vegvesen.no/`) supplies bounded low-frequency traffic-counter context for Trøndelag/Trondheim. It is not a situation source.
 ```
 
 **Step 2: Update `docs/ARCHITECTURE.md`**
@@ -2047,17 +2807,17 @@ Add a bullet after DATEX/SRTI:
 Add:
 
 ```md
-Traffic map overlays are operational map state. `traffic_map_events` is the map-ready table; `source_items` is the provenance ledger; `situations` remains the incident feed. TrafficInfo roadworks can be shown richly on `/trafikk` without activating the Situation Room.
+Traffic map overlays are operational map state. `traffic_map_events` is the map-ready table; `source_items` is the provenance ledger; `situations` remains the incident feed. TrafficInfo roadworks can be shown richly on `/trafikk` without activating the Situation Room. DATEX TravelTime, DATEX Weather, DATEX CCTV and Trafikkdata counters are context overlays/telemetry and must not create source_items, official_events, or situations without a future explicit promotion rule.
 ```
 
 **Step 3: Commit**
 
 ```bash
 git add docs/SOURCES.md docs/ARCHITECTURE.md
-git commit -m "docs: document TrafficInfo traffic map source"
+git commit -m "docs: document Vegvesen traffic map sources"
 ```
 
-### Task 24: Run the full local quality gate
+### Task 31: Run the full local quality gate
 
 **Objective:** Prove the implementation is coherent before push.
 
@@ -2092,7 +2852,7 @@ git add -A
 git commit -m "style: format traffic map improvements"
 ```
 
-### Task 25: Production verification runbook
+### Task 32: Production verification runbook
 
 **Objective:** Verify the live site with real data after deployment; never report success from CI alone.
 
@@ -2116,12 +2876,18 @@ Use the repo's existing GitHub Actions names. Do not report deployed until deplo
 ```bash
 ssh deploy@198.23.137.16 <<'REMOTE'
 docker exec -i nytt-trondheim-postgres-1 sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -F " | " -At' <<'SQL'
-SELECT source, state, detail, last_checked_at FROM source_health WHERE source IN ('vegvesen_traffic_info','datex','datex_travel_time') ORDER BY source;
+SELECT source, state, detail, last_checked_at FROM source_health WHERE source IN ('vegvesen_traffic_info','datex','datex_travel_time','datex_weather','datex_cctv','trafikkdata') ORDER BY source;
 SELECT source, state, count(*) FROM traffic_map_events GROUP BY source, state ORDER BY source, state;
 SELECT provider, kind, count(*) FROM source_items WHERE provider='vegvesen_traffic_info' GROUP BY provider, kind;
 SELECT count(*) FROM traffic_map_events WHERE source='vegvesen_traffic_info' AND state IN ('active','planned');
+SELECT count(*) FROM datex_travel_times WHERE state <> 'stale';
+SELECT count(*) FROM road_weather_observations;
+SELECT count(*) FROM road_cameras;
+SELECT count(*) FROM traffic_counter_snapshots;
 SELECT count(*) FROM official_events WHERE source='datex';
-SELECT count(*) FROM situations WHERE payload->>'officialSource'='vegvesen_traffic_info';
+SELECT source, count(*) FROM official_events WHERE source IN ('vegvesen_traffic_info','datex_weather','datex_cctv','trafikkdata','datex_travel_time') GROUP BY source;
+SELECT count(*) FROM source_items WHERE provider IN ('datex_weather','datex_cctv','trafikkdata','datex_travel_time');
+SELECT count(*) FROM situations WHERE payload->>'officialSource' IN ('vegvesen_traffic_info','datex_weather','datex_cctv','trafikkdata','datex_travel_time');
 SQL
 REMOTE
 ```
@@ -2132,7 +2898,11 @@ Expected:
 - `traffic_map_events` has non-zero `vegvesen_traffic_info` rows.
 - `source_items` has non-zero `vegvesen_traffic_info | official_event` rows.
 - Active/planned count is non-zero when Vegvesen's own map shows local events.
-- `situations` count for `officialSource='vegvesen_traffic_info'` is 0; TrafficInfo roadworks did not promote incidents.
+- `datex_travel_times` may be non-zero when DATEX TravelTime has Trondheim data.
+- `road_weather_observations`, `road_cameras`, and `traffic_counter_snapshots` are non-zero when those sources are enabled and available.
+- `official_events` grouped query for map/context-only sources returns zero rows.
+- `source_items` count for context telemetry providers is 0.
+- `situations` count for map/context-only sources is 0; TrafficInfo roadworks and road-context telemetry did not promote incidents.
 
 **Step 4: Verify live page shell and authenticated API behavior**
 
@@ -2168,13 +2938,14 @@ git commit -m "docs: clarify traffic map production verification"
 - Do not add a new map library; keep Leaflet/react-leaflet.
 - Do not expose DATEX credentials to the frontend.
 - Do not add push alerts in this phase; first make the map data-rich and trustworthy.
-- Do not infer causes from DATEX TravelTime measurements.
+- Do not infer causes from DATEX TravelTime measurements; use TravelTime only as corridor telemetry/context.
 
 ## Follow-up ideas after this plan ships
 
 - User-configurable alert subscriptions for selected corridors/roads.
 - Dedicated planned-roadworks calendar view.
-- Road weather/CCTV enrichment with explicit freshness labels.
+- Routeplanner-based alternative routes around selected closures.
+- NVDB static layers for tunnels, height/weight restrictions, tolls and rest areas.
 - More precise line geometries if Vegvesen TrafficInfo exposes route geometry beyond icon points.
 - Editorial workflow to promote selected TrafficInfo events into Situation Room entries when corroborated by news or severe impact.
 
@@ -2186,11 +2957,13 @@ Before implementation, reviewer must verify:
 - [ ] Failed TrafficInfo fetches do not expire old events.
 - [ ] Successful snapshots expire disappeared active/planned TrafficInfo events.
 - [ ] TrafficInfo source items do not create `official_events` or `situations`.
-- [ ] DATEX TravelTime remains operations-only.
+- [ ] DATEX TravelTime remains operations-only and is used only as corridor context.
 - [ ] API bounds filtering uses geometry and does not rely only on frontend filtering.
 - [ ] Frontend source labels are not hardcoded to DATEX.
 - [ ] Segment-aware corridor/news matching tests include line geometries where vertices are not near the target.
 - [ ] Production verification checks DB/source-health and authenticated API behavior, not anonymous 401 JSON.
+- [ ] Weather, CCTV and Trafikkdata counter telemetry do not create source_items, official_events, or situations.
+- [ ] Trafikkdata GraphQL queries are bounded to Trøndelag/Trondheim and conservative polling.
 - [ ] Full local gate is listed and uses Node 22.
 
 ## Execution recommendation
@@ -2202,6 +2975,7 @@ Execute in this order with subagent-driven-development:
 3. Phase 4 server route integration.
 4. Phase 5 frontend UX.
 5. Phase 6 intelligence improvements.
-6. Phase 7 full gate and production verification.
+6. Phase 7 catalog-derived road context enhancements after the core map is stable.
+7. Phase 8 full gate and production verification.
 
 For execution, dispatch one implementer subagent per task, then a spec compliance reviewer, then a code-quality reviewer. Do not run implementation subagents in parallel when they touch git commits or shared files (`repository.ts`, `app.ts`, `store.ts`, `TrafficMapPage.tsx`).
