@@ -1771,19 +1771,23 @@ button {
 }
 
 .traffic-event-low {
-  stroke: var(--green);
-  fill: var(--green);
+  stroke: var(--traffic-low, #64748b);
+  fill: var(--traffic-low, #64748b);
 }
 
 .traffic-event-medium {
-  stroke: var(--amber);
-  fill: var(--amber);
+  stroke: var(--traffic-medium, #d97706);
+  fill: var(--traffic-medium, #d97706);
 }
 
-.traffic-event-high,
+.traffic-event-high {
+  stroke: var(--traffic-high, #dc2626);
+  fill: var(--traffic-high, #dc2626);
+}
+
 .traffic-event-critical {
-  stroke: var(--terracotta);
-  fill: var(--terracotta);
+  stroke: var(--traffic-critical, #7f1d1d);
+  fill: var(--traffic-critical, #7f1d1d);
 }
 
 .traffic-event-planned {
@@ -1791,8 +1795,7 @@ button {
 }
 
 .traffic-event-highlighted {
-  stroke: var(--blue);
-  filter: drop-shadow(0 0 4px rgba(18, 78, 136, 0.65));
+  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.7));
 }
 
 @media (max-width: 1080px) {

@@ -142,8 +142,9 @@ export function TrafficLayer({ events, highlightedEventIds = [] }: TrafficLayerP
       {events.map((event) => {
         const highlighted = highlightedIds.has(event.id);
         const point = pointFromGeometry(event.geometry);
+        const eventClassName = `traffic-event traffic-event-${event.source} traffic-event-${event.category} traffic-event-${event.severity} traffic-event-${event.state}${highlighted ? " traffic-event-highlighted" : ""}`;
         const pathOptions = {
-          className: `traffic-event traffic-event-${event.severity} traffic-event-${event.state}${highlighted ? " traffic-event-highlighted" : ""}`,
+          className: eventClassName,
           weight: severityWeight[event.severity] + (highlighted ? 3 : 0),
           opacity: highlighted ? 1 : event.state === "planned" ? 0.65 : 0.95,
           fillOpacity: highlighted ? 0.45 : event.state === "planned" ? 0.2 : 0.3,
@@ -152,9 +153,10 @@ export function TrafficLayer({ events, highlightedEventIds = [] }: TrafficLayerP
         if (point) {
           return (
             <CircleMarker
-              key={event.id}
+              key={`${event.id}:${eventClassName}`}
               center={point}
               radius={severityRadius[event.severity] + (highlighted ? 4 : 0)}
+              className={eventClassName}
               pathOptions={pathOptions}
             >
               <TrafficPopup event={event} />
@@ -173,7 +175,7 @@ export function TrafficLayer({ events, highlightedEventIds = [] }: TrafficLayerP
         };
 
         return (
-          <GeoJSON key={event.id} data={feature} style={() => pathOptions}>
+          <GeoJSON key={`${event.id}:${eventClassName}`} data={feature} style={() => pathOptions}>
             <TrafficPopup event={event} />
           </GeoJSON>
         );
