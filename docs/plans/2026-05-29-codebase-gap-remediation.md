@@ -4,6 +4,8 @@
 
 **Goal:** Close the concrete gaps found in the May 29 full-codebase audit after Source Item Ledger Phase 1.
 
+**Status:** Completed and deployed. During review, the deployment-safety design was corrected: production `app` and `worker` stay online through backup, migration and canary; promotion recreates them only after the canary is healthy. Do not reintroduce a pre-backup `docker compose stop app worker` task unless an explicit rollback/restart block is added.
+
 **Architecture:** Keep the existing React/Vite + Express + PostgreSQL/PostGIS + worker architecture. Fix release blockers first: safe deployment/migrations, API hardening, worker lifecycle correctness, and source-item ledger backfill/link parity. Keep DATEX TravelTime operations-only and keep raw source payloads off public API/UI.
 
 **Tech Stack:** TypeScript, Express, React/Vite, Vitest, Playwright, PostgreSQL/PostGIS, Docker Compose, Ansible, GitHub Actions.
@@ -16,7 +18,7 @@
 
 1. **Deploy checkout not pinned to the CI-verified SHA**: `deploy.yml` triggers on a successful `workflow_run`, but `ansible-playbook.yml` checks out `main`.
 2. **Secret-rendering Ansible tasks are too verbose**: `.env.production` and backup env copy tasks render secret-derived values and deploy runs with `-vv`.
-3. **Old app/worker can write during backup + migration**: playbook backs up and migrates before stopping the previous app/worker.
+3. **Deployment availability can regress during backup + migration**: live API/worker must not be stopped before backup, migration and canary unless rollback/restart is explicit.
 4. **Migration runner has no advisory lock/transaction guard**: concurrent deploys or mid-file failures can leave partial state.
 5. **CI does not run migrations against real PostGIS**: DDL idempotency is only checked at deploy time.
 6. **Worker DATEX conditional state can advance before persistence**: `datex:lastModified` can be written before official events/source items are durable.
@@ -72,9 +74,9 @@
 6. Verify with `python3` YAML parse and searches for `ansible-playbook .* -vv` and duplicate DB overrides.
 7. Commit: `fix: harden deployment checkout and env handling`.
 
-## Task 2: Quiesce deploy writes, improve migration safety, and add migration CI
+## Task 2: Keep deploys available, improve migration safety, and add migration CI
 
-**Objective:** Prevent concurrent writes during backups/migrations and prove schema idempotency before deploy.
+**Objective:** Keep the existing production API/worker serving while backup, locked migrations and canary validation run, then promote only after the canary is healthy and prove schema idempotency before deploy.
 
 **Files:**
 
@@ -85,7 +87,7 @@
 
 **Steps:**
 
-1. Add an Ansible task before backup/migration to stop `app` and `worker` if present.
+1. Keep `app` and `worker` running through backup, migration and canary; do not add a pre-backup stop task without an explicit rescue/rollback path.
 2. In `migrate.ts`, acquire a transaction-scoped advisory lock, run schema inside `BEGIN`/`COMMIT`, rollback on failure, and release the client.
 3. Add a CI `migration-smoke` job with a `postgis/postgis:16-3.4` service, build server/shared, run `npm run db:migrate` twice, and query `source_items`/`schema_migrations`.
 4. Commit: `fix: guard migrations and verify schema in CI`.

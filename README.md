@@ -14,6 +14,8 @@ npm run dev
 
 The development API uses seeded in-memory data and bypasses GitHub authentication unless `DEV_AUTH_BYPASS=false` is set. Open `http://127.0.0.1:5173`.
 
+For local DATEX testing, copy `.env.example` to `.env.production` and set `DATEX_USERNAME` / `DATEX_PASSWORD` from the Basic Auth credentials Vegvesen issued. Leave `DATEX_ENDPOINT` blank unless intentionally overriding the application's SRTI-filtered default. Production credentials belong in GitHub repository secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, optional `NYTT_DATEX_ENDPOINT`); see [docs/DEPLOYMENT.md#datex-credentials](docs/DEPLOYMENT.md#datex-credentials).
+
 For PostgreSQL/PostGIS-backed development:
 
 ```bash

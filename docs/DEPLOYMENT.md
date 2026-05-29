@@ -6,9 +6,9 @@ The repository follows the RFMC release pattern:
 2. When repository variable `NYTT_DEPLOY_ENABLED=true` is configured, a successful `CI` workflow on `main` triggers `Deploy to VPS`; manual dispatch remains available for an intentional first release.
 3. For a new or repaired origin, the manual `Provision Origin` workflow connects with the existing VPS key, installs the dedicated Actions key and repository-scoped read-only checkout key, and provisions the Caddy hostname.
 4. GitHub Actions connects to the VPS as `deploy` and runs `ansible-playbook.yml`; the VPS uses its own repository-scoped read-only deploy key at `~/.ssh/nytt_github_deploy` to clone this private repository.
-5. Ansible checks out the exact CI-verified commit, installs/configures backup tooling, pulls/builds fresh Docker images, stops the current API/worker before backup and migration, verifies an encrypted pre-migration backup, applies locked transactional migrations, health-checks a canary API container, promotes API/worker, validates and reloads Caddy, then runs production health, worker, source-health and source-item sanity checks.
+5. Ansible checks out the exact CI-verified commit, installs/configures backup tooling, pulls/builds fresh Docker images, verifies an encrypted pre-migration backup, applies locked transactional migrations, health-checks a canary API container on a separate localhost port, promotes API/worker only after the canary is healthy, validates and reloads Caddy, then runs production health, worker, source-health and source-item sanity checks. The current production API/worker stay up through backup, migration and canary so a failed backup, migration or canary does not leave the site offline.
 
-The deploy workflow and playbook fail before changing application state if any required SSH, application, GitHub authentication, AI, DATEX or backup secret is absent. Automatic deploys set `NYTT_DEPLOY_REF` from the successful CI workflow run SHA so the VPS checkout matches the commit CI verified; manual dispatch falls back to the dispatch SHA. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
+The deploy workflow fails before SSH/Ansible if any required SSH, application, GitHub authentication, AI, DATEX or backup secret is absent; the playbook repeats the required-value check before writing runtime secrets. Automatic deploys set `NYTT_DEPLOY_REF` from the successful CI workflow run SHA so the VPS checkout matches the commit CI verified; manual dispatch falls back to the dispatch SHA. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
 
 ## Production Services
 
@@ -39,7 +39,33 @@ If Google Drive still reports `rateLimitExceeded` while backups recover after re
 - Confirm DNS for `nytt.reidar.tech` resolves to the VPS.
 - Run origin provisioning to repair TLS/Cloudflare routing before release; the endpoint returned HTTP `525` before the `nytt.reidar.tech` Caddy hostname existed.
 - Confirm Docker, Caddy and the `deploy` SSH key are available on the same VPS used by RFMC.
-- Configure DATEX Basic Auth secrets (`NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, optional `NYTT_DATEX_ENDPOINT`) if traffic-event ingestion, DATEX TravelTime traffic pulse and source health should run against Vegvesen. These secrets map to runtime `DATEX_USERNAME` and `DATEX_PASSWORD` and are shared by DATEX situation and TravelTime collectors. Leave `NYTT_DATEX_ENDPOINT` empty to use the SRTI-filtered default (`GetSituation/pullsnapshotdata?srti=True`); only override it deliberately because the unfiltered national snapshot is much larger. Optional runtime TravelTime endpoint overrides are `DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT` and `DATEX_TRAVEL_TIME_DATA_ENDPOINT`; blank values use `https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata` and `https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata`.
+- Configure DATEX Basic Auth secrets as described in [DATEX Credentials](#datex-credentials). Production currently treats `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD` as required deployment secrets because the Drift/source-health and traffic-pulse surfaces depend on Vegvesen access.
+
+## DATEX Credentials
+
+Vegvesen DATEX II v3.1 access is Basic Auth. Store the issued username/password as GitHub Actions repository secrets only; do not write real values into `.env.example`, docs, fixtures, screenshots, shell history or frontend build-time variables.
+
+```bash
+gh secret set NYTT_DATEX_USERNAME --repo Reedtrullz/Nytt-Trondheim
+gh secret set NYTT_DATEX_PASSWORD --repo Reedtrullz/Nytt-Trondheim
+```
+
+`NYTT_DATEX_ENDPOINT` is optional. Leave it unset/blank for the application's SRTI-filtered default:
+
+```text
+https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=True
+```
+
+Only set an endpoint override when Vegvesen explicitly provides a different one or when deliberately testing another DATEX publication:
+
+```bash
+printf '%s' 'https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=True' \
+  | gh secret set NYTT_DATEX_ENDPOINT --repo Reedtrullz/Nytt-Trondheim
+```
+
+The deploy workflow exposes `NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD` and optional `NYTT_DATEX_ENDPOINT` to Ansible. The playbook writes them into `.env.production` as runtime-only `DATEX_USERNAME`, `DATEX_PASSWORD` and `DATEX_ENDPOINT`; both DATEX Situation and DATEX TravelTime collectors use the same Basic Auth credentials. Changing GitHub secrets does not update a running worker by itself: run `Deploy to VPS` manually or push a verified `main` commit and wait for both `CI` and `Deploy to VPS` to complete successfully.
+
+For local development, copy `.env.example` to `.env.production` and set `DATEX_USERNAME` / `DATEX_PASSWORD` there. Leave `DATEX_ENDPOINT`, `DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT` and `DATEX_TRAVEL_TIME_DATA_ENDPOINT` blank unless intentionally overriding the defaults. Local `.env*` files must stay untracked.
 
 ## DATEX Verification
 
@@ -66,13 +92,11 @@ The deployment preserves the prior API and worker images as `:previous` before b
 
 ## Current Provisioning State
 
-As inspected on May 28, 2026:
+The application is live at `https://nytt.reidar.tech`; `/health` returns healthy Postgres-backed status through Caddy and Cloudflare. Production is promoted from successful `main` CI through `Deploy to VPS`; verify the current commit with `git ls-remote origin refs/heads/main`, the latest successful GitHub Actions runs, and the VPS checkout under `/home/deploy/nytt-trondheim` rather than relying on a commit SHA embedded in this document.
 
-- The application is live at `https://nytt.reidar.tech`; `/health` returns healthy Postgres-backed status through Caddy and Cloudflare.
-- The DATEX ingestion release is deployed from commit `31bee84` after `CI` and `Deploy to VPS` completed successfully on `main`; the worker is running without the earlier full-snapshot Node heap OOM.
 - DATEX Basic Auth credentials are configured as GitHub repository secrets `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD`, mapped to runtime `DATEX_USERNAME` and `DATEX_PASSWORD` by the deploy workflow/playbook. DATEX TravelTime uses the same credentials. Leave `NYTT_DATEX_ENDPOINT` blank unless intentionally overriding the SRTI-filtered default; leave `DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT` and `DATEX_TRAVEL_TIME_DATA_ENDPOINT` blank unless intentionally overriding the Vegvesen TravelTime defaults.
 - DATEX TravelTime production verification should check `source_health.source='datex_travel_time'` and the `datex_travel_times` table. Treat the data as Drift/source-health traffic pulse only, not as incident cause or situation activation evidence.
-- Production DATEX source health last verified as `ok` with `0 relevante DATEX trafikkhendelser hentet`; this reflects the current SRTI snapshot having no relevant Trondheim/Trøndelag events, not missing credentials.
+- Production DATEX source health can legitimately report `0 relevante DATEX trafikkhendelser hentet`; that means the current SRTI snapshot had no relevant Trondheim/Trøndelag events when credentials, worker logs and source health are otherwise OK.
 - The incident-correctness release was manually verified and `NYTT_DEPLOY_ENABLED=true`; successful `main` CI runs now trigger production promotion.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
