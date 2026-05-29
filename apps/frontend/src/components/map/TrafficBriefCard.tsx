@@ -1,7 +1,8 @@
-import type { TrafficBrief } from "@nytt/shared";
+import type { TrafficBrief, TrafficMapSourceStatus } from "@nytt/shared";
 
 interface TrafficBriefCardProps {
   brief: TrafficBrief;
+  sources?: TrafficMapSourceStatus[];
   loading?: boolean;
   error?: string;
   onReload?: () => void;
@@ -15,7 +16,15 @@ function formatGeneratedAt(value: string) {
   }).format(date);
 }
 
-export function TrafficBriefCard({ brief, loading, error, onReload }: TrafficBriefCardProps) {
+export function TrafficBriefCard({
+  brief,
+  sources,
+  loading,
+  error,
+  onReload,
+}: TrafficBriefCardProps) {
+  const degradedSources = sources?.filter((source) => source.state === "degraded") ?? [];
+
   return (
     <section className={`traffic-brief-card severity-${brief.severity}`}>
       <header>
@@ -36,6 +45,11 @@ export function TrafficBriefCard({ brief, loading, error, onReload }: TrafficBri
           Hendelsene i kartet har ikke fått nye oppdateringer på over 30 minutter.
         </p>
       ) : null}
+      {degradedSources.map((source) => (
+        <p key={source.source} role="status">
+          Datakilde redusert: {source.label} – {source.detail}
+        </p>
+      ))}
       <small>Brief generert {formatGeneratedAt(brief.generatedAt)}</small>
     </section>
   );

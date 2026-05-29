@@ -77,8 +77,17 @@ export interface TrafficCorridorImpact {
   highestSeverity: TrafficEventSeverity;
 }
 
+export interface TrafficMapSourceStatus {
+  source: "datex" | "datex_travel_time" | "vegvesen_traffic_info";
+  label: string;
+  state: "ok" | "degraded" | "disabled" | "awaiting_access";
+  detail: string;
+  lastCheckedAt?: string;
+}
+
 export interface TrafficMapPayload {
   events: TrafficMapEvent[];
   brief: TrafficBrief;
   corridorImpacts?: TrafficCorridorImpact[];
+  sources?: TrafficMapSourceStatus[];
 }

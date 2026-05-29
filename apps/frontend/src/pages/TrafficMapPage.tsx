@@ -96,8 +96,8 @@ export function TrafficMapPage() {
     if (selectedEventId) highlightedIds.add(selectedEventId);
     if (selectedCorridorId) {
       const affectedEventIds =
-        data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)?.affectedEventIds ??
-        [];
+        data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)
+          ?.affectedEventIds ?? [];
       affectedEventIds.forEach((eventId) => highlightedIds.add(eventId));
     }
     return Array.from(highlightedIds);
@@ -157,7 +157,13 @@ export function TrafficMapPage() {
           onPresetChange={applyPreset}
         />
         {data?.brief ? (
-          <TrafficBriefCard brief={data.brief} loading={loading} error={error} onReload={reload} />
+          <TrafficBriefCard
+            brief={data.brief}
+            sources={data.sources}
+            loading={loading}
+            error={error}
+            onReload={reload}
+          />
         ) : (
           <section className="traffic-brief-card">
             <header>

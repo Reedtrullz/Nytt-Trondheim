@@ -8,7 +8,7 @@ import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { PgStore } from "../src/store.js";
-import type { Article, OfficialEvent, TrafficMapEvent } from "@nytt/shared";
+import type { Article, OfficialEvent, SourceHealth, TrafficMapEvent } from "@nytt/shared";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
@@ -200,6 +200,28 @@ describe("private situation API", () => {
     vi.spyOn(store, "listOfficialEvents").mockResolvedValue(datexEvents);
     vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
     vi.spyOn(store, "listArticles").mockResolvedValue({ items: relatedArticles });
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "datex",
+        label: "Vegvesen DATEX",
+        state: "ok",
+        lastCheckedAt: "2026-05-28T10:00:00.000Z",
+        detail: "Sist hentet nå",
+      },
+      {
+        source: "datex_travel_time",
+        label: "DATEX reisetid",
+        state: "degraded",
+        detail: "Mangler oppdaterte reisetider",
+      },
+      {
+        source: "vegvesen_traffic_info",
+        label: "Vegvesen TrafficInfo",
+        state: "ok",
+        detail: "Meldinger hentet",
+      },
+      { source: "nrk", label: "NRK Trøndelag", state: "ok", detail: "RSS" },
+    ] satisfies SourceHealth[]);
 
     const agent = request.agent(app);
     await agent.get("/api/session").expect(200);
@@ -244,6 +266,27 @@ describe("private situation API", () => {
         }),
       ]),
     );
+    expect(response.body.sources).toEqual([
+      {
+        source: "datex",
+        label: "Vegvesen DATEX",
+        state: "ok",
+        lastCheckedAt: "2026-05-28T10:00:00.000Z",
+        detail: "Sist hentet nå",
+      },
+      {
+        source: "datex_travel_time",
+        label: "DATEX reisetid",
+        state: "degraded",
+        detail: "Mangler oppdaterte reisetider",
+      },
+      {
+        source: "vegvesen_traffic_info",
+        label: "Vegvesen TrafficInfo",
+        state: "ok",
+        detail: "Meldinger hentet",
+      },
+    ]);
 
     const emptyCategoryResponse = await agent
       .get("/api/map/traffic-events?categories=&north=63.5&south=63.3&east=10.5&west=10.2")

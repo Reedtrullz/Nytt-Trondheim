@@ -19,9 +19,11 @@ import {
   taskInputSchema,
   trafficMapQuerySchema,
   type MapFeature,
+  type SourceHealth,
   type SourceItem,
   type TrafficEventState,
   type TrafficMapEvent,
+  type TrafficMapSourceStatus,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
 import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from "./auth.js";
@@ -38,6 +40,22 @@ import { buildTrafficBrief } from "./traffic/traffic-brief.js";
 
 const EXPORT_ATTACHMENT_COUNT_LIMIT = 25;
 const EXPORT_ATTACHMENT_BYTE_LIMIT = 50 * 1024 * 1024;
+const trafficMapSourceIds = ["datex", "datex_travel_time", "vegvesen_traffic_info"] as const;
+const trafficMapSourceIdSet = new Set<string>(trafficMapSourceIds);
+
+function trafficMapSourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourceStatus[] {
+  return sourceHealth
+    .filter((source): source is SourceHealth & { source: TrafficMapSourceStatus["source"] } =>
+      trafficMapSourceIdSet.has(source.source),
+    )
+    .map((source) => ({
+      source: source.source,
+      label: source.label,
+      state: source.state,
+      detail: source.detail,
+      ...(source.lastCheckedAt ? { lastCheckedAt: source.lastCheckedAt } : {}),
+    }));
+}
 
 function attachmentSizeBytes(size: unknown): number {
   const bytes =
@@ -266,23 +284,25 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         typeof query.west === "number"
           ? { north: query.north, south: query.south, east: query.east, west: query.west }
           : undefined;
-      const [trafficInfoEvents, officialEvents, sourceItems, articlesPage] = await Promise.all([
-        store.listTrafficMapEvents(
-          {
-            sources: ["vegvesen_traffic_info"],
-            states: requestedStates,
-            categories: query.categories,
-            severities: query.severities,
-            from: query.from,
-            to: query.to,
-            bounds,
-          },
-          login,
-        ),
-        store.listOfficialEvents({ source: "datex" }, login),
-        listAllDatexSourceItems(store, login),
-        store.listArticles({ limit: 500 }, login),
-      ]);
+      const [trafficInfoEvents, officialEvents, sourceItems, articlesPage, sourceHealth] =
+        await Promise.all([
+          store.listTrafficMapEvents(
+            {
+              sources: ["vegvesen_traffic_info"],
+              states: requestedStates,
+              categories: query.categories,
+              severities: query.severities,
+              from: query.from,
+              to: query.to,
+              bounds,
+            },
+            login,
+          ),
+          store.listOfficialEvents({ source: "datex" }, login),
+          listAllDatexSourceItems(store, login),
+          store.listArticles({ limit: 500 }, login),
+          store.listSourceHealth(),
+        ]);
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
 
@@ -308,6 +328,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         events,
         brief: buildTrafficBrief(events),
         corridorImpacts: buildCorridorImpacts(events),
+        sources: trafficMapSourceStatuses(sourceHealth),
       });
     } catch (error) {
       next(error);
