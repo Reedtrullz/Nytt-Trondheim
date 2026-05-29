@@ -73,6 +73,16 @@ function severityLabel(severity: TrafficEventSeverity) {
   }
 }
 
+function sourceLabel(source: TrafficMapEvent["source"]) {
+  switch (source) {
+    case "vegvesen_traffic_info":
+      return "Statens vegvesen";
+    case "datex":
+    default:
+      return "DATEX";
+  }
+}
+
 function TrafficPopup({ event }: { event: TrafficMapEvent }) {
   const validFrom = formatTime(event.validFrom);
   const validTo = formatTime(event.validTo);
@@ -82,7 +92,7 @@ function TrafficPopup({ event }: { event: TrafficMapEvent }) {
       <article className="traffic-popup">
         <strong>{event.title}</strong>
         <p>
-          {categoryLabel(event.category)} · {severityLabel(event.severity)} · DATEX
+          {categoryLabel(event.category)} · {severityLabel(event.severity)} · {sourceLabel(event.source)}
         </p>
         {event.description ? <p>{event.description}</p> : null}
         {event.locationName ? (
