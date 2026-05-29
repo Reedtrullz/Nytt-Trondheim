@@ -25,13 +25,16 @@ const categoryLabels: Record<TrafficEventCategory, string> = {
 
 const STALE_AFTER_MS = 30 * 60 * 1000;
 
-function trafficFreshness(events: TrafficMapEvent[]): TrafficBrief["freshness"] {
-  const newestUpdate = events
+function visibleTrafficEventFreshness(visibleEvents: TrafficMapEvent[]): TrafficBrief["freshness"] {
+  // This is selection freshness: it only inspects the update timestamps on the
+  // events currently visible after map/filter selection. It is not source health
+  // and must not be presented as the collection time for Statens vegvesen data.
+  const newestVisibleEventUpdate = visibleEvents
     .map((event) => Date.parse(event.updatedAt))
     .filter(Number.isFinite)
     .sort((left, right) => right - left)[0];
-  if (!newestUpdate) return "unknown";
-  return Date.now() - newestUpdate > STALE_AFTER_MS ? "stale" : "fresh";
+  if (newestVisibleEventUpdate === undefined) return "unknown";
+  return Date.now() - newestVisibleEventUpdate > STALE_AFTER_MS ? "stale" : "fresh";
 }
 
 export function buildTrafficBrief(events: TrafficMapEvent[]): TrafficBrief {
@@ -57,10 +60,10 @@ export function buildTrafficBrief(events: TrafficMapEvent[]): TrafficBrief {
   return {
     headline:
       activeEvents.length === 0
-        ? "Ingen aktive trafikkhendelser registrert akkurat nå."
-        : `${activeEvents.length} trafikkhendelser rundt Trondheim akkurat nå.`,
+        ? "Ingen trafikkhendelser i valgt kartutsnitt og filter. Prøv å zoome ut eller slå på planlagte veiarbeid."
+        : `${activeEvents.length} trafikkhendelser i valgt kartutsnitt akkurat nå.`,
     severity: maxSeverity,
-    freshness: trafficFreshness(activeEvents),
+    freshness: visibleTrafficEventFreshness(activeEvents),
     generatedAt: new Date().toISOString(),
     bullets: [
       categoryBits.length > 0

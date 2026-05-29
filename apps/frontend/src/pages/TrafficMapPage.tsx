@@ -144,7 +144,7 @@ export function TrafficMapPage() {
     <main className="traffic-map-page">
       <div className="traffic-map-sidebar">
         <div className="traffic-map-heading">
-          <p className="label">DATEX fra Statens vegvesen</p>
+          <p className="label">Trafikkdata fra Statens vegvesen</p>
           <h1>Trafikkart</h1>
           <p>Live trafikkhendelser, veiarbeid og påvirkning rundt Trondheim.</p>
         </div>
@@ -166,9 +166,13 @@ export function TrafficMapPage() {
                 {loading ? "Oppdaterer ..." : "Oppdater"}
               </button>
             </header>
-            <p role={error ? "alert" : undefined}>
-              {error ?? (loading ? "Henter trafikkdata ..." : "Ingen trafikkdata lastet ennå.")}
-            </p>
+            {error ? (
+              <p role="alert">{error}</p>
+            ) : loading ? (
+              <p>Henter trafikkdata ...</p>
+            ) : (
+              <p>Velg et kartutsnitt eller trykk Oppdater for å hente trafikkdata.</p>
+            )}
           </section>
         )}
         {data?.events ? (

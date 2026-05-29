@@ -226,7 +226,7 @@ describe("private situation API", () => {
     });
     expect(response.body.events[0].relatedArticles[0].distanceMeters).toBeLessThan(100);
     expect(response.body.brief).toMatchObject({
-      headline: "1 trafikkhendelser rundt Trondheim akkurat nå.",
+      headline: "1 trafikkhendelser i valgt kartutsnitt akkurat nå.",
       freshness: expect.any(String),
       counts: {
         total: 1,
@@ -249,7 +249,11 @@ describe("private situation API", () => {
       .get("/api/map/traffic-events?categories=&north=63.5&south=63.3&east=10.5&west=10.2")
       .expect(200);
     expect(emptyCategoryResponse.body.events).toEqual([]);
-    expect(emptyCategoryResponse.body.brief.counts.total).toBe(0);
+    expect(emptyCategoryResponse.body.brief).toMatchObject({
+      headline:
+        "Ingen trafikkhendelser i valgt kartutsnitt og filter. Prøv å zoome ut eller slå på planlagte veiarbeid.",
+      counts: { total: 0 },
+    });
 
     await agent.get("/api/map/traffic-events?states=not-a-state").expect(400);
   });

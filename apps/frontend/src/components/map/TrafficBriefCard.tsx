@@ -15,17 +15,6 @@ function formatGeneratedAt(value: string) {
   }).format(date);
 }
 
-function freshnessLabel(freshness: TrafficBrief["freshness"]) {
-  switch (freshness) {
-    case "fresh":
-      return "ferske DATEX-data";
-    case "stale":
-      return "mulig foreldet DATEX-data";
-    default:
-      return "ukjent datferskhet";
-  }
-}
-
 export function TrafficBriefCard({ brief, loading, error, onReload }: TrafficBriefCardProps) {
   return (
     <section className={`traffic-brief-card severity-${brief.severity}`}>
@@ -42,9 +31,12 @@ export function TrafficBriefCard({ brief, loading, error, onReload }: TrafficBri
           <li key={`${index}:${bullet}`}>{bullet}</li>
         ))}
       </ul>
-      <small>
-        Sist oppdatert {formatGeneratedAt(brief.generatedAt)} · {freshnessLabel(brief.freshness)}
-      </small>
+      {brief.freshness === "stale" ? (
+        <p role="status">
+          Hendelsene i kartet har ikke fått nye oppdateringer på over 30 minutter.
+        </p>
+      ) : null}
+      <small>Brief generert {formatGeneratedAt(brief.generatedAt)}</small>
     </section>
   );
 }
