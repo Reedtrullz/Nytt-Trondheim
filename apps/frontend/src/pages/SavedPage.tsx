@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Article, Situation } from "@nytt/shared";
 import { api } from "../api.js";
+import { situationTimeMeta } from "../situationTime.js";
 
 function time(value: string) {
   return new Intl.DateTimeFormat("nb-NO", { dateStyle: "medium", timeStyle: "short" }).format(
@@ -45,7 +46,7 @@ export function SavedPage() {
               <div>
                 <h3>{situation.title}</h3>
                 <small>
-                  {situation.locationLabel} · {time(situation.updatedAt)}
+                  {situation.locationLabel} · {situationTimeMeta(situation)}
                 </small>
               </div>
               <Link className="primary-link" to={`/situasjoner/${situation.id}`}>

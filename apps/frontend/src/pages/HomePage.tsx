@@ -4,6 +4,7 @@ import type { Article, BootstrapPayload, GeographicScope } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
 import { NewsMap } from "../components/MapViews.js";
+import { situationTimeMeta } from "../situationTime.js";
 
 const categories = [
   "Alle",
@@ -65,7 +66,7 @@ function SituationBanner({
           <span className="status">{status}</span>
         </div>
         <p className="status-time">
-          Oppdatert {formatTime(situation.updatedAt)} · {situation.verificationStatus}
+          {situationTimeMeta(situation)} · {situation.verificationStatus}
         </p>
         <ul>
           <li>{situation.summary}</li>

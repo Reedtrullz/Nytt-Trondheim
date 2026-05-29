@@ -4,6 +4,7 @@ import type { MapFeature, SituationWorkspace, SourceItem } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
+import { formatSituationTimestamp } from "../situationTime.js";
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("nb-NO", {
@@ -367,7 +368,8 @@ export function SituationPage() {
         </div>
         <div className="incident-state">
           <span className="status">{statusLabel}</span>
-          <strong>Sist oppdatert {formatTime(situation.updatedAt)}</strong>
+          <strong>Sist oppdatert {formatSituationTimestamp(situation.updatedAt)}</strong>
+          <small>Hendelsen startet {formatSituationTimestamp(situation.createdAt)}</small>
           <small>{situation.verificationStatus}</small>
           <button onClick={() => void saveSituation()}>
             {situation.saved ? "Fjern lagring" : "Lagre situasjon"}

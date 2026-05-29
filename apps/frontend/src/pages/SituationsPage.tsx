@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Situation, SituationLifecycle } from "@nytt/shared";
 import { api } from "../api.js";
+import { situationTimeMeta } from "../situationTime.js";
 
 const filters: Array<{ label: string; status?: SituationLifecycle; includeDismissed?: boolean }> = [
   { label: "Aktuelle" },
@@ -10,12 +11,6 @@ const filters: Array<{ label: string; status?: SituationLifecycle; includeDismis
   { label: "Avsluttet", status: "resolved", includeDismissed: true },
   { label: "Avvist historikk", status: "dismissed", includeDismissed: true },
 ];
-
-function time(value: string) {
-  return new Intl.DateTimeFormat("nb-NO", { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(value),
-  );
-}
 
 export function SituationsPage() {
   const [selected, setSelected] = useState(filters[0]!);
@@ -102,7 +97,7 @@ export function SituationsPage() {
               <h2>{situation.title}</h2>
               <p>{situation.summary}</p>
               <small>
-                {situation.locationLabel} · Oppdatert {time(situation.updatedAt)}
+                {situation.locationLabel} · {situationTimeMeta(situation)}
               </small>
             </div>
             <Link className="primary-link" to={`/situasjoner/${situation.id}`}>
