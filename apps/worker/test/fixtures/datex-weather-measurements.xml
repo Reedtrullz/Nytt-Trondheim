@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<d2:d2LogicalModel xmlns:d2="http://datex2.eu/schema/3/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" modelBaseVersion="3">
+  <d2:payloadPublication xsi:type="d2:MeasuredDataPublication" lang="no">
+    <d2:publicationTime>2026-05-29T11:42:00Z</d2:publicationTime>
+    <d2:siteMeasurements>
+      <d2:measurementSiteReference targetClass="MeasurementSiteRecord" id="SN70690" version="1" />
+      <d2:measurementTimeDefault>2026-05-29T11:40:00Z</d2:measurementTimeDefault>
+      <d2:measuredValue index="1">
+        <d2:basicData xsi:type="d2:TemperatureInformation">
+          <d2:airTemperature>
+            <d2:temperature>7.2</d2:temperature>
+          </d2:airTemperature>
+        </d2:basicData>
+      </d2:measuredValue>
+      <d2:measuredValue index="2">
+        <d2:basicData xsi:type="d2:RoadSurfaceConditionInformation">
+          <d2:roadSurfaceTemperature>
+            <d2:temperature>5.1</d2:temperature>
+          </d2:roadSurfaceTemperature>
+        </d2:basicData>
+      </d2:measuredValue>
+    </d2:siteMeasurements>
+    <d2:siteMeasurements>
+      <d2:measurementSiteReference targetClass="MeasurementSiteRecord" id="SN99999" version="1" />
+      <d2:measurementTimeDefault>2026-05-29T11:41:00Z</d2:measurementTimeDefault>
+      <d2:measuredValue index="1">
+        <d2:basicData xsi:type="d2:TemperatureInformation">
+          <d2:airTemperature>
+            <d2:temperature>14.4</d2:temperature>
+          </d2:airTemperature>
+        </d2:basicData>
+      </d2:measuredValue>
+    </d2:siteMeasurements>
+    <d2:siteMeasurements>
+      <d2:measurementSiteReference targetClass="MeasurementSiteRecord" id="SNBAD" version="1" />
+      <d2:measurementTimeDefault>2026-05-29T11:39:00Z</d2:measurementTimeDefault>
+      <d2:measuredValue index="1">
+        <d2:basicData xsi:type="d2:TemperatureInformation">
+          <d2:airTemperature>
+            <d2:temperature>6.4</d2:temperature>
+          </d2:airTemperature>
+        </d2:basicData>
+      </d2:measuredValue>
+    </d2:siteMeasurements>
+  </d2:payloadPublication>
+</d2:d2LogicalModel>

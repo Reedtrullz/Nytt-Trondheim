@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<d2:d2LogicalModel xmlns:d2="http://datex2.eu/schema/3/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" modelBaseVersion="3">
+  <d2:payloadPublication xsi:type="d2:MeasurementSiteTablePublication" lang="no">
+    <d2:measurementSiteTable id="weather-sites" version="1">
+      <d2:measurementSiteRecord id="SN70690" version="1">
+        <d2:measurementSiteName>
+          <d2:values>
+            <d2:value lang="no">Klett</d2:value>
+          </d2:values>
+        </d2:measurementSiteName>
+        <d2:measurementSiteLocation>
+          <d2:locationForDisplay>
+            <d2:latitude>63.324</d2:latitude>
+            <d2:longitude>10.3001</d2:longitude>
+          </d2:locationForDisplay>
+        </d2:measurementSiteLocation>
+      </d2:measurementSiteRecord>
+      <d2:measurementSiteRecord id="SN99999" version="1">
+        <d2:measurementSiteName>
+          <d2:values>
+            <d2:value lang="no">Ring 3 Oslo</d2:value>
+          </d2:values>
+        </d2:measurementSiteName>
+        <d2:measurementSiteLocation>
+          <d2:pointCoordinates>
+            <d2:latitude>59.91</d2:latitude>
+            <d2:longitude>10.75</d2:longitude>
+          </d2:pointCoordinates>
+        </d2:measurementSiteLocation>
+      </d2:measurementSiteRecord>
+      <d2:measurementSiteRecord id="SNBAD" version="1">
+        <d2:measurementSiteName>
+          <d2:values>
+            <d2:value lang="no">Ugyldig geometri</d2:value>
+          </d2:values>
+        </d2:measurementSiteName>
+        <d2:measurementSiteLocation>
+          <d2:coordinatesForDisplay>
+            <d2:latitude>63.43</d2:latitude>
+          </d2:coordinatesForDisplay>
+        </d2:measurementSiteLocation>
+      </d2:measurementSiteRecord>
+    </d2:measurementSiteTable>
+  </d2:payloadPublication>
+</d2:d2LogicalModel>
