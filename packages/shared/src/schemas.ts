@@ -45,6 +45,7 @@ export const sourceIdSchema = z.enum([
   "nve",
   "datex",
   "datex_travel_time",
+  "vegvesen_traffic_info",
   "dsb",
   "politiloggen",
   "deepseek",
