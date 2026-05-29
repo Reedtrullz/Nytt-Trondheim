@@ -3,5 +3,5 @@
   "compilerOptions": {
     "rootDir": "."
   },
-  "include": ["test/traffic-info-types.test.ts"]
+  "include": ["test/traffic-info-types.test.ts", "test/road-context-types.test.ts"]
 }
