@@ -1,0 +1,57 @@
+{
+  "metadata": {
+    "overallDataStatus": "ok",
+    "pagination": { "totalElements": 3, "matchedElements": 3 }
+  },
+  "trafficMessages": [
+    {
+      "dataFetchStatus": "ok",
+      "publicationTime": "2026-05-29T13:12:04+02:00",
+      "id": "NPRA_HBT_21-04-2026.66010",
+      "icon": { "position": { "type": "Point", "coordinates": [10.345405, 63.38945] } },
+      "locationDescriptionDetails": {
+        "simpleLocationDescription": "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag"
+      },
+      "publicCommentDescription": "Lysregulering.",
+      "activityStatus": "active",
+      "trafficImpact": "small",
+      "trafficStatus": { "description": "Lysregulering", "type": "Regulation" },
+      "trafficEvent": { "trafficEventDescription": "Veiarbeid", "trafficEventType": "roadworks" },
+      "trafficEventCategory": "roadworks",
+      "startTime": "2026-04-21T07:00:00+02:00",
+      "estimatedEndTime": "2026-06-26T16:00:00+02:00",
+      "updatedTime": "2026-05-07T06:59:25+02:00",
+      "location": { "counties": [{ "name": "Trøndelag", "code": 50 }], "roads": [{ "name": "", "number": "F6650", "category": "F" }] },
+      "priorityScore": 500
+    },
+    {
+      "dataFetchStatus": "ok",
+      "publicationTime": "2026-05-29T13:12:04+02:00",
+      "id": "NPRA_HBT_19-05-2026.80670",
+      "icon": { "position": { "type": "Point", "coordinates": [10.318883, 63.383823] } },
+      "locationDescriptionDetails": { "simpleLocationDescription": "Kv. 4295 Leirbrumyran, Trondheim, Trøndelag" },
+      "activityStatus": "future",
+      "trafficImpact": "none",
+      "trafficStatus": { "description": "Åpen vei", "type": "RoadOpen" },
+      "trafficEvent": { "trafficEventDescription": "Veiarbeid", "trafficEventType": "roadworks" },
+      "trafficEventCategory": "roadworks",
+      "startTime": "2026-06-01T07:00:00+02:00",
+      "estimatedEndTime": "2026-06-05T15:00:00+02:00",
+      "updatedTime": "2026-05-26T14:28:35+02:00",
+      "location": { "counties": [{ "name": "Trøndelag", "code": 50 }], "roads": [{ "name": "", "number": "K4295", "category": "K" }] },
+      "priorityScore": 100
+    },
+    {
+      "dataFetchStatus": "ok",
+      "publicationTime": "2026-05-29T13:12:04+02:00",
+      "id": "NPRA_HBT_OSLO",
+      "icon": { "position": { "type": "Point", "coordinates": [10.75, 59.91] } },
+      "locationDescriptionDetails": { "simpleLocationDescription": "Ring 3, Oslo" },
+      "activityStatus": "active",
+      "trafficImpact": "large",
+      "trafficEventCategory": "warning",
+      "updatedTime": "2026-05-29T10:00:00+02:00",
+      "location": { "counties": [{ "name": "Oslo", "code": 3 }], "roads": [{ "number": "R150", "category": "R" }] }
+    }
+  ]
+}
