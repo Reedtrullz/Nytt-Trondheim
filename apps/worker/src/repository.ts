@@ -4,6 +4,8 @@ import type {
   AiProcessingRun,
   Article,
   OfficialEvent,
+  RoadCamera,
+  RoadWeatherObservation,
   Situation,
   SourceItemInput,
   SourceHealth,
@@ -360,6 +362,45 @@ export class WorkerRepository {
           eventPayloadHash,
           options.fetchedAt,
         ],
+      );
+    }
+  }
+
+  async upsertRoadWeatherObservations(
+    observations: RoadWeatherObservation[],
+  ): Promise<void> {
+    for (const observation of observations) {
+      await this.pool.query(
+        `INSERT INTO road_weather_observations
+         (station_id, payload, observed_at, updated_at, geometry)
+         VALUES ($1,$2,$3,$4,ST_SetSRID(ST_GeomFromGeoJSON($5),4326))
+         ON CONFLICT (station_id) DO UPDATE SET
+           payload=EXCLUDED.payload,
+           observed_at=EXCLUDED.observed_at,
+           updated_at=EXCLUDED.updated_at,
+           geometry=EXCLUDED.geometry`,
+        [
+          observation.stationId,
+          observation,
+          observation.observedAt,
+          observation.updatedAt,
+          JSON.stringify(observation.geometry),
+        ],
+      );
+    }
+  }
+
+  async upsertRoadCameras(cameras: RoadCamera[]): Promise<void> {
+    for (const camera of cameras) {
+      await this.pool.query(
+        `INSERT INTO road_cameras
+         (camera_id, payload, updated_at, geometry)
+         VALUES ($1,$2,$3,ST_SetSRID(ST_GeomFromGeoJSON($4),4326))
+         ON CONFLICT (camera_id) DO UPDATE SET
+           payload=EXCLUDED.payload,
+           updated_at=EXCLUDED.updated_at,
+           geometry=EXCLUDED.geometry`,
+        [camera.cameraId, camera, camera.updatedAt, JSON.stringify(camera.geometry)],
       );
     }
   }

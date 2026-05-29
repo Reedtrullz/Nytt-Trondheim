@@ -1,6 +1,8 @@
-import type { TrafficMapEvent } from "@nytt/shared";
+import type { RoadCamera, RoadWeatherObservation, TrafficMapEvent } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
+  collectDatexCctvContext,
+  collectDatexRoadWeatherContext,
   collectTrafficInfoForMap,
   createCollectionGuard,
   normalizeDatexSituationEndpoint,
@@ -39,6 +41,18 @@ function fakeTrafficInfoRepository() {
     setCollectorState: vi.fn().mockResolvedValue(undefined),
     setHealth: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+function fakeRoadContextRepository() {
+  return {
+    upsertRoadWeatherObservations: vi.fn().mockResolvedValue(undefined),
+    upsertRoadCameras: vi.fn().mockResolvedValue(undefined),
+    setHealth: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function okXmlResponse(xml: string): Response {
+  return new Response(xml, { status: 200 });
 }
 
 describe("worker lifecycle helpers", () => {
@@ -87,6 +101,236 @@ describe("worker lifecycle helpers", () => {
     await guarded();
 
     expect(collect).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("DATEX road context collection", () => {
+  it("fetches, parses, persists weather observations and records ok health", async () => {
+    const checkedAt = "2026-05-29T11:15:00.000Z";
+    const nextPollAt = "2026-05-29T11:25:00.000Z";
+    const repository = fakeRoadContextRepository();
+    const observation: RoadWeatherObservation = {
+      id: "datex-weather:SN123",
+      source: "datex_weather",
+      stationId: "SN123",
+      stationName: "E6 Sluppen",
+      observedAt: checkedAt,
+      updatedAt: checkedAt,
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+      airTemperatureC: 5,
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(okXmlResponse("<sites />"))
+      .mockResolvedValueOnce(okXmlResponse("<measurements />"));
+    const parser = vi.fn().mockReturnValue([observation]);
+
+    await collectDatexRoadWeatherContext({
+      repository: repository as never,
+      sitesEndpoint: "https://datex.example.test/weather-sites",
+      measurementsEndpoint: "https://datex.example.test/weather-measurements",
+      username: " user ",
+      password: " pass ",
+      nextPollAt,
+      now: () => new Date(checkedAt),
+      fetcher,
+      parser,
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://datex.example.test/weather-sites");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("https://datex.example.test/weather-measurements");
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+        Authorization: "Basic dXNlcjpwYXNz",
+      }),
+    });
+    expect(parser).toHaveBeenCalledWith("<sites />", "<measurements />", {
+      receivedAt: checkedAt,
+    });
+    expect(repository.upsertRoadWeatherObservations).toHaveBeenCalledWith([observation]);
+    expect(repository.upsertRoadCameras).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "datex_weather",
+      label: "Vegvesen værstasjoner",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "1 DATEX værstasjonsobservasjoner oppdatert",
+    });
+  });
+
+  it("marks weather context awaiting access without fetching when credentials are missing", async () => {
+    const checkedAt = "2026-05-29T11:15:00.000Z";
+    const nextPollAt = "2026-05-29T11:25:00.000Z";
+    const repository = fakeRoadContextRepository();
+    const fetcher = vi.fn<typeof fetch>();
+    const parser = vi.fn();
+
+    await collectDatexRoadWeatherContext({
+      repository: repository as never,
+      sitesEndpoint: "https://datex.example.test/weather-sites",
+      measurementsEndpoint: "https://datex.example.test/weather-measurements",
+      username: "",
+      password: "pass",
+      nextPollAt,
+      now: () => new Date(checkedAt),
+      fetcher,
+      parser: parser as never,
+    });
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(parser).not.toHaveBeenCalled();
+    expect(repository.upsertRoadWeatherObservations).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "datex_weather",
+      label: "Vegvesen værstasjoner",
+      state: "awaiting_access",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "DATEX Basic Auth mangler for værstasjonsdata",
+    });
+  });
+
+  it("marks weather context degraded on fetch or parse failure", async () => {
+    const checkedAt = "2026-05-29T11:15:00.000Z";
+    const nextPollAt = "2026-05-29T11:25:00.000Z";
+    const repository = fakeRoadContextRepository();
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("weather unavailable"));
+
+    await collectDatexRoadWeatherContext({
+      repository: repository as never,
+      sitesEndpoint: "https://datex.example.test/weather-sites",
+      measurementsEndpoint: "https://datex.example.test/weather-measurements",
+      username: "user",
+      password: "pass",
+      nextPollAt,
+      now: () => new Date(checkedAt),
+      fetcher,
+    });
+
+    expect(repository.upsertRoadWeatherObservations).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "datex_weather",
+      label: "Vegvesen værstasjoner",
+      state: "degraded",
+      lastCheckedAt: checkedAt,
+      lastFailureAt: checkedAt,
+      nextPollAt,
+      detail: "DATEX værstasjonsinnhenting feilet: Error: weather unavailable",
+    });
+  });
+
+  it("fetches, parses, persists CCTV cameras and records ok health", async () => {
+    const checkedAt = "2026-05-29T11:15:00.000Z";
+    const nextPollAt = "2026-05-29T11:25:00.000Z";
+    const repository = fakeRoadContextRepository();
+    const camera: RoadCamera = {
+      id: "datex-cctv:CAM123",
+      source: "datex_cctv",
+      cameraId: "CAM123",
+      name: "E6 Sluppen kamera",
+      status: "ok",
+      updatedAt: checkedAt,
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+      imageUrl: "https://example.test/camera.jpg",
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(okXmlResponse("<sites />"))
+      .mockResolvedValueOnce(okXmlResponse("<status />"));
+    const parser = vi.fn().mockReturnValue([camera]);
+
+    await collectDatexCctvContext({
+      repository: repository as never,
+      sitesEndpoint: "https://datex.example.test/cctv-sites",
+      statusEndpoint: "https://datex.example.test/cctv-status",
+      username: "user",
+      password: "pass",
+      nextPollAt,
+      now: () => new Date(checkedAt),
+      fetcher,
+      parser,
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(parser).toHaveBeenCalledWith("<sites />", "<status />", { receivedAt: checkedAt });
+    expect(repository.upsertRoadCameras).toHaveBeenCalledWith([camera]);
+    expect(repository.upsertRoadWeatherObservations).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "datex_cctv",
+      label: "Vegvesen webkamera",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "1 DATEX webkamera oppdatert",
+    });
+  });
+
+  it("marks CCTV context awaiting access without fetching when credentials are missing", async () => {
+    const checkedAt = "2026-05-29T11:15:00.000Z";
+    const nextPollAt = "2026-05-29T11:25:00.000Z";
+    const repository = fakeRoadContextRepository();
+    const fetcher = vi.fn<typeof fetch>();
+
+    await collectDatexCctvContext({
+      repository: repository as never,
+      sitesEndpoint: "https://datex.example.test/cctv-sites",
+      statusEndpoint: "https://datex.example.test/cctv-status",
+      username: "user",
+      password: " ",
+      nextPollAt,
+      now: () => new Date(checkedAt),
+      fetcher,
+    });
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(repository.upsertRoadCameras).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "datex_cctv",
+      label: "Vegvesen webkamera",
+      state: "awaiting_access",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "DATEX Basic Auth mangler for webkameradata",
+    });
+  });
+
+  it("marks CCTV context degraded on fetch or parse failure", async () => {
+    const checkedAt = "2026-05-29T11:15:00.000Z";
+    const nextPollAt = "2026-05-29T11:25:00.000Z";
+    const repository = fakeRoadContextRepository();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(okXmlResponse("<sites />"))
+      .mockResolvedValueOnce(okXmlResponse("<status />"));
+    const parser = vi.fn(() => {
+      throw new Error("bad cctv xml");
+    });
+
+    await collectDatexCctvContext({
+      repository: repository as never,
+      sitesEndpoint: "https://datex.example.test/cctv-sites",
+      statusEndpoint: "https://datex.example.test/cctv-status",
+      username: "user",
+      password: "pass",
+      nextPollAt,
+      now: () => new Date(checkedAt),
+      fetcher,
+      parser,
+    });
+
+    expect(repository.upsertRoadCameras).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "datex_cctv",
+      label: "Vegvesen webkamera",
+      state: "degraded",
+      lastCheckedAt: checkedAt,
+      lastFailureAt: checkedAt,
+      nextPollAt,
+      detail: "DATEX webkamerainnhenting feilet: Error: bad cctv xml",
+    });
   });
 });
 

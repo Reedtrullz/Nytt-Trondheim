@@ -327,6 +327,24 @@ CREATE TABLE IF NOT EXISTS datex_travel_times (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS road_weather_observations (
+  station_id text PRIMARY KEY,
+  payload jsonb NOT NULL,
+  observed_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  geometry geometry(Point, 4326) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS road_weather_observations_geometry_idx
+  ON road_weather_observations USING gist (geometry);
+
+CREATE TABLE IF NOT EXISTS road_cameras (
+  camera_id text PRIMARY KEY,
+  payload jsonb NOT NULL,
+  updated_at timestamptz NOT NULL,
+  geometry geometry(Point, 4326) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS road_cameras_geometry_idx ON road_cameras USING gist (geometry);
+
 CREATE TABLE IF NOT EXISTS traffic_map_events (
   id text PRIMARY KEY,
   source text NOT NULL,
@@ -459,3 +477,4 @@ INSERT INTO schema_migrations (version) VALUES ('001_safe_launch_schema') ON CON
 INSERT INTO schema_migrations (version) VALUES ('002_situation_trustworthiness') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('003_collector_state') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('004_traffic_map_events') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('005_road_context') ON CONFLICT DO NOTHING;

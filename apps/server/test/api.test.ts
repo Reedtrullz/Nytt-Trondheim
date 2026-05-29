@@ -11,6 +11,8 @@ import { PgStore } from "../src/store.js";
 import type {
   Article,
   OfficialEvent,
+  RoadCamera,
+  RoadWeatherObservation,
   SourceHealth,
   TrafficMapEvent,
   TrafficPulseCorridor,
@@ -432,7 +434,119 @@ describe("private situation API", () => {
     );
   });
 
-  it("supports planned roadwork timeline queries", async () => {
+  it("returns road weather and camera context inside traffic map bounds", async () => {
+    const { app, store } = await testApp();
+    const insideWeather: RoadWeatherObservation = {
+      id: "datex-weather:SN123",
+      source: "datex_weather",
+      stationId: "SN123",
+      stationName: "E6 Sluppen værstasjon",
+      observedAt: "2026-05-29T10:00:00.000Z",
+      updatedAt: "2026-05-29T10:01:00.000Z",
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+      airTemperatureC: 5,
+    };
+    const outsideWeather: RoadWeatherObservation = {
+      ...insideWeather,
+      id: "datex-weather:SN999",
+      stationId: "SN999",
+      stationName: "Oppdal værstasjon",
+      geometry: { type: "Point", coordinates: [9.69, 62.59] },
+    };
+    const insideCamera: RoadCamera = {
+      id: "datex-cctv:CAM123",
+      source: "datex_cctv",
+      cameraId: "CAM123",
+      name: "E6 Sluppen kamera",
+      status: "ok",
+      updatedAt: "2026-05-29T10:01:00.000Z",
+      geometry: { type: "Point", coordinates: [10.38, 63.38] },
+      imageUrl: "https://example.test/camera.jpg",
+    };
+    const outsideCamera: RoadCamera = {
+      ...insideCamera,
+      id: "datex-cctv:CAM999",
+      cameraId: "CAM999",
+      name: "Oppdal kamera",
+      geometry: { type: "Point", coordinates: [9.7, 62.58] },
+    };
+    const inBounds = (
+      point: { coordinates: number[] },
+      bounds?: { north: number; south: number; east: number; west: number },
+    ) => {
+      if (!bounds) return true;
+      const [lng, lat] = point.coordinates;
+      return lat <= bounds.north && lat >= bounds.south && lng <= bounds.east && lng >= bounds.west;
+    };
+    const listRoadWeatherObservations = vi.fn(async (bounds) =>
+      [insideWeather, outsideWeather].filter((item) => inBounds(item.geometry, bounds)),
+    );
+    const listRoadCameras = vi.fn(async (bounds) =>
+      [insideCamera, outsideCamera].filter((item) => inBounds(item.geometry, bounds)),
+    );
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listTrafficPulseCorridors").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "datex_weather",
+        label: "Vegvesen værstasjoner",
+        state: "ok",
+        lastCheckedAt: "2026-05-29T10:01:00.000Z",
+        detail: "2 stasjoner oppdatert",
+      },
+      {
+        source: "datex_cctv",
+        label: "Vegvesen webkamera",
+        state: "degraded",
+        detail: "Kamerastatus mangler",
+      },
+      { source: "nrk", label: "NRK", state: "ok", detail: "RSS" },
+    ] satisfies SourceHealth[]);
+    vi.spyOn(store, "listRoadWeatherObservations").mockImplementation(listRoadWeatherObservations);
+    vi.spyOn(store, "listRoadCameras").mockImplementation(listRoadCameras);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get("/api/map/traffic-events?north=63.5&south=63.3&east=10.5&west=10.2")
+      .expect(200);
+
+    expect(response.body.events).toEqual([]);
+    expect(response.body.weather).toEqual([insideWeather]);
+    expect(response.body.cameras).toEqual([insideCamera]);
+    expect(listRoadWeatherObservations).toHaveBeenCalledWith({
+      north: 63.5,
+      south: 63.3,
+      east: 10.5,
+      west: 10.2,
+    });
+    expect(listRoadCameras).toHaveBeenCalledWith({
+      north: 63.5,
+      south: 63.3,
+      east: 10.5,
+      west: 10.2,
+    });
+    expect(response.body.sources).toEqual([
+      {
+        source: "datex_weather",
+        label: "Vegvesen værstasjoner",
+        state: "ok",
+        lastCheckedAt: "2026-05-29T10:01:00.000Z",
+        detail: "2 stasjoner oppdatert",
+      },
+      {
+        source: "datex_cctv",
+        label: "Vegvesen webkamera",
+        state: "degraded",
+        detail: "Kamerastatus mangler",
+      },
+    ]);
+  });
+
+   it("supports planned roadwork timeline queries", async () => {
     const { app, store } = await testApp();
     vi.spyOn(store, "listOfficialEvents").mockResolvedValue([
       {
@@ -619,6 +733,56 @@ describe("private situation API", () => {
       "2026-05-30T00:00:00.000Z",
     ]);
     expect(events).toEqual([{ ...payload, state: "active" }]);
+  });
+
+  it("PgStore lists road weather and camera rows with bounds SQL filters", async () => {
+    const weatherPayload: RoadWeatherObservation = {
+      id: "datex-weather:SN123",
+      source: "datex_weather",
+      stationId: "SN123",
+      stationName: "E6 Sluppen værstasjon",
+      observedAt: "2026-05-29T10:00:00.000Z",
+      updatedAt: "2026-05-29T10:01:00.000Z",
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+      airTemperatureC: 5,
+    };
+    const cameraPayload: RoadCamera = {
+      id: "datex-cctv:CAM123",
+      source: "datex_cctv",
+      cameraId: "CAM123",
+      name: "E6 Sluppen kamera",
+      status: "ok",
+      updatedAt: "2026-05-29T10:01:00.000Z",
+      geometry: { type: "Point", coordinates: [10.38, 63.38] },
+    };
+    const captured: Array<{ sql: string; params: unknown[] | undefined }> = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push({ sql: normalizedSql, params });
+        if (normalizedSql.includes("FROM road_weather_observations")) {
+          return { rows: [{ payload: weatherPayload }] };
+        }
+        if (normalizedSql.includes("FROM road_cameras")) {
+          return { rows: [{ payload: cameraPayload }] };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+    const bounds = { north: 63.5, south: 63.3, east: 10.5, west: 10.2 };
+
+    await expect(store.listRoadWeatherObservations(bounds)).resolves.toEqual([weatherPayload]);
+    await expect(store.listRoadCameras(bounds)).resolves.toEqual([cameraPayload]);
+
+    expect(captured[0]?.sql).toContain("FROM road_weather_observations");
+    expect(captured[0]?.sql).toContain("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
+    expect(captured[0]?.sql).toContain("ORDER BY updated_at DESC, station_id ASC");
+    expect(captured[0]?.params).toEqual([10.2, 63.3, 10.5, 63.5]);
+    expect(captured[1]?.sql).toContain("FROM road_cameras");
+    expect(captured[1]?.sql).toContain("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
+    expect(captured[1]?.sql).toContain("ORDER BY updated_at DESC, camera_id ASC");
+    expect(captured[1]?.params).toEqual([10.2, 63.3, 10.5, 63.5]);
   });
 
   it("includes DATEX traffic pulse rows in PgStore operations status with stale overlay", async () => {

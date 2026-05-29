@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import type { OfficialEvent } from "@nytt/shared";
+import type { OfficialEvent, RoadCamera, RoadWeatherObservation } from "@nytt/shared";
 import {
   collectMunicipality,
   collectPolitiloggenPersonalUse,
@@ -22,9 +22,20 @@ import {
 } from "./clusters.js";
 import {
   collectDatexSituationEvents,
+  datexBasicAuthHeader,
   defaultDatexSituationEndpoint,
   normalizeDatexSituationEndpoint,
 } from "./datex.js";
+import {
+  defaultDatexWeatherMeasurementsEndpoint,
+  defaultDatexWeatherSitesEndpoint,
+  parseDatexRoadWeather,
+} from "./datexRoadWeather.js";
+import {
+  defaultDatexCctvSitesEndpoint,
+  defaultDatexCctvStatusEndpoint,
+  parseDatexCctv,
+} from "./datexCctv.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
@@ -131,6 +142,165 @@ export async function collectTrafficInfoForMap({
   }
 }
 
+type RoadContextRepository = Pick<
+  WorkerRepository,
+  "setHealth" | "upsertRoadWeatherObservations" | "upsertRoadCameras"
+>;
+
+type RoadWeatherParser = typeof parseDatexRoadWeather;
+type CctvParser = typeof parseDatexCctv;
+
+async function fetchDatexText(
+  endpoint: string,
+  username: string,
+  password: string,
+  fetcher: typeof fetch,
+): Promise<string> {
+  const response = await fetcher(endpoint, {
+    headers: {
+      "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+      Authorization: datexBasicAuthHeader(username, password),
+    },
+  });
+  if (!response.ok) throw new Error(`DATEX returned HTTP ${response.status} for ${endpoint}`);
+  return response.text();
+}
+
+function normalizedDatexCredentials(username?: string, password?: string) {
+  const normalizedUsername = username?.trim();
+  const normalizedPassword = password?.trim();
+  if (!normalizedUsername || !normalizedPassword) return undefined;
+  return { username: normalizedUsername, password: normalizedPassword };
+}
+
+export async function collectDatexRoadWeatherContext({
+  repository,
+  sitesEndpoint,
+  measurementsEndpoint,
+  username,
+  password,
+  nextPollAt,
+  now = () => new Date(),
+  fetcher = fetch,
+  parser = parseDatexRoadWeather,
+}: {
+  repository: RoadContextRepository;
+  sitesEndpoint: string;
+  measurementsEndpoint: string;
+  username?: string;
+  password?: string;
+  nextPollAt: string;
+  now?: () => Date;
+  fetcher?: typeof fetch;
+  parser?: RoadWeatherParser;
+}): Promise<void> {
+  const checkedAt = now().toISOString();
+  const credentials = normalizedDatexCredentials(username, password);
+  if (!credentials) {
+    await repository.setHealth({
+      source: "datex_weather",
+      label: "Vegvesen værstasjoner",
+      state: "awaiting_access",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "DATEX Basic Auth mangler for værstasjonsdata",
+    });
+    return;
+  }
+
+  try {
+    const [siteXml, measurementXml] = await Promise.all([
+      fetchDatexText(sitesEndpoint, credentials.username, credentials.password, fetcher),
+      fetchDatexText(measurementsEndpoint, credentials.username, credentials.password, fetcher),
+    ]);
+    const observations = parser(siteXml, measurementXml, { receivedAt: checkedAt });
+    await repository.upsertRoadWeatherObservations(observations);
+    await repository.setHealth({
+      source: "datex_weather",
+      label: "Vegvesen værstasjoner",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: `${observations.length} DATEX værstasjonsobservasjoner oppdatert`,
+    });
+  } catch (error) {
+    const failureAt = now().toISOString();
+    await repository.setHealth({
+      source: "datex_weather",
+      label: "Vegvesen værstasjoner",
+      state: "degraded",
+      lastCheckedAt: failureAt,
+      lastFailureAt: failureAt,
+      nextPollAt,
+      detail: `DATEX værstasjonsinnhenting feilet: ${String(error)}`,
+    });
+  }
+}
+
+export async function collectDatexCctvContext({
+  repository,
+  sitesEndpoint,
+  statusEndpoint,
+  username,
+  password,
+  nextPollAt,
+  now = () => new Date(),
+  fetcher = fetch,
+  parser = parseDatexCctv,
+}: {
+  repository: RoadContextRepository;
+  sitesEndpoint: string;
+  statusEndpoint: string;
+  username?: string;
+  password?: string;
+  nextPollAt: string;
+  now?: () => Date;
+  fetcher?: typeof fetch;
+  parser?: CctvParser;
+}): Promise<void> {
+  const checkedAt = now().toISOString();
+  const credentials = normalizedDatexCredentials(username, password);
+  if (!credentials) {
+    await repository.setHealth({
+      source: "datex_cctv",
+      label: "Vegvesen webkamera",
+      state: "awaiting_access",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "DATEX Basic Auth mangler for webkameradata",
+    });
+    return;
+  }
+
+  try {
+    const [siteXml, statusXml] = await Promise.all([
+      fetchDatexText(sitesEndpoint, credentials.username, credentials.password, fetcher),
+      fetchDatexText(statusEndpoint, credentials.username, credentials.password, fetcher),
+    ]);
+    const cameras = parser(siteXml, statusXml, { receivedAt: checkedAt });
+    await repository.upsertRoadCameras(cameras);
+    await repository.setHealth({
+      source: "datex_cctv",
+      label: "Vegvesen webkamera",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: `${cameras.length} DATEX webkamera oppdatert`,
+    });
+  } catch (error) {
+    const failureAt = now().toISOString();
+    await repository.setHealth({
+      source: "datex_cctv",
+      label: "Vegvesen webkamera",
+      state: "degraded",
+      lastCheckedAt: failureAt,
+      lastFailureAt: failureAt,
+      nextPollAt,
+      detail: `DATEX webkamerainnhenting feilet: ${String(error)}`,
+    });
+  }
+}
+
 async function collectAll({ repository, analyzer, once }: CollectionContext): Promise<void> {
   console.log(`[worker] collection started ${new Date().toISOString()}`);
   const nextPollAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -227,6 +397,15 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     defaultDatexTravelTimeLocationsEndpoint;
   const datexTravelTimeDataEndpoint =
     process.env.DATEX_TRAVEL_TIME_DATA_ENDPOINT?.trim() || defaultDatexTravelTimeDataEndpoint;
+  const datexWeatherSitesEndpoint =
+    process.env.DATEX_WEATHER_SITES_ENDPOINT?.trim() || defaultDatexWeatherSitesEndpoint;
+  const datexWeatherMeasurementsEndpoint =
+    process.env.DATEX_WEATHER_MEASUREMENTS_ENDPOINT?.trim() ||
+    defaultDatexWeatherMeasurementsEndpoint;
+  const datexCctvSitesEndpoint =
+    process.env.DATEX_CCTV_SITES_ENDPOINT?.trim() || defaultDatexCctvSitesEndpoint;
+  const datexCctvStatusEndpoint =
+    process.env.DATEX_CCTV_STATUS_ENDPOINT?.trim() || defaultDatexCctvStatusEndpoint;
   let freshDatexSnapshotEventIds: string[] | undefined;
   let pendingDatexLastModified: string | undefined;
 
@@ -309,6 +488,22 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       detail: "DATEX Basic Auth mangler for reisetidsdata",
     });
   }
+  await collectDatexRoadWeatherContext({
+    repository,
+    sitesEndpoint: datexWeatherSitesEndpoint,
+    measurementsEndpoint: datexWeatherMeasurementsEndpoint,
+    username: datexUsername,
+    password: datexPassword,
+    nextPollAt,
+  });
+  await collectDatexCctvContext({
+    repository,
+    sitesEndpoint: datexCctvSitesEndpoint,
+    statusEndpoint: datexCctvStatusEndpoint,
+    username: datexUsername,
+    password: datexPassword,
+    nextPollAt,
+  });
   await repository.upsertOfficialEvents(officialEvents);
   if (freshDatexSnapshotEventIds) {
     await repository.expireMissingOfficialEvents("datex", freshDatexSnapshotEventIds);

@@ -8,6 +8,8 @@ import type {
   MapFeature,
   OfficialEvent,
   OperationsStatus,
+  RoadCamera,
+  RoadWeatherObservation,
   Situation,
   SituationPage,
   SituationWorkspace,
@@ -65,6 +67,8 @@ export interface TrafficMapEventFilters {
   bounds?: { north: number; south: number; east: number; west: number };
 }
 
+export type Bounds = TrafficMapEventFilters["bounds"];
+
 export interface AttachmentRecord extends Attachment {
   storagePath: string;
 }
@@ -84,6 +88,8 @@ export interface Store {
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
+  listRoadWeatherObservations(bounds?: Bounds): Promise<RoadWeatherObservation[]>;
+  listRoadCameras(bounds?: Bounds): Promise<RoadCamera[]>;
   listTrafficPulseCorridors(limit?: number): Promise<TrafficPulseCorridor[]>;
   listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
   linkSourceItem(
@@ -423,6 +429,14 @@ export class MemoryStore implements Store {
   }
 
   async listTrafficMapEvents(): Promise<TrafficMapEvent[]> {
+    return [];
+  }
+
+  async listRoadWeatherObservations(): Promise<RoadWeatherObservation[]> {
+    return [];
+  }
+
+  async listRoadCameras(): Promise<RoadCamera[]> {
     return [];
   }
 
@@ -951,6 +965,42 @@ export class PgStore implements Store {
     );
 
     return result.rows.map((row) => ({ ...row.payload, state: row.state }));
+  }
+
+  async listRoadWeatherObservations(bounds?: Bounds): Promise<RoadWeatherObservation[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (bounds) {
+      params.push(bounds.west, bounds.south, bounds.east, bounds.north);
+      where.push("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
+    }
+
+    const result = await this.pool.query<{ payload: RoadWeatherObservation }>(
+      `SELECT payload
+       FROM road_weather_observations
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY updated_at DESC, station_id ASC`,
+      params,
+    );
+    return result.rows.map((row) => row.payload);
+  }
+
+  async listRoadCameras(bounds?: Bounds): Promise<RoadCamera[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (bounds) {
+      params.push(bounds.west, bounds.south, bounds.east, bounds.north);
+      where.push("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
+    }
+
+    const result = await this.pool.query<{ payload: RoadCamera }>(
+      `SELECT payload
+       FROM road_cameras
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY updated_at DESC, camera_id ASC`,
+      params,
+    );
+    return result.rows.map((row) => row.payload);
   }
 
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
