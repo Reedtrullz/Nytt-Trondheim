@@ -6,6 +6,7 @@ import type {
   BootstrapPayload,
   EvidenceItem,
   MapFeature,
+  OfficialEvent,
   OperationsStatus,
   Situation,
   SituationPage,
@@ -46,6 +47,13 @@ export interface SituationFilters {
   limit?: number;
 }
 
+export interface OfficialEventFilters {
+  source?: OfficialEvent["source"];
+  states?: OfficialEvent["state"][];
+  cursor?: string;
+  limit?: number;
+}
+
 export interface AttachmentRecord extends Attachment {
   storagePath: string;
 }
@@ -63,6 +71,7 @@ export interface Store {
   getBootstrap(login: string): Promise<BootstrapPayload>;
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
+  listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
   linkSourceItem(
     situationId: string,
@@ -394,6 +403,10 @@ export class MemoryStore implements Store {
       items: clone(page),
       nextCursor: items.length > limit && last ? encodeCursor(last.fetchedAt, last.id) : undefined,
     };
+  }
+
+  async listOfficialEvents(): Promise<OfficialEvent[]> {
+    return [];
   }
 
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
@@ -817,6 +830,52 @@ export class PgStore implements Store {
           ? encodeCursor(lastRow.fetched_at_cursor, lastRow.id)
           : undefined,
     };
+  }
+
+  async listOfficialEvents(filters: OfficialEventFilters): Promise<OfficialEvent[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.source) {
+      params.push(filters.source);
+      where.push(`source = $${params.length}`);
+    }
+    if (filters.states?.length) {
+      params.push(filters.states);
+      where.push(`state = ANY($${params.length}::text[])`);
+    }
+    if (filters.cursor) {
+      const cursor = decodeCursor(filters.cursor);
+      params.push(cursor.timestamp);
+      const timestampIndex = params.length;
+      if (cursor.id) {
+        params.push(cursor.id);
+        where.push(
+          `(published_at < $${timestampIndex} OR (published_at = $${timestampIndex} AND id < $${params.length}))`,
+        );
+      } else {
+        where.push(`published_at < $${timestampIndex}`);
+      }
+    }
+    const limitClause = filters.limit ? `LIMIT $${params.length + 1}` : "";
+    if (filters.limit) params.push(filters.limit);
+    const result = await this.pool.query<{
+      payload: OfficialEvent;
+      state: OfficialEvent["state"];
+      geometry: OfficialEvent["geometry"] | null;
+    }>(
+      `SELECT payload, state, ST_AsGeoJSON(geometry)::json AS geometry
+       FROM official_events
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY published_at DESC, id DESC
+       ${limitClause}`,
+      params,
+    );
+
+    return result.rows.map((row) => ({
+      ...row.payload,
+      state: row.state,
+      ...(row.geometry ? { geometry: row.geometry } : {}),
+    }));
   }
 
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {

@@ -1487,6 +1487,252 @@ button {
   opacity: 0;
 }
 
+/* Traffic intelligence map */
+.traffic-map-page {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  min-height: calc(100vh - 84px);
+}
+
+.traffic-map-sidebar {
+  min-width: 0;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.traffic-map-heading h1 {
+  margin: 4px 0 8px;
+  font: 46px/1.04 var(--serif);
+  letter-spacing: -0.025em;
+}
+
+.traffic-map-heading p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.traffic-map {
+  min-height: calc(100vh - 84px);
+  height: 100%;
+  width: 100%;
+  background: #eef0eb;
+}
+
+.traffic-filter-panel,
+.traffic-brief-card,
+.corridor-impact-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.traffic-filter-panel h2,
+.traffic-brief-card h2,
+.corridor-impact-card h2 {
+  margin: 0;
+  font: 28px/1.1 var(--serif);
+}
+
+.traffic-filter-panel h3,
+.corridor-impact-card h3 {
+  margin: 16px 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.traffic-filter-panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: #39434b;
+  font-size: 13px;
+}
+
+.traffic-preset-list,
+.corridor-impact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.traffic-preset-list button,
+.corridor-impact-list button,
+.corridor-impact-card header button {
+  padding: 9px 10px;
+  text-align: left;
+  color: #263238;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+}
+
+.traffic-preset-list button.selected,
+.corridor-impact-list button.selected {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: #eef5ff;
+}
+
+.traffic-preset-list small,
+.corridor-impact-list small,
+.corridor-impact-hint,
+.corridor-impact-events p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.corridor-impact-list button span {
+  display: block;
+  font-weight: 700;
+}
+
+.corridor-impact-list button small {
+  display: block;
+  margin-top: 3px;
+}
+
+.corridor-impact-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.corridor-impact-events ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.corridor-impact-events li {
+  margin: 8px 0;
+  color: #39434b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.traffic-brief-card {
+  border-left: 5px solid var(--green);
+}
+
+.traffic-brief-card.severity-medium {
+  border-left-color: var(--amber);
+}
+
+.traffic-brief-card.severity-high,
+.traffic-brief-card.severity-critical {
+  border-left-color: var(--terracotta);
+}
+
+.traffic-brief-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.traffic-brief-card button {
+  padding: 8px 10px;
+  color: var(--blue);
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+}
+
+.traffic-brief-card button:disabled {
+  color: var(--muted);
+  cursor: wait;
+}
+
+.traffic-brief-card p,
+.traffic-brief-card li,
+.traffic-popup p {
+  color: #39434b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.traffic-brief-card ul {
+  margin: 12px 0;
+  padding-left: 19px;
+}
+
+.traffic-brief-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.traffic-popup {
+  max-width: 280px;
+}
+
+.traffic-popup strong {
+  display: inline-block;
+  margin-bottom: 3px;
+}
+
+.traffic-popup a {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.traffic-popup-related {
+  margin: 10px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.traffic-popup-related ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.traffic-popup-related li {
+  margin: 5px 0;
+}
+
+.traffic-popup-related small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.traffic-event-low {
+  stroke: var(--green);
+  fill: var(--green);
+}
+
+.traffic-event-medium {
+  stroke: var(--amber);
+  fill: var(--amber);
+}
+
+.traffic-event-high,
+.traffic-event-critical {
+  stroke: var(--terracotta);
+  fill: var(--terracotta);
+}
+
+.traffic-event-planned {
+  stroke-dasharray: 6 5;
+}
+
+.traffic-event-highlighted {
+  stroke: var(--blue);
+  filter: drop-shadow(0 0 4px rgba(18, 78, 136, 0.65));
+}
+
 @media (max-width: 1080px) {
   .masthead {
     gap: 22px;
@@ -1507,7 +1753,8 @@ button {
 
   .home-grid,
   .situation-layout,
-  .operations-detail {
+  .operations-detail,
+  .traffic-map-page {
     grid-template-columns: 1fr;
   }
 
@@ -1642,6 +1889,16 @@ button {
 
   .incident-map {
     height: 390px;
+  }
+
+  .traffic-map-sidebar {
+    order: 2;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .traffic-map {
+    min-height: 520px;
   }
 
   .drawing-tools input,

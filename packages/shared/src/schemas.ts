@@ -97,6 +97,94 @@ export const sourceItemLinkInputSchema = z.object({
   relationship: sourceItemRelationshipSchema.default("supports"),
 });
 
+export const trafficEventCategorySchema = z.enum([
+  "roadworks",
+  "accident",
+  "closure",
+  "congestion",
+  "weather",
+  "restriction",
+  "obstruction",
+  "other",
+]);
+
+export const trafficEventSeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+export const trafficEventStateSchema = z.enum(["planned", "active", "expired", "cancelled"]);
+
+function csvListSchema<T extends z.ZodTypeAny>(itemSchema: T) {
+  return z.preprocess((value) => {
+    if (value === undefined) return undefined;
+    const values = Array.isArray(value) ? value : [value];
+    return values
+      .flatMap((entry) => (typeof entry === "string" ? entry.split(",") : []))
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }, z.array(itemSchema).optional());
+}
+
+const coordinateParamSchema = z.preprocess(
+  (value) => (value === "" ? Number.NaN : value),
+  z.coerce.number().finite().optional(),
+);
+
+export const trafficMapQuerySchema = z
+  .object({
+    categories: csvListSchema(trafficEventCategorySchema),
+    severities: csvListSchema(trafficEventSeveritySchema),
+    states: csvListSchema(trafficEventStateSchema),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    north: coordinateParamSchema,
+    south: coordinateParamSchema,
+    east: coordinateParamSchema,
+    west: coordinateParamSchema,
+  })
+  .superRefine((value, context) => {
+    const bounds = [value.north, value.south, value.east, value.west];
+    const providedBounds = bounds.filter((entry) => entry !== undefined).length;
+    if (providedBounds > 0 && providedBounds < bounds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Kartutsnitt krever north, south, east og west.",
+        path: ["bounds"],
+      });
+      return;
+    }
+    if (providedBounds === 0) return;
+    if (
+      value.north! < -90 ||
+      value.north! > 90 ||
+      value.south! < -90 ||
+      value.south! > 90 ||
+      value.east! < -180 ||
+      value.east! > 180 ||
+      value.west! < -180 ||
+      value.west! > 180
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Kartutsnitt er utenfor gyldige koordinater.",
+        path: ["bounds"],
+      });
+    }
+    if (value.north! < value.south!) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "north må være større enn eller lik south.",
+        path: ["north"],
+      });
+    }
+    if (value.east! < value.west!) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "east må være større enn eller lik west.",
+        path: ["east"],
+      });
+    }
+  });
+
+export type TrafficMapQueryInput = z.infer<typeof trafficMapQuerySchema>;
+
 export const situationQuerySchema = z.object({
   status: z.enum(["preliminary", "active", "resolved", "dismissed"]).optional(),
   saved: z

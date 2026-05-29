@@ -17,12 +17,24 @@ import {
   sourceItemQuerySchema,
   situationQuerySchema,
   taskInputSchema,
+  trafficMapQuerySchema,
   type MapFeature,
+  type SourceItem,
+  type TrafficEventState,
+  type TrafficMapEvent,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
 import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from "./auth.js";
 import { buildWorkspaceExport, safeFilename } from "./export.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
+import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
+import {
+  officialEventToTrafficMapEvent,
+  sourceItemToTrafficMapEvent,
+} from "./traffic/datex-normalizer.js";
+import { geometryIntersectsBounds } from "./traffic/geo.js";
+import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
+import { buildTrafficBrief } from "./traffic/traffic-brief.js";
 
 const EXPORT_ATTACHMENT_COUNT_LIMIT = 25;
 const EXPORT_ATTACHMENT_BYTE_LIMIT = 50 * 1024 * 1024;
@@ -104,6 +116,68 @@ function errorStatus(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
+function eventIntersectsTimeRange(
+  event: TrafficMapEvent,
+  from?: string,
+  to?: string,
+): boolean {
+  const fromMs = from ? Date.parse(from) : Number.NaN;
+  const toMs = to ? Date.parse(to) : Number.NaN;
+  const startMs = Date.parse(event.validFrom ?? event.updatedAt);
+  const endMs = Date.parse(event.validTo ?? event.validFrom ?? event.updatedAt);
+
+  if (Number.isFinite(fromMs) && Number.isFinite(endMs) && endMs < fromMs) return false;
+  if (Number.isFinite(toMs) && Number.isFinite(startMs) && startMs > toMs) return false;
+  return true;
+}
+
+function filterTrafficMapEvents(
+  events: TrafficMapEvent[],
+  query: ReturnType<typeof trafficMapQuerySchema.parse>,
+): TrafficMapEvent[] {
+  const states = query.states === undefined ? ["active", "planned"] : query.states;
+  return events.filter((event) => {
+    if (query.categories !== undefined && !query.categories.includes(event.category)) return false;
+    if (query.severities !== undefined && !query.severities.includes(event.severity)) return false;
+    if (!(states as TrafficEventState[]).includes(event.state)) return false;
+    if (!eventIntersectsTimeRange(event, query.from, query.to)) return false;
+    if (
+      typeof query.north === "number" &&
+      typeof query.south === "number" &&
+      typeof query.east === "number" &&
+      typeof query.west === "number" &&
+      !geometryIntersectsBounds(event.geometry, {
+        north: query.north,
+        south: query.south,
+        east: query.east,
+        west: query.west,
+      })
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+async function listAllDatexSourceItems(store: Store, login: string): Promise<SourceItem[]> {
+  const items: SourceItem[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await store.listSourceItems({ provider: "datex", limit: 500, cursor }, login);
+    items.push(...page.items);
+    if (!page.nextCursor) break;
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("Ugyldig DATEX sidepeker fra lageret.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+
+  return items;
+}
+
 export interface AppRuntime {
   app: express.Express;
   store: Store;
@@ -179,6 +253,42 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = sourceItemQuerySchema.parse(req.query);
       res.json(await store.listSourceItems(query, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/map/traffic-events", async (req, res, next) => {
+    try {
+      const query = trafficMapQuerySchema.parse(req.query);
+      const login = currentLogin(req);
+      const [officialEvents, sourceItems, articlesPage] = await Promise.all([
+        store.listOfficialEvents({ source: "datex" }, login),
+        listAllDatexSourceItems(store, login),
+        store.listArticles({ limit: 500 }, login),
+      ]);
+      const eventsBySourceId = new Map<string, TrafficMapEvent>();
+
+      for (const event of officialEvents) {
+        const trafficEvent = officialEventToTrafficMapEvent(event);
+        if (trafficEvent) eventsBySourceId.set(trafficEvent.sourceEventId, trafficEvent);
+      }
+      for (const item of sourceItems) {
+        const trafficEvent = sourceItemToTrafficMapEvent(item);
+        if (trafficEvent && !eventsBySourceId.has(trafficEvent.sourceEventId)) {
+          eventsBySourceId.set(trafficEvent.sourceEventId, trafficEvent);
+        }
+      }
+
+      const events = filterTrafficMapEvents([...eventsBySourceId.values()], query).map((event) => {
+        const relatedArticles = relatedTrafficArticlesForEvent(event, articlesPage.items);
+        return relatedArticles.length > 0 ? { ...event, relatedArticles } : event;
+      });
+      res.json({
+        events,
+        brief: buildTrafficBrief(events),
+        corridorImpacts: buildCorridorImpacts(events),
+      });
     } catch (error) {
       next(error);
     }

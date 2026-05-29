@@ -8,6 +8,7 @@ import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { PgStore } from "../src/store.js";
+import type { Article, OfficialEvent } from "@nytt/shared";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
@@ -130,6 +131,215 @@ describe("private situation API", () => {
       .get(created.headers.location as string)
       .expect("Content-Type", /zip/)
       .expect(200);
+  });
+
+  it("returns normalized and filtered DATEX traffic map events", async () => {
+    const { app, store } = await testApp();
+    const datexEvents: OfficialEvent[] = [
+      {
+        id: "datex-roadwork-e6",
+        source: "datex",
+        eventType: "traffic",
+        title: "Veiarbeid på E6 ved Tiller",
+        detail: "Ett felt er stengt i forbindelse med veiarbeid.",
+        sourceUrl: "https://example.test/datex/e6",
+        areaLabel: "E6 Tiller",
+        state: "active",
+        severity: "medium",
+        publishedAt: "2026-05-28T10:00:00.000Z",
+        validFrom: "2026-05-28T09:00:00.000Z",
+        validTo: "2099-01-01T00:00:00.000Z",
+        geometry: { type: "Point", coordinates: [10.39, 63.39] },
+        raw: { datex: { recordKind: "MaintenanceWorks", roadName: "E6" } },
+      },
+      {
+        id: "datex-accident-outside-bounds",
+        source: "datex",
+        eventType: "traffic",
+        title: "Ulykke på E6",
+        detail: "Utenfor valgt kartutsnitt.",
+        sourceUrl: "https://example.test/datex/outside",
+        areaLabel: "E6 Oppdal",
+        state: "active",
+        severity: "high",
+        publishedAt: "2026-05-28T10:05:00.000Z",
+        validFrom: "2026-05-28T10:00:00.000Z",
+        validTo: "2099-01-01T00:00:00.000Z",
+        geometry: { type: "Point", coordinates: [9.69, 62.59] },
+        raw: { datex: { recordKind: "Accident", roadName: "E6" } },
+      },
+    ];
+    const relatedArticles: Article[] = [
+      {
+        id: "article-near-e6",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Kø ved Tiller etter veiarbeid",
+        excerpt: "Trafikken går sakte ved Tiller.",
+        url: "https://example.test/articles/e6",
+        publishedAt: "2026-05-28T10:10:00.000Z",
+        scope: "trondheim",
+        category: "Transport",
+        places: ["Tiller"],
+        location: { lat: 63.3902, lng: 10.3902, label: "Tiller" },
+      },
+      {
+        id: "article-far-away",
+        source: "nrk",
+        sourceLabel: "NRK",
+        title: "Annen trafikknyhet",
+        excerpt: "Ikke i nærheten av hendelsen.",
+        url: "https://example.test/articles/far",
+        publishedAt: "2026-05-28T10:20:00.000Z",
+        scope: "trondheim",
+        category: "Transport",
+        places: ["Ranheim"],
+        location: { lat: 63.43, lng: 10.55, label: "Ranheim" },
+      },
+    ];
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue(datexEvents);
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: relatedArticles });
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get(
+        "/api/map/traffic-events?categories=roadworks&severities=medium&north=63.5&south=63.3&east=10.5&west=10.2",
+      )
+      .expect(200);
+
+    expect(response.body.events).toHaveLength(1);
+    expect(response.body.events[0]).toMatchObject({
+      id: "datex:datex-roadwork-e6",
+      category: "roadworks",
+      severity: "medium",
+      state: "active",
+      roadName: "E6",
+      relatedArticles: [
+        {
+          id: "article-near-e6",
+          title: "Kø ved Tiller etter veiarbeid",
+          url: "https://example.test/articles/e6",
+        },
+      ],
+    });
+    expect(response.body.events[0].relatedArticles[0].distanceMeters).toBeLessThan(100);
+    expect(response.body.brief).toMatchObject({
+      headline: "1 trafikkhendelser rundt Trondheim akkurat nå.",
+      freshness: expect.any(String),
+      counts: {
+        total: 1,
+        byCategory: { roadworks: 1 },
+        bySeverity: { medium: 1 },
+      },
+    });
+    expect(response.body.corridorImpacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "e6-south",
+          eventCount: 1,
+          affectedEventIds: ["datex:datex-roadwork-e6"],
+          highestSeverity: "medium",
+        }),
+      ]),
+    );
+
+    const emptyCategoryResponse = await agent
+      .get("/api/map/traffic-events?categories=&north=63.5&south=63.3&east=10.5&west=10.2")
+      .expect(200);
+    expect(emptyCategoryResponse.body.events).toEqual([]);
+    expect(emptyCategoryResponse.body.brief.counts.total).toBe(0);
+
+    await agent.get("/api/map/traffic-events?states=not-a-state").expect(400);
+  });
+
+  it("supports planned roadwork timeline queries", async () => {
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([
+      {
+        id: "datex-planned-roadwork",
+        source: "datex",
+        eventType: "traffic",
+        title: "Planlagt veiarbeid på Omkjøringsveien",
+        detail: "Nattarbeid med redusert framkommelighet.",
+        sourceUrl: "https://example.test/datex/planned",
+        areaLabel: "Omkjøringsveien",
+        state: "active",
+        severity: "medium",
+        publishedAt: "2026-05-28T11:00:00.000Z",
+        validFrom: "2099-01-02T18:00:00.000Z",
+        validTo: "2099-01-03T05:00:00.000Z",
+        geometry: { type: "LineString", coordinates: [[10.33, 63.395], [10.435, 63.405]] },
+        raw: { datex: { recordKind: "MaintenanceWorks", roadName: "Omkjøringsveien" } },
+      },
+      {
+        id: "datex-active-accident",
+        source: "datex",
+        eventType: "traffic",
+        title: "Ulykke på E6",
+        detail: "Aktiv hendelse skal ikke vises i planlagt-modus.",
+        sourceUrl: "https://example.test/datex/active",
+        areaLabel: "E6",
+        state: "active",
+        severity: "high",
+        publishedAt: "2026-05-28T12:00:00.000Z",
+        validFrom: "2026-05-28T12:00:00.000Z",
+        validTo: "2099-01-03T05:00:00.000Z",
+        geometry: { type: "Point", coordinates: [10.39, 63.39] },
+        raw: { datex: { recordKind: "Accident", roadName: "E6" } },
+      },
+    ]);
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listArticles").mockResolvedValue({
+      items: [
+        {
+          id: "article-near-planned-line",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Nattarbeid på Omkjøringsveien",
+          excerpt: "Arbeidet skjer langs traseen.",
+          url: "https://example.test/articles/omkjoringsveien",
+          publishedAt: "2026-05-28T12:30:00.000Z",
+          scope: "trondheim",
+          category: "Transport",
+          places: ["Omkjøringsveien"],
+          location: { lat: 63.4001, lng: 10.382, label: "Omkjøringsveien" },
+        },
+      ],
+    });
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get(
+        "/api/map/traffic-events?states=planned&categories=roadworks&from=2099-01-01T00%3A00%3A00.000Z&to=2099-01-04T00%3A00%3A00.000Z",
+      )
+      .expect(200);
+
+    expect(response.body.events).toHaveLength(1);
+    expect(response.body.events[0]).toMatchObject({
+      id: "datex:datex-planned-roadwork",
+      state: "planned",
+      category: "roadworks",
+      roadName: "Omkjøringsveien",
+      relatedArticles: [
+        {
+          id: "article-near-planned-line",
+          title: "Nattarbeid på Omkjøringsveien",
+        },
+      ],
+    });
+    expect(response.body.events[0].relatedArticles[0].distanceMeters).toBeLessThan(300);
+    expect(response.body.corridorImpacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "omkjoringsveien",
+          eventCount: 1,
+          affectedEventIds: ["datex:datex-planned-roadwork"],
+        }),
+      ]),
+    );
   });
 
   it("uses opaque cursor pagination without repeating feed items", async () => {
