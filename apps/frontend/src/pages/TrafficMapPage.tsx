@@ -4,6 +4,7 @@ import type { TrafficEventCategory, TrafficEventSeverity, TrafficEventState } fr
 import { CorridorImpactCard } from "../components/map/CorridorImpactCard.js";
 import { MapBoundsWatcher } from "../components/map/MapBoundsWatcher.js";
 import { TrafficBriefCard } from "../components/map/TrafficBriefCard.js";
+import { TrafficEventList } from "../components/map/TrafficEventList.js";
 import { TrafficFilterPanel, type TrafficMapPreset } from "../components/map/TrafficFilterPanel.js";
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
@@ -75,6 +76,7 @@ export function TrafficMapPage() {
   const [selectedSeverities, setSelectedSeverities] =
     useState<TrafficEventSeverity[]>(allSeverities);
   const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>();
+  const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
 
   const stableBounds = useMemo(
     () => bounds,
@@ -90,12 +92,16 @@ export function TrafficMapPage() {
   });
 
   const highlightedEventIds = useMemo(() => {
-    if (!selectedCorridorId) return [];
-    return (
-      data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)?.affectedEventIds ??
-      []
-    );
-  }, [data?.corridorImpacts, selectedCorridorId]);
+    const highlightedIds = new Set<string>();
+    if (selectedEventId) highlightedIds.add(selectedEventId);
+    if (selectedCorridorId) {
+      const affectedEventIds =
+        data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)?.affectedEventIds ??
+        [];
+      affectedEventIds.forEach((eventId) => highlightedIds.add(eventId));
+    }
+    return Array.from(highlightedIds);
+  }, [data?.corridorImpacts, selectedCorridorId, selectedEventId]);
 
   const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
     setBounds(nextBounds);
@@ -105,6 +111,7 @@ export function TrafficMapPage() {
     setSelectedPreset(preset);
     setTimeWindow(timeWindowForPreset(preset));
     setSelectedCorridorId(undefined);
+    setSelectedEventId(undefined);
     if (preset === "planned") {
       setSelectedCategories(["roadworks"]);
       setSelectedSeverities(allSeverities);
@@ -122,12 +129,14 @@ export function TrafficMapPage() {
   const handleCategoriesChange = useCallback((categories: TrafficEventCategory[]) => {
     setSelectedPreset("custom");
     setSelectedCorridorId(undefined);
+    setSelectedEventId(undefined);
     setSelectedCategories(categories);
   }, []);
 
   const handleSeveritiesChange = useCallback((severities: TrafficEventSeverity[]) => {
     setSelectedPreset("custom");
     setSelectedCorridorId(undefined);
+    setSelectedEventId(undefined);
     setSelectedSeverities(severities);
   }, []);
 
@@ -162,6 +171,13 @@ export function TrafficMapPage() {
             </p>
           </section>
         )}
+        {data?.events ? (
+          <TrafficEventList
+            events={data.events}
+            selectedEventId={selectedEventId}
+            onSelectEvent={setSelectedEventId}
+          />
+        ) : null}
         {data?.corridorImpacts ? (
           <CorridorImpactCard
             impacts={data.corridorImpacts}

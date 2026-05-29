@@ -1527,6 +1527,7 @@ button {
 
 .traffic-filter-panel,
 .traffic-brief-card,
+.traffic-event-list-card,
 .corridor-impact-card {
   padding: 18px;
   border: 1px solid var(--line);
@@ -1535,6 +1536,7 @@ button {
 
 .traffic-filter-panel h2,
 .traffic-brief-card h2,
+.traffic-event-list-card h2,
 .corridor-impact-card h2 {
   margin: 0;
   font: 28px/1.1 var(--serif);
@@ -1559,6 +1561,7 @@ button {
 }
 
 .traffic-preset-list,
+.traffic-event-list,
 .corridor-impact-list {
   display: flex;
   flex-direction: column;
@@ -1566,6 +1569,7 @@ button {
 }
 
 .traffic-preset-list button,
+.traffic-event-list button,
 .corridor-impact-list button,
 .corridor-impact-card header button {
   padding: 9px 10px;
@@ -1577,6 +1581,8 @@ button {
 }
 
 .traffic-preset-list button.selected,
+.traffic-event-list button.selected,
+.traffic-event-list button:hover,
 .corridor-impact-list button.selected {
   color: var(--blue);
   border-color: var(--blue);
@@ -1584,11 +1590,67 @@ button {
 }
 
 .traffic-preset-list small,
+.traffic-event-list small,
 .corridor-impact-list small,
 .corridor-impact-hint,
 .corridor-impact-events p {
   color: var(--muted);
   font-size: 12px;
+}
+
+.traffic-event-list-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.traffic-event-list-card header span {
+  min-width: 30px;
+  padding: 4px 8px;
+  color: var(--blue);
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.traffic-event-list-card p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.traffic-event-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.traffic-event-list button {
+  width: 100%;
+}
+
+.traffic-event-list button strong,
+.traffic-event-list button span,
+.traffic-event-list button small {
+  display: block;
+}
+
+.traffic-event-list button strong {
+  margin-bottom: 4px;
+}
+
+.traffic-event-list button span {
+  color: #39434b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.traffic-event-list button small {
+  margin-top: 4px;
 }
 
 .corridor-impact-list button span {
