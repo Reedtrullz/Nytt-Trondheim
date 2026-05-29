@@ -39,6 +39,36 @@ function shouldPromoteDatex(event: OfficialEvent): boolean {
   );
 }
 
+function datexSituationKey(event: OfficialEvent): string {
+  const situationId = rawDatex(event).situationId;
+  return typeof situationId === "string" && situationId.trim().length > 0
+    ? situationId.trim()
+    : event.id;
+}
+
+function datexRecordPriority(event: OfficialEvent): number {
+  const kind = String(rawDatex(event).recordKind ?? "").toLowerCase();
+  if (kind.includes("accident") || kind.includes("obstruction")) return 0;
+  if (event.title.toLocaleLowerCase("nb").includes("stengt")) return 1;
+  if (kind.includes("rerouting")) return 3;
+  if (kind.includes("management")) return 4;
+  return 2;
+}
+
+function orderedDatexGroup(events: OfficialEvent[]): OfficialEvent[] {
+  return [...events].sort((left, right) => {
+    const priority = datexRecordPriority(left) - datexRecordPriority(right);
+    if (priority !== 0) return priority;
+    const published = right.publishedAt.localeCompare(left.publishedAt);
+    if (published !== 0) return published;
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function uniqueTexts(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
 export function officialTrafficSituationsFromEvents(
   events: OfficialEvent[],
   existingSituations: Situation[] = [],
@@ -48,89 +78,106 @@ export function officialTrafficSituationsFromEvents(
       .filter((situation) => situation.officialSource === "datex" && situation.officialEventId)
       .map((situation) => [situation.officialEventId, situation]),
   );
+  const existingByIncidentSignature = new Map(
+    existingSituations
+      .filter((situation) => situation.officialSource === "datex" && situation.incidentSignature)
+      .map((situation) => [situation.incidentSignature, situation]),
+  );
+  const grouped = new Map<string, OfficialEvent[]>();
+  for (const event of events.filter(shouldPromoteDatex)) {
+    const key = datexSituationKey(event);
+    grouped.set(key, [...(grouped.get(key) ?? []), event]);
+  }
 
-  return events.filter(shouldPromoteDatex).map((event) => {
-    const existing = existingByOfficialEventId.get(event.id);
+  return [...grouped.entries()].map(([datexKey, group]) => {
+    const ordered = orderedDatexGroup(group);
+    const primary = ordered[0]!;
+    const incidentSignature = `datex:${datexKey}`;
+    const existing =
+      existingByIncidentSignature.get(incidentSignature) ??
+      ordered.map((event) => existingByOfficialEventId.get(event.id)).find(Boolean);
     const id =
-      existing?.id ?? `datex-${createHash("sha1").update(event.id).digest("hex").slice(0, 12)}`;
-    const datex = rawDatex(event);
+      existing?.id ?? `datex-${createHash("sha1").update(datexKey).digest("hex").slice(0, 12)}`;
     const sourceLabel = "Statens vegvesen DATEX";
-    const evidence: EvidenceItem[] = [
-      {
-        id: createHash("sha1")
-          .update(`${id}:datex-evidence:${event.id}`)
-          .digest("hex")
-          .slice(0, 18),
-        situationId: id,
-        source: "datex",
-        sourceLabel,
-        sourceUrl: event.sourceUrl,
-        supportingSnippet: event.detail,
-        claim: event.title,
-        claimType: "official_traffic_status",
-        provenance: "official",
-        confidence: 1,
-        extractedAt: new Date().toISOString(),
-        publishedAt: event.publishedAt,
-      },
-    ];
-    const features: MapFeature[] = event.geometry
-      ? [
-          {
-            id: createHash("sha1")
-              .update(`${id}:datex-feature:${event.id}`)
-              .digest("hex")
-              .slice(0, 18),
-            type: "Feature",
-            geometry: event.geometry,
-            properties: {
-              label: event.title,
-              provenance: "official",
-              sourceLabel,
-              sourceUrl: event.sourceUrl,
-              updatedAt: event.publishedAt,
-              layer: "traffic",
+    const extractedAt = new Date().toISOString();
+    const latestPublishedAt = ordered
+      .map((event) => event.publishedAt)
+      .sort((left, right) => right.localeCompare(left))[0]!;
+    const earliestValidFrom = ordered
+      .map((event) => event.validFrom)
+      .sort((left, right) => left.localeCompare(right))[0]!;
+    const evidence: EvidenceItem[] = ordered.map((event) => ({
+      id: createHash("sha1").update(`${id}:datex-evidence:${event.id}`).digest("hex").slice(0, 18),
+      situationId: id,
+      source: "datex",
+      sourceLabel,
+      sourceUrl: event.sourceUrl,
+      supportingSnippet: event.detail,
+      claim: event.title,
+      claimType: "official_traffic_status",
+      provenance: "official",
+      confidence: 1,
+      extractedAt,
+      publishedAt: event.publishedAt,
+    }));
+    const features: MapFeature[] = ordered.flatMap((event) =>
+      event.geometry
+        ? [
+            {
+              id: createHash("sha1")
+                .update(`${id}:datex-feature:${event.id}`)
+                .digest("hex")
+                .slice(0, 18),
+              type: "Feature" as const,
+              geometry: event.geometry,
+              properties: {
+                label: event.title,
+                provenance: "official" as const,
+                sourceLabel,
+                sourceUrl: event.sourceUrl,
+                updatedAt: event.publishedAt,
+                layer: "traffic",
+              },
             },
-          },
-        ]
-      : [];
+          ]
+        : [],
+    );
+    const timeline = ordered.map((event) => ({
+      id: `timeline-${event.id}`,
+      situationId: id,
+      timestamp: event.publishedAt,
+      title: event.title,
+      detail: event.detail,
+      sourceLabel,
+      sourceUrl: event.sourceUrl,
+      official: true,
+    }));
 
     return {
       id,
       type: "traffic",
-      title: event.title,
-      summary: event.detail,
+      title: primary.title,
+      summary: uniqueTexts(ordered.map((event) => event.detail)).join("\n"),
       status: "active",
       verificationStatus: "Offentlig bekreftet",
-      importance: datex.impact === "high" ? "high" : "normal",
-      updatedAt: event.publishedAt,
-      createdAt: existing?.createdAt ?? event.validFrom,
-      locationLabel: event.areaLabel,
-      incidentSignature: `datex:${event.id}`,
-      detectionVersion: "datex-1",
+      importance: ordered.some((event) => rawDatex(event).impact === "high") ? "high" : "normal",
+      updatedAt: latestPublishedAt,
+      createdAt: existing?.createdAt ?? earliestValidFrom,
+      locationLabel: primary.areaLabel,
+      incidentSignature,
+      detectionVersion: "datex-situation-2",
       officialSource: "datex",
-      officialEventId: event.id,
+      officialEventId: primary.id,
       activationBasis: existing?.activationBasis ?? {
         rule: "official_source",
         sourceIds: ["datex"],
         articleIds: [],
-        activatedAt: event.publishedAt,
+        activatedAt: latestPublishedAt,
       },
       relatedArticleIds: existing?.relatedArticleIds ?? [],
       evidence,
       features,
-      timeline: [
-        {
-          id: `timeline-${event.id}`,
-          situationId: id,
-          timestamp: event.publishedAt,
-          title: event.title,
-          detail: event.detail,
-          sourceLabel,
-          sourceUrl: event.sourceUrl,
-          official: true,
-        },
-      ],
+      timeline,
     } satisfies Situation;
   });
 }
@@ -166,6 +213,49 @@ export function resolvedOfficialTrafficSituationsForMissingDatex(
             timestamp: resolvedAt,
             title: "DATEX-hendelsen er ikke lenger aktiv",
             detail: "Statens vegvesen DATEX-snapshot inneholder ikke lenger denne hendelsen.",
+            sourceLabel,
+            sourceUrl,
+            official: true,
+          },
+        ],
+      } satisfies Situation;
+    });
+}
+
+export function resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
+  existingSituations: Situation[],
+  activeDatexEventIds: Set<string>,
+  activeSituationIds: Set<string>,
+  resolvedAt: string,
+): Situation[] {
+  const sourceLabel = "Statens vegvesen DATEX";
+  return existingSituations
+    .filter(
+      (situation) =>
+        situation.status === "active" &&
+        situation.officialSource === "datex" &&
+        situation.officialEventId &&
+        activeDatexEventIds.has(situation.officialEventId) &&
+        !activeSituationIds.has(situation.id),
+    )
+    .map((situation) => {
+      const sourceUrl =
+        situation.evidence.find(
+          (evidence) => evidence.source === "datex" && evidence.provenance === "official",
+        )?.sourceUrl ?? "";
+      return {
+        ...situation,
+        status: "resolved",
+        updatedAt: resolvedAt,
+        timeline: [
+          ...situation.timeline,
+          {
+            id: `timeline-datex-merged-${situation.officialEventId}`,
+            situationId: situation.id,
+            timestamp: resolvedAt,
+            title: "DATEX-delhendelse er samlet i en hovedsituasjon",
+            detail:
+              "Denne DATEX-posten er en delpost i samme Vegvesen-hendelse og vises samlet i én aktiv situasjon.",
             sourceLabel,
             sourceUrl,
             official: true,

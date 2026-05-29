@@ -18,6 +18,7 @@ import {
 import {
   detectPreliminarySituations,
   officialTrafficSituationsFromEvents,
+  resolvedDuplicateOfficialTrafficSituationsForMergedDatex,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "./clusters.js";
 import {
@@ -620,18 +621,29 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     currentDatexEvents,
     trackedSituations,
   );
+  const activeDatexEventIds = new Set(currentDatexEvents.map((event) => event.id));
+  const activeDatexSituationIds = new Set(
+    officialTrafficSituations.map((situation) => situation.id),
+  );
+  const resolvedDuplicateDatexSituations = resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
+    trackedSituations,
+    activeDatexEventIds,
+    activeDatexSituationIds,
+    new Date().toISOString(),
+  );
   const resolvedDatexSituations = shouldResolveMissingDatexSituations(
     freshDatexSnapshotEventIds !== undefined,
   )
     ? resolvedOfficialTrafficSituationsForMissingDatex(
         trackedSituations,
-        new Set(currentDatexEvents.map((event) => event.id)),
+        activeDatexEventIds,
         new Date().toISOString(),
       )
     : [];
   const situationsToPersist = [
     ...deterministicSituations,
     ...officialTrafficSituations,
+    ...resolvedDuplicateDatexSituations,
     ...resolvedDatexSituations,
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));

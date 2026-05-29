@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { Article, OfficialEvent } from "@nytt/shared";
+import type { Article, OfficialEvent, Situation } from "@nytt/shared";
 import {
   detectPreliminarySituations,
   officialTrafficSituationsFromEvents,
+  resolvedDuplicateOfficialTrafficSituationsForMergedDatex,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "../src/clusters.js";
 
@@ -49,6 +50,147 @@ describe("official traffic situation promotion", () => {
     });
   });
 
+  it("deduplicates multiple DATEX records from the same upstream situation", () => {
+    const obstruction: OfficialEvent = {
+      ...datexEvent,
+      id: "datex-landslide-obstruction",
+      title: "Jordskred, vegen er stengt",
+      detail: "Jordskred, vegen er stengt.",
+      raw: {
+        datex: {
+          promoteToSituation: true,
+          impact: "high",
+          situationId: "NPRA_HBT_11-04-2025.68022",
+          recordKind: "ns12:EnvironmentalObstruction",
+        },
+      },
+    };
+    const rerouting: OfficialEvent = {
+      ...datexEvent,
+      id: "datex-landslide-rerouting",
+      title: "Omkjøring er skiltet",
+      detail: "Omkjøring er skiltet.",
+      raw: {
+        datex: {
+          promoteToSituation: true,
+          impact: "high",
+          situationId: "NPRA_HBT_11-04-2025.68022",
+          recordKind: "ns12:ReroutingManagement",
+        },
+      },
+    };
+    const management: OfficialEvent = {
+      ...datexEvent,
+      id: "datex-landslide-management",
+      title: "Vegen er stengt for gjennomkjøring",
+      detail: "Vegen er stengt for gjennomkjøring.",
+      raw: {
+        datex: {
+          promoteToSituation: true,
+          impact: "high",
+          situationId: "NPRA_HBT_11-04-2025.68022",
+          recordKind: "ns12:RoadOrCarriagewayOrLaneManagement",
+        },
+      },
+    };
+
+    const situations = officialTrafficSituationsFromEvents(
+      [rerouting, management, obstruction],
+      [],
+    );
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]).toMatchObject({
+      title: "Jordskred, vegen er stengt",
+      incidentSignature: "datex:NPRA_HBT_11-04-2025.68022",
+      officialEventId: "datex-landslide-obstruction",
+      importance: "high",
+    });
+    expect(situations[0]?.evidence.map((item) => item.claim).sort()).toEqual([
+      "Jordskred, vegen er stengt",
+      "Omkjøring er skiltet",
+      "Vegen er stengt for gjennomkjøring",
+    ]);
+  });
+
+  it("resolves legacy DATEX record-level duplicates after merging by upstream situation", () => {
+    const legacy = (id: string, officialEventId: string): Situation => ({
+      id,
+      type: "traffic",
+      title: `Legacy ${officialEventId}`,
+      summary: "Legacy DATEX record-level situation.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      importance: "high",
+      updatedAt: "2026-05-28T10:00:00.000Z",
+      createdAt: "2026-05-28T09:55:00.000Z",
+      locationLabel: "E6 Tiller",
+      incidentSignature: `datex:${officialEventId}`,
+      detectionVersion: "datex-1",
+      officialSource: "datex",
+      officialEventId,
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["datex"],
+        articleIds: [],
+        activatedAt: "2026-05-28T10:00:00.000Z",
+      },
+      relatedArticleIds: [],
+      evidence: [],
+      features: [],
+      timeline: [],
+    });
+    const obstruction: OfficialEvent = {
+      ...datexEvent,
+      id: "datex-landslide-obstruction",
+      raw: {
+        datex: {
+          promoteToSituation: true,
+          impact: "high",
+          situationId: "NPRA_HBT_11-04-2025.68022",
+          recordKind: "ns12:EnvironmentalObstruction",
+        },
+      },
+    };
+    const rerouting: OfficialEvent = {
+      ...datexEvent,
+      id: "datex-landslide-rerouting",
+      title: "Omkjøring er skiltet",
+      raw: {
+        datex: {
+          promoteToSituation: true,
+          impact: "high",
+          situationId: "NPRA_HBT_11-04-2025.68022",
+          recordKind: "ns12:ReroutingManagement",
+        },
+      },
+    };
+    const existing = [
+      legacy("datex-old-primary", obstruction.id),
+      legacy("datex-old-rerouting", rerouting.id),
+    ];
+    const active = officialTrafficSituationsFromEvents([rerouting, obstruction], existing);
+    const resolved = resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
+      existing,
+      new Set([obstruction.id, rerouting.id]),
+      new Set(active.map((situation) => situation.id)),
+      "2026-05-28T10:30:00.000Z",
+    );
+
+    expect(active).toHaveLength(1);
+    expect(active[0]?.id).toBe("datex-old-primary");
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]).toMatchObject({
+      id: "datex-old-rerouting",
+      status: "resolved",
+      updatedAt: "2026-05-28T10:30:00.000Z",
+    });
+    expect(resolved[0]?.timeline.at(-1)).toMatchObject({
+      title: "DATEX-delhendelse er samlet i en hovedsituasjon",
+      official: true,
+    });
+  });
+
   it("does not promote low-impact DATEX roadworks", () => {
     const low = { ...datexEvent, id: "datex-low", raw: { datex: { promoteToSituation: false } } };
     expect(officialTrafficSituationsFromEvents([low], [])).toEqual([]);
@@ -56,7 +198,7 @@ describe("official traffic situation promotion", () => {
 
   it("does not reuse a non-DATEX situation with a matching official event id", () => {
     const [existing] = officialTrafficSituationsFromEvents([datexEvent], []);
-    const nonDatexExisting = {
+    const nonDatexExisting: Situation = {
       ...existing!,
       id: "non-datex-existing",
       officialSource: undefined,
