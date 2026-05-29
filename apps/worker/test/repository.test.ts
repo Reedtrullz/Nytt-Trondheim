@@ -5,11 +5,13 @@ import type {
   Article,
   OfficialEvent,
   Situation,
+  SourceItemInput,
   TrafficMapEvent,
   TrafficPulseCorridor,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerRepository } from "../src/repository.js";
+import { trafficInfoSourceItemInput } from "../src/vegvesenTrafficInfo.js";
 
 describe("WorkerRepository", () => {
   it("refreshes stored article metadata without replacing situation linkage", async () => {
@@ -401,6 +403,64 @@ describe("WorkerRepository", () => {
     ).resolves.toEqual([{ ...payloadOldColumnFresh, state: "stale" }]);
 
     expect(payloadOldColumnFresh.state).toBe("slow");
+  });
+
+  it("upserts TrafficInfo source items without promoting them to official events or situations", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const event = trafficMapEvent();
+    const item = trafficInfoSourceItemInput(event, {
+      fetchedAt: "2026-05-29T11:15:00.000Z",
+      rawMessage: { id: event.sourceEventId },
+    });
+
+    await repository.upsertTrafficInfoSourceItems([item]);
+    await expect(repository.currentOfficialEvents()).resolves.toEqual([]);
+
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+    expect(sqlCalls[0]).toContain("INSERT INTO source_items");
+    expect(sqlCalls[0]).toContain("ON CONFLICT (provider, kind, external_id)");
+    expect(query.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining([
+        "vegvesen_traffic_info",
+        "official_event",
+        event.sourceEventId,
+        event.sourceUrl,
+        event.title,
+      ]),
+    );
+    expect(sqlCalls[1]).toContain("SELECT payload FROM official_events");
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO official_events"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situations"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situation_source_items"))).toBe(false);
+  });
+
+  it("rejects non-TrafficInfo official event source items in the TrafficInfo bulk upsert", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const item = trafficInfoSourceItemInput(trafficMapEvent(), {
+      fetchedAt: "2026-05-29T11:15:00.000Z",
+      rawMessage: { id: "NPRA_HBT_1" },
+    });
+    const wrongProviderItem = { ...item, provider: "datex" };
+    const wrongKindItem = { ...item, kind: "article" } as SourceItemInput;
+
+    await expect(
+      repository.upsertTrafficInfoSourceItems([wrongProviderItem]),
+    ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
+    await expect(
+      repository.upsertTrafficInfoSourceItems([wrongKindItem]),
+    ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
+    await expect(
+      repository.upsertTrafficInfoSourceItems([item, wrongProviderItem]),
+    ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
+    await expect(
+      repository.upsertTrafficInfoSourceItems([item, wrongKindItem]),
+    ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
+    expect(query).not.toHaveBeenCalled();
   });
 
   it("upserts and lists traffic map events through the dedicated table", async () => {

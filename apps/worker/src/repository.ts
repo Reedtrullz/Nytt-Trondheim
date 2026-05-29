@@ -126,6 +126,20 @@ export class WorkerRepository {
     );
   }
 
+  async upsertTrafficInfoSourceItems(items: SourceItemInput[]): Promise<void> {
+    for (const item of items) {
+      if (item.provider !== "vegvesen_traffic_info" || item.kind !== "official_event") {
+        throw new Error(
+          "upsertTrafficInfoSourceItems only accepts Vegvesen TrafficInfo official_event items",
+        );
+      }
+    }
+
+    for (const item of items) {
+      await this.upsertSourceItem(item);
+    }
+  }
+
   async setHealth(health: SourceHealth): Promise<void> {
     await this.pool.query(
       `INSERT INTO source_health (source, label, state, last_checked_at, last_failure_at, next_poll_at, detail)

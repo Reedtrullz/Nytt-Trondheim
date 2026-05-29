@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Point } from "geojson";
 import type {
+  SourceItemInput,
   TrafficEventCategory,
   TrafficEventSeverity,
   TrafficEventState,
@@ -56,6 +57,31 @@ export function pointGeometry(message: TrafficInfoObject): Point | undefined {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
 
   return { type: "Point", coordinates: [lng, lat] };
+}
+
+export function trafficInfoSourceItemInput(
+  event: TrafficMapEvent,
+  options: { fetchedAt: string; rawMessage: unknown },
+): SourceItemInput {
+  const captureHash = sha256(
+    JSON.stringify([event.source, event.sourceEventId, event.updatedAt, event.state, event.validTo]),
+  );
+  return {
+    id: `source:${sha256(JSON.stringify([event.source, "official_event", event.sourceEventId]))}`,
+    provider: "vegvesen_traffic_info",
+    kind: "official_event",
+    externalId: event.sourceEventId,
+    originalUrl: event.sourceUrl,
+    title: event.title,
+    summary: event.description,
+    publishedAt: event.updatedAt,
+    fetchedAt: options.fetchedAt,
+    rawPayload: options.rawMessage,
+    normalizedPayload: event,
+    captureHash,
+    geoHint: event.geometry,
+    reliabilityTier: "official",
+  };
 }
 
 function stateFromActivityStatus(status: unknown): TrafficEventState {

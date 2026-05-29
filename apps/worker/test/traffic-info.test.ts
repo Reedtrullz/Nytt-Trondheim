@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultTrafficInfoEndpoint,
   parseTrafficInfoMessages,
+  trafficInfoSourceItemInput,
   trafficInfoRequestHeaders,
 } from "../src/vegvesenTrafficInfo.js";
 
@@ -65,6 +66,34 @@ describe("Vegvesen TrafficInfo", () => {
     );
     expect(originalRawMessage).toBeDefined();
     expect(result.rawMessagesById.get("NPRA_HBT_21-04-2026.66010")).toEqual(originalRawMessage);
+  });
+
+  it("mirrors TrafficInfo map events into official source items", async () => {
+    const payload = await readFile(fixturePath, "utf8");
+    const result = parseTrafficInfoMessages(payload, {
+      endpoint: defaultTrafficInfoEndpoint,
+      receivedAt: "2026-05-29T11:15:00.000Z",
+    });
+    const activeEvent = result.events.find(
+      (event) => event.sourceEventId === "NPRA_HBT_21-04-2026.66010",
+    );
+
+    expect(activeEvent).toBeDefined();
+    const item = trafficInfoSourceItemInput(activeEvent!, {
+      fetchedAt: "2026-05-29T11:15:00.000Z",
+      rawMessage: { id: "NPRA_HBT_21-04-2026.66010" },
+    });
+
+    expect(item).toMatchObject({
+      provider: "vegvesen_traffic_info",
+      kind: "official_event",
+      externalId: "NPRA_HBT_21-04-2026.66010",
+      title: "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
+      reliabilityTier: "official",
+      geoHint: { type: "Point", coordinates: [10.345405, 63.38945] },
+    });
+    expect(item.rawPayload).toEqual({ id: "NPRA_HBT_21-04-2026.66010" });
+    expect(item.normalizedPayload).toMatchObject({ state: "active", category: "roadworks" });
   });
 
   it("skips messages with missing IDs or malformed geometry and keeps outside-region messages out of Nytt's traffic map table", async () => {

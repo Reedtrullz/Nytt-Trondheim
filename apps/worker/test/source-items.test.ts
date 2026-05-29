@@ -1,6 +1,7 @@
-import type { Article, OfficialEvent } from "@nytt/shared";
+import type { Article, OfficialEvent, TrafficMapEvent } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
 import { articleSourceItemInput, officialEventSourceItemInput } from "../src/repository.js";
+import { trafficInfoSourceItemInput } from "../src/vegvesenTrafficInfo.js";
 
 describe("worker source item mapping", () => {
   it("maps articles into trusted or official source item inputs", () => {
@@ -72,5 +73,50 @@ describe("worker source item mapping", () => {
       geoHint: { type: "Point", coordinates: [10.39, 63.39] },
     });
     expect(item.normalizedPayload).not.toHaveProperty("raw");
+  });
+
+  it("maps TrafficInfo map events into official source item inputs", () => {
+    const event: TrafficMapEvent = {
+      id: "vegvesen-traffic-info:NPRA_HBT_1",
+      source: "vegvesen_traffic_info",
+      sourceEventId: "NPRA_HBT_1",
+      category: "roadworks",
+      severity: "medium",
+      state: "active",
+      title: "Fv. 6650 Vestre Kystad",
+      description: "Lysregulering.",
+      locationName: "Fv. 6650 Vestre Kystad, Trondheim",
+      roadName: "Fv. 6650",
+      validFrom: "2026-04-21T05:00:00.000Z",
+      validTo: "2026-06-26T14:00:00.000Z",
+      updatedAt: "2026-05-07T04:59:25.000Z",
+      sourceUrl: "https://www.vegvesen.no/trafikk/hvaskjer?lat=63.38945&lng=10.345405&zoom=14",
+      geometry: { type: "Point", coordinates: [10.345405, 63.38945] },
+      rawType: "roadworks",
+      confidence: 1,
+    };
+    const rawMessage = { id: "NPRA_HBT_1", publicCommentDescription: "Lysregulering." };
+
+    const item = trafficInfoSourceItemInput(event, {
+      fetchedAt: "2026-05-29T11:15:00.000Z",
+      rawMessage,
+    });
+
+    expect(item).toMatchObject({
+      provider: "vegvesen_traffic_info",
+      kind: "official_event",
+      externalId: "NPRA_HBT_1",
+      originalUrl: event.sourceUrl,
+      title: event.title,
+      summary: event.description,
+      publishedAt: event.updatedAt,
+      fetchedAt: "2026-05-29T11:15:00.000Z",
+      rawPayload: rawMessage,
+      normalizedPayload: event,
+      geoHint: event.geometry,
+      reliabilityTier: "official",
+    });
+    expect(item.id).toMatch(/^source:/);
+    expect(item.captureHash).toMatch(/^[a-f0-9]{64}$/);
   });
 });
