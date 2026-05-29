@@ -28,6 +28,11 @@ import {
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
+import {
+  collectTrafficInfoMessages,
+  defaultTrafficInfoEndpoint,
+  trafficInfoSourceItemInput,
+} from "./vegvesenTrafficInfo.js";
 
 const municipalityIntervalMs = 60 * 60 * 1000;
 let lastMunicipalityCollection = 0;
@@ -62,6 +67,68 @@ export function createCollectionGuard(
       collectionRunning = false;
     }
   };
+}
+
+export async function collectTrafficInfoForMap({
+  repository,
+  endpoint,
+  nextPollAt,
+  now = () => new Date(),
+  collector = collectTrafficInfoMessages,
+}: {
+  repository: WorkerRepository;
+  endpoint: string;
+  nextPollAt: string;
+  now?: () => Date;
+  collector?: typeof collectTrafficInfoMessages;
+}): Promise<void> {
+  try {
+    const checkedAt = now().toISOString();
+    const fetchedAt = checkedAt;
+    const result = await collector({ endpoint, now });
+    await repository.upsertTrafficMapEvents(result.events, {
+      source: "vegvesen_traffic_info",
+      fetchedAt,
+    });
+    await repository.upsertTrafficInfoSourceItems(
+      result.events.map((event) =>
+        trafficInfoSourceItemInput(event, {
+          fetchedAt,
+          rawMessage: result.rawMessagesById.get(event.sourceEventId) ?? event,
+        }),
+      ),
+    );
+    const expiredCount = await repository.markMissingTrafficMapEventsExpired(
+      "vegvesen_traffic_info",
+      result.events.map((event) => event.sourceEventId),
+      fetchedAt,
+    );
+    const staleExpiredCount = await repository.expireStaleOpenEndedTrafficMapEvents(
+      "vegvesen_traffic_info",
+      fetchedAt,
+      7 * 24,
+    );
+    await repository.setCollectorState("vegvesen_traffic_info:lastHash", result.sourcePayloadHash);
+    await repository.setHealth({
+      source: "vegvesen_traffic_info",
+      label: "Vegvesen trafikkmeldinger",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: `${result.relevantMessages} relevante av ${result.totalMessages} Vegvesen trafikkmeldinger hentet (${result.events.filter((event) => event.state === "active").length} aktive, ${result.events.filter((event) => event.state === "planned").length} planlagte, ${expiredCount} utløpt fra snapshot, ${staleExpiredCount} stale utløpt)`,
+    });
+  } catch (error) {
+    const failureAt = now().toISOString();
+    await repository.setHealth({
+      source: "vegvesen_traffic_info",
+      label: "Vegvesen trafikkmeldinger",
+      state: "degraded",
+      lastCheckedAt: failureAt,
+      lastFailureAt: failureAt,
+      nextPollAt,
+      detail: `TrafficInfo-innhenting feilet: ${String(error)}`,
+    });
+  }
 }
 
 async function collectAll({ repository, analyzer, once }: CollectionContext): Promise<void> {
@@ -129,6 +196,11 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       console.warn(`[worker] Politiloggen adapter failed: ${String(error)}`),
     );
   }
+  await collectTrafficInfoForMap({
+    repository,
+    endpoint: process.env.TRAFFIC_INFO_ENDPOINT?.trim() || defaultTrafficInfoEndpoint,
+    nextPollAt,
+  });
   const officialEvents: OfficialEvent[] = [];
   for (const [source, collector] of [
     ["met", () => collectMetWarnings(fetch)],
