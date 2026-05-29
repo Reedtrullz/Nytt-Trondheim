@@ -37,6 +37,8 @@ High-impact official DATEX traffic records are the explicit exception to the two
 
 DATEX TravelTime is intentionally outside situation activation. Current corridor rows are persisted in `datex_travel_times` for source health and Drift traffic-pulse display, separate from `official_events` and `situations`. TravelTime values describe measured or estimated travel time, free-flow comparison and delay only; the worker must not infer incident cause, create `OfficialEvent` rows, promote official traffic events, or create/update `Situation` rows from TravelTime alone.
 
+Traffic map overlays are operational map state. `traffic_map_events` is the map-ready table; `source_items` is the provenance ledger; `situations` remains the incident feed. TrafficInfo roadworks can be shown richly on `/trafikk` without activating the Situation Room. DATEX TravelTime, DATEX Weather, DATEX CCTV and Trafikkdata counters are context overlays/telemetry and must not create `source_items`, `official_events`, or `situations` without a future explicit promotion rule.
+
 DATEX traffic events stay separate from MET/NVE warning context: weather and hazard warnings can enrich or contextualize a situation, but they are not fed into DATEX promotion logic. Conversely, DATEX records can confirm road state but are not treated as broader emergency confirmation outside the traffic layer without corroborating sources.
 
 Owner-dismissed false positives retain evidence, timelines and activation audit records under the `dismissed` lifecycle state, but are excluded from current-situation surfaces.
