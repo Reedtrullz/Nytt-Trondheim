@@ -7,10 +7,21 @@ import type {
   Situation,
   SourceItemInput,
   SourceHealth,
+  TrafficMapEvent,
   TrafficPulseCorridor,
 } from "@nytt/shared";
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
+
+export interface TrafficMapEventUpsertOptions {
+  source: TrafficMapEvent["source"];
+  fetchedAt: string;
+}
+
+export interface TrafficMapEventListFilters {
+  source?: TrafficMapEvent["source"];
+  states?: TrafficMapEvent["state"][];
+}
 
 export class WorkerRepository {
   constructor(private readonly pool: pg.Pool) {}
@@ -277,6 +288,127 @@ export class WorkerRepository {
       "SELECT payload FROM official_events WHERE state IN ('active', 'updated') AND valid_to >= now() ORDER BY published_at DESC",
     );
     return result.rows.map((row) => row.payload);
+  }
+
+  async upsertTrafficMapEvents(
+    events: TrafficMapEvent[],
+    options: TrafficMapEventUpsertOptions,
+  ): Promise<void> {
+    if (events.length === 0) return;
+
+    for (const event of events) {
+      const eventPayloadHash = createHash("sha256").update(JSON.stringify(event)).digest("hex");
+      await this.pool.query(
+        `INSERT INTO traffic_map_events
+         (id, source, source_event_id, category, severity, state, title, description,
+          location_name, road_name, valid_from, valid_to, updated_at, source_url,
+          geometry, raw_type, confidence, payload, source_payload_hash, last_seen_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+          ST_SetSRID(ST_GeomFromGeoJSON($15),4326),$16,$17,$18,$19,$20)
+         ON CONFLICT (source, source_event_id) DO UPDATE SET
+          id=EXCLUDED.id,
+          category=EXCLUDED.category,
+          severity=EXCLUDED.severity,
+          state=EXCLUDED.state,
+          title=EXCLUDED.title,
+          description=EXCLUDED.description,
+          location_name=EXCLUDED.location_name,
+          road_name=EXCLUDED.road_name,
+          valid_from=EXCLUDED.valid_from,
+          valid_to=EXCLUDED.valid_to,
+          updated_at=EXCLUDED.updated_at,
+          source_url=EXCLUDED.source_url,
+          geometry=EXCLUDED.geometry,
+          raw_type=EXCLUDED.raw_type,
+          confidence=EXCLUDED.confidence,
+          payload=EXCLUDED.payload,
+          source_payload_hash=EXCLUDED.source_payload_hash,
+          last_seen_at=EXCLUDED.last_seen_at`,
+        [
+          event.id,
+          event.source,
+          event.sourceEventId,
+          event.category,
+          event.severity,
+          event.state,
+          event.title,
+          event.description ?? null,
+          event.locationName ?? null,
+          event.roadName ?? null,
+          event.validFrom ?? null,
+          event.validTo ?? null,
+          event.updatedAt,
+          event.sourceUrl ?? null,
+          JSON.stringify(event.geometry),
+          event.rawType ?? null,
+          event.confidence ?? null,
+          event,
+          eventPayloadHash,
+          options.fetchedAt,
+        ],
+      );
+    }
+  }
+
+  async listTrafficMapEvents(
+    filters: TrafficMapEventListFilters = {},
+  ): Promise<TrafficMapEvent[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters.source) {
+      params.push(filters.source);
+      where.push(`source=$${params.length}`);
+    }
+    if (filters.states?.length) {
+      params.push(filters.states);
+      where.push(`state = ANY($${params.length}::text[])`);
+    }
+
+    const result = await this.pool.query<{
+      payload: TrafficMapEvent;
+      state: TrafficMapEvent["state"];
+    }>(
+      `SELECT payload, state FROM traffic_map_events${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY updated_at DESC`,
+      params,
+    );
+    return result.rows.map((row) => ({ ...row.payload, state: row.state }));
+  }
+
+  async markMissingTrafficMapEventsExpired(
+    source: TrafficMapEvent["source"],
+    activeSourceEventIds: string[],
+    fetchedAt: string,
+  ): Promise<number> {
+    const result = await this.pool.query(
+      `UPDATE traffic_map_events
+       SET state='expired',
+           payload=jsonb_set(payload, '{state}', to_jsonb('expired'::text), true),
+           last_seen_at=$3
+       WHERE source=$1
+       AND state IN ('active', 'planned')
+       AND NOT (source_event_id = ANY($2::text[]))`,
+      [source, activeSourceEventIds, fetchedAt],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  async expireStaleOpenEndedTrafficMapEvents(
+    source: TrafficMapEvent["source"],
+    now: string,
+    maxAgeHours: number,
+  ): Promise<number> {
+    const result = await this.pool.query(
+      `UPDATE traffic_map_events
+       SET state='expired',
+           payload=jsonb_set(payload, '{state}', to_jsonb('expired'::text), true)
+       WHERE source=$1
+       AND state IN ('active', 'planned')
+       AND valid_to IS NULL
+       AND last_seen_at < ($2::timestamptz - ($3 * interval '1 hour'))`,
+      [source, now, maxAgeHours],
+    );
+    return result.rowCount ?? 0;
   }
 
   async upsertDatexTravelTimes(corridors: TrafficPulseCorridor[]): Promise<void> {

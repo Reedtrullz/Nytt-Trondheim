@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import type pg from "pg";
 import type {
   AiProcessingRun,
   Article,
   OfficialEvent,
   Situation,
+  TrafficMapEvent,
   TrafficPulseCorridor,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
@@ -400,11 +402,240 @@ describe("WorkerRepository", () => {
 
     expect(payloadOldColumnFresh.state).toBe("slow");
   });
+
+  it("upserts and lists traffic map events through the dedicated table", async () => {
+    const event = trafficMapEvent();
+    const updatedEvent = { ...event, title: "Oppdatert tittel" };
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ payload: updatedEvent, state: "active" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.upsertTrafficMapEvents([event], {
+      source: "vegvesen_traffic_info",
+      fetchedAt: "2026-05-29T11:00:00.000Z",
+    });
+    await repository.upsertTrafficMapEvents([updatedEvent], {
+      source: "vegvesen_traffic_info",
+      fetchedAt: "2026-05-29T11:10:00.000Z",
+    });
+    const rows = await repository.listTrafficMapEvents({ source: "vegvesen_traffic_info" });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ title: "Oppdatert tittel", state: "active" });
+
+    const insertCalls = query.mock.calls.filter(([sql]) =>
+      String(sql).includes("INSERT INTO traffic_map_events"),
+    );
+    expect(insertCalls).toHaveLength(2);
+    expect(String(insertCalls[0]?.[0])).toContain("ON CONFLICT (source, source_event_id)");
+    expect(String(insertCalls[0]?.[0])).toContain("last_seen_at");
+    expect(insertCalls[0]?.[1]).toEqual(
+      trafficMapEventParameters(event, "2026-05-29T11:00:00.000Z"),
+    );
+    expect(insertCalls[1]?.[1]).toEqual(
+      trafficMapEventParameters(updatedEvent, "2026-05-29T11:10:00.000Z"),
+    );
+    expect(query.mock.calls[2]?.[0]).toContain("SELECT payload, state FROM traffic_map_events");
+    expect(query.mock.calls[2]?.[1]).toEqual(["vegvesen_traffic_info"]);
+  });
+
+  it("expires traffic map events missing from a successful snapshot", async () => {
+    const event = trafficMapEvent();
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ payload: event, state: "expired" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.markMissingTrafficMapEventsExpired(
+      "vegvesen_traffic_info",
+      [],
+      "2026-05-29T11:20:00.000Z",
+    );
+    const rows = await repository.listTrafficMapEvents({ source: "vegvesen_traffic_info" });
+
+    expect(rows[0]?.state).toBe("expired");
+    expect(query.mock.calls[0]?.[0]).toContain("UPDATE traffic_map_events");
+    expect(query.mock.calls[0]?.[0]).toContain("state='expired'");
+    expect(query.mock.calls[0]?.[0]).toContain("payload=jsonb_set");
+    expect(query.mock.calls[0]?.[0]).toContain("NOT (source_event_id = ANY($2::text[]))");
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      "vegvesen_traffic_info",
+      [],
+      "2026-05-29T11:20:00.000Z",
+    ]);
+  });
+
+  it("keeps duplicate unchanged traffic map snapshots as one row while refreshing last_seen_at", async () => {
+    const event = trafficMapEvent();
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ payload: event, state: "active" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.upsertTrafficMapEvents([event], {
+      source: "vegvesen_traffic_info",
+      fetchedAt: "2026-05-29T11:00:00.000Z",
+    });
+    await repository.upsertTrafficMapEvents([event], {
+      source: "vegvesen_traffic_info",
+      fetchedAt: "2026-05-29T11:10:00.000Z",
+    });
+    const rows = await repository.listTrafficMapEvents({ source: "vegvesen_traffic_info" });
+
+    expect(rows).toEqual([event]);
+    const insertCalls = query.mock.calls.filter(([sql]) =>
+      String(sql).includes("INSERT INTO traffic_map_events"),
+    );
+    expect(insertCalls).toHaveLength(2);
+    expect(String(insertCalls[1]?.[0])).toContain("last_seen_at=EXCLUDED.last_seen_at");
+    expect((insertCalls[0]?.[1] as unknown[])?.[18]).toBe((insertCalls[1]?.[1] as unknown[])?.[18]);
+    expect((insertCalls[0]?.[1] as unknown[])?.[19]).toBe("2026-05-29T11:00:00.000Z");
+    expect((insertCalls[1]?.[1] as unknown[])?.[19]).toBe("2026-05-29T11:10:00.000Z");
+  });
+
+  it("reactivates a previously expired traffic map event when it reappears", async () => {
+    const activeEvent = trafficMapEvent({ state: "active", updatedAt: "2026-05-29T11:25:00.000Z" });
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ payload: activeEvent, state: "active" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.markMissingTrafficMapEventsExpired(
+      "vegvesen_traffic_info",
+      [],
+      "2026-05-29T11:20:00.000Z",
+    );
+    await repository.upsertTrafficMapEvents([activeEvent], {
+      source: "vegvesen_traffic_info",
+      fetchedAt: "2026-05-29T11:30:00.000Z",
+    });
+    const rows = await repository.listTrafficMapEvents({ source: "vegvesen_traffic_info" });
+
+    expect(rows[0]?.state).toBe("active");
+    const insertCall = query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO traffic_map_events"),
+    );
+    expect(String(insertCall?.[0])).toContain("state=EXCLUDED.state");
+    expect((insertCall?.[1] as unknown[])?.[5]).toBe("active");
+    expect((insertCall?.[1] as unknown[])?.[19]).toBe("2026-05-29T11:30:00.000Z");
+  });
+
+  it("does not expire traffic map events after a failed snapshot", async () => {
+    const event = trafficMapEvent();
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ payload: event, state: "active" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.upsertTrafficMapEvents([event], {
+      source: "vegvesen_traffic_info",
+      fetchedAt: "2026-05-29T11:00:00.000Z",
+    });
+    const rows = await repository.listTrafficMapEvents({ source: "vegvesen_traffic_info" });
+
+    expect(rows[0]?.state).toBe("active");
+    expect(
+      query.mock.calls.some(([sql]) => String(sql).trimStart().startsWith("UPDATE traffic_map_events")),
+    ).toBe(false);
+  });
+
+  it("expires stale open-ended active and planned traffic map events", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 2 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.expireStaleOpenEndedTrafficMapEvents(
+        "vegvesen_traffic_info",
+        "2026-05-29T11:30:00.000Z",
+        7 * 24,
+      ),
+    ).resolves.toBe(2);
+
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE traffic_map_events"), [
+      "vegvesen_traffic_info",
+      "2026-05-29T11:30:00.000Z",
+      7 * 24,
+    ]);
+    const sql = query.mock.calls[0]?.[0] as string;
+    expect(sql).toContain("state='expired'");
+    expect(sql).toContain("payload=jsonb_set");
+    expect(sql).toContain("state IN ('active', 'planned')");
+    expect(sql).toContain("valid_to IS NULL");
+    expect(sql).toContain("last_seen_at < ($2::timestamptz - ($3 * interval '1 hour'))");
+  });
+
+  it("does not insert traffic map rows when upstream parsing produced no valid events", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.upsertTrafficMapEvents([], {
+      source: "vegvesen_traffic_info",
+      fetchedAt: "2026-05-29T11:00:00.000Z",
+    });
+
+    expect(query).not.toHaveBeenCalled();
+  });
 });
 
 function transactionalPool(query: ReturnType<typeof vi.fn>): pg.Pool {
   const client = { query, release: vi.fn() };
   return { connect: vi.fn().mockResolvedValue(client) } as unknown as pg.Pool;
+}
+
+function trafficMapEvent(overrides: Partial<TrafficMapEvent> = {}): TrafficMapEvent {
+  return {
+    id: "vegvesen-traffic-info:NPRA_HBT_1",
+    source: "vegvesen_traffic_info",
+    sourceEventId: "NPRA_HBT_1",
+    category: "roadworks",
+    severity: "medium",
+    state: "active",
+    title: "Fv. 6650 Vestre Kystad",
+    description: "Lysregulering.",
+    locationName: "Fv. 6650 Vestre Kystad, Trondheim",
+    roadName: "Fv. 6650",
+    validFrom: "2026-04-21T05:00:00.000Z",
+    validTo: "2026-06-26T14:00:00.000Z",
+    updatedAt: "2026-05-07T04:59:25.000Z",
+    sourceUrl: "https://www.vegvesen.no/trafikk/hvaskjer?lat=63.38945&lng=10.345405&zoom=14",
+    geometry: { type: "Point", coordinates: [10.345405, 63.38945] },
+    rawType: "roadworks",
+    ...overrides,
+  };
+}
+
+function trafficMapEventParameters(event: TrafficMapEvent, fetchedAt: string): unknown[] {
+  return [
+    event.id,
+    event.source,
+    event.sourceEventId,
+    event.category,
+    event.severity,
+    event.state,
+    event.title,
+    event.description ?? null,
+    event.locationName ?? null,
+    event.roadName ?? null,
+    event.validFrom ?? null,
+    event.validTo ?? null,
+    event.updatedAt,
+    event.sourceUrl ?? null,
+    JSON.stringify(event.geometry),
+    event.rawType ?? null,
+    event.confidence ?? null,
+    event,
+    createHash("sha256").update(JSON.stringify(event)).digest("hex"),
+    fetchedAt,
+  ];
 }
 
 function travelTimeCorridor(
