@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<d2:d2LogicalModel xmlns:d2="http://datex2.eu/schema/3/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" modelBaseVersion="3">
+  <d2:payloadPublication xsi:type="d2:CCTVStatusPublication" lang="no">
+    <d2:cctvCameraStatus>
+      <d2:cctvCameraReference id="CCTV_1" />
+      <d2:operationalStatus>operational</d2:operationalStatus>
+      <d2:stillImageUrl>https://webkamera.vegvesen.no/public/kroppanbrua.jpg</d2:stillImageUrl>
+    </d2:cctvCameraStatus>
+
+    <d2:cctvCameraStatus>
+      <d2:cctvCameraReference id="CCTV_OSLO" />
+      <d2:operationalStatus>unavailable</d2:operationalStatus>
+      <d2:stillImageUrl>https://webkamera.vegvesen.no/public/oslo.jpg</d2:stillImageUrl>
+    </d2:cctvCameraStatus>
+  </d2:payloadPublication>
+</d2:d2LogicalModel>

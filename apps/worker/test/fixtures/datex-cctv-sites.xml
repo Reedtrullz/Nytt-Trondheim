@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<d2:d2LogicalModel xmlns:d2="http://datex2.eu/schema/3/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" modelBaseVersion="3">
+  <d2:payloadPublication xsi:type="d2:CCTVSiteTablePublication" lang="no">
+    <d2:cctvCameraRecord id="CCTV_1">
+      <d2:cctvCameraName>
+        <d2:values>
+          <d2:value>Kroppanbrua</d2:value>
+        </d2:values>
+      </d2:cctvCameraName>
+      <d2:locationForDisplay>
+        <d2:latitude>63.3918</d2:latitude>
+        <d2:longitude>10.3845</d2:longitude>
+      </d2:locationForDisplay>
+    </d2:cctvCameraRecord>
+
+    <d2:cctvCameraRecord id="CCTV_NO_STATUS">
+      <d2:cctvCameraName>
+        <d2:values>
+          <d2:value>Sluppen uten status</d2:value>
+        </d2:values>
+      </d2:cctvCameraName>
+      <d2:pointCoordinates>
+        <d2:latitude>63.4030</d2:latitude>
+        <d2:longitude>10.3950</d2:longitude>
+      </d2:pointCoordinates>
+    </d2:cctvCameraRecord>
+
+    <d2:cctvCameraRecord id="CCTV_OSLO">
+      <d2:cctvCameraName>
+        <d2:values>
+          <d2:value>Oslo tunnel</d2:value>
+        </d2:values>
+      </d2:cctvCameraName>
+      <d2:locationForDisplay>
+        <d2:latitude>59.9139</d2:latitude>
+        <d2:longitude>10.7522</d2:longitude>
+      </d2:locationForDisplay>
+    </d2:cctvCameraRecord>
+
+    <d2:cctvCameraRecord id="CCTV_BAD_GEOMETRY">
+      <d2:cctvCameraName>
+        <d2:values>
+          <d2:value>Manglende geometri</d2:value>
+        </d2:values>
+      </d2:cctvCameraName>
+      <d2:locationForDisplay>
+        <d2:latitude>not-a-number</d2:latitude>
+        <d2:longitude>10.4000</d2:longitude>
+      </d2:locationForDisplay>
+    </d2:cctvCameraRecord>
+  </d2:payloadPublication>
+</d2:d2LogicalModel>
