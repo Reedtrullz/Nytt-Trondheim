@@ -52,10 +52,7 @@ export function buildTrafficBrief(events: TrafficMapEvent[]): TrafficBrief {
   const maxSeverity = important[0]?.severity ?? "low";
   const categoryBits = Object.entries(byCategory)
     .filter(([, count]) => count > 0)
-    .map(
-      ([category, count]) =>
-        `${count} ${categoryLabels[category as TrafficEventCategory]}`,
-    );
+    .map(([category, count]) => `${count} ${categoryLabels[category as TrafficEventCategory]}`);
 
   return {
     headline:

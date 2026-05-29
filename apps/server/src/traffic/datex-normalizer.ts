@@ -19,7 +19,11 @@ function datexRawField(raw: unknown, field: string): string | undefined {
   return undefined;
 }
 
-function categoryFromDatex(rawType?: string, title?: string, description?: string): TrafficEventCategory {
+function categoryFromDatex(
+  rawType?: string,
+  title?: string,
+  description?: string,
+): TrafficEventCategory {
   const haystack = `${rawType ?? ""} ${title ?? ""} ${description ?? ""}`.toLocaleLowerCase("nb");
   if (/roadworks|maintenanceworks|veiarbeid|vegarbeid|veg arbeid|kantklipp/.test(haystack)) {
     return "roadworks";
@@ -41,7 +45,8 @@ function severityFromDatex(
 ): TrafficEventSeverity {
   const value = severity?.toLocaleLowerCase("en") ?? "";
   if (/highest|critical|severe|very high|major/.test(value)) return "critical";
-  if (/high|serious/.test(value) || category === "closure" || category === "accident") return "high";
+  if (/high|serious/.test(value) || category === "closure" || category === "accident")
+    return "high";
   if (/medium|moderate/.test(value) || category === "roadworks" || category === "congestion") {
     return "medium";
   }

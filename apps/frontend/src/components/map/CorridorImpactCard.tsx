@@ -75,7 +75,9 @@ export function CorridorImpactCard({
           )}
         </div>
       ) : (
-        <p className="corridor-impact-hint">Velg en korridor for å markere berørte hendelser på kartet.</p>
+        <p className="corridor-impact-hint">
+          Velg en korridor for å markere berørte hendelser på kartet.
+        </p>
       )}
     </section>
   );

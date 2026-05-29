@@ -29,7 +29,9 @@ function nearestDistanceMeters(event: TrafficMapEvent, article: Article): number
 
   const eventSegments = coordinateSegmentsFromGeometry(event.geometry);
   distances.push(
-    ...eventSegments.map((segment) => distancePointToSegmentMeters(articlePoint, segment[0], segment[1])),
+    ...eventSegments.map((segment) =>
+      distancePointToSegmentMeters(articlePoint, segment[0], segment[1]),
+    ),
   );
 
   return distances.length > 0 ? Math.min(...distances) : undefined;

@@ -191,5 +191,10 @@ export function geometryIntersectsBounds(geometry: Geometry, bounds: Bounds): bo
   const minLat = Math.min(...lats);
   const maxLat = Math.max(...lats);
 
-  return maxLat >= bounds.south && minLat <= bounds.north && maxLng >= bounds.west && minLng <= bounds.east;
+  return (
+    maxLat >= bounds.south &&
+    minLat <= bounds.north &&
+    maxLng >= bounds.west &&
+    minLng <= bounds.east
+  );
 }

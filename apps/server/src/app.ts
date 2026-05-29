@@ -116,11 +116,7 @@ function errorStatus(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
-function eventIntersectsTimeRange(
-  event: TrafficMapEvent,
-  from?: string,
-  to?: string,
-): boolean {
+function eventIntersectsTimeRange(event: TrafficMapEvent, from?: string, to?: string): boolean {
   const fromMs = from ? Date.parse(from) : Number.NaN;
   const toMs = to ? Date.parse(to) : Number.NaN;
   const startMs = Date.parse(event.validFrom ?? event.updatedAt);

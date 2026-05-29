@@ -270,7 +270,13 @@ describe("private situation API", () => {
         publishedAt: "2026-05-28T11:00:00.000Z",
         validFrom: "2099-01-02T18:00:00.000Z",
         validTo: "2099-01-03T05:00:00.000Z",
-        geometry: { type: "LineString", coordinates: [[10.33, 63.395], [10.435, 63.405]] },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.33, 63.395],
+            [10.435, 63.405],
+          ],
+        },
         raw: { datex: { recordKind: "MaintenanceWorks", roadName: "Omkjøringsveien" } },
       },
       {

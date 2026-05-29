@@ -4,10 +4,7 @@ import type { TrafficEventCategory, TrafficEventSeverity, TrafficEventState } fr
 import { CorridorImpactCard } from "../components/map/CorridorImpactCard.js";
 import { MapBoundsWatcher } from "../components/map/MapBoundsWatcher.js";
 import { TrafficBriefCard } from "../components/map/TrafficBriefCard.js";
-import {
-  TrafficFilterPanel,
-  type TrafficMapPreset,
-} from "../components/map/TrafficFilterPanel.js";
+import { TrafficFilterPanel, type TrafficMapPreset } from "../components/map/TrafficFilterPanel.js";
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
 
@@ -46,9 +43,17 @@ function timeWindowForPreset(preset: TrafficMapPreset): TrafficTimeWindow {
   const now = new Date();
   switch (preset) {
     case "next24h":
-      return { states: ["active", "planned"], from: now.toISOString(), to: addHours(now, 24).toISOString() };
+      return {
+        states: ["active", "planned"],
+        from: now.toISOString(),
+        to: addHours(now, 24).toISOString(),
+      };
     case "next7d":
-      return { states: ["active", "planned"], from: now.toISOString(), to: addHours(now, 24 * 7).toISOString() };
+      return {
+        states: ["active", "planned"],
+        from: now.toISOString(),
+        to: addHours(now, 24 * 7).toISOString(),
+      };
     case "planned":
       return { states: ["planned"], from: now.toISOString() };
     case "severe":
@@ -65,8 +70,10 @@ export function TrafficMapPage() {
   const [bounds, setBounds] = useState<MapBounds>();
   const [selectedPreset, setSelectedPreset] = useState<TrafficMapPreset>("now");
   const [timeWindow, setTimeWindow] = useState<TrafficTimeWindow>(() => timeWindowForPreset("now"));
-  const [selectedCategories, setSelectedCategories] = useState<TrafficEventCategory[]>(allCategories);
-  const [selectedSeverities, setSelectedSeverities] = useState<TrafficEventSeverity[]>(allSeverities);
+  const [selectedCategories, setSelectedCategories] =
+    useState<TrafficEventCategory[]>(allCategories);
+  const [selectedSeverities, setSelectedSeverities] =
+    useState<TrafficEventSeverity[]>(allSeverities);
   const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>();
 
   const stableBounds = useMemo(
@@ -84,7 +91,10 @@ export function TrafficMapPage() {
 
   const highlightedEventIds = useMemo(() => {
     if (!selectedCorridorId) return [];
-    return data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)?.affectedEventIds ?? [];
+    return (
+      data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)?.affectedEventIds ??
+      []
+    );
   }, [data?.corridorImpacts, selectedCorridorId]);
 
   const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
@@ -164,7 +174,9 @@ export function TrafficMapPage() {
       <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
         <TileLayer attribution="© Kartverket" url={tiles} />
         <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
-        {data?.events ? <TrafficLayer events={data.events} highlightedEventIds={highlightedEventIds} /> : null}
+        {data?.events ? (
+          <TrafficLayer events={data.events} highlightedEventIds={highlightedEventIds} />
+        ) : null}
       </MapContainer>
     </main>
   );

@@ -61,7 +61,8 @@ function eventNearCorridor(
   if (corridorSegments.length === 0) return false;
   return eventSegments.some((eventSegment) =>
     corridorSegments.some(
-      (corridorSegment) => distanceSegmentToSegmentMeters(eventSegment, corridorSegment) <= bufferMeters,
+      (corridorSegment) =>
+        distanceSegmentToSegmentMeters(eventSegment, corridorSegment) <= bufferMeters,
     ),
   );
 }
