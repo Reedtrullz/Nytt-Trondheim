@@ -90,7 +90,10 @@ describe("DATEX situation parsing", () => {
     });
 
     expect(result.events).toHaveLength(1);
-    expect(result.events[0]?.geometry).toEqual({ type: "Point", coordinates: [9.641987, 63.279343] });
+    expect(result.events[0]?.geometry).toEqual({
+      type: "Point",
+      coordinates: [9.641987, 63.279343],
+    });
     expect(result.events[0]?.areaLabel).toBe("Gangåsvegen");
   });
 

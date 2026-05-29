@@ -65,7 +65,11 @@ function stateLabel(state: TrafficMapEvent["state"]) {
   }
 }
 
-export function TrafficEventList({ events, selectedEventId, onSelectEvent }: TrafficEventListProps) {
+export function TrafficEventList({
+  events,
+  selectedEventId,
+  onSelectEvent,
+}: TrafficEventListProps) {
   return (
     <section className="traffic-event-list-card">
       <header>
@@ -84,9 +88,10 @@ export function TrafficEventList({ events, selectedEventId, onSelectEvent }: Tra
             >
               <strong>{event.title}</strong>
               <span>
-                {categoryLabel(event.category)} · {severityLabel(event.severity)} · {stateLabel(event.state)}
+                {categoryLabel(event.category)} · {severityLabel(event.severity)} ·{" "}
+                {stateLabel(event.state)}
               </span>
-              {event.locationName ?? event.roadName ? (
+              {(event.locationName ?? event.roadName) ? (
                 <span>{event.locationName ?? event.roadName}</span>
               ) : null}
               <small>{formatEventTime(event)}</small>

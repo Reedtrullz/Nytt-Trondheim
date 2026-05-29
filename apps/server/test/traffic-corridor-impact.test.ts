@@ -36,11 +36,14 @@ function trafficPulseCorridor(overrides: Partial<TrafficPulseCorridor> = {}): Tr
 
 describe("traffic corridor impact travel-time telemetry", () => {
   it("attaches the worst matching DATEX TravelTime row by curated upstream location id", () => {
-    const impacts = buildCorridorImpacts([trafficEvent()], [
-      trafficPulseCorridor({ id: "e6-south", delaySeconds: 999, state: "congested" }),
-      trafficPulseCorridor({ id: "100142", delaySeconds: 120, state: "congested" }),
-      trafficPulseCorridor(),
-    ]);
+    const impacts = buildCorridorImpacts(
+      [trafficEvent()],
+      [
+        trafficPulseCorridor({ id: "e6-south", delaySeconds: 999, state: "congested" }),
+        trafficPulseCorridor({ id: "100142", delaySeconds: 120, state: "congested" }),
+        trafficPulseCorridor(),
+      ],
+    );
 
     const impact = impacts.find((item) => item.id === "e6-south");
 

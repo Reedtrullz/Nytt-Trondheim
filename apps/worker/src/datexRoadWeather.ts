@@ -181,7 +181,12 @@ function pointFromLatLngObject(value: unknown): RoadWeatherObservation["geometry
   if (!isObject(value)) return undefined;
 
   const latitude = coordinateNumber(value, ["latitude", "lat", "latitudeInDecimalDegrees"]);
-  const longitude = coordinateNumber(value, ["longitude", "lng", "lon", "longitudeInDecimalDegrees"]);
+  const longitude = coordinateNumber(value, [
+    "longitude",
+    "lng",
+    "lon",
+    "longitudeInDecimalDegrees",
+  ]);
   if (latitude === undefined || longitude === undefined) return undefined;
   if (!pointInTrondelagCoordinates(longitude, latitude)) return undefined;
 
@@ -323,7 +328,10 @@ function weatherMeasurementFromSiteMeasurements(
   return hasMeasurementValues(measurement) ? measurement : undefined;
 }
 
-function weatherMeasurements(measurementXml: string, receivedAt: string): Map<string, DatexWeatherMeasurement> {
+function weatherMeasurements(
+  measurementXml: string,
+  receivedAt: string,
+): Map<string, DatexWeatherMeasurement> {
   const tree = parseXml(measurementXml);
   const measurements = new Map<string, DatexWeatherMeasurement>();
 
@@ -334,7 +342,10 @@ function weatherMeasurements(measurementXml: string, receivedAt: string): Map<st
       if (!measurement) continue;
 
       const previous = measurements.get(measurement.stationId);
-      if (!previous || new Date(measurement.observedAt).getTime() >= new Date(previous.observedAt).getTime()) {
+      if (
+        !previous ||
+        new Date(measurement.observedAt).getTime() >= new Date(previous.observedAt).getTime()
+      ) {
         measurements.set(measurement.stationId, measurement);
       }
     }
@@ -349,7 +360,9 @@ function rawSummary(measurement: DatexWeatherMeasurement): string | undefined {
     measurement.roadSurfaceTemperatureC !== undefined
       ? `road=${measurement.roadSurfaceTemperatureC}C`
       : "",
-    measurement.precipitationMm !== undefined ? `precipitation=${measurement.precipitationMm}mm` : "",
+    measurement.precipitationMm !== undefined
+      ? `precipitation=${measurement.precipitationMm}mm`
+      : "",
     measurement.windSpeedMps !== undefined ? `wind=${measurement.windSpeedMps}m/s` : "",
     measurement.visibilityMeters !== undefined ? `visibility=${measurement.visibilityMeters}m` : "",
   ].filter(Boolean);

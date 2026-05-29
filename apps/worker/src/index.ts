@@ -1,12 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import type {
-  OfficialEvent,
-  RoadCamera,
-  RoadWeatherObservation,
-  TrafficCounterSnapshot,
-} from "@nytt/shared";
+import type { OfficialEvent, TrafficCounterSnapshot } from "@nytt/shared";
 import {
   collectMunicipality,
   collectPolitiloggenPersonalUse,

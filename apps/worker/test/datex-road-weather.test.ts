@@ -8,7 +8,10 @@ import {
 } from "../src/datexRoadWeather.js";
 
 const sitesFixturePath = new URL("./fixtures/datex-weather-sites.xml", import.meta.url);
-const measurementsFixturePath = new URL("./fixtures/datex-weather-measurements.xml", import.meta.url);
+const measurementsFixturePath = new URL(
+  "./fixtures/datex-weather-measurements.xml",
+  import.meta.url,
+);
 
 const _roadWeatherObservationTypeCheck = {
   id: "datex-weather:SN70690",

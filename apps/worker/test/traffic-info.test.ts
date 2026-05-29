@@ -23,7 +23,9 @@ describe("Vegvesen TrafficInfo", () => {
 
   it("normalizes relevant Trondheim messages into traffic map events", async () => {
     const payload = await readFile(fixturePath, "utf8");
-    const parsedPayload = JSON.parse(payload) as { trafficMessages: Array<Record<string, unknown>> };
+    const parsedPayload = JSON.parse(payload) as {
+      trafficMessages: Array<Record<string, unknown>>;
+    };
     const result = parseTrafficInfoMessages(payload, {
       endpoint: defaultTrafficInfoEndpoint,
       receivedAt: "2026-05-29T11:15:00.000Z",
@@ -40,7 +42,8 @@ describe("Vegvesen TrafficInfo", () => {
       category: "roadworks",
       severity: "medium",
       state: "active",
-      title: "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
+      title:
+        "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
       description: "Lysregulering.",
       roadName: "F6650",
       validFrom: "2026-04-21T05:00:00.000Z",
@@ -88,7 +91,8 @@ describe("Vegvesen TrafficInfo", () => {
       provider: "vegvesen_traffic_info",
       kind: "official_event",
       externalId: "NPRA_HBT_21-04-2026.66010",
-      title: "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
+      title:
+        "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
       reliabilityTier: "official",
       geoHint: { type: "Point", coordinates: [10.345405, 63.38945] },
     });
@@ -98,7 +102,9 @@ describe("Vegvesen TrafficInfo", () => {
 
   it("skips messages with missing IDs or malformed geometry and keeps outside-region messages out of Nytt's traffic map table", async () => {
     const payload = await readFile(fixturePath, "utf8");
-    const parsedPayload = JSON.parse(payload) as { trafficMessages: Array<Record<string, unknown>> };
+    const parsedPayload = JSON.parse(payload) as {
+      trafficMessages: Array<Record<string, unknown>>;
+    };
     const [baseMessage] = parsedPayload.trafficMessages;
     const missingIdTitle = "Missing ID Trondheim test message";
     const malformedGeometryId = "NPRA_HBT_MALFORMED_GEOMETRY";

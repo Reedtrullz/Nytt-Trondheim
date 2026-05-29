@@ -90,7 +90,10 @@ function numericRank(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
 }
 
-function compareTrafficPulseImpact(left: TrafficPulseCorridor, right: TrafficPulseCorridor): number {
+function compareTrafficPulseImpact(
+  left: TrafficPulseCorridor,
+  right: TrafficPulseCorridor,
+): number {
   return (
     numericRank(right.delaySeconds) - numericRank(left.delaySeconds) ||
     numericRank(right.delayRatio) - numericRank(left.delayRatio) ||

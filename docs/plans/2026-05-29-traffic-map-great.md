@@ -28,13 +28,13 @@ Reviewed `https://dataut.vegvesen.no/dataset/` on 2026-05-29 through the CKAN AP
 
 Recommended now or immediately after TrafficInfo parity:
 
-| Dataset/API | Catalog ID | Access | Product value | Plan decision |
-|---|---|---|---|---|
-| Trafikkmeldinger / TrafficInfo | `trafikkmeldinger-api`, `trafikkmeldinger` | TrafficInfo JSON is public with `X-System-ID: vvtraf`; DATEX Situation requires existing Basic Auth | Primary official roadworks/closure/restriction/event layer | Already core source in Phase 2 |
-| Reisetider | `reisetider-reiser-api`, `reisetider-lokasjoner-api`, `reisetider` | DATEX Basic Auth; updates every 5 minutes; covers Trondheim | Makes corridor cards honest: actual travel time, delay and stale state instead of only event counts | Add to corridor summaries; operational telemetry only |
-| Værdata | `vaerdata-malinger-api`, `vaerdata-malestasjoner-api`, `vaerdata` | DATEX Basic Auth; measurement endpoint updates every 10 minutes | Shows road-surface/air-temperature/precipitation context near incidents; valuable for winter/glatt føre explanations | Add as road-context overlay; operational telemetry only |
-| Webkamera | `webkamera-statuser-api`, `webkamera-oppdateringer-api`, `webkamera` | DATEX Basic Auth; CCTV site/status endpoints | Lets users visually verify conditions around bridges, tunnels, ferries and exposed roads | Add as optional camera markers/links; operations-only, no source item spam |
-| Trafikkdata.no GraphQL | `trafikkdata` | Public GraphQL at `https://trafikkdata-api.atlas.vegvesen.no/`; verified 282 operational Trøndelag points and 52 operational Trondheim points | Adds live-ish traffic volume context at counters such as Kroppanbrua, Holtermanns veg, Innherredsveien | Add after weather/camera; bounded low-frequency polling |
+| Dataset/API                    | Catalog ID                                                           | Access                                                                                                                                        | Product value                                                                                                        | Plan decision                                                              |
+| ------------------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Trafikkmeldinger / TrafficInfo | `trafikkmeldinger-api`, `trafikkmeldinger`                           | TrafficInfo JSON is public with `X-System-ID: vvtraf`; DATEX Situation requires existing Basic Auth                                           | Primary official roadworks/closure/restriction/event layer                                                           | Already core source in Phase 2                                             |
+| Reisetider                     | `reisetider-reiser-api`, `reisetider-lokasjoner-api`, `reisetider`   | DATEX Basic Auth; updates every 5 minutes; covers Trondheim                                                                                   | Makes corridor cards honest: actual travel time, delay and stale state instead of only event counts                  | Add to corridor summaries; operational telemetry only                      |
+| Værdata                        | `vaerdata-malinger-api`, `vaerdata-malestasjoner-api`, `vaerdata`    | DATEX Basic Auth; measurement endpoint updates every 10 minutes                                                                               | Shows road-surface/air-temperature/precipitation context near incidents; valuable for winter/glatt føre explanations | Add as road-context overlay; operational telemetry only                    |
+| Webkamera                      | `webkamera-statuser-api`, `webkamera-oppdateringer-api`, `webkamera` | DATEX Basic Auth; CCTV site/status endpoints                                                                                                  | Lets users visually verify conditions around bridges, tunnels, ferries and exposed roads                             | Add as optional camera markers/links; operations-only, no source item spam |
+| Trafikkdata.no GraphQL         | `trafikkdata`                                                        | Public GraphQL at `https://trafikkdata-api.atlas.vegvesen.no/`; verified 282 operational Trøndelag points and 52 operational Trondheim points | Adds live-ish traffic volume context at counters such as Kroppanbrua, Holtermanns veg, Innherredsveien               | Add after weather/camera; bounded low-frequency polling                    |
 
 Defer/not worth adding to this plan:
 
@@ -640,7 +640,10 @@ Use this shape:
       "startTime": "2026-04-21T07:00:00+02:00",
       "estimatedEndTime": "2026-06-26T16:00:00+02:00",
       "updatedTime": "2026-05-07T06:59:25+02:00",
-      "location": { "counties": [{ "name": "Trøndelag", "code": 50 }], "roads": [{ "name": "", "number": "F6650", "category": "F" }] },
+      "location": {
+        "counties": [{ "name": "Trøndelag", "code": 50 }],
+        "roads": [{ "name": "", "number": "F6650", "category": "F" }]
+      },
       "priorityScore": 500
     },
     {
@@ -648,7 +651,9 @@ Use this shape:
       "publicationTime": "2026-05-29T13:12:04+02:00",
       "id": "NPRA_HBT_19-05-2026.80670",
       "icon": { "position": { "type": "Point", "coordinates": [10.318883, 63.383823] } },
-      "locationDescriptionDetails": { "simpleLocationDescription": "Kv. 4295 Leirbrumyran, Trondheim, Trøndelag" },
+      "locationDescriptionDetails": {
+        "simpleLocationDescription": "Kv. 4295 Leirbrumyran, Trondheim, Trøndelag"
+      },
       "activityStatus": "future",
       "trafficImpact": "none",
       "trafficStatus": { "description": "Åpen vei", "type": "RoadOpen" },
@@ -657,7 +662,10 @@ Use this shape:
       "startTime": "2026-06-01T07:00:00+02:00",
       "estimatedEndTime": "2026-06-05T15:00:00+02:00",
       "updatedTime": "2026-05-26T14:28:35+02:00",
-      "location": { "counties": [{ "name": "Trøndelag", "code": 50 }], "roads": [{ "name": "", "number": "K4295", "category": "K" }] },
+      "location": {
+        "counties": [{ "name": "Trøndelag", "code": 50 }],
+        "roads": [{ "name": "", "number": "K4295", "category": "K" }]
+      },
       "priorityScore": 100
     },
     {
@@ -670,7 +678,10 @@ Use this shape:
       "trafficImpact": "large",
       "trafficEventCategory": "warning",
       "updatedTime": "2026-05-29T10:00:00+02:00",
-      "location": { "counties": [{ "name": "Oslo", "code": 3 }], "roads": [{ "number": "R150", "category": "R" }] }
+      "location": {
+        "counties": [{ "name": "Oslo", "code": 3 }],
+        "roads": [{ "number": "R150", "category": "R" }]
+      }
     }
   ]
 }
@@ -730,7 +741,8 @@ describe("Vegvesen TrafficInfo", () => {
       category: "roadworks",
       severity: "medium",
       state: "active",
-      title: "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
+      title:
+        "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
       description: "Lysregulering.",
       roadName: "F6650",
       validFrom: "2026-04-21T05:00:00.000Z",
@@ -784,7 +796,12 @@ Create `apps/worker/src/vegvesenTrafficInfo.ts` with these exported functions:
 ```ts
 import { createHash } from "node:crypto";
 import type { Point } from "geojson";
-import type { TrafficEventCategory, TrafficEventSeverity, TrafficEventState, TrafficMapEvent } from "@nytt/shared";
+import type {
+  TrafficEventCategory,
+  TrafficEventSeverity,
+  TrafficEventState,
+  TrafficMapEvent,
+} from "@nytt/shared";
 
 type TrafficInfoObject = Record<string, unknown>;
 
@@ -819,7 +836,8 @@ function iso(value: unknown, fallback?: string): string | undefined {
 }
 
 function pointGeometry(message: TrafficInfoObject): Point | undefined {
-  const position = isObject(message.icon) && isObject(message.icon.position) ? message.icon.position : undefined;
+  const position =
+    isObject(message.icon) && isObject(message.icon.position) ? message.icon.position : undefined;
   const coordinates = Array.isArray(position?.coordinates) ? position.coordinates : undefined;
   if (!coordinates || coordinates.length < 2) return undefined;
   const lng = Number(coordinates[0]);
@@ -867,17 +885,22 @@ function categoryFromMessage(message: TrafficInfoObject): TrafficEventCategory {
   if (/closed|closure|stengt|roadclosed/i.test(haystack)) return "closure";
   if (/congestion|queue|kø|forsinkelse/i.test(haystack)) return "congestion";
   if (/weather|vær|føre|glatt|snø|is/i.test(haystack)) return "weather";
-  if (/restriction|weight|height|width|restriksjon|begrensning/i.test(haystack)) return "restriction";
+  if (/restriction|weight|height|width|restriksjon|begrensning/i.test(haystack))
+    return "restriction";
   if (/obstruction|hindring|debris|dyr|animal/i.test(haystack)) return "obstruction";
   return "other";
 }
 
-function severityFromMessage(message: TrafficInfoObject, category: TrafficEventCategory): TrafficEventSeverity {
+function severityFromMessage(
+  message: TrafficInfoObject,
+  category: TrafficEventCategory,
+): TrafficEventSeverity {
   const status = isObject(message.trafficStatus) ? message.trafficStatus : {};
   const impact = text(message.trafficImpact)?.toLowerCase();
   const statusType = text(status.type)?.toLowerCase() ?? "";
   if (impact === "very_large") return "critical";
-  if (impact === "large" || statusType.includes("roadclosed") || category === "accident") return "high";
+  if (impact === "large" || statusType.includes("roadclosed") || category === "accident")
+    return "high";
   if (impact === "small" || category === "roadworks" || category === "congestion") return "medium";
   return "low";
 }
@@ -891,7 +914,9 @@ const trondheimRegion = { south: 62.9, north: 63.75, west: 9.6, east: 11.3 };
 function isTrondelagMessage(message: TrafficInfoObject): boolean {
   const location = isObject(message.location) ? message.location : {};
   const counties = Array.isArray(location.counties) ? location.counties : [];
-  return counties.some((county) => isObject(county) && /trøndelag|trondelag/i.test(text(county.name) ?? ""));
+  return counties.some(
+    (county) => isObject(county) && /trøndelag|trondelag/i.test(text(county.name) ?? ""),
+  );
 }
 
 function pointInTrondheimRegion(geometry: Point | undefined): boolean {
@@ -899,7 +924,12 @@ function pointInTrondheimRegion(geometry: Point | undefined): boolean {
   const lng = geometry.coordinates[0];
   const lat = geometry.coordinates[1];
   if (typeof lat !== "number" || typeof lng !== "number") return false;
-  return lat >= trondheimRegion.south && lat <= trondheimRegion.north && lng >= trondheimRegion.west && lng <= trondheimRegion.east;
+  return (
+    lat >= trondheimRegion.south &&
+    lat <= trondheimRegion.north &&
+    lng >= trondheimRegion.west &&
+    lng <= trondheimRegion.east
+  );
 }
 ```
 
@@ -919,7 +949,10 @@ export interface TrafficInfoParseResult {
   relevantMessages: number;
 }
 
-export function parseTrafficInfoMessages(rawJson: string, options: TrafficInfoParseOptions): TrafficInfoParseResult {
+export function parseTrafficInfoMessages(
+  rawJson: string,
+  options: TrafficInfoParseOptions,
+): TrafficInfoParseResult {
   const parsed = JSON.parse(rawJson) as unknown;
   if (!isObject(parsed) || !Array.isArray(parsed.trafficMessages)) {
     throw new Error("TrafficInfo payload mangler trafficMessages[]");
@@ -936,10 +969,10 @@ export function parseTrafficInfoMessages(rawJson: string, options: TrafficInfoPa
 
     const location = isObject(message.location) ? message.location : {};
     const roads = Array.isArray(location.roads) ? location.roads.filter(isObject) : [];
-    const roadName = roads
-      .map((road) => text(road.number) ?? text(road.name))
-      .find(Boolean);
-    const details = isObject(message.locationDescriptionDetails) ? message.locationDescriptionDetails : {};
+    const roadName = roads.map((road) => text(road.number) ?? text(road.name)).find(Boolean);
+    const details = isObject(message.locationDescriptionDetails)
+      ? message.locationDescriptionDetails
+      : {};
     const category = categoryFromMessage(message);
     const severity = severityFromMessage(message, category);
     const [lng, lat] = geometry.coordinates as [number, number];
@@ -952,13 +985,18 @@ export function parseTrafficInfoMessages(rawJson: string, options: TrafficInfoPa
       category,
       severity,
       state: stateFromActivityStatus(message.activityStatus),
-      title: text(details.simpleLocationDescription) ?? text(message.publicCommentDescription) ?? "Trafikkmelding",
+      title:
+        text(details.simpleLocationDescription) ??
+        text(message.publicCommentDescription) ??
+        "Trafikkmelding",
       description: text(message.publicCommentDescription),
       locationName: text(details.simpleLocationDescription),
       roadName,
       validFrom: iso(message.startTime),
       validTo: iso(message.estimatedEndTime),
-      updatedAt: iso(message.updatedTime, iso(message.publicationTime, options.receivedAt)) ?? options.receivedAt,
+      updatedAt:
+        iso(message.updatedTime, iso(message.publicationTime, options.receivedAt)) ??
+        options.receivedAt,
       sourceUrl: `https://www.vegvesen.no/trafikk/hvaskjer?lat=${lat}&lng=${lng}&zoom=14`,
       geometry,
       rawType: text(message.trafficEventCategory),
@@ -1058,7 +1096,8 @@ it("mirrors TrafficInfo map events into official source items", async () => {
     provider: "vegvesen_traffic_info",
     kind: "official_event",
     externalId: "NPRA_HBT_21-04-2026.66010",
-    title: "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
+    title:
+      "Fv. 6650 Vestre Kystad - avkjøringsveg Kystad helse- og velferdssenter, Trondheim, Trøndelag",
     reliabilityTier: "official",
     geoHint: { type: "Point", coordinates: [10.345405, 63.38945] },
   });
@@ -1099,7 +1138,15 @@ export function trafficInfoSourceItemInput(
   event: TrafficMapEvent,
   options: { fetchedAt: string; rawMessage: unknown },
 ): SourceItemInput {
-  const captureHash = sha256(JSON.stringify([event.source, event.sourceEventId, event.updatedAt, event.state, event.validTo]));
+  const captureHash = sha256(
+    JSON.stringify([
+      event.source,
+      event.sourceEventId,
+      event.updatedAt,
+      event.state,
+      event.validTo,
+    ]),
+  );
   return {
     id: `source:${sha256(JSON.stringify([event.source, "official_event", event.sourceEventId]))}`,
     provider: "vegvesen_traffic_info",
@@ -1436,7 +1483,10 @@ await request(app)
   .expect(200)
   .expect((res) => {
     expect(res.body.events).toHaveLength(1);
-    expect(res.body.events[0]).toMatchObject({ source: "vegvesen_traffic_info", sourceEventId: "NPRA_HBT_1" });
+    expect(res.body.events[0]).toMatchObject({
+      source: "vegvesen_traffic_info",
+      sourceEventId: "NPRA_HBT_1",
+    });
   });
 ```
 
@@ -1697,7 +1747,11 @@ function formatEventTime(event: TrafficMapEvent) {
   return new Intl.DateTimeFormat("nb-NO", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
-export function TrafficEventList({ events, selectedEventId, onSelectEvent }: TrafficEventListProps) {
+export function TrafficEventList({
+  events,
+  selectedEventId,
+  onSelectEvent,
+}: TrafficEventListProps) {
   return (
     <section className="traffic-event-list-card">
       <header>
@@ -1714,7 +1768,9 @@ export function TrafficEventList({ events, selectedEventId, onSelectEvent }: Tra
               onClick={() => onSelectEvent(event.id)}
             >
               <strong>{event.title}</strong>
-              <span>{event.category} · {event.severity} · {event.state}</span>
+              <span>
+                {event.category} · {event.severity} · {event.state}
+              </span>
               <small>{formatEventTime(event)}</small>
             </button>
           </li>
@@ -1742,7 +1798,8 @@ const highlightedEventIds = useMemo(() => {
   const ids = new Set<string>();
   if (selectedEventId) ids.add(selectedEventId);
   if (selectedCorridorId) {
-    for (const id of data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)?.affectedEventIds ?? []) {
+    for (const id of data?.corridorImpacts?.find((impact) => impact.id === selectedCorridorId)
+      ?.affectedEventIds ?? []) {
       ids.add(id);
     }
   }
@@ -1753,13 +1810,15 @@ const highlightedEventIds = useMemo(() => {
 Render after `TrafficBriefCard`:
 
 ```tsx
-{data?.events ? (
-  <TrafficEventList
-    events={data.events}
-    selectedEventId={selectedEventId}
-    onSelectEvent={setSelectedEventId}
-  />
-) : null}
+{
+  data?.events ? (
+    <TrafficEventList
+      events={data.events}
+      selectedEventId={selectedEventId}
+      onSelectEvent={setSelectedEventId}
+    />
+  ) : null;
+}
 ```
 
 **Step 3: Add minimal CSS**
@@ -1828,10 +1887,9 @@ git commit -m "feat: add traffic event list sidebar"
 In `buildTrafficBrief`, distinguish no events from stale source:
 
 ```ts
-headline:
-  activeEvents.length === 0
-    ? "Ingen trafikkhendelser i valgt kartutsnitt og filter. Prøv å zoome ut eller slå på planlagte veiarbeid."
-    : `${activeEvents.length} trafikkhendelser i valgt kartutsnitt akkurat nå.`
+headline: activeEvents.length === 0
+  ? "Ingen trafikkhendelser i valgt kartutsnitt og filter. Prøv å zoome ut eller slå på planlagte veiarbeid."
+  : `${activeEvents.length} trafikkhendelser i valgt kartutsnitt akkurat nå.`;
 ```
 
 **Step 2: Frontend brief card freshness**
@@ -1839,9 +1897,11 @@ headline:
 In `TrafficBriefCard`, add:
 
 ```tsx
-{brief.freshness === "stale" ? (
-  <p role="status">Trafikkdata kan være eldre enn 30 minutter.</p>
-) : null}
+{
+  brief.freshness === "stale" ? (
+    <p role="status">Trafikkdata kan være eldre enn 30 minutter.</p>
+  ) : null;
+}
 ```
 
 **Step 3: Page error/empty text**
@@ -1883,12 +1943,28 @@ className: `traffic-event traffic-event-${event.source} traffic-event-${event.ca
 **Step 2: Add CSS variables/classes**
 
 ```css
-.traffic-event-low { stroke: var(--traffic-low, #64748b); fill: var(--traffic-low, #64748b); }
-.traffic-event-medium { stroke: var(--traffic-medium, #d97706); fill: var(--traffic-medium, #d97706); }
-.traffic-event-high { stroke: var(--traffic-high, #dc2626); fill: var(--traffic-high, #dc2626); }
-.traffic-event-critical { stroke: var(--traffic-critical, #7f1d1d); fill: var(--traffic-critical, #7f1d1d); }
-.traffic-event-planned { stroke-dasharray: 6 5; }
-.traffic-event-highlighted { filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.7)); }
+.traffic-event-low {
+  stroke: var(--traffic-low, #64748b);
+  fill: var(--traffic-low, #64748b);
+}
+.traffic-event-medium {
+  stroke: var(--traffic-medium, #d97706);
+  fill: var(--traffic-medium, #d97706);
+}
+.traffic-event-high {
+  stroke: var(--traffic-high, #dc2626);
+  fill: var(--traffic-high, #dc2626);
+}
+.traffic-event-critical {
+  stroke: var(--traffic-critical, #7f1d1d);
+  fill: var(--traffic-critical, #7f1d1d);
+}
+.traffic-event-planned {
+  stroke-dasharray: 6 5;
+}
+.traffic-event-highlighted {
+  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.7));
+}
 ```
 
 The fallback literals are contained in CSS custom properties only; if the app has design tokens, replace the fallback values with token references.
@@ -2150,7 +2226,18 @@ export interface TrafficCorridorImpact {
   highestSeverity: TrafficEventSeverity;
   travelTime?: Pick<
     TrafficPulseCorridor,
-    "id" | "name" | "state" | "travelTimeSeconds" | "freeFlowSeconds" | "delaySeconds" | "delayRatio" | "trend" | "measurementFrom" | "measurementTo" | "updatedAt" | "sourceUrl"
+    | "id"
+    | "name"
+    | "state"
+    | "travelTimeSeconds"
+    | "freeFlowSeconds"
+    | "delaySeconds"
+    | "delayRatio"
+    | "trend"
+    | "measurementFrom"
+    | "measurementTo"
+    | "updatedAt"
+    | "sourceUrl"
   >;
 }
 ```
@@ -2213,7 +2300,13 @@ git commit -m "feat: add travel time context to traffic corridors"
 Create `apps/worker/test/road-context-types.test.ts`:
 
 ```ts
-import type { RoadCamera, RoadWeatherObservation, TrafficCounterSnapshot, TrafficMapPayload, SourceHealth } from "@nytt/shared";
+import type {
+  RoadCamera,
+  RoadWeatherObservation,
+  TrafficCounterSnapshot,
+  TrafficMapPayload,
+  SourceHealth,
+} from "@nytt/shared";
 
 const weather = {
   id: "datex-weather:SN70690",
@@ -2248,8 +2341,27 @@ const counter = {
   volumeLastHour: 1234,
 } satisfies TrafficCounterSnapshot;
 
-const payload = { events: [], brief: { headline: "", severity: "low", freshness: "fresh", generatedAt: "", bullets: [], primaryEventIds: [], counts: { total: 0, byCategory: {}, bySeverity: {} } }, weather: [weather], cameras: [camera], counters: [counter] } satisfies TrafficMapPayload;
-const health = { source: "trafikkdata", label: "Trafikkdata", state: "ok", detail: "52 punkt" } satisfies SourceHealth;
+const payload = {
+  events: [],
+  brief: {
+    headline: "",
+    severity: "low",
+    freshness: "fresh",
+    generatedAt: "",
+    bullets: [],
+    primaryEventIds: [],
+    counts: { total: 0, byCategory: {}, bySeverity: {} },
+  },
+  weather: [weather],
+  cameras: [camera],
+  counters: [counter],
+} satisfies TrafficMapPayload;
+const health = {
+  source: "trafikkdata",
+  label: "Trafikkdata",
+  state: "ok",
+  detail: "52 punkt",
+} satisfies SourceHealth;
 
 void payload;
 void health;
@@ -2276,7 +2388,12 @@ Add to `SourceId` and `sourceIdSchema`:
 Also extend `TrafficMapSourceStatus.source` in `packages/shared/src/traffic-map.ts` so source-health warnings can include the new context feeds:
 
 ```ts
-source: "datex" | "datex_travel_time" | "vegvesen_traffic_info" | "datex_weather" | "datex_cctv" | "trafikkdata";
+source: "datex" |
+  "datex_travel_time" |
+  "vegvesen_traffic_info" |
+  "datex_weather" |
+  "datex_cctv" |
+  "trafikkdata";
 ```
 
 **Step 4: Add shared types**
@@ -2628,7 +2745,9 @@ expect(buildTrafficRegistrationPointsQuery()).toContain("countyNumbers:[50]");
 Parser expectations:
 
 ```ts
-expect(parseTrafikkdataPoints(fixture).filter((point) => point.municipalityName === "Trondheim")).toHaveLength(1);
+expect(
+  parseTrafikkdataPoints(fixture).filter((point) => point.municipalityName === "Trondheim"),
+).toHaveLength(1);
 expect(parseTrafikkdataPoints(fixture)[0]).toMatchObject({
   id: "trafikkdata:06970V72811",
   source: "trafikkdata",
@@ -2757,10 +2876,20 @@ Add checkboxes:
 Use CSS variables/classes, not inline colors:
 
 ```css
-.road-context-marker-weather { --road-context-color: var(--traffic-weather, #0284c7); }
-.road-context-marker-camera { --road-context-color: var(--traffic-camera, #7c3aed); }
-.road-context-marker-counter { --road-context-color: var(--traffic-counter, #059669); }
-.road-context-popup img { max-width: 260px; border-radius: 8px; display: block; }
+.road-context-marker-weather {
+  --road-context-color: var(--traffic-weather, #0284c7);
+}
+.road-context-marker-camera {
+  --road-context-color: var(--traffic-camera, #7c3aed);
+}
+.road-context-marker-counter {
+  --road-context-color: var(--traffic-counter, #059669);
+}
+.road-context-popup img {
+  max-width: 260px;
+  border-radius: 8px;
+  display: block;
+}
 ```
 
 **Step 5: Run frontend checks**

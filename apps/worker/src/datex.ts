@@ -301,9 +301,11 @@ export function parseDatexSituationPublication(
           firstIso(datexText(validityTimeSpecification.overallEndTime)) ??
           receivedAtPlusOneDay(options.receivedAt);
         const roadNumber =
-          firstTextForKey(record.roadInformation, "roadNumber") || firstTextForKey(record, "roadNumber");
+          firstTextForKey(record.roadInformation, "roadNumber") ||
+          firstTextForKey(record, "roadNumber");
         const roadName =
-          firstTextForKey(record.roadInformation, "roadName") || firstTextForKey(record, "roadName");
+          firstTextForKey(record.roadInformation, "roadName") ||
+          firstTextForKey(record, "roadName");
         const comments = publicComments(record);
         const title = titleForRecord(record, kind, roadName, roadNumber);
         const detail = comments.join("\n") || title;

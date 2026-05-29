@@ -48,7 +48,8 @@ export function iso(value: unknown, fallback?: string): string | undefined {
 }
 
 export function pointGeometry(message: TrafficInfoObject): Point | undefined {
-  const position = isObject(message.icon) && isObject(message.icon.position) ? message.icon.position : undefined;
+  const position =
+    isObject(message.icon) && isObject(message.icon.position) ? message.icon.position : undefined;
   const coordinates = Array.isArray(position?.coordinates) ? position.coordinates : undefined;
   if (!coordinates || coordinates.length < 2) return undefined;
 
@@ -64,7 +65,13 @@ export function trafficInfoSourceItemInput(
   options: { fetchedAt: string; rawMessage: unknown },
 ): SourceItemInput {
   const captureHash = sha256(
-    JSON.stringify([event.source, event.sourceEventId, event.updatedAt, event.state, event.validTo]),
+    JSON.stringify([
+      event.source,
+      event.sourceEventId,
+      event.updatedAt,
+      event.state,
+      event.validTo,
+    ]),
   );
   return {
     id: `source:${sha256(JSON.stringify([event.source, "official_event", event.sourceEventId]))}`,
@@ -128,7 +135,8 @@ function categoryFromMessage(message: TrafficInfoObject): TrafficEventCategory {
   if (/restriction|weight|height|width|length|restriksjon|begrensning|kolonne/.test(haystack)) {
     return "restriction";
   }
-  if (/obstruction|hindring|debris|gjenstand|dyr|animal|stein|ras/.test(haystack)) return "obstruction";
+  if (/obstruction|hindring|debris|gjenstand|dyr|animal|stein|ras/.test(haystack))
+    return "obstruction";
   return "other";
 }
 
@@ -188,7 +196,9 @@ function pointInTrondheimRegion(geometry: Point | undefined): boolean {
 function roadNameForMessage(message: TrafficInfoObject): string | undefined {
   const location = isObject(message.location) ? message.location : {};
   const roads = Array.isArray(location.roads) ? location.roads.filter(isObject) : [];
-  return roads.map((road) => text(road.number) ?? text(road.name)).find((road) => road !== undefined);
+  return roads
+    .map((road) => text(road.number) ?? text(road.name))
+    .find((road) => road !== undefined);
 }
 
 export interface TrafficInfoParseOptions {
@@ -231,7 +241,9 @@ export function parseTrafficInfoMessages(
       ? message.locationDescriptionDetails
       : {};
     const title =
-      text(details.simpleLocationDescription) ?? text(message.publicCommentDescription) ?? "Trafikkmelding";
+      text(details.simpleLocationDescription) ??
+      text(message.publicCommentDescription) ??
+      "Trafikkmelding";
     const category = categoryFromMessage(message);
     const severity = severityFromMessage(message, category);
     const [lng, lat] = geometry.coordinates as [number, number];
