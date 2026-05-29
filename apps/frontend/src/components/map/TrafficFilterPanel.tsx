@@ -1,6 +1,11 @@
 import type { TrafficEventCategory, TrafficEventSeverity } from "@nytt/shared";
 
 export type TrafficMapPreset = "now" | "next24h" | "next7d" | "planned" | "severe" | "custom";
+export interface RoadContextLayerVisibility {
+  weather: boolean;
+  cameras: boolean;
+  counters: boolean;
+}
 
 const presets: Array<{ value: Exclude<TrafficMapPreset, "custom">; label: string }> = [
   { value: "now", label: "Nå" },
@@ -32,9 +37,11 @@ interface TrafficFilterPanelProps {
   selectedCategories: TrafficEventCategory[];
   selectedSeverities: TrafficEventSeverity[];
   selectedPreset: TrafficMapPreset;
+  visibleContextLayers: RoadContextLayerVisibility;
   onCategoriesChange: (categories: TrafficEventCategory[]) => void;
   onSeveritiesChange: (severities: TrafficEventSeverity[]) => void;
   onPresetChange: (preset: Exclude<TrafficMapPreset, "custom">) => void;
+  onContextLayersChange: (visible: RoadContextLayerVisibility) => void;
 }
 
 function toggle<T extends string>(items: T[], item: T): T[] {
@@ -45,9 +52,11 @@ export function TrafficFilterPanel({
   selectedCategories,
   selectedSeverities,
   selectedPreset,
+  visibleContextLayers,
   onCategoriesChange,
   onSeveritiesChange,
   onPresetChange,
+  onContextLayersChange,
 }: TrafficFilterPanelProps) {
   return (
     <aside className="traffic-filter-panel">
@@ -93,6 +102,48 @@ export function TrafficFilterPanel({
             {severity.label}
           </label>
         ))}
+      </section>
+      <section>
+        <h3>Kartlag</h3>
+        <label>
+          <input
+            type="checkbox"
+            checked={visibleContextLayers.weather}
+            onChange={() =>
+              onContextLayersChange({
+                ...visibleContextLayers,
+                weather: !visibleContextLayers.weather,
+              })
+            }
+          />
+          Værstasjoner
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={visibleContextLayers.cameras}
+            onChange={() =>
+              onContextLayersChange({
+                ...visibleContextLayers,
+                cameras: !visibleContextLayers.cameras,
+              })
+            }
+          />
+          Webkamera
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={visibleContextLayers.counters}
+            onChange={() =>
+              onContextLayersChange({
+                ...visibleContextLayers,
+                counters: !visibleContextLayers.counters,
+              })
+            }
+          />
+          Trafikktelling
+        </label>
       </section>
     </aside>
   );

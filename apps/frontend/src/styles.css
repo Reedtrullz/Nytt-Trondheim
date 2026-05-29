@@ -1798,6 +1798,72 @@ button {
   filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.7));
 }
 
+.road-context-marker {
+  stroke: var(--road-context-color, var(--blue));
+  fill: var(--road-context-color, var(--blue));
+}
+
+.road-context-marker-weather {
+  --road-context-color: var(--traffic-weather, #0284c7);
+}
+
+.road-context-marker-camera {
+  --road-context-color: var(--traffic-camera, #7c3aed);
+}
+
+.road-context-marker-counter {
+  --road-context-color: var(--traffic-counter, #059669);
+}
+
+.road-context-popup {
+  max-width: 280px;
+}
+
+.road-context-popup strong {
+  display: inline-block;
+  margin-bottom: 4px;
+}
+
+.road-context-popup p {
+  margin: 6px 0;
+  color: #39434b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.road-context-popup dl {
+  margin: 8px 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  font-size: 12px;
+}
+
+.road-context-popup dt {
+  color: var(--muted);
+}
+
+.road-context-popup dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.road-context-popup img {
+  max-width: 260px;
+  border-radius: 8px;
+  display: block;
+  margin: 8px 0;
+}
+
+.road-context-popup a {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 @media (max-width: 1080px) {
   .masthead {
     gap: 22px;

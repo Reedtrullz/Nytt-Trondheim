@@ -3,9 +3,14 @@ import { MapContainer, TileLayer } from "react-leaflet";
 import type { TrafficEventCategory, TrafficEventSeverity, TrafficEventState } from "@nytt/shared";
 import { CorridorImpactCard } from "../components/map/CorridorImpactCard.js";
 import { MapBoundsWatcher } from "../components/map/MapBoundsWatcher.js";
+import { RoadContextLayer } from "../components/map/RoadContextLayer.js";
 import { TrafficBriefCard } from "../components/map/TrafficBriefCard.js";
 import { TrafficEventList } from "../components/map/TrafficEventList.js";
-import { TrafficFilterPanel, type TrafficMapPreset } from "../components/map/TrafficFilterPanel.js";
+import {
+  TrafficFilterPanel,
+  type RoadContextLayerVisibility,
+  type TrafficMapPreset,
+} from "../components/map/TrafficFilterPanel.js";
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
 
@@ -35,6 +40,11 @@ const allCategories: TrafficEventCategory[] = [
   "other",
 ];
 const allSeverities: TrafficEventSeverity[] = ["low", "medium", "high", "critical"];
+const defaultContextLayers: RoadContextLayerVisibility = {
+  weather: true,
+  cameras: false,
+  counters: false,
+};
 
 function addHours(date: Date, hours: number): Date {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
@@ -77,6 +87,8 @@ export function TrafficMapPage() {
     useState<TrafficEventSeverity[]>(allSeverities);
   const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>();
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
+  const [visibleContextLayers, setVisibleContextLayers] =
+    useState<RoadContextLayerVisibility>(defaultContextLayers);
 
   const stableBounds = useMemo(
     () => bounds,
@@ -152,9 +164,11 @@ export function TrafficMapPage() {
           selectedCategories={selectedCategories}
           selectedSeverities={selectedSeverities}
           selectedPreset={selectedPreset}
+          visibleContextLayers={visibleContextLayers}
           onCategoriesChange={handleCategoriesChange}
           onSeveritiesChange={handleSeveritiesChange}
           onPresetChange={applyPreset}
+          onContextLayersChange={setVisibleContextLayers}
         />
         {data?.brief ? (
           <TrafficBriefCard
@@ -202,6 +216,13 @@ export function TrafficMapPage() {
         <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
         {data?.events ? (
           <TrafficLayer events={data.events} highlightedEventIds={highlightedEventIds} />
+        ) : null}
+        {data ? (
+          <RoadContextLayer
+            weather={visibleContextLayers.weather ? data.weather : []}
+            cameras={visibleContextLayers.cameras ? data.cameras : []}
+            counters={visibleContextLayers.counters ? data.counters : []}
+          />
         ) : null}
       </MapContainer>
     </main>
