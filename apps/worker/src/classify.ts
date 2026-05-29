@@ -33,10 +33,18 @@ const categoryRules: Array<[ArticleCategory, string[]]> = [
   ["Vær", ["vær", "regn", "flom", "farevarsel", "vind"]],
 ];
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function containsPlaceTerm(text: string, term: string): boolean {
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(term)}(?![\\p{L}\\p{N}])`, "u").test(text);
+}
+
 export function detectScope(text: string): GeographicScope | undefined {
   const normalized = text.toLocaleLowerCase("nb");
-  if (trondheimTerms.some((term) => normalized.includes(term))) return "trondheim";
-  if (regionalTerms.some((term) => normalized.includes(term))) return "trondelag";
+  if (trondheimTerms.some((term) => containsPlaceTerm(normalized, term))) return "trondheim";
+  if (regionalTerms.some((term) => containsPlaceTerm(normalized, term))) return "trondelag";
   return undefined;
 }
 
@@ -51,6 +59,6 @@ export function categorize(text: string): ArticleCategory {
 export function extractPlaces(text: string): string[] {
   const normalized = text.toLocaleLowerCase("nb");
   return [...trondheimTerms, ...regionalTerms]
-    .filter((term) => normalized.includes(term))
+    .filter((term) => containsPlaceTerm(normalized, term))
     .map((term) => term.charAt(0).toLocaleUpperCase("nb") + term.slice(1));
 }

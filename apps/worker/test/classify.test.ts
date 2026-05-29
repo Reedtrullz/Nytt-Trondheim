@@ -13,6 +13,14 @@ describe("Trondheim relevance classification", () => {
     expect(detectScope("Farevarsel for kraftig regn i Trøndelag")).toBe("trondelag");
   });
 
+  it("does not match Trondheim place names inside unrelated words", () => {
+    const text =
+      "- Himmelen lyste opp - Jeg kjente en vegg av varm luft, sier Laurentio Mardare til Dagbladet. To av naboene hans ble skadd da en drone traff en boligblokk i Ukraina.";
+
+    expect(detectScope(text)).toBeUndefined();
+    expect(extractPlaces(text)).toEqual([]);
+  });
+
   it("categorizes incident stories and extracts public place names", () => {
     expect(categorize("Skogbrann i Bymarka")).toBe("Hendelser");
     expect(extractPlaces("Skogbrann i Bymarka ved Granåsen")).toEqual(["Bymarka", "Granåsen"]);
