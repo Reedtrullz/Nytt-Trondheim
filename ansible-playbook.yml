@@ -111,7 +111,7 @@
           GITHUB_ALLOWED_LOGIN=Reedtrullz
           DEEPSEEK_API_KEY={{ lookup('env', 'NYTT_DEEPSEEK_API_KEY') }}
           DEEPSEEK_MODEL=deepseek-v4-flash
-          POLITILOGGEN_ENABLED={{ lookup('env', 'NYTT_POLITILOGGEN_ENABLED') | default('false', true) }}
+          POLITILOGGEN_ENABLED={{ lookup('env', 'NYTT_POLITILOGGEN_ENABLED') | default('true', true) }}
           DATEX_ENDPOINT={{ lookup('env', 'NYTT_DATEX_ENDPOINT') | default('', true) }}
           DATEX_USERNAME={{ lookup('env', 'NYTT_DATEX_USERNAME') | default('', true) }}
           DATEX_PASSWORD={{ lookup('env', 'NYTT_DATEX_PASSWORD') | default('', true) }}

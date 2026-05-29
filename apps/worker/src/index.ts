@@ -1,14 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import type { OfficialEvent, TrafficCounterSnapshot } from "@nytt/shared";
-import {
-  collectMunicipality,
-  collectPolitiloggenPersonalUse,
-  collectRss,
-  probeOfficialSources,
-  rssSources,
-} from "./collectors.js";
+import type { Article, OfficialEvent, TrafficCounterSnapshot } from "@nytt/shared";
+import { collectMunicipality, collectRss, probeOfficialSources, rssSources } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
 import {
   collectDatexTravelTimePulse,
@@ -41,6 +35,12 @@ import {
   defaultTrafikkdataGraphqlEndpoint,
   fetchTrafikkdataCounterSnapshots,
 } from "./trafikkdata.js";
+import {
+  collectPolitiloggen,
+  isPolitiloggenEnabled,
+  politiloggenSituationsFromThreads,
+  type PolitiloggenThread,
+} from "./politiloggen.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
@@ -403,6 +403,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       }
     }),
   );
+  const articlesWithoutGeocoding: Article[] = [];
   if (once || Date.now() - lastMunicipalityCollection >= municipalityIntervalMs) {
     lastMunicipalityCollection = Date.now();
     try {
@@ -428,15 +429,54 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       });
     }
   }
-  const articles = await geocodeArticles(articleSets.flat());
+  let politiloggenThreads: PolitiloggenThread[] = [];
+  if (isPolitiloggenEnabled()) {
+    try {
+      const collection = await collectPolitiloggen();
+      politiloggenThreads = collection.threads;
+      const activeThreadIds = new Set(
+        collection.threads
+          .filter((thread) => thread.isActive && thread.id)
+          .map((thread) => `politiloggen-${thread.id}`),
+      );
+      articleSets.push(collection.articles.filter((article) => activeThreadIds.has(article.id)));
+      articlesWithoutGeocoding.push(
+        ...collection.articles.filter((article) => !activeThreadIds.has(article.id)),
+      );
+      await repository.setHealth({
+        source: "politiloggen",
+        label: "Politiloggen",
+        state: "ok",
+        lastCheckedAt: new Date().toISOString(),
+        nextPollAt,
+        detail: `${collection.threads.length} Trondheim-tråder hentet fra Politiloggen API`,
+      });
+    } catch (error) {
+      await repository.setHealth({
+        source: "politiloggen",
+        label: "Politiloggen",
+        state: "degraded",
+        lastCheckedAt: new Date().toISOString(),
+        lastFailureAt: new Date().toISOString(),
+        nextPollAt,
+        detail: `Politiloggen API feilet: ${String(error)}`,
+      });
+    }
+  } else {
+    await repository.setHealth({
+      source: "politiloggen",
+      label: "Politiloggen",
+      state: "disabled",
+      lastCheckedAt: new Date().toISOString(),
+      nextPollAt,
+      detail: "Politiloggen-adapter er slått av med POLITILOGGEN_ENABLED=false",
+    });
+  }
+  const articles = [...(await geocodeArticles(articleSets.flat())), ...articlesWithoutGeocoding];
   await repository.upsertArticles(articles);
   for (const status of await probeOfficialSources()) {
+    if (status.source === "politiloggen") continue;
     await repository.setHealth({ ...status, lastCheckedAt: new Date().toISOString(), nextPollAt });
-  }
-  if (process.env.POLITILOGGEN_ENABLED === "true") {
-    await collectPolitiloggenPersonalUse().catch((error) =>
-      console.warn(`[worker] Politiloggen adapter failed: ${String(error)}`),
-    );
   }
   await collectTrafficInfoForMap({
     repository,
@@ -621,6 +661,11 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     currentDatexEvents,
     trackedSituations,
   );
+  const politiloggenSituations = politiloggenSituationsFromThreads(
+    politiloggenThreads,
+    trackedSituations,
+    articles,
+  );
   const activeDatexEventIds = new Set(currentDatexEvents.map((event) => event.id));
   const activeDatexSituationIds = new Set(
     officialTrafficSituations.map((situation) => situation.id),
@@ -643,12 +688,13 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const situationsToPersist = [
     ...deterministicSituations,
     ...officialTrafficSituations,
+    ...politiloggenSituations,
     ...resolvedDuplicateDatexSituations,
     ...resolvedDatexSituations,
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
   console.log(
-    `[worker] stored ${articles.length} articles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX); AI identified ${analysis.result.clusters.length} validated candidates`,
+    `[worker] stored ${articles.length} articles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen); AI identified ${analysis.result.clusters.length} validated candidates`,
   );
 }
 

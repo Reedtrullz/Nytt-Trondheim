@@ -821,7 +821,10 @@ export function articleSourceItemInput(article: Article, fetchedAt: string): Sou
     geoHint: article.location
       ? { type: "Point", coordinates: [article.location.lng, article.location.lat] }
       : undefined,
-    reliabilityTier: article.source === "trondheim_kommune" ? "official" : "trusted_media",
+    reliabilityTier:
+      article.source === "trondheim_kommune" || article.source === "politiloggen"
+        ? "official"
+        : "trusted_media",
   };
 }
 

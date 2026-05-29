@@ -13,7 +13,7 @@
 Articles link to the publisher; this application does not republish complete articles. Nidaros is excluded until a suitable permitted collection route is confirmed.
 Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, including daylight-saving transitions. When a still-visible collected article is fetched again, corrected public classification and geocoding metadata are refreshed without removing an established situation link.
 
-Articles and official MET/NVE/DATEX situation events are mirrored into the internal `source_items` ledger. DATEX TravelTime is explicitly excluded from the editorial source stream and remains `datex_travel_times` plus `source_health` only.
+Articles and official MET/NVE/DATEX/Politiloggen situation events are mirrored into the internal `source_items` ledger. DATEX TravelTime is explicitly excluded from the editorial source stream and remains `datex_travel_times` plus `source_health` only.
 
 ## Official And Geographic Layers
 
@@ -31,7 +31,7 @@ Articles and official MET/NVE/DATEX situation events are mirrored into the inter
 
 ## Politiloggen
 
-`POLITILOGGEN_ENABLED=false` by default. The optional adapter is isolated because the current web application's structured endpoint is not a documented stable public collection contract and `/api/` is disallowed in the site's robots policy. Enabling it is a personal-use operational choice; failure does not disable the Situation Room.
+Politiloggen is collected from the documented public API `https://api.politiloggen.politiet.no/messagethreads` with `Municipalities=Trondheim`. The worker fetches up to 1000 Trondheim message threads per run, mirrors them as official `politiloggen` source items/articles, and promotes active threads to `Offentlig bekreftet` situations. When Politiloggen later marks a known thread inactive, the matching Nytt situation is resolved with an official timeline entry. Set `POLITILOGGEN_ENABLED=false` only to disable this adapter operationally.
 
 ## Situation Matching
 

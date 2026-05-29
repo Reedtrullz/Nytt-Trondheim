@@ -8,6 +8,7 @@ import {
   normalizeDatexSituationEndpoint,
   probeDatexAccess,
 } from "./datex.js";
+import { defaultPolitiloggenEndpoint, isPolitiloggenEnabled } from "./politiloggen.js";
 
 interface FeedSource {
   id: SourceId;
@@ -212,6 +213,42 @@ async function probeDatex(fetcher: typeof fetch): Promise<OfficialProbeResult> {
   }
 }
 
+async function probePolitiloggen(fetcher: typeof fetch): Promise<OfficialProbeResult> {
+  if (!isPolitiloggenEnabled()) {
+    return {
+      source: "politiloggen",
+      label: "Politiloggen",
+      state: "disabled",
+      detail: "Politiloggen-adapter er slått av med POLITILOGGEN_ENABLED=false",
+    };
+  }
+  const url = new URL(process.env.POLITILOGGEN_ENDPOINT?.trim() || defaultPolitiloggenEndpoint);
+  url.searchParams.set("Municipalities", "Trondheim");
+  url.searchParams.set("Take", "1");
+  url.searchParams.set("Skip", "0");
+  try {
+    const response = await fetcher(url, {
+      headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
+    });
+    return {
+      source: "politiloggen",
+      label: "Politiloggen",
+      state: response.ok || response.status === 204 ? "ok" : "degraded",
+      detail:
+        response.ok || response.status === 204
+          ? "Offentlig Politiloggen API tilgjengelig"
+          : `HTTP ${response.status}`,
+    };
+  } catch (error) {
+    return {
+      source: "politiloggen",
+      label: "Politiloggen",
+      state: "degraded",
+      detail: String(error),
+    };
+  }
+}
+
 export async function probeOfficialSources(
   fetcher: typeof fetch = fetch,
 ): Promise<OfficialProbeResult[]> {
@@ -249,31 +286,6 @@ export async function probeOfficialSources(
     }
   }
   results.push(await probeDatex(fetcher));
-  results.push({
-    source: "politiloggen",
-    label: "Politiloggen",
-    state: process.env.POLITILOGGEN_ENABLED === "true" ? "degraded" : "disabled",
-    detail:
-      process.env.POLITILOGGEN_ENABLED === "true"
-        ? "Eksperimentell adapter; endepunktet er endrings- og policyfølsomt"
-        : "Eksperimentell adapter er slått av",
-  });
+  results.push(await probePolitiloggen(fetcher));
   return results;
-}
-
-export async function collectPolitiloggenPersonalUse(
-  fetcher: typeof fetch = fetch,
-): Promise<unknown[]> {
-  if (process.env.POLITILOGGEN_ENABLED !== "true") return [];
-  const response = await fetcher("https://www.politiet.no/politiloggen/api/messagethreads", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "NyttTrondheim/0.1 personlig bruk",
-    },
-    body: JSON.stringify({ skip: 0, take: 10, districts: ["Trøndelag"], category: [] }),
-  });
-  if (!response.ok) throw new Error(`Politiloggen returned ${response.status}`);
-  const result = (await response.json()) as { messageThreads?: unknown[] };
-  return result.messageThreads ?? [];
 }

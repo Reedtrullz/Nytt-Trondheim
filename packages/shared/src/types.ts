@@ -173,7 +173,7 @@ export interface Situation {
   locationLabel: string;
   incidentSignature?: string;
   detectionVersion?: string;
-  officialSource?: Extract<SourceId, "datex">;
+  officialSource?: Extract<SourceId, "datex" | "politiloggen">;
   officialEventId?: string;
   activationBasis?: {
     rule: "two_independent_sources" | "official_source";
