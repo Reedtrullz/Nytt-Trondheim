@@ -86,6 +86,57 @@ ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file
 
 A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on `source_health.state='ok'`, worker logs and container uptime to distinguish that from collector failure. TravelTime source health appears as `datex_travel_time`; rows in `datex_travel_times` are measured/estimated travel time and delay pulse data only. They do not create `official_events`, do not promote or create `OfficialEvent` rows, and do not create or update `situations`. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
 
+## Traffic Map Production Verification
+
+Do not call the traffic map deployed from CI alone. Verify the same pushed SHA through both workflows, then prove the live VPS has traffic/context data and that map-only/context-only telemetry stayed out of editorial incident promotion.
+
+```bash
+HEAD_SHA=$(git rev-parse HEAD)
+git push origin main
+gh run list --branch main --limit 10 --json databaseId,headSha,status,conclusion,workflowName,event,url
+# Watch the CI run whose headSha is $HEAD_SHA until status=completed and conclusion=success.
+# Then watch the Deploy to VPS workflow_run whose headSha is $HEAD_SHA until it also completes successfully.
+```
+
+After the deploy workflow for that SHA succeeds, run the live checks:
+
+```bash
+curl -fsS https://nytt.reidar.tech/health
+curl -sS -o /tmp/trafikk.html -w '%{http_code}\n' https://nytt.reidar.tech/trafikk
+ASSET=$(grep -oE '/assets/[^"]+\.js' /tmp/trafikk.html | head -n 1)
+curl -fsSL "https://nytt.reidar.tech${ASSET}" -o /tmp/trafikk.js
+grep -Eq 'Trafikk akkurat nå|Kartlag|road-context-marker' /tmp/trafikk.js
+curl -sS -o /tmp/traffic-api.json -w '%{http_code}\n' 'https://nytt.reidar.tech/api/map/traffic-events?north=63.5&south=63.3&east=10.6&west=10.1'
+
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -P pager=off -F ' | ' -At" <<'SQL'
+SELECT source, state, detail, last_checked_at
+FROM source_health
+WHERE source IN ('vegvesen_traffic_info','datex','datex_travel_time','datex_weather','datex_cctv','trafikkdata')
+ORDER BY source;
+SELECT source, state, count(*) FROM traffic_map_events GROUP BY source, state ORDER BY source, state;
+SELECT provider, kind, count(*) FROM source_items WHERE provider='vegvesen_traffic_info' GROUP BY provider, kind;
+SELECT count(*) FROM traffic_map_events WHERE source='vegvesen_traffic_info' AND state IN ('active','planned');
+SELECT count(*) FROM datex_travel_times WHERE state <> 'stale';
+SELECT count(*) FROM road_weather_observations;
+SELECT count(*) FROM road_cameras;
+SELECT count(*) FROM traffic_counter_snapshots;
+SELECT count(*) FROM official_events WHERE source='datex';
+SELECT source, count(*) FROM official_events WHERE source IN ('vegvesen_traffic_info','datex_weather','datex_cctv','trafikkdata','datex_travel_time') GROUP BY source;
+SELECT count(*) FROM source_items WHERE provider IN ('datex_weather','datex_cctv','trafikkdata','datex_travel_time');
+SELECT count(*) FROM situations WHERE payload->>'officialSource' IN ('vegvesen_traffic_info','datex_weather','datex_cctv','trafikkdata','datex_travel_time');
+SQL
+```
+
+Expected live results:
+
+- `/health` returns `200` with Postgres-backed `status: ok`.
+- `/trafikk` returns `200` and the built asset contains the current traffic-map UI strings.
+- Anonymous `/api/map/traffic-events` returns `401`; this is expected for the protected API and is not a zero-event result.
+- `source_health.source='vegvesen_traffic_info'` is `ok`, `traffic_map_events` has non-zero `vegvesen_traffic_info` rows, and active/planned count is non-zero when Vegvesen has visible Trøndelag messages.
+- `datex_travel_times` and `traffic_counter_snapshots` are non-zero when the upstream feeds are available. DATEX weather/CCTV rows may legitimately be zero if the current bounded endpoints have no matching observations/status updates; rely on `source_health` and freshness labels rather than treating zero rows as an automatic deployment failure.
+- `source_items` has `vegvesen_traffic_info | official_event` provenance rows, but context telemetry providers (`datex_weather`, `datex_cctv`, `trafikkdata`, `datex_travel_time`) have zero `source_items` rows.
+- `official_events` and `situations` have no rows promoted from map-only or context-only sources.
+
 ## Rollback
 
 The deployment preserves the prior API and worker images as `:previous` before building candidates and does not promote containers if backup verification, migration or canary health fails. If post-promotion validation fails, re-tag `:previous` as `:latest`, restart `app` and `worker`, and restore the latest verified restic snapshot before attempting any incompatible migration recovery.
