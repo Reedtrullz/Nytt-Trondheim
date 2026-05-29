@@ -258,25 +258,49 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = trafficMapQuerySchema.parse(req.query);
       const login = currentLogin(req);
-      const [officialEvents, sourceItems, articlesPage] = await Promise.all([
+      const requestedStates = query.states ?? ["active", "planned"];
+      const bounds =
+        typeof query.north === "number" &&
+        typeof query.south === "number" &&
+        typeof query.east === "number" &&
+        typeof query.west === "number"
+          ? { north: query.north, south: query.south, east: query.east, west: query.west }
+          : undefined;
+      const [trafficInfoEvents, officialEvents, sourceItems, articlesPage] = await Promise.all([
+        store.listTrafficMapEvents(
+          {
+            sources: ["vegvesen_traffic_info"],
+            states: requestedStates,
+            categories: query.categories,
+            severities: query.severities,
+            from: query.from,
+            to: query.to,
+            bounds,
+          },
+          login,
+        ),
         store.listOfficialEvents({ source: "datex" }, login),
         listAllDatexSourceItems(store, login),
         store.listArticles({ limit: 500 }, login),
       ]);
-      const eventsBySourceId = new Map<string, TrafficMapEvent>();
+      const eventsBySourceKey = new Map<string, TrafficMapEvent>();
+      const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
 
+      for (const event of trafficInfoEvents) {
+        eventsBySourceKey.set(sourceKey(event), event);
+      }
       for (const event of officialEvents) {
         const trafficEvent = officialEventToTrafficMapEvent(event);
-        if (trafficEvent) eventsBySourceId.set(trafficEvent.sourceEventId, trafficEvent);
+        if (trafficEvent) eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
       }
       for (const item of sourceItems) {
         const trafficEvent = sourceItemToTrafficMapEvent(item);
-        if (trafficEvent && !eventsBySourceId.has(trafficEvent.sourceEventId)) {
-          eventsBySourceId.set(trafficEvent.sourceEventId, trafficEvent);
+        if (trafficEvent && !eventsBySourceKey.has(sourceKey(trafficEvent))) {
+          eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
         }
       }
 
-      const events = filterTrafficMapEvents([...eventsBySourceId.values()], query).map((event) => {
+      const events = filterTrafficMapEvents([...eventsBySourceKey.values()], query).map((event) => {
         const relatedArticles = relatedTrafficArticlesForEvent(event, articlesPage.items);
         return relatedArticles.length > 0 ? { ...event, relatedArticles } : event;
       });

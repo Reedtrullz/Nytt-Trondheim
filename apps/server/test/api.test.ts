@@ -8,7 +8,7 @@ import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { PgStore } from "../src/store.js";
-import type { Article, OfficialEvent } from "@nytt/shared";
+import type { Article, OfficialEvent, TrafficMapEvent } from "@nytt/shared";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
@@ -254,6 +254,102 @@ describe("private situation API", () => {
     await agent.get("/api/map/traffic-events?states=not-a-state").expect(400);
   });
 
+  it("returns dedicated traffic_map_events rows with bounds and state filters", async () => {
+    const { app, store } = await testApp();
+    const insideEvent: TrafficMapEvent = {
+      id: "vegvesen-traffic-info:NPRA_HBT_1",
+      source: "vegvesen_traffic_info",
+      sourceEventId: "NPRA_HBT_1",
+      category: "roadworks",
+      severity: "medium",
+      state: "active",
+      title: "Veiarbeid ved Trondheim sentrum",
+      description: "Ett felt er stengt innenfor valgt kartutsnitt.",
+      locationName: "Trondheim sentrum",
+      roadName: "E6",
+      validFrom: "2026-05-29T08:00:00.000Z",
+      validTo: "2099-01-01T00:00:00.000Z",
+      updatedAt: "2026-05-29T08:05:00.000Z",
+      sourceUrl: "https://trafikkinfo.atlas.vegvesen.no/NPRA_HBT_1",
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+      rawType: "roadworks",
+      confidence: 0.98,
+    };
+    const outsideEvent: TrafficMapEvent = {
+      id: "vegvesen-traffic-info:NPRA_HBT_2",
+      source: "vegvesen_traffic_info",
+      sourceEventId: "NPRA_HBT_2",
+      category: "roadworks",
+      severity: "medium",
+      state: "active",
+      title: "Veiarbeid utenfor Trondheim",
+      description: "Skal filtreres bort av bounds.",
+      locationName: "Utenfor Trondheim",
+      roadName: "E6",
+      validFrom: "2026-05-29T08:00:00.000Z",
+      validTo: "2099-01-01T00:00:00.000Z",
+      updatedAt: "2026-05-29T08:05:00.000Z",
+      sourceUrl: "https://trafikkinfo.atlas.vegvesen.no/NPRA_HBT_2",
+      geometry: { type: "Point", coordinates: [9.69, 62.59] },
+      rawType: "roadworks",
+      confidence: 0.98,
+    };
+    type ListTrafficMapEvents = (
+      filters: {
+        bounds?: { north: number; south: number; east: number; west: number };
+        categories?: TrafficMapEvent["category"][];
+        severities?: TrafficMapEvent["severity"][];
+        states?: TrafficMapEvent["state"][];
+        from?: string;
+        to?: string;
+      },
+      login: string,
+    ) => Promise<TrafficMapEvent[]>;
+    const listTrafficMapEvents = vi.fn<ListTrafficMapEvents>(async (filters) => {
+      return [insideEvent, outsideEvent].filter((event) => {
+        if (filters.states && !filters.states.includes(event.state)) return false;
+        if (filters.categories && !filters.categories.includes(event.category)) return false;
+        if (filters.severities && !filters.severities.includes(event.severity)) return false;
+        if (!filters.bounds || event.geometry.type !== "Point") return true;
+        const [lng, lat] = event.geometry.coordinates;
+        return (
+          lat <= filters.bounds.north &&
+          lat >= filters.bounds.south &&
+          lng <= filters.bounds.east &&
+          lng >= filters.bounds.west
+        );
+      });
+    });
+    (store as unknown as { listTrafficMapEvents: ListTrafficMapEvents }).listTrafficMapEvents =
+      listTrafficMapEvents;
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: [] });
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get(
+        "/api/map/traffic-events?north=63.5&south=63.3&east=10.5&west=10.2&states=active,planned&categories=roadworks&severities=medium",
+      )
+      .expect(200);
+
+    expect(response.body.events).toHaveLength(1);
+    expect(response.body.events[0]).toMatchObject({
+      source: "vegvesen_traffic_info",
+      sourceEventId: "NPRA_HBT_1",
+    });
+    expect(listTrafficMapEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bounds: { north: 63.5, south: 63.3, east: 10.5, west: 10.2 },
+        categories: ["roadworks"],
+        severities: ["medium"],
+        states: ["active", "planned"],
+      }),
+      "Reedtrullz",
+    );
+  });
+
   it("supports planned roadwork timeline queries", async () => {
     const { app, store } = await testApp();
     vi.spyOn(store, "listOfficialEvents").mockResolvedValue([
@@ -370,6 +466,77 @@ describe("private situation API", () => {
       .expect(201);
     expect(response.body.filename).toBe("notat.txt");
     expect(response.body.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+  });
+
+  it("PgStore lists traffic map events with SQL filters and overlays row state", async () => {
+    let capturedSql = "";
+    let capturedParams: unknown[] = [];
+    const payload: TrafficMapEvent = {
+      id: "vegvesen-traffic-info:NPRA_HBT_1",
+      source: "vegvesen_traffic_info",
+      sourceEventId: "NPRA_HBT_1",
+      category: "roadworks",
+      severity: "medium",
+      state: "planned",
+      title: "Veiarbeid ved Trondheim sentrum",
+      description: "Ett felt er stengt innenfor valgt kartutsnitt.",
+      locationName: "Trondheim sentrum",
+      roadName: "E6",
+      validFrom: "2026-05-29T08:00:00.000Z",
+      validTo: "2026-05-29T12:00:00.000Z",
+      updatedAt: "2026-05-29T08:05:00.000Z",
+      sourceUrl: "https://trafikkinfo.atlas.vegvesen.no/NPRA_HBT_1",
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+      rawType: "roadworks",
+      confidence: 0.98,
+    };
+    const fakePool = {
+      async query(sql: string, params: unknown[]) {
+        capturedSql = sql.replace(/\s+/g, " ").trim();
+        capturedParams = params;
+        return { rows: [{ payload, state: "active" as TrafficMapEvent["state"] }] };
+      },
+    };
+
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+    const events = await store.listTrafficMapEvents({
+      sources: ["vegvesen_traffic_info"],
+      states: ["active", "planned"],
+      categories: ["roadworks", "closure"],
+      severities: ["medium", "high"],
+      bounds: { north: 63.5, south: 63.3, east: 10.5, west: 10.2 },
+      from: "2026-05-29T00:00:00.000Z",
+      to: "2026-05-30T00:00:00.000Z",
+    });
+
+    expect(capturedSql).toContain("FROM traffic_map_events");
+    expect(capturedSql).toContain("source = ANY($1::text[])");
+    expect(capturedSql).toContain("state = ANY($2::text[])");
+    expect(capturedSql).toContain("category = ANY($3::text[])");
+    expect(capturedSql).toContain("severity = ANY($4::text[])");
+    expect(capturedSql).toContain("geometry && ST_MakeEnvelope($5, $6, $7, $8, 4326)");
+    expect(capturedSql).toContain("COALESCE(valid_to, updated_at) >= $9");
+    expect(capturedSql).toContain("COALESCE(valid_from, updated_at) <= $10");
+    expect(capturedSql).toContain("ORDER BY updated_at DESC LIMIT 1000");
+    expect(capturedSql.indexOf("category = ANY($3::text[])")).toBeLessThan(
+      capturedSql.indexOf("ORDER BY updated_at DESC LIMIT 1000"),
+    );
+    expect(capturedSql.indexOf("severity = ANY($4::text[])")).toBeLessThan(
+      capturedSql.indexOf("ORDER BY updated_at DESC LIMIT 1000"),
+    );
+    expect(capturedParams).toEqual([
+      ["vegvesen_traffic_info"],
+      ["active", "planned"],
+      ["roadworks", "closure"],
+      ["medium", "high"],
+      10.2,
+      63.3,
+      10.5,
+      63.5,
+      "2026-05-29T00:00:00.000Z",
+      "2026-05-30T00:00:00.000Z",
+    ]);
+    expect(events).toEqual([{ ...payload, state: "active" }]);
   });
 
   it("includes DATEX traffic pulse rows in PgStore operations status with stale overlay", async () => {

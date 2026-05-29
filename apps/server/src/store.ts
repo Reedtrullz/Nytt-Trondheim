@@ -17,6 +17,7 @@ import type {
   SourceItemRelationship,
   SourceHealth,
   TimelineEntry,
+  TrafficMapEvent,
   TrafficPulseCorridor,
   WorkspaceNote,
   WorkspaceTask,
@@ -54,6 +55,16 @@ export interface OfficialEventFilters {
   limit?: number;
 }
 
+export interface TrafficMapEventFilters {
+  sources?: TrafficMapEvent["source"][];
+  categories?: TrafficMapEvent["category"][];
+  severities?: TrafficMapEvent["severity"][];
+  states?: TrafficMapEvent["state"][];
+  from?: string;
+  to?: string;
+  bounds?: { north: number; south: number; east: number; west: number };
+}
+
 export interface AttachmentRecord extends Attachment {
   storagePath: string;
 }
@@ -72,6 +83,7 @@ export interface Store {
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
+  listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
   listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
   linkSourceItem(
     situationId: string,
@@ -406,6 +418,10 @@ export class MemoryStore implements Store {
   }
 
   async listOfficialEvents(): Promise<OfficialEvent[]> {
+    return [];
+  }
+
+  async listTrafficMapEvents(): Promise<TrafficMapEvent[]> {
     return [];
   }
 
@@ -876,6 +892,60 @@ export class PgStore implements Store {
       state: row.state,
       ...(row.geometry ? { geometry: row.geometry } : {}),
     }));
+  }
+
+  async listTrafficMapEvents(filters: TrafficMapEventFilters): Promise<TrafficMapEvent[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+
+    if (filters.sources?.length) {
+      params.push(filters.sources);
+      where.push(`source = ANY($${params.length}::text[])`);
+    }
+    if (filters.states?.length) {
+      params.push(filters.states);
+      where.push(`state = ANY($${params.length}::text[])`);
+    }
+    if (filters.categories?.length) {
+      params.push(filters.categories);
+      where.push(`category = ANY($${params.length}::text[])`);
+    }
+    if (filters.severities?.length) {
+      params.push(filters.severities);
+      where.push(`severity = ANY($${params.length}::text[])`);
+    }
+    if (filters.bounds) {
+      params.push(filters.bounds.west, filters.bounds.south, filters.bounds.east, filters.bounds.north);
+      const westIndex = params.length - 3;
+      const southIndex = params.length - 2;
+      const eastIndex = params.length - 1;
+      const northIndex = params.length;
+      where.push(
+        `geometry && ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326)`,
+      );
+    }
+    if (filters.from) {
+      params.push(filters.from);
+      where.push(`COALESCE(valid_to, updated_at) >= $${params.length}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      where.push(`COALESCE(valid_from, updated_at) <= $${params.length}`);
+    }
+
+    const result = await this.pool.query<{
+      payload: TrafficMapEvent;
+      state: TrafficMapEvent["state"];
+    }>(
+      `SELECT payload, state
+       FROM traffic_map_events
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY updated_at DESC
+       LIMIT 1000`,
+      params,
+    );
+
+    return result.rows.map((row) => ({ ...row.payload, state: row.state }));
   }
 
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
