@@ -19,6 +19,7 @@ import type {
   SourceItemRelationship,
   SourceHealth,
   TimelineEntry,
+  TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
   WorkspaceNote,
@@ -90,6 +91,7 @@ export interface Store {
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
   listRoadWeatherObservations(bounds?: Bounds): Promise<RoadWeatherObservation[]>;
   listRoadCameras(bounds?: Bounds): Promise<RoadCamera[]>;
+  listTrafficCounterSnapshots(bounds?: Bounds): Promise<TrafficCounterSnapshot[]>;
   listTrafficPulseCorridors(limit?: number): Promise<TrafficPulseCorridor[]>;
   listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
   linkSourceItem(
@@ -437,6 +439,10 @@ export class MemoryStore implements Store {
   }
 
   async listRoadCameras(): Promise<RoadCamera[]> {
+    return [];
+  }
+
+  async listTrafficCounterSnapshots(): Promise<TrafficCounterSnapshot[]> {
     return [];
   }
 
@@ -934,7 +940,12 @@ export class PgStore implements Store {
       where.push(`severity = ANY($${params.length}::text[])`);
     }
     if (filters.bounds) {
-      params.push(filters.bounds.west, filters.bounds.south, filters.bounds.east, filters.bounds.north);
+      params.push(
+        filters.bounds.west,
+        filters.bounds.south,
+        filters.bounds.east,
+        filters.bounds.north,
+      );
       const westIndex = params.length - 3;
       const southIndex = params.length - 2;
       const eastIndex = params.length - 1;
@@ -998,6 +1009,24 @@ export class PgStore implements Store {
        FROM road_cameras
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
        ORDER BY updated_at DESC, camera_id ASC`,
+      params,
+    );
+    return result.rows.map((row) => row.payload);
+  }
+
+  async listTrafficCounterSnapshots(bounds?: Bounds): Promise<TrafficCounterSnapshot[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (bounds) {
+      params.push(bounds.west, bounds.south, bounds.east, bounds.north);
+      where.push("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
+    }
+
+    const result = await this.pool.query<{ payload: TrafficCounterSnapshot }>(
+      `SELECT payload
+       FROM traffic_counter_snapshots
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY updated_at DESC, point_id ASC`,
       params,
     );
     return result.rows.map((row) => row.payload);

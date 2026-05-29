@@ -9,6 +9,7 @@ import type {
   Situation,
   SourceItemInput,
   SourceHealth,
+  TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
 } from "@nytt/shared";
@@ -366,9 +367,7 @@ export class WorkerRepository {
     }
   }
 
-  async upsertRoadWeatherObservations(
-    observations: RoadWeatherObservation[],
-  ): Promise<void> {
+  async upsertRoadWeatherObservations(observations: RoadWeatherObservation[]): Promise<void> {
     for (const observation of observations) {
       await this.pool.query(
         `INSERT INTO road_weather_observations
@@ -405,9 +404,22 @@ export class WorkerRepository {
     }
   }
 
-  async listTrafficMapEvents(
-    filters: TrafficMapEventListFilters = {},
-  ): Promise<TrafficMapEvent[]> {
+  async upsertTrafficCounterSnapshots(counters: TrafficCounterSnapshot[]): Promise<void> {
+    for (const counter of counters) {
+      await this.pool.query(
+        `INSERT INTO traffic_counter_snapshots
+         (point_id, payload, updated_at, geometry)
+         VALUES ($1,$2,$3,ST_SetSRID(ST_GeomFromGeoJSON($4),4326))
+         ON CONFLICT (point_id) DO UPDATE SET
+           payload=EXCLUDED.payload,
+           updated_at=EXCLUDED.updated_at,
+           geometry=EXCLUDED.geometry`,
+        [counter.pointId, counter, counter.updatedAt, JSON.stringify(counter.geometry)],
+      );
+    }
+  }
+
+  async listTrafficMapEvents(filters: TrafficMapEventListFilters = {}): Promise<TrafficMapEvent[]> {
     const where: string[] = [];
     const params: unknown[] = [];
 

@@ -1,7 +1,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import type { OfficialEvent, RoadCamera, RoadWeatherObservation } from "@nytt/shared";
+import type {
+  OfficialEvent,
+  RoadCamera,
+  RoadWeatherObservation,
+  TrafficCounterSnapshot,
+} from "@nytt/shared";
 import {
   collectMunicipality,
   collectPolitiloggenPersonalUse,
@@ -36,6 +41,10 @@ import {
   defaultDatexCctvStatusEndpoint,
   parseDatexCctv,
 } from "./datexCctv.js";
+import {
+  defaultTrafikkdataGraphqlEndpoint,
+  fetchTrafikkdataCounterSnapshots,
+} from "./trafikkdata.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { WorkerRepository } from "./repository.js";
@@ -139,6 +148,73 @@ export async function collectTrafficInfoForMap({
       nextPollAt,
       detail: `TrafficInfo-innhenting feilet: ${String(error)}`,
     });
+  }
+}
+
+const trafikkdataPollIntervalMs = 15 * 60 * 1000;
+const trafikkdataLastSuccessfulPollStateKey = "trafikkdata:lastSuccessfulPollAt";
+
+type TrafikkdataRepository = Pick<
+  WorkerRepository,
+  "collectorState" | "setCollectorState" | "setHealth" | "upsertTrafficCounterSnapshots"
+>;
+
+type TrafikkdataCollector = typeof fetchTrafikkdataCounterSnapshots;
+
+export async function collectTrafikkdataCounters({
+  repository,
+  endpoint = defaultTrafikkdataGraphqlEndpoint,
+  nextPollAt,
+  now = () => new Date(),
+  fetcher = fetch,
+  collector = fetchTrafikkdataCounterSnapshots,
+}: {
+  repository: TrafikkdataRepository;
+  endpoint?: string;
+  nextPollAt: string;
+  now?: () => Date;
+  fetcher?: typeof fetch;
+  collector?: TrafikkdataCollector;
+}): Promise<{ skipped: boolean }> {
+  const checkedAtDate = now();
+  const checkedAt = checkedAtDate.toISOString();
+  const lastSuccessfulPollAt = await repository.collectorState(
+    trafikkdataLastSuccessfulPollStateKey,
+  );
+  const lastSuccessfulPollMs = lastSuccessfulPollAt ? Date.parse(lastSuccessfulPollAt) : Number.NaN;
+  if (Number.isFinite(lastSuccessfulPollMs)) {
+    const elapsedMs = checkedAtDate.getTime() - lastSuccessfulPollMs;
+    if (elapsedMs >= 0 && elapsedMs < trafikkdataPollIntervalMs) return { skipped: true };
+  }
+
+  try {
+    const counters = await collector({ endpoint, fetcher, now });
+    await repository.upsertTrafficCounterSnapshots(counters);
+    const volumeCount = counters.filter(
+      (counter: TrafficCounterSnapshot) => typeof counter.volumeLastHour === "number",
+    ).length;
+    await repository.setCollectorState(trafikkdataLastSuccessfulPollStateKey, checkedAt);
+    await repository.setHealth({
+      source: "trafikkdata",
+      label: "Vegvesen Trafikkdata",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: `${counters.length} Trafikkdata tellepunkter oppdatert (${volumeCount} med timesvolum). Neste poll tidligst ${nextPollAt}`,
+    });
+    return { skipped: false };
+  } catch (error) {
+    const failureAt = now().toISOString();
+    await repository.setHealth({
+      source: "trafikkdata",
+      label: "Vegvesen Trafikkdata",
+      state: "degraded",
+      lastCheckedAt: failureAt,
+      lastFailureAt: failureAt,
+      nextPollAt,
+      detail: `Trafikkdata-innhenting feilet: ${String(error)}`,
+    });
+    return { skipped: false };
   }
 }
 
@@ -370,6 +446,11 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     repository,
     endpoint: process.env.TRAFFIC_INFO_ENDPOINT?.trim() || defaultTrafficInfoEndpoint,
     nextPollAt,
+  });
+  await collectTrafikkdataCounters({
+    repository,
+    endpoint: process.env.TRAFIKKDATA_GRAPHQL_ENDPOINT?.trim() || defaultTrafikkdataGraphqlEndpoint,
+    nextPollAt: new Date(Date.now() + trafikkdataPollIntervalMs).toISOString(),
   });
   const officialEvents: OfficialEvent[] = [];
   for (const [source, collector] of [

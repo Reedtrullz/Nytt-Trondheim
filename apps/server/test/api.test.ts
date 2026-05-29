@@ -14,6 +14,7 @@ import type {
   RoadCamera,
   RoadWeatherObservation,
   SourceHealth,
+  TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
 } from "@nytt/shared";
@@ -546,7 +547,82 @@ describe("private situation API", () => {
     ]);
   });
 
-   it("supports planned roadwork timeline queries", async () => {
+  it("returns Trafikkdata counters inside traffic map bounds and includes source health", async () => {
+    const { app, store } = await testApp();
+    const insideCounter: TrafficCounterSnapshot = {
+      id: "trafikkdata:06970V72811",
+      source: "trafikkdata",
+      pointId: "06970V72811",
+      name: "Kroppanbrua",
+      updatedAt: "2026-05-29T10:00:00.000Z",
+      geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+      municipalityName: "Trondheim",
+      volumeLastHour: 1234,
+      coveragePercent: 98,
+    };
+    const outsideCounter: TrafficCounterSnapshot = {
+      ...insideCounter,
+      id: "trafikkdata:OUTSIDE",
+      pointId: "OUTSIDE",
+      name: "Oppdal sør",
+      geometry: { type: "Point", coordinates: [9.69, 62.59] },
+    };
+    const inBounds = (
+      point: { coordinates: number[] },
+      bounds?: { north: number; south: number; east: number; west: number },
+    ) => {
+      if (!bounds) return true;
+      const [lng, lat] = point.coordinates;
+      return lat <= bounds.north && lat >= bounds.south && lng <= bounds.east && lng >= bounds.west;
+    };
+    const listTrafficCounterSnapshots = vi.fn(async (bounds) =>
+      [insideCounter, outsideCounter].filter((item) => inBounds(item.geometry, bounds)),
+    );
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listTrafficPulseCorridors").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadCameras").mockResolvedValue([]);
+    vi.spyOn(store, "listTrafficCounterSnapshots").mockImplementation(listTrafficCounterSnapshots);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "trafikkdata",
+        label: "Vegvesen Trafikkdata",
+        state: "ok",
+        lastCheckedAt: "2026-05-29T10:00:00.000Z",
+        detail: "1 Trafikkdata tellepunkter oppdatert (1 med timesvolum)",
+      },
+      { source: "nrk", label: "NRK", state: "ok", detail: "RSS" },
+    ] satisfies SourceHealth[]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get("/api/map/traffic-events?north=63.5&south=63.3&east=10.5&west=10.2")
+      .expect(200);
+
+    expect(response.body.events).toEqual([]);
+    expect(response.body.counters).toEqual([insideCounter]);
+    expect(listTrafficCounterSnapshots).toHaveBeenCalledWith({
+      north: 63.5,
+      south: 63.3,
+      east: 10.5,
+      west: 10.2,
+    });
+    expect(response.body.sources).toEqual([
+      {
+        source: "trafikkdata",
+        label: "Vegvesen Trafikkdata",
+        state: "ok",
+        lastCheckedAt: "2026-05-29T10:00:00.000Z",
+        detail: "1 Trafikkdata tellepunkter oppdatert (1 med timesvolum)",
+      },
+    ]);
+  });
+
+  it("supports planned roadwork timeline queries", async () => {
     const { app, store } = await testApp();
     vi.spyOn(store, "listOfficialEvents").mockResolvedValue([
       {
@@ -735,7 +811,7 @@ describe("private situation API", () => {
     expect(events).toEqual([{ ...payload, state: "active" }]);
   });
 
-  it("PgStore lists road weather and camera rows with bounds SQL filters", async () => {
+  it("PgStore lists road weather, camera, and counter rows with bounds SQL filters", async () => {
     const weatherPayload: RoadWeatherObservation = {
       id: "datex-weather:SN123",
       source: "datex_weather",
@@ -755,6 +831,16 @@ describe("private situation API", () => {
       updatedAt: "2026-05-29T10:01:00.000Z",
       geometry: { type: "Point", coordinates: [10.38, 63.38] },
     };
+    const counterPayload: TrafficCounterSnapshot = {
+      id: "trafikkdata:06970V72811",
+      source: "trafikkdata",
+      pointId: "06970V72811",
+      name: "Kroppanbrua",
+      updatedAt: "2026-05-29T10:02:00.000Z",
+      geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+      municipalityName: "Trondheim",
+      volumeLastHour: 1234,
+    };
     const captured: Array<{ sql: string; params: unknown[] | undefined }> = [];
     const fakePool = {
       async query(sql: string, params?: unknown[]) {
@@ -766,6 +852,9 @@ describe("private situation API", () => {
         if (normalizedSql.includes("FROM road_cameras")) {
           return { rows: [{ payload: cameraPayload }] };
         }
+        if (normalizedSql.includes("FROM traffic_counter_snapshots")) {
+          return { rows: [{ payload: counterPayload }] };
+        }
         throw new Error(`Unexpected query: ${normalizedSql}`);
       },
     };
@@ -774,6 +863,7 @@ describe("private situation API", () => {
 
     await expect(store.listRoadWeatherObservations(bounds)).resolves.toEqual([weatherPayload]);
     await expect(store.listRoadCameras(bounds)).resolves.toEqual([cameraPayload]);
+    await expect(store.listTrafficCounterSnapshots(bounds)).resolves.toEqual([counterPayload]);
 
     expect(captured[0]?.sql).toContain("FROM road_weather_observations");
     expect(captured[0]?.sql).toContain("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
@@ -783,6 +873,10 @@ describe("private situation API", () => {
     expect(captured[1]?.sql).toContain("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
     expect(captured[1]?.sql).toContain("ORDER BY updated_at DESC, camera_id ASC");
     expect(captured[1]?.params).toEqual([10.2, 63.3, 10.5, 63.5]);
+    expect(captured[2]?.sql).toContain("FROM traffic_counter_snapshots");
+    expect(captured[2]?.sql).toContain("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
+    expect(captured[2]?.sql).toContain("ORDER BY updated_at DESC, point_id ASC");
+    expect(captured[2]?.params).toEqual([10.2, 63.3, 10.5, 63.5]);
   });
 
   it("includes DATEX traffic pulse rows in PgStore operations status with stale overlay", async () => {

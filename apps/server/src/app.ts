@@ -45,6 +45,7 @@ const trafficMapSourceIds = [
   "datex_travel_time",
   "datex_weather",
   "datex_cctv",
+  "trafikkdata",
   "vegvesen_traffic_info",
 ] as const;
 const trafficMapSourceIdSet = new Set<string>(trafficMapSourceIds);
@@ -299,6 +300,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         trafficPulse,
         weather,
         cameras,
+        counters,
       ] = await Promise.all([
         store.listTrafficMapEvents(
           {
@@ -319,6 +321,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         store.listTrafficPulseCorridors(50),
         store.listRoadWeatherObservations(bounds),
         store.listRoadCameras(bounds),
+        store.listTrafficCounterSnapshots(bounds),
       ]);
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
@@ -348,6 +351,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         sources: trafficMapSourceStatuses(sourceHealth),
         weather,
         cameras,
+        counters,
       });
     } catch (error) {
       next(error);

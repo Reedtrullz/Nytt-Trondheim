@@ -8,6 +8,7 @@ import type {
   RoadWeatherObservation,
   Situation,
   SourceItemInput,
+  TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
 } from "@nytt/shared";
@@ -447,8 +448,12 @@ describe("WorkerRepository", () => {
       JSON.stringify(latest.geometry),
     ]);
     const sqlCalls = query.mock.calls.map(([statement]) => String(statement));
-    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO source_items"))).toBe(false);
-    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO official_events"))).toBe(false);
+    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO source_items"))).toBe(
+      false,
+    );
+    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO official_events"))).toBe(
+      false,
+    );
     expect(sqlCalls.some((statement) => statement.includes("INSERT INTO situations"))).toBe(false);
   });
 
@@ -475,12 +480,7 @@ describe("WorkerRepository", () => {
     expect(sql).toContain("ON CONFLICT (camera_id) DO UPDATE");
     expect(sql).toContain("updated_at=EXCLUDED.updated_at");
     expect(sql).toContain("ST_SetSRID(ST_GeomFromGeoJSON($4),4326)");
-    expect(firstParams).toEqual([
-      "CAM123",
-      first,
-      first.updatedAt,
-      JSON.stringify(first.geometry),
-    ]);
+    expect(firstParams).toEqual(["CAM123", first, first.updatedAt, JSON.stringify(first.geometry)]);
     expect(latestParams).toEqual([
       "CAM123",
       latest,
@@ -488,8 +488,57 @@ describe("WorkerRepository", () => {
       JSON.stringify(latest.geometry),
     ]);
     const sqlCalls = query.mock.calls.map(([statement]) => String(statement));
-    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO source_items"))).toBe(false);
-    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO official_events"))).toBe(false);
+    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO source_items"))).toBe(
+      false,
+    );
+    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO official_events"))).toBe(
+      false,
+    );
+    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO situations"))).toBe(false);
+  });
+
+  it("upserts one latest Trafikkdata counter row per point without source item promotion", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const first: TrafficCounterSnapshot = trafficCounterSnapshot({
+      pointId: "06970V72811",
+      updatedAt: "2026-05-29T10:00:00.000Z",
+      volumeLastHour: 1200,
+    });
+    const latest: TrafficCounterSnapshot = trafficCounterSnapshot({
+      pointId: "06970V72811",
+      updatedAt: "2026-05-29T10:15:00.000Z",
+      volumeLastHour: 1300,
+    });
+
+    await repository.upsertTrafficCounterSnapshots([first, latest]);
+
+    expect(query).toHaveBeenCalledTimes(2);
+    const [sql, firstParams] = query.mock.calls[0] as [string, unknown[]];
+    const [, latestParams] = query.mock.calls[1] as [string, unknown[]];
+    expect(sql).toContain("INSERT INTO traffic_counter_snapshots");
+    expect(sql).toContain("ON CONFLICT (point_id) DO UPDATE");
+    expect(sql).toContain("updated_at=EXCLUDED.updated_at");
+    expect(sql).toContain("ST_SetSRID(ST_GeomFromGeoJSON($4),4326)");
+    expect(firstParams).toEqual([
+      "06970V72811",
+      first,
+      first.updatedAt,
+      JSON.stringify(first.geometry),
+    ]);
+    expect(latestParams).toEqual([
+      "06970V72811",
+      latest,
+      latest.updatedAt,
+      JSON.stringify(latest.geometry),
+    ]);
+    const sqlCalls = query.mock.calls.map(([statement]) => String(statement));
+    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO source_items"))).toBe(
+      false,
+    );
+    expect(sqlCalls.some((statement) => statement.includes("INSERT INTO official_events"))).toBe(
+      false,
+    );
     expect(sqlCalls.some((statement) => statement.includes("INSERT INTO situations"))).toBe(false);
   });
 
@@ -536,18 +585,18 @@ describe("WorkerRepository", () => {
     const wrongProviderItem = { ...item, provider: "datex" };
     const wrongKindItem = { ...item, kind: "article" } as SourceItemInput;
 
-    await expect(
-      repository.upsertTrafficInfoSourceItems([wrongProviderItem]),
-    ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
-    await expect(
-      repository.upsertTrafficInfoSourceItems([wrongKindItem]),
-    ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
+    await expect(repository.upsertTrafficInfoSourceItems([wrongProviderItem])).rejects.toThrow(
+      "only accepts Vegvesen TrafficInfo official_event items",
+    );
+    await expect(repository.upsertTrafficInfoSourceItems([wrongKindItem])).rejects.toThrow(
+      "only accepts Vegvesen TrafficInfo official_event items",
+    );
     await expect(
       repository.upsertTrafficInfoSourceItems([item, wrongProviderItem]),
     ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
-    await expect(
-      repository.upsertTrafficInfoSourceItems([item, wrongKindItem]),
-    ).rejects.toThrow("only accepts Vegvesen TrafficInfo official_event items");
+    await expect(repository.upsertTrafficInfoSourceItems([item, wrongKindItem])).rejects.toThrow(
+      "only accepts Vegvesen TrafficInfo official_event items",
+    );
     expect(query).not.toHaveBeenCalled();
   });
 
@@ -692,7 +741,9 @@ describe("WorkerRepository", () => {
 
     expect(rows[0]?.state).toBe("active");
     expect(
-      query.mock.calls.some(([sql]) => String(sql).trimStart().startsWith("UPDATE traffic_map_events")),
+      query.mock.calls.some(([sql]) =>
+        String(sql).trimStart().startsWith("UPDATE traffic_map_events"),
+      ),
     ).toBe(false);
   });
 
@@ -759,9 +810,7 @@ function roadWeatherObservation(
   };
 }
 
-function roadCamera(
-  overrides: Partial<RoadCamera> & Pick<RoadCamera, "cameraId">,
-): RoadCamera {
+function roadCamera(overrides: Partial<RoadCamera> & Pick<RoadCamera, "cameraId">): RoadCamera {
   return {
     id: `datex-cctv:${overrides.cameraId}`,
     source: "datex_cctv",
@@ -772,6 +821,26 @@ function roadCamera(
     geometry: overrides.geometry ?? { type: "Point", coordinates: [10.39, 63.39] },
     imageUrl: overrides.imageUrl,
     sourceUrl: overrides.sourceUrl,
+  };
+}
+
+function trafficCounterSnapshot(
+  overrides: Partial<TrafficCounterSnapshot> & Pick<TrafficCounterSnapshot, "pointId">,
+): TrafficCounterSnapshot {
+  return {
+    id: `trafikkdata:${overrides.pointId}`,
+    source: "trafikkdata",
+    pointId: overrides.pointId,
+    name: overrides.name ?? "Kroppanbrua",
+    updatedAt: overrides.updatedAt ?? "2026-05-29T10:00:00.000Z",
+    geometry: overrides.geometry ?? { type: "Point", coordinates: [10.384529, 63.391793] },
+    municipalityName: overrides.municipalityName ?? "Trondheim",
+    roadCategory: overrides.roadCategory,
+    roadNumber: overrides.roadNumber,
+    volumeLastHour: overrides.volumeLastHour,
+    coveragePercent: overrides.coveragePercent,
+    baselineVolumeLastHour: overrides.baselineVolumeLastHour,
+    anomalyRatio: overrides.anomalyRatio,
   };
 }
 

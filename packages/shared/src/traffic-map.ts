@@ -128,6 +128,9 @@ export interface TrafficCounterSnapshot {
   name: string;
   updatedAt: string;
   geometry: Point;
+  municipalityName?: string;
+  roadCategory?: string;
+  roadNumber?: string;
   volumeLastHour?: number;
   coveragePercent?: number;
   baselineVolumeLastHour?: number;

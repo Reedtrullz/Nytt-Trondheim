@@ -345,6 +345,15 @@ CREATE TABLE IF NOT EXISTS road_cameras (
 );
 CREATE INDEX IF NOT EXISTS road_cameras_geometry_idx ON road_cameras USING gist (geometry);
 
+CREATE TABLE IF NOT EXISTS traffic_counter_snapshots (
+  point_id text PRIMARY KEY,
+  payload jsonb NOT NULL,
+  updated_at timestamptz NOT NULL,
+  geometry geometry(Point, 4326) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshots_geometry_idx
+  ON traffic_counter_snapshots USING gist (geometry);
+
 CREATE TABLE IF NOT EXISTS traffic_map_events (
   id text PRIMARY KEY,
   source text NOT NULL,
@@ -478,3 +487,4 @@ INSERT INTO schema_migrations (version) VALUES ('002_situation_trustworthiness')
 INSERT INTO schema_migrations (version) VALUES ('003_collector_state') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('004_traffic_map_events') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('005_road_context') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('006_trafikkdata_counters') ON CONFLICT DO NOTHING;

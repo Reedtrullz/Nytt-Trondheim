@@ -1,8 +1,14 @@
-import type { RoadCamera, RoadWeatherObservation, TrafficMapEvent } from "@nytt/shared";
+import type {
+  RoadCamera,
+  RoadWeatherObservation,
+  TrafficCounterSnapshot,
+  TrafficMapEvent,
+} from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
   collectDatexCctvContext,
   collectDatexRoadWeatherContext,
+  collectTrafikkdataCounters,
   collectTrafficInfoForMap,
   createCollectionGuard,
   normalizeDatexSituationEndpoint,
@@ -48,6 +54,33 @@ function fakeRoadContextRepository() {
     upsertRoadWeatherObservations: vi.fn().mockResolvedValue(undefined),
     upsertRoadCameras: vi.fn().mockResolvedValue(undefined),
     setHealth: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function fakeTrafikkdataRepository(lastSuccessfulPollAt?: string) {
+  return {
+    collectorState: vi.fn().mockResolvedValue(lastSuccessfulPollAt),
+    setCollectorState: vi.fn().mockResolvedValue(undefined),
+    upsertTrafficCounterSnapshots: vi.fn().mockResolvedValue(undefined),
+    setHealth: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function trafikkdataCounter(
+  overrides: Partial<TrafficCounterSnapshot> = {},
+): TrafficCounterSnapshot {
+  return {
+    id: overrides.id ?? "trafikkdata:06970V72811",
+    source: "trafikkdata",
+    pointId: overrides.pointId ?? "06970V72811",
+    name: overrides.name ?? "Kroppanbrua",
+    updatedAt: overrides.updatedAt ?? "2026-05-29T10:00:00.000Z",
+    geometry: overrides.geometry ?? { type: "Point", coordinates: [10.384529, 63.391793] },
+    municipalityName: overrides.municipalityName ?? "Trondheim",
+    volumeLastHour: overrides.volumeLastHour,
+    coveragePercent: overrides.coveragePercent,
+    baselineVolumeLastHour: overrides.baselineVolumeLastHour,
+    anomalyRatio: overrides.anomalyRatio,
   };
 }
 
@@ -101,6 +134,103 @@ describe("worker lifecycle helpers", () => {
     await guarded();
 
     expect(collect).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Trafikkdata counter collection", () => {
+  it("skips fetch when the last successful poll is less than 15 minutes old", async () => {
+    const repository = fakeTrafikkdataRepository("2026-05-29T10:01:00.000Z");
+    const collector = vi.fn().mockResolvedValue([trafikkdataCounter()]);
+
+    await expect(
+      collectTrafikkdataCounters({
+        repository: repository as never,
+        endpoint: "https://trafikkdata.example.test/graphql",
+        nextPollAt: "2026-05-29T10:30:00.000Z",
+        now: () => new Date("2026-05-29T10:15:00.000Z"),
+        collector,
+      }),
+    ).resolves.toEqual({ skipped: true });
+
+    expect(repository.collectorState).toHaveBeenCalledWith("trafikkdata:lastSuccessfulPollAt");
+    expect(collector).not.toHaveBeenCalled();
+    expect(repository.upsertTrafficCounterSnapshots).not.toHaveBeenCalled();
+    expect(repository.setHealth).not.toHaveBeenCalled();
+  });
+
+  it("fetches after 15 minutes and writes ok health with counts and next poll", async () => {
+    const checkedAt = "2026-05-29T10:16:00.000Z";
+    const nextPollAt = "2026-05-29T10:31:00.000Z";
+    const counters = [
+      trafikkdataCounter({ volumeLastHour: 1234 }),
+      trafikkdataCounter({
+        id: "trafikkdata:TRD-METADATA",
+        pointId: "TRD-METADATA",
+        name: "Elgeseter bru",
+      }),
+    ];
+    const repository = fakeTrafikkdataRepository("2026-05-29T10:01:00.000Z");
+    const fetcher = vi.fn<typeof fetch>();
+    const collector = vi.fn().mockResolvedValue(counters);
+
+    await expect(
+      collectTrafikkdataCounters({
+        repository: repository as never,
+        endpoint: "https://trafikkdata.example.test/graphql",
+        nextPollAt,
+        now: () => new Date(checkedAt),
+        fetcher,
+        collector,
+      }),
+    ).resolves.toEqual({ skipped: false });
+
+    expect(collector).toHaveBeenCalledWith({
+      endpoint: "https://trafikkdata.example.test/graphql",
+      fetcher,
+      now: expect.any(Function),
+    });
+    expect(repository.upsertTrafficCounterSnapshots).toHaveBeenCalledWith(counters);
+    expect(repository.setCollectorState).toHaveBeenCalledWith(
+      "trafikkdata:lastSuccessfulPollAt",
+      checkedAt,
+    );
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "trafikkdata",
+      label: "Vegvesen Trafikkdata",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: `2 Trafikkdata tellepunkter oppdatert (1 med timesvolum). Neste poll tidligst ${nextPollAt}`,
+    });
+  });
+
+  it("writes degraded health when fetch, parse, or upsert fails", async () => {
+    const checkedAt = "2026-05-29T10:20:00.000Z";
+    const nextPollAt = "2026-05-29T10:35:00.000Z";
+    const repository = fakeTrafikkdataRepository("2026-05-29T10:00:00.000Z");
+    repository.upsertTrafficCounterSnapshots.mockRejectedValue(new Error("database unavailable"));
+    const collector = vi.fn().mockResolvedValue([trafikkdataCounter({ volumeLastHour: 123 })]);
+
+    await expect(
+      collectTrafikkdataCounters({
+        repository: repository as never,
+        endpoint: "https://trafikkdata.example.test/graphql",
+        nextPollAt,
+        now: () => new Date(checkedAt),
+        collector,
+      }),
+    ).resolves.toEqual({ skipped: false });
+
+    expect(repository.setCollectorState).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "trafikkdata",
+      label: "Vegvesen Trafikkdata",
+      state: "degraded",
+      lastCheckedAt: checkedAt,
+      lastFailureAt: checkedAt,
+      nextPollAt,
+      detail: "Trafikkdata-innhenting feilet: Error: database unavailable",
+    });
   });
 });
 
@@ -425,7 +555,9 @@ describe("TrafficInfo worker collection", () => {
     ).toBeGreaterThan(repository.upsertTrafficInfoSourceItems.mock.invocationCallOrder[0] ?? 0);
     expect(
       repository.expireStaleOpenEndedTrafficMapEvents.mock.invocationCallOrder[0],
-    ).toBeGreaterThan(repository.markMissingTrafficMapEventsExpired.mock.invocationCallOrder[0] ?? 0);
+    ).toBeGreaterThan(
+      repository.markMissingTrafficMapEventsExpired.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("records degraded health and skips expiry when TrafficInfo collection fails", async () => {
