@@ -13,6 +13,7 @@ import {
   lifecycleInputSchema,
   noteInputSchema,
   privateMapFeatureInputSchema,
+  publicTransportMapQuerySchema,
   sourceItemLinkInputSchema,
   sourceItemQuerySchema,
   situationQuerySchema,
@@ -49,6 +50,11 @@ const trafficMapSourceIds = [
   "vegvesen_traffic_info",
 ] as const;
 const trafficMapSourceIdSet = new Set<string>(trafficMapSourceIds);
+const publicTransportSourceIdSet = new Set<string>([
+  "entur_vehicle_positions",
+  "entur_service_alerts",
+]);
+const defaultPublicTransportBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
 
 function trafficMapSourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourceStatus[] {
   return sourceHealth
@@ -360,6 +366,34 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         weather,
         cameras,
         counters,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/map/public-transport", async (req, res, next) => {
+    try {
+      const query = publicTransportMapQuerySchema.parse(req.query);
+      const bounds =
+        typeof query.north === "number" &&
+        typeof query.south === "number" &&
+        typeof query.east === "number" &&
+        typeof query.west === "number"
+          ? { north: query.north, south: query.south, east: query.east, west: query.west }
+          : defaultPublicTransportBounds;
+      const [vehicles, alerts, sourceHealth] = await Promise.all([
+        store.listPublicTransportVehicles({ modes: query.modes, bounds }),
+        query.includeAlerts === false
+          ? Promise.resolve([])
+          : store.listPublicTransportServiceAlerts({ states: ["active"], bounds }),
+        store.listSourceHealth(),
+      ]);
+      res.json({
+        vehicles,
+        alerts,
+        sources: sourceHealth.filter((source) => publicTransportSourceIdSet.has(source.source)),
+        generatedAt: new Date().toISOString(),
       });
     } catch (error) {
       next(error);

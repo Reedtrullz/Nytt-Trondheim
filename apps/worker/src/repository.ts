@@ -4,6 +4,8 @@ import type {
   AiProcessingRun,
   Article,
   OfficialEvent,
+  PublicTransportServiceAlert,
+  PublicTransportVehicle,
   RoadCamera,
   RoadWeatherObservation,
   Situation,
@@ -24,6 +26,13 @@ export interface TrafficMapEventUpsertOptions {
 export interface TrafficMapEventListFilters {
   source?: TrafficMapEvent["source"];
   states?: TrafficMapEvent["state"][];
+}
+
+export interface PublicTransportBounds {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
 }
 
 export class WorkerRepository {
@@ -134,6 +143,20 @@ export class WorkerRepository {
       if (item.provider !== "vegvesen_traffic_info" || item.kind !== "official_event") {
         throw new Error(
           "upsertTrafficInfoSourceItems only accepts Vegvesen TrafficInfo official_event items",
+        );
+      }
+    }
+
+    for (const item of items) {
+      await this.upsertSourceItem(item);
+    }
+  }
+
+  async upsertEnturServiceAlertSourceItems(items: SourceItemInput[]): Promise<void> {
+    for (const item of items) {
+      if (item.provider !== "entur" || item.kind !== "official_event") {
+        throw new Error(
+          "upsertEnturServiceAlertSourceItems only accepts Entur official_event items",
         );
       }
     }
@@ -365,6 +388,242 @@ export class WorkerRepository {
         ],
       );
     }
+  }
+
+  async upsertPublicTransportVehicles(
+    vehicles: PublicTransportVehicle[],
+    fetchedAt: string,
+  ): Promise<void> {
+    for (const vehicle of vehicles) {
+      const payloadHash = createHash("sha256").update(JSON.stringify(vehicle)).digest("hex");
+      await this.pool.query(
+        `INSERT INTO public_transport_vehicles
+         (id, source, codespace_id, vehicle_id, mode, line_ref, public_code, line_name,
+          operator_ref, operator_name, last_updated, expires_at, geometry, payload,
+          payload_hash, last_seen_at, stale)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+          ST_SetSRID(ST_GeomFromGeoJSON($13),4326),$14,$15,$16,false)
+         ON CONFLICT (codespace_id, vehicle_id) DO UPDATE SET
+          id=EXCLUDED.id,
+          source=EXCLUDED.source,
+          mode=EXCLUDED.mode,
+          line_ref=EXCLUDED.line_ref,
+          public_code=EXCLUDED.public_code,
+          line_name=EXCLUDED.line_name,
+          operator_ref=EXCLUDED.operator_ref,
+          operator_name=EXCLUDED.operator_name,
+          last_updated=EXCLUDED.last_updated,
+          expires_at=EXCLUDED.expires_at,
+          geometry=EXCLUDED.geometry,
+          payload=EXCLUDED.payload,
+          payload_hash=EXCLUDED.payload_hash,
+          last_seen_at=EXCLUDED.last_seen_at,
+          stale=false`,
+        [
+          vehicle.id,
+          vehicle.source,
+          vehicle.codespaceId,
+          vehicle.vehicleId,
+          vehicle.mode,
+          vehicle.lineRef ?? null,
+          vehicle.publicCode ?? null,
+          vehicle.lineName ?? null,
+          vehicle.operatorRef ?? null,
+          vehicle.operatorName ?? null,
+          vehicle.lastUpdated,
+          vehicle.expiresAt ?? null,
+          JSON.stringify(vehicle.geometry),
+          vehicle,
+          payloadHash,
+          fetchedAt,
+        ],
+      );
+    }
+  }
+
+  async markMissingPublicTransportVehiclesStale(
+    source: PublicTransportVehicle["source"],
+    codespaceId: string,
+    activeVehicleIds: string[],
+    checkedAt: string,
+  ): Promise<number> {
+    const result = await this.pool.query(
+      `UPDATE public_transport_vehicles
+       SET stale=true,
+           payload=jsonb_set(payload, '{stale}', 'true'::jsonb, true)
+       WHERE source=$1
+         AND codespace_id=$2
+         AND stale=false
+         AND (
+           (expires_at IS NOT NULL AND expires_at <= $4::timestamptz)
+           OR last_seen_at < $4::timestamptz - interval '5 minutes'
+         )
+         AND NOT (vehicle_id = ANY($3::text[]))`,
+      [source, codespaceId, activeVehicleIds, checkedAt],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  async listPublicTransportVehicles(filters: {
+    modes?: PublicTransportVehicle["mode"][];
+    bounds: PublicTransportBounds;
+  }): Promise<PublicTransportVehicle[]> {
+    const params: unknown[] = [];
+    const where = ["stale=false"];
+    if (filters.modes?.length) {
+      params.push(filters.modes);
+      where.push(`mode = ANY($${params.length}::text[])`);
+    }
+    params.push(
+      filters.bounds.west,
+      filters.bounds.south,
+      filters.bounds.east,
+      filters.bounds.north,
+    );
+    const westIndex = params.length - 3;
+    const southIndex = params.length - 2;
+    const eastIndex = params.length - 1;
+    const northIndex = params.length;
+    where.push(
+      `ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))`,
+    );
+
+    const result = await this.pool.query<{
+      payload: PublicTransportVehicle;
+      stale: boolean;
+    }>(
+      `SELECT payload, stale
+       FROM public_transport_vehicles
+       WHERE ${where.join(" AND ")}
+       ORDER BY last_updated DESC, vehicle_id ASC
+       LIMIT 1000`,
+      params,
+    );
+    return result.rows.map((row) => ({ ...row.payload, stale: row.stale }));
+  }
+
+  async upsertPublicTransportServiceAlerts(
+    alerts: PublicTransportServiceAlert[],
+    fetchedAt: string,
+  ): Promise<void> {
+    for (const alert of alerts) {
+      const payloadHash = createHash("sha256").update(JSON.stringify(alert)).digest("hex");
+      await this.pool.query(
+        `INSERT INTO public_transport_service_alerts
+         (id, source, codespace_id, situation_number, severity, report_type, state, summary,
+          valid_from, valid_to, updated_at, geometry, payload, payload_hash, last_seen_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+          CASE WHEN $12::text IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($12),4326) END,
+          $13,$14,$15)
+         ON CONFLICT (codespace_id, situation_number) DO UPDATE SET
+          id=EXCLUDED.id,
+          source=EXCLUDED.source,
+          severity=EXCLUDED.severity,
+          report_type=EXCLUDED.report_type,
+          state=EXCLUDED.state,
+          summary=EXCLUDED.summary,
+          valid_from=EXCLUDED.valid_from,
+          valid_to=EXCLUDED.valid_to,
+          updated_at=EXCLUDED.updated_at,
+          geometry=EXCLUDED.geometry,
+          payload=EXCLUDED.payload,
+          payload_hash=EXCLUDED.payload_hash,
+          last_seen_at=EXCLUDED.last_seen_at`,
+        [
+          alert.id,
+          alert.source,
+          alert.codespaceId,
+          alert.situationNumber,
+          alert.severity ?? null,
+          alert.reportType ?? null,
+          alert.state,
+          alert.summary,
+          alert.validFrom ?? null,
+          alert.validTo ?? null,
+          alert.updatedAt,
+          alert.geometry ? JSON.stringify(alert.geometry) : null,
+          alert,
+          payloadHash,
+          fetchedAt,
+        ],
+      );
+    }
+  }
+
+  async expireMissingPublicTransportServiceAlerts(
+    source: PublicTransportServiceAlert["source"],
+    codespaceId: string,
+    activeSituationNumbers: string[],
+    fetchedAt: string,
+  ): Promise<number> {
+    return this.withTransaction(async (client) => {
+      const expired = await client.query<{ codespace_id: string; situation_number: string }>(
+        `UPDATE public_transport_service_alerts
+         SET state='expired',
+             payload=jsonb_set(payload, '{state}', to_jsonb('expired'::text), true),
+             last_seen_at=$4
+         WHERE source=$1
+         AND codespace_id=$2
+         AND state='active'
+         AND NOT (situation_number = ANY($3::text[]))
+         RETURNING codespace_id, situation_number`,
+        [source, codespaceId, activeSituationNumbers, fetchedAt],
+      );
+      const expiredExternalIds = expired.rows.map(
+        (row) => `${row.codespace_id}:${row.situation_number}`,
+      );
+      if (expiredExternalIds.length) {
+        await client.query(
+          `UPDATE source_items
+           SET normalized_payload=jsonb_set(normalized_payload, '{state}', to_jsonb('expired'::text), true),
+               updated_at=now()
+           WHERE provider='entur'
+           AND kind='official_event'
+           AND external_id = ANY($1::text[])`,
+          [expiredExternalIds],
+        );
+      }
+      return expired.rowCount ?? 0;
+    });
+  }
+
+  async listPublicTransportServiceAlerts(filters: {
+    states?: PublicTransportServiceAlert["state"][];
+    bounds: PublicTransportBounds;
+  }): Promise<PublicTransportServiceAlert[]> {
+    const params: unknown[] = [];
+    const where = ["geometry IS NOT NULL"];
+    const states: PublicTransportServiceAlert["state"][] = filters.states?.length
+      ? filters.states
+      : ["active"];
+    params.push(states);
+    where.push(`state = ANY($${params.length}::text[])`);
+    params.push(
+      filters.bounds.west,
+      filters.bounds.south,
+      filters.bounds.east,
+      filters.bounds.north,
+    );
+    const westIndex = params.length - 3;
+    const southIndex = params.length - 2;
+    const eastIndex = params.length - 1;
+    const northIndex = params.length;
+    where.push(
+      `ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))`,
+    );
+
+    const result = await this.pool.query<{
+      payload: PublicTransportServiceAlert;
+      state: PublicTransportServiceAlert["state"];
+    }>(
+      `SELECT payload, state
+       FROM public_transport_service_alerts
+       WHERE ${where.join(" AND ")}
+       ORDER BY updated_at DESC, situation_number ASC
+       LIMIT 500`,
+      params,
+    );
+    return result.rows.map((row) => ({ ...row.payload, state: row.state }));
   }
 
   async upsertRoadWeatherObservations(observations: RoadWeatherObservation[]): Promise<void> {

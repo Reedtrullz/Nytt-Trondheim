@@ -1,7 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import type { Article, OfficialEvent, TrafficCounterSnapshot } from "@nytt/shared";
+import type {
+  Article,
+  OfficialEvent,
+  PublicTransportServiceAlert,
+  SourceItemInput,
+  TrafficCounterSnapshot,
+} from "@nytt/shared";
 import { collectMunicipality, collectRss, probeOfficialSources, rssSources } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
 import {
@@ -35,6 +41,8 @@ import {
   defaultTrafikkdataGraphqlEndpoint,
   fetchTrafikkdataCounterSnapshots,
 } from "./trafikkdata.js";
+import { fetchEnturVehicles, type EnturVehicleBounds } from "./enturVehicles.js";
+import { enturServiceAlertSourceItemInput, fetchEnturServiceAlerts } from "./enturServiceAlerts.js";
 import {
   collectPolitiloggen,
   isPolitiloggenEnabled,
@@ -145,6 +153,193 @@ export async function collectTrafficInfoForMap({
       detail: `TrafficInfo-innhenting feilet: ${String(error)}`,
     });
   }
+}
+
+function enturBoundsFromEnv(value: string | undefined): EnturVehicleBounds {
+  const fallback = { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 };
+  if (!value) return fallback;
+  const parts = value.split(",").map((entry) => entry.trim());
+  if (parts.length !== 4 || parts.some((entry) => entry.length === 0)) return fallback;
+  const [minLat, minLon, maxLat, maxLon] = parts.map(Number);
+  if (![minLat, minLon, maxLat, maxLon].every(Number.isFinite)) return fallback;
+  if (minLat! < -90 || maxLat! > 90 || minLon! < -180 || maxLon! > 180) return fallback;
+  if (minLat! >= maxLat! || minLon! >= maxLon!) return fallback;
+  return { minLat: minLat!, minLon: minLon!, maxLat: maxLat!, maxLon: maxLon! };
+}
+
+function enturCodespacesFromEnv(value: string | undefined): string[] {
+  const seen = new Set<string>();
+  for (const entry of (value ?? "ATB").split(",")) {
+    const codespace = entry.trim().toUpperCase();
+    if (codespace) seen.add(codespace);
+  }
+  return seen.size ? [...seen] : ["ATB"];
+}
+
+type EnturVehicleRepository = Pick<
+  WorkerRepository,
+  "markMissingPublicTransportVehiclesStale" | "setHealth" | "upsertPublicTransportVehicles"
+>;
+
+type EnturVehicleCollector = typeof fetchEnturVehicles;
+
+export async function collectEnturVehiclesForMap({
+  repository,
+  clientName,
+  codespaceId,
+  bounds,
+  nextPollAt,
+  now = () => new Date(),
+  collector = fetchEnturVehicles,
+}: {
+  repository: EnturVehicleRepository;
+  clientName: string;
+  codespaceId: string;
+  bounds: EnturVehicleBounds;
+  nextPollAt: string;
+  now?: () => Date;
+  collector?: EnturVehicleCollector;
+}): Promise<void> {
+  await collectEnturVehiclesForMapCodespaces({
+    repository,
+    clientName,
+    codespaceIds: [codespaceId],
+    bounds,
+    nextPollAt,
+    now,
+    collector,
+  });
+}
+
+export async function collectEnturVehiclesForMapCodespaces({
+  repository,
+  clientName,
+  codespaceIds,
+  bounds,
+  nextPollAt,
+  now = () => new Date(),
+  collector = fetchEnturVehicles,
+}: {
+  repository: EnturVehicleRepository;
+  clientName: string;
+  codespaceIds: string[];
+  bounds: EnturVehicleBounds;
+  nextPollAt: string;
+  now?: () => Date;
+  collector?: EnturVehicleCollector;
+}): Promise<void> {
+  const checkedAt = now().toISOString();
+  let vehicleCount = 0;
+  let staleCount = 0;
+  let successfulCodespaces = 0;
+  const failures: string[] = [];
+
+  for (const codespaceId of codespaceIds) {
+    try {
+      const result = await collector({ clientName, codespaceId, bounds });
+      await repository.upsertPublicTransportVehicles(result.vehicles, checkedAt);
+      staleCount += await repository.markMissingPublicTransportVehiclesStale(
+        "entur_vehicle_positions",
+        codespaceId,
+        result.activeVehicleIds,
+        checkedAt,
+      );
+      vehicleCount += result.vehicles.length;
+      successfulCodespaces += 1;
+    } catch (error) {
+      failures.push(`${codespaceId}: ${String(error)}`);
+    }
+  }
+
+  await repository.setHealth({
+    source: "entur_vehicle_positions",
+    label: "Entur kjøretøyposisjoner",
+    state: failures.length ? "degraded" : "ok",
+    lastCheckedAt: checkedAt,
+    lastFailureAt: failures.length ? checkedAt : undefined,
+    nextPollAt,
+    detail: failures.length
+      ? `${vehicleCount} kjøretøy oppdatert fra ${successfulCodespaces}/${codespaceIds.length} codespaces (${staleCount} markert stale). Feil: ${failures.join("; ")}`
+      : `${vehicleCount} kjøretøy oppdatert fra ${successfulCodespaces} codespaces (${staleCount} markert stale)`,
+  });
+}
+
+type EnturServiceAlertRepository = Pick<
+  WorkerRepository,
+  | "expireMissingPublicTransportServiceAlerts"
+  | "setHealth"
+  | "upsertEnturServiceAlertSourceItems"
+  | "upsertPublicTransportServiceAlerts"
+>;
+
+type EnturServiceAlertCollector = typeof fetchEnturServiceAlerts;
+
+export async function collectEnturServiceAlerts({
+  repository,
+  clientName,
+  codespaceIds,
+  nextPollAt,
+  now = () => new Date(),
+  collector = fetchEnturServiceAlerts,
+}: {
+  repository: EnturServiceAlertRepository;
+  clientName: string;
+  codespaceIds: string[];
+  nextPollAt: string;
+  now?: () => Date;
+  collector?: EnturServiceAlertCollector;
+}): Promise<void> {
+  const checkedAt = now().toISOString();
+  const allAlerts: PublicTransportServiceAlert[] = [];
+  const activeSituationNumbersByCodespace = new Map<string, string[]>();
+  const sourceItems: SourceItemInput[] = [];
+  const failures: string[] = [];
+
+  for (const codespaceId of codespaceIds) {
+    try {
+      const result = await collector({ clientName, codespaceId, receivedAt: checkedAt });
+      allAlerts.push(...result.alerts);
+      activeSituationNumbersByCodespace.set(codespaceId, result.activeSituationNumbers);
+      sourceItems.push(
+        ...result.alerts.map((alert) =>
+          enturServiceAlertSourceItemInput(alert, {
+            fetchedAt: checkedAt,
+            rawAlert: result.rawAlertsBySituationNumber.get(alert.situationNumber) ?? alert,
+          }),
+        ),
+      );
+    } catch (error) {
+      failures.push(`${codespaceId}: ${String(error)}`);
+    }
+  }
+
+  let expiredCount = 0;
+  if (allAlerts.length) {
+    await repository.upsertPublicTransportServiceAlerts(allAlerts, checkedAt);
+  }
+  if (sourceItems.length) {
+    await repository.upsertEnturServiceAlertSourceItems(sourceItems);
+  }
+  for (const [codespaceId, activeSituationNumbers] of activeSituationNumbersByCodespace) {
+    expiredCount += await repository.expireMissingPublicTransportServiceAlerts(
+      "entur_service_alerts",
+      codespaceId,
+      activeSituationNumbers,
+      checkedAt,
+    );
+  }
+
+  await repository.setHealth({
+    source: "entur_service_alerts",
+    label: "Entur trafikkavvik",
+    state: failures.length ? "degraded" : "ok",
+    lastCheckedAt: checkedAt,
+    lastFailureAt: failures.length ? checkedAt : undefined,
+    nextPollAt,
+    detail: failures.length
+      ? `${allAlerts.length} Entur trafikkavvik oppdatert fra ${activeSituationNumbersByCodespace.size}/${codespaceIds.length} codespaces (${expiredCount} utløpt fra snapshot). Feil: ${failures.join("; ")}`
+      : `${allAlerts.length} Entur trafikkavvik oppdatert fra ${activeSituationNumbersByCodespace.size}/${codespaceIds.length} codespaces (${expiredCount} utløpt fra snapshot)`,
+  });
 }
 
 const trafikkdataPollIntervalMs = 15 * 60 * 1000;
@@ -488,6 +683,12 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     endpoint: process.env.TRAFIKKDATA_GRAPHQL_ENDPOINT?.trim() || defaultTrafikkdataGraphqlEndpoint,
     nextPollAt: new Date(Date.now() + trafikkdataPollIntervalMs).toISOString(),
   });
+  await collectEnturServiceAlerts({
+    repository,
+    clientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",
+    codespaceIds: enturCodespacesFromEnv(process.env.ENTUR_CODESPACES),
+    nextPollAt,
+  });
   const officialEvents: OfficialEvent[] = [];
   for (const [source, collector] of [
     ["met", () => collectMetWarnings(fetch)],
@@ -707,10 +908,27 @@ export async function runWorker(): Promise<void> {
   const analyzer = createAnalyzer();
   const once = process.argv.includes("--once");
   const guardedCollectAll = createCollectionGuard(() => collectAll({ repository, analyzer, once }));
+  const enturClientName = process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim";
+  const enturCodespaceIds = enturCodespacesFromEnv(process.env.ENTUR_CODESPACES);
+  const enturVehicleBounds = enturBoundsFromEnv(process.env.ENTUR_VEHICLE_BOUNDS);
+  const enturVehicleIntervalMs = 60 * 1000;
+  const guardedEnturVehicles = createCollectionGuard(
+    () =>
+      collectEnturVehiclesForMapCodespaces({
+        repository,
+        clientName: enturClientName,
+        codespaceIds: enturCodespaceIds,
+        bounds: enturVehicleBounds,
+        nextPollAt: new Date(Date.now() + enturVehicleIntervalMs).toISOString(),
+      }),
+    () => console.warn("[worker] skipping Entur vehicle tick; previous cycle still running"),
+  );
 
   try {
+    await guardedEnturVehicles();
     await guardedCollectAll();
     if (!once) {
+      setInterval(() => void guardedEnturVehicles().catch(console.error), enturVehicleIntervalMs);
       setInterval(() => void guardedCollectAll().catch(console.error), 10 * 60 * 1000);
       process.on("SIGTERM", async () => {
         await pool.end();

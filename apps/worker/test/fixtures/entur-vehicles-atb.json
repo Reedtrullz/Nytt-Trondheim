@@ -1,0 +1,30 @@
+{
+  "data": {
+    "vehicles": [
+      {
+        "vehicleId": "8790",
+        "mode": "BUS",
+        "line": {
+          "lineRef": "ATB:Line:2_45",
+          "publicCode": "45",
+          "lineName": "Sjetnmarka- Tiller- Tillerringen- Sandmoen"
+        },
+        "operator": { "operatorRef": "ATB:Operator:171", "name": "Tide Buss" },
+        "originName": "Sandmoen",
+        "destinationName": "Hagen",
+        "lastUpdated": "2026-05-31T21:02:50.207Z",
+        "expiration": "2026-05-31T21:17:00Z",
+        "location": { "latitude": 63.3708205, "longitude": 10.4045538 },
+        "speed": 0,
+        "bearing": 206,
+        "delay": 59,
+        "inCongestion": null,
+        "occupancyStatus": "noData",
+        "vehicleStatus": "IN_PROGRESS",
+        "monitored": true,
+        "monitoredCall": { "stopPointRef": "NSR:Quay:72486", "order": 21, "vehicleAtStop": true },
+        "progressBetweenStops": { "linkDistance": 454, "percentage": 100 }
+      }
+    ]
+  }
+}

@@ -3,9 +3,14 @@ import type {
   RoadWeatherObservation,
   TrafficCounterSnapshot,
   TrafficMapEvent,
+  PublicTransportServiceAlert,
+  PublicTransportVehicle,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
+  collectEnturServiceAlerts,
+  collectEnturVehiclesForMap,
+  collectEnturVehiclesForMapCodespaces,
   collectDatexCctvContext,
   collectDatexRoadWeatherContext,
   collectTrafikkdataCounters,
@@ -590,3 +595,362 @@ describe("TrafficInfo worker collection", () => {
     });
   });
 });
+
+describe("Entur worker collection", () => {
+  it("collects Entur vehicle positions into telemetry only and writes source health", async () => {
+    const repository = {
+      upsertPublicTransportVehicles: vi.fn().mockResolvedValue(undefined),
+      markMissingPublicTransportVehiclesStale: vi.fn().mockResolvedValue(2),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi.fn().mockResolvedValue({
+      vehicles: [enturVehicle()],
+      activeVehicleIds: ["8790"],
+    });
+
+    await collectEnturVehiclesForMap({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceId: "ATB",
+      bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
+      nextPollAt: "2026-05-31T21:16:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.upsertPublicTransportVehicles).toHaveBeenCalledWith(
+      expect.any(Array),
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.markMissingPublicTransportVehiclesStale).toHaveBeenCalledWith(
+      "entur_vehicle_positions",
+      "ATB",
+      ["8790"],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.setHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "entur_vehicle_positions", state: "ok" }),
+    );
+  });
+
+  it("aggregates Entur vehicle health across codespaces without hiding partial failures", async () => {
+    const repository = {
+      upsertPublicTransportVehicles: vi.fn().mockResolvedValue(undefined),
+      markMissingPublicTransportVehiclesStale: vi.fn().mockResolvedValue(1),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi
+      .fn()
+      .mockImplementation(async ({ codespaceId }: { codespaceId: string }) => {
+        if (codespaceId === "SKY") throw new Error("SKY unavailable");
+        return {
+          vehicles: [enturVehicle({ codespaceId })],
+          activeVehicleIds: ["8790"],
+        };
+      });
+
+    await collectEnturVehiclesForMapCodespaces({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceIds: ["ATB", "SKY"],
+      bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
+      nextPollAt: "2026-05-31T21:16:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.upsertPublicTransportVehicles).toHaveBeenCalledTimes(1);
+    expect(repository.markMissingPublicTransportVehiclesStale).toHaveBeenCalledWith(
+      "entur_vehicle_positions",
+      "ATB",
+      ["8790"],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.setHealth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "entur_vehicle_positions",
+        state: "degraded",
+        detail: expect.stringContaining("SKY unavailable"),
+      }),
+    );
+  });
+
+  it("records degraded Entur vehicle health and skips stale expiry on failure", async () => {
+    const repository = {
+      upsertPublicTransportVehicles: vi.fn().mockResolvedValue(undefined),
+      markMissingPublicTransportVehiclesStale: vi.fn().mockResolvedValue(0),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi.fn().mockRejectedValue(new Error("Entur unavailable"));
+
+    await collectEnturVehiclesForMap({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceId: "ATB",
+      bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
+      nextPollAt: "2026-05-31T21:16:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.upsertPublicTransportVehicles).not.toHaveBeenCalled();
+    expect(repository.markMissingPublicTransportVehiclesStale).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "entur_vehicle_positions", state: "degraded" }),
+    );
+  });
+
+  it("collects Entur service alerts as dedicated rows and source items without promotion", async () => {
+    const alert = enturServiceAlert();
+    const rawAlert = { situationNumber: alert.situationNumber };
+    const repository = {
+      upsertPublicTransportServiceAlerts: vi.fn().mockResolvedValue(undefined),
+      upsertEnturServiceAlertSourceItems: vi.fn().mockResolvedValue(undefined),
+      expireMissingPublicTransportServiceAlerts: vi.fn().mockResolvedValue(1),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+      upsertOfficialEvents: vi.fn().mockResolvedValue(undefined),
+      upsertSituation: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi.fn().mockResolvedValue({
+      alerts: [alert],
+      activeSituationNumbers: [alert.situationNumber],
+      rawAlertsBySituationNumber: new Map([[alert.situationNumber, rawAlert]]),
+    });
+
+    await collectEnturServiceAlerts({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceIds: ["ATB"],
+      nextPollAt: "2026-05-31T21:25:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.upsertPublicTransportServiceAlerts).toHaveBeenCalledWith(
+      [alert],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.upsertEnturServiceAlertSourceItems).toHaveBeenCalledWith([
+      expect.objectContaining({
+        provider: "entur",
+        kind: "official_event",
+        externalId: `${alert.codespaceId}:${alert.situationNumber}`,
+        rawPayload: rawAlert,
+      }),
+    ]);
+    expect(repository.expireMissingPublicTransportServiceAlerts).toHaveBeenCalledWith(
+      "entur_service_alerts",
+      "ATB",
+      [alert.situationNumber],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.upsertOfficialEvents).not.toHaveBeenCalled();
+    expect(repository.upsertSituation).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "entur_service_alerts", state: "ok" }),
+    );
+  });
+
+  it("expires Entur service-alert codespaces that successfully return an empty snapshot", async () => {
+    const repository = {
+      upsertPublicTransportServiceAlerts: vi.fn().mockResolvedValue(undefined),
+      upsertEnturServiceAlertSourceItems: vi.fn().mockResolvedValue(undefined),
+      expireMissingPublicTransportServiceAlerts: vi.fn().mockResolvedValue(3),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi.fn().mockResolvedValue({
+      alerts: [],
+      activeSituationNumbers: [],
+      rawAlertsBySituationNumber: new Map(),
+    });
+
+    await collectEnturServiceAlerts({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceIds: ["ATB"],
+      nextPollAt: "2026-05-31T21:25:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.upsertPublicTransportServiceAlerts).not.toHaveBeenCalled();
+    expect(repository.upsertEnturServiceAlertSourceItems).not.toHaveBeenCalled();
+    expect(repository.expireMissingPublicTransportServiceAlerts).toHaveBeenCalledWith(
+      "entur_service_alerts",
+      "ATB",
+      [],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.setHealth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "entur_service_alerts",
+        state: "ok",
+        detail: expect.stringContaining("3 utløpt"),
+      }),
+    );
+  });
+
+  it("expires Entur service alerts separately for each configured codespace", async () => {
+    const repository = {
+      upsertPublicTransportServiceAlerts: vi.fn().mockResolvedValue(undefined),
+      upsertEnturServiceAlertSourceItems: vi.fn().mockResolvedValue(undefined),
+      expireMissingPublicTransportServiceAlerts: vi.fn().mockResolvedValue(1),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi
+      .fn()
+      .mockImplementation(async ({ codespaceId }: { codespaceId: string }) => ({
+        alerts: [
+          enturServiceAlert({
+            id: `entur-service-alert:${codespaceId}:shared-alert`,
+            codespaceId,
+            situationNumber: "shared-alert",
+          }),
+        ],
+        activeSituationNumbers: ["shared-alert"],
+        rawAlertsBySituationNumber: new Map([["shared-alert", { codespaceId }]]),
+      }));
+
+    await collectEnturServiceAlerts({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceIds: ["ATB", "SKY"],
+      nextPollAt: "2026-05-31T21:25:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.expireMissingPublicTransportServiceAlerts).toHaveBeenNthCalledWith(
+      1,
+      "entur_service_alerts",
+      "ATB",
+      ["shared-alert"],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.expireMissingPublicTransportServiceAlerts).toHaveBeenNthCalledWith(
+      2,
+      "entur_service_alerts",
+      "SKY",
+      ["shared-alert"],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.upsertEnturServiceAlertSourceItems).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ externalId: "ATB:shared-alert" }),
+        expect.objectContaining({ externalId: "SKY:shared-alert" }),
+      ]),
+    );
+  });
+
+  it("keeps successful Entur service-alert codespaces when another codespace fails", async () => {
+    const alert = enturServiceAlert({ situationNumber: "shared-alert" });
+    const repository = {
+      upsertPublicTransportServiceAlerts: vi.fn().mockResolvedValue(undefined),
+      upsertEnturServiceAlertSourceItems: vi.fn().mockResolvedValue(undefined),
+      expireMissingPublicTransportServiceAlerts: vi.fn().mockResolvedValue(0),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi
+      .fn()
+      .mockImplementation(async ({ codespaceId }: { codespaceId: string }) => {
+        if (codespaceId === "SKY") throw new Error("Journey Planner SKY unavailable");
+        return {
+          alerts: [alert],
+          activeSituationNumbers: [alert.situationNumber],
+          rawAlertsBySituationNumber: new Map([[alert.situationNumber, { codespaceId }]]),
+        };
+      });
+
+    await collectEnturServiceAlerts({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceIds: ["ATB", "SKY"],
+      nextPollAt: "2026-05-31T21:25:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.upsertPublicTransportServiceAlerts).toHaveBeenCalledWith(
+      [alert],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.expireMissingPublicTransportServiceAlerts).toHaveBeenCalledWith(
+      "entur_service_alerts",
+      "ATB",
+      ["shared-alert"],
+      "2026-05-31T21:15:00.000Z",
+    );
+    expect(repository.setHealth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "entur_service_alerts",
+        state: "degraded",
+        detail: expect.stringContaining("SKY unavailable"),
+      }),
+    );
+  });
+
+  it("records degraded Entur service-alert health and skips expiry on failure", async () => {
+    const repository = {
+      upsertPublicTransportServiceAlerts: vi.fn().mockResolvedValue(undefined),
+      upsertEnturServiceAlertSourceItems: vi.fn().mockResolvedValue(undefined),
+      expireMissingPublicTransportServiceAlerts: vi.fn().mockResolvedValue(0),
+      setHealth: vi.fn().mockResolvedValue(undefined),
+    };
+    const collector = vi.fn().mockRejectedValue(new Error("Journey Planner unavailable"));
+
+    await collectEnturServiceAlerts({
+      repository: repository as never,
+      clientName: "reidar-nytt-trondheim",
+      codespaceIds: ["ATB"],
+      nextPollAt: "2026-05-31T21:25:00.000Z",
+      now: () => new Date("2026-05-31T21:15:00.000Z"),
+      collector,
+    });
+
+    expect(repository.upsertPublicTransportServiceAlerts).not.toHaveBeenCalled();
+    expect(repository.upsertEnturServiceAlertSourceItems).not.toHaveBeenCalled();
+    expect(repository.expireMissingPublicTransportServiceAlerts).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "entur_service_alerts", state: "degraded" }),
+    );
+  });
+});
+
+function enturVehicle(overrides: Partial<PublicTransportVehicle> = {}): PublicTransportVehicle {
+  return {
+    id: "entur-vehicle:ATB:8790",
+    source: "entur_vehicle_positions",
+    codespaceId: "ATB",
+    vehicleId: "8790",
+    mode: "bus",
+    lineRef: "ATB:Line:2_45",
+    publicCode: "45",
+    lineName: "Sjetnmarka- Tiller- Tillerringen- Sandmoen",
+    lastUpdated: "2026-05-31T21:02:50.207Z",
+    expiresAt: "2026-05-31T21:17:00.000Z",
+    geometry: { type: "Point", coordinates: [10.4045538, 63.3708205] },
+    stale: false,
+    ...overrides,
+  };
+}
+
+function enturServiceAlert(
+  overrides: Partial<PublicTransportServiceAlert> = {},
+): PublicTransportServiceAlert {
+  return {
+    id: "entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint",
+    source: "entur_service_alerts",
+    codespaceId: "ATB",
+    situationNumber: "ATB:SituationNumber:24982-stopPoint",
+    severity: "normal",
+    reportType: "general",
+    state: "active",
+    summary: "Rota - bussholdeplassen er midlertidig flyttet",
+    description: "Holdeplassen er midlertidig flyttet.",
+    validFrom: "2026-05-31T20:00:00.000Z",
+    updatedAt: "2026-05-31T21:00:00.000Z",
+    geometry: { type: "Point", coordinates: [10.760832, 63.431348] },
+    affectedStopNames: ["Rota"],
+    ...overrides,
+  };
+}

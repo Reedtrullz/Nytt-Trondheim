@@ -1,0 +1,90 @@
+{
+  "data": {
+    "situations": [
+      {
+        "id": "situation-24982",
+        "situationNumber": "ATB:SituationNumber:24982-stopPoint",
+        "version": 3,
+        "creationTime": "2026-05-31T20:00:00Z",
+        "versionedAtTime": "2026-05-31T21:00:00Z",
+        "severity": "normal",
+        "reportType": "general",
+        "summary": [
+          { "language": "no", "value": "Rota - bussholdeplassen er midlertidig flyttet" }
+        ],
+        "description": [{ "language": "no", "value": "Bussholdeplassen er midlertidig flyttet." }],
+        "advice": [{ "language": "no", "value": "Se etter midlertidig holdeplass." }],
+        "validityPeriod": {
+          "startTime": "2026-05-31T20:00:00Z",
+          "endTime": "2026-06-02T20:00:00Z"
+        },
+        "affects": {
+          "stopPlaces": [
+            {
+              "id": "NSR:StopPlace:44033",
+              "name": "Rota",
+              "quays": [
+                {
+                  "id": "NSR:Quay:4403301",
+                  "name": "Rota",
+                  "latitude": 63.431348,
+                  "longitude": 10.760832
+                }
+              ]
+            }
+          ],
+          "lines": [{ "id": "ATB:Line:2_45", "publicCode": "45", "name": "Linje 45" }]
+        },
+        "infoLinks": [{ "uri": "https://example.test/rota", "label": "Mer informasjon" }]
+      },
+      {
+        "id": "situation-multi",
+        "situationNumber": "ATB:SituationNumber:multi-stop-test",
+        "version": 1,
+        "creationTime": "2026-05-31T19:00:00Z",
+        "versionedAtTime": "2026-05-31T21:05:00Z",
+        "severity": "normal",
+        "reportType": "lineInfo",
+        "summary": [{ "language": "no", "value": "Linje 45 forsinket" }],
+        "description": [{ "language": "no", "value": "Forsinkelse på flere holdeplasser." }],
+        "validityPeriod": { "startTime": "2026-05-31T19:00:00Z" },
+        "affects": {
+          "stopPlaces": [
+            {
+              "id": "NSR:StopPlace:1",
+              "name": "Sentrum",
+              "latitude": 63.4305,
+              "longitude": 10.3951
+            },
+            {
+              "id": "NSR:StopPlace:2",
+              "name": "Tiller",
+              "quays": [
+                {
+                  "id": "NSR:Quay:2",
+                  "name": "Tiller",
+                  "latitude": 63.3708,
+                  "longitude": 10.4046
+                }
+              ]
+            }
+          ],
+          "lines": [{ "id": "ATB:Line:2_45", "publicCode": "45", "name": "Linje 45" }]
+        }
+      },
+      {
+        "id": "situation-unlocated",
+        "situationNumber": "ATB:SituationNumber:unlocated-test",
+        "version": 1,
+        "creationTime": "2026-05-31T18:00:00Z",
+        "versionedAtTime": "2026-05-31T21:10:00Z",
+        "severity": "normal",
+        "reportType": "lineInfo",
+        "summary": [{ "language": "no", "value": "Generell informasjon om linje 3" }],
+        "affects": {
+          "lines": [{ "id": "ATB:Line:2_3", "publicCode": "3", "name": "Linje 3" }]
+        }
+      }
+    ]
+  }
+}
