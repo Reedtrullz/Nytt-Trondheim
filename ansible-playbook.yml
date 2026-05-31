@@ -112,6 +112,9 @@
           DEEPSEEK_API_KEY={{ lookup('env', 'NYTT_DEEPSEEK_API_KEY') }}
           DEEPSEEK_MODEL=deepseek-v4-flash
           POLITILOGGEN_ENABLED={{ lookup('env', 'NYTT_POLITILOGGEN_ENABLED') | default('true', true) }}
+          ENTUR_CLIENT_NAME={{ lookup('env', 'NYTT_ENTUR_CLIENT_NAME') | default('reidar-nytt-trondheim', true) }}
+          ENTUR_CODESPACES={{ lookup('env', 'NYTT_ENTUR_CODESPACES') | default('ATB', true) }}
+          ENTUR_VEHICLE_BOUNDS={{ lookup('env', 'NYTT_ENTUR_VEHICLE_BOUNDS') | default('63.30,10.20,63.55,10.65', true) }}
           DATEX_ENDPOINT={{ lookup('env', 'NYTT_DATEX_ENDPOINT') | default('', true) }}
           DATEX_USERNAME={{ lookup('env', 'NYTT_DATEX_USERNAME') | default('', true) }}
           DATEX_PASSWORD={{ lookup('env', 'NYTT_DATEX_PASSWORD') | default('', true) }}
@@ -431,6 +434,75 @@
       when:
         - lookup('env', 'NYTT_DATEX_USERNAME') | length > 0
         - lookup('env', 'NYTT_DATEX_PASSWORD') | length > 0
+
+    - name: Verify Entur source health and provenance invariants when tables exist
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 <<'SQL'
+        DO $$
+        DECLARE
+          entur_source_health_count integer;
+          accidental_vehicle_source_items integer;
+          accidental_official_events integer;
+          accidental_entur_situations integer;
+        BEGIN
+          IF to_regclass('public.public_transport_vehicles') IS NULL
+             OR to_regclass('public.public_transport_service_alerts') IS NULL THEN
+            RAISE NOTICE 'Skipping Entur verification because public transport tables do not exist yet.';
+            RETURN;
+          END IF;
+
+          SELECT count(*) INTO entur_source_health_count
+          FROM source_health
+          WHERE source IN ('entur_vehicle_positions','entur_service_alerts');
+
+          IF entur_source_health_count <> 2 THEN
+            RAISE EXCEPTION 'Expected 2 Entur source_health rows, found %', entur_source_health_count;
+          END IF;
+
+          SELECT count(*) INTO accidental_vehicle_source_items
+          FROM source_items
+          WHERE provider='entur_vehicle_positions'
+             OR (
+               provider='entur'
+               AND (
+                 external_id LIKE 'entur-vehicle:%'
+                 OR normalized_payload->>'source' = 'entur_vehicle_positions'
+                 OR normalized_payload ? 'vehicleId'
+               )
+             );
+
+          IF accidental_vehicle_source_items <> 0 THEN
+            RAISE EXCEPTION 'Entur vehicle telemetry entered source_items: % rows', accidental_vehicle_source_items;
+          END IF;
+
+          SELECT count(*) INTO accidental_official_events
+          FROM official_events
+          WHERE source IN ('entur','entur_vehicle_positions','entur_service_alerts');
+
+          IF accidental_official_events <> 0 THEN
+            RAISE EXCEPTION 'Entur sources entered official_events: % rows', accidental_official_events;
+          END IF;
+
+          SELECT count(*) INTO accidental_entur_situations
+          FROM situations
+          WHERE payload->>'officialSource' IN ('entur','entur_vehicle_positions','entur_service_alerts')
+             OR payload->'activationBasis'->'sourceIds' ?| array['entur','entur_vehicle_positions','entur_service_alerts']
+             OR EXISTS (
+               SELECT 1
+               FROM jsonb_array_elements(COALESCE(payload->'evidence', '[]'::jsonb)) evidence
+               WHERE evidence->>'source' IN ('entur','entur_vehicle_positions','entur_service_alerts')
+             );
+
+          IF accidental_entur_situations <> 0 THEN
+            RAISE EXCEPTION 'Entur sources activated situations: % rows', accidental_entur_situations;
+          END IF;
+        END $$;
+        SQL
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      changed_when: false
 
     - name: Verify source item query sanity
       ansible.builtin.command: >-

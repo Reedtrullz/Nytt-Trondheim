@@ -67,6 +67,16 @@ The deploy workflow exposes `NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD` and opt
 
 For local development, copy `.env.example` to `.env.production` and set `DATEX_USERNAME` / `DATEX_PASSWORD` there. Leave `DATEX_ENDPOINT`, `DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT` and `DATEX_TRAVEL_TIME_DATA_ENDPOINT` blank unless intentionally overriding the defaults. Local `.env*` files must stay untracked.
 
+## Entur Configuration
+
+Entur open-data APIs require every request to identify the client, but the identifier is not a secret. Local defaults are documented in `.env.example`, and production can optionally override them with repository variables:
+
+- `NYTT_ENTUR_CLIENT_NAME`, defaulting to `reidar-nytt-trondheim`.
+- `NYTT_ENTUR_CODESPACES`, defaulting to `ATB`.
+- `NYTT_ENTUR_VEHICLE_BOUNDS`, defaulting to `63.30,10.20,63.55,10.65`.
+
+Do not add these values to the required deployment secrets list; the playbook writes safe defaults into `.env.production` when repository variables are unset.
+
 ## DATEX Verification
 
 The deployment playbook now automatically verifies live health, worker container status, DATEX/datex_travel_time `source_health` row presence when DATEX credentials are enabled, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
@@ -85,6 +95,51 @@ ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file
 ```
 
 A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on `source_health.state='ok'`, worker logs and container uptime to distinguish that from collector failure. TravelTime source health appears as `datex_travel_time`; rows in `datex_travel_times` are measured/estimated travel time and delay pulse data only. They do not create `official_events`, do not promote or create `OfficialEvent` rows, and do not create or update `situations`. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
+
+## Entur Verification
+
+After Entur ingestion is deployed for a CI-verified SHA, verify source health, stored public transport rows and provenance separation:
+
+```bash
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -P pager=off -F ' | ' -At" <<'SQL'
+SELECT source, state, detail, last_checked_at, next_poll_at
+FROM source_health
+WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
+ORDER BY source;
+SELECT count(*) FROM public_transport_vehicles WHERE stale=false;
+SELECT state, count(*) FROM public_transport_service_alerts GROUP BY state ORDER BY state;
+SELECT provider, kind, count(*) FROM source_items WHERE provider='entur' GROUP BY provider, kind;
+SELECT count(*) AS accidental_vehicle_source_items
+FROM source_items
+WHERE provider='entur_vehicle_positions'
+   OR (
+     provider='entur'
+     AND (
+       external_id LIKE 'entur-vehicle:%'
+       OR normalized_payload->>'source' = 'entur_vehicle_positions'
+       OR normalized_payload ? 'vehicleId'
+     )
+   );
+SELECT count(*) FROM official_events WHERE source IN ('entur','entur_vehicle_positions','entur_service_alerts');
+SELECT count(*) AS accidental_entur_situations
+FROM situations
+WHERE payload->>'officialSource' IN ('entur','entur_vehicle_positions','entur_service_alerts')
+   OR payload->'activationBasis'->'sourceIds' ?| array['entur','entur_vehicle_positions','entur_service_alerts']
+   OR EXISTS (
+     SELECT 1
+     FROM jsonb_array_elements(COALESCE(payload->'evidence', '[]'::jsonb)) evidence
+     WHERE evidence->>'source' IN ('entur','entur_vehicle_positions','entur_service_alerts')
+   );
+SQL
+```
+
+Expected results:
+
+- Entur source health rows are present; `entur_vehicle_positions` should normally be `ok` with non-zero row count when Entur is reachable.
+- `source_items WHERE provider='entur'` can be non-zero for service alerts.
+- `accidental_vehicle_source_items` must be zero; this proves vehicle telemetry did not enter `source_items` either under `entur_vehicle_positions` or disguised as `provider='entur'` rows.
+- `official_events` for Entur sources must be zero in this plan.
+- `accidental_entur_situations` must be zero; this checks `officialSource`, `activationBasis.sourceIds`, and embedded evidence sources, not just one field.
 
 ## Traffic Map Production Verification
 
