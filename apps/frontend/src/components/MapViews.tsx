@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { GeoJsonObject } from "geojson";
 import L, { type LatLngTuple } from "leaflet";
 import {
@@ -10,7 +10,18 @@ import {
   WMSTileLayer,
   useMapEvents,
 } from "react-leaflet";
-import type { Article, MapFeature, Situation } from "@nytt/shared";
+import type { Article, MapFeature, PrivateMapFeatureInput, Situation } from "@nytt/shared";
+import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
+import {
+  bearingDegrees,
+  circlePolygon,
+  lineDistanceMeters,
+  polygonAreaSquareMeters,
+  sectorPolygon,
+} from "../mapTools/geometry.js";
+import { mapToolPresets, type MapToolPreset } from "../mapTools/presets.js";
+import { MapBoundsWatcher } from "./map/MapBoundsWatcher.js";
+import { PublicTransportLayer, PublicTransportSummary } from "./map/PublicTransportLayer.js";
 
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
 export function NewsMap({ articles }: { articles: Article[] }) {
@@ -39,14 +50,48 @@ export function NewsMap({ articles }: { articles: Article[] }) {
   );
 }
 
-type DrawingMode = "point" | "line" | "area" | null;
+type DrawingMode = MapToolPreset["geometryMode"] | null;
+type PrivateFeatureProperties = Pick<
+  MapFeature["properties"],
+  | "label"
+  | "note"
+  | "analysisType"
+  | "confidence"
+  | "scenario"
+  | "measurement"
+  | "styleKey"
+  | "sourceItemIds"
+>;
+
+interface MapBounds {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+}
+
+const minToolRadiusMeters = 25;
+const maxToolRadiusMeters = 50_000;
+
+function clampNumber(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampRadiusMeters(value: number): number {
+  return clampNumber(value, minToolRadiusMeters, maxToolRadiusMeters, 500);
+}
+
+function clampBearingDegrees(value: number): number {
+  return clampNumber(value, 0, 360, 0);
+}
 
 function CaptureClicks({
   mode,
   onClick,
 }: {
   mode: DrawingMode;
-  onClick: (coordinates: [number, number]) => void;
+  onClick: (coordinates: [number, number]) => void | Promise<void>;
 }) {
   useMapEvents({
     click(event) {
@@ -58,6 +103,46 @@ function CaptureClicks({
 
 function featureStyle(feature?: MapFeature) {
   const provenance = feature?.properties.provenance;
+  const styleKey = feature?.properties.styleKey;
+  if (styleKey === "fire-front" || styleKey === "fire-hotspot") {
+    return { color: "#dc2626", weight: 3, fillColor: "#ef4444", fillOpacity: 0.18 };
+  }
+  if (styleKey === "smoke-cone") {
+    return { color: "#6b7280", weight: 2, fillColor: "#9ca3af", fillOpacity: 0.22 };
+  }
+  if (styleKey === "risk-radius") {
+    return {
+      color: "#f97316",
+      weight: 2,
+      dashArray: "7 5",
+      fillColor: "#fb923c",
+      fillOpacity: 0.12,
+    };
+  }
+  if (styleKey === "evacuation-line") {
+    return {
+      color: "#111827",
+      weight: 4,
+      dashArray: "9 6",
+      fillColor: "#111827",
+      fillOpacity: 0.1,
+    };
+  }
+  if (styleKey === "search-sector" || styleKey === "search-grid") {
+    return {
+      color: "#0891b2",
+      weight: 2,
+      dashArray: "6 5",
+      fillColor: "#22d3ee",
+      fillOpacity: 0.13,
+    };
+  }
+  if (styleKey === "last-seen" || styleKey === "witness") {
+    return { color: "#7c3aed", weight: 3, fillColor: "#8b5cf6", fillOpacity: 0.24 };
+  }
+  if (styleKey === "command" || styleKey === "resource") {
+    return { color: "#15803d", weight: 3, fillColor: "#22c55e", fillOpacity: 0.22 };
+  }
   if (feature?.properties.layer === "traffic") {
     return { color: "#1f6feb", weight: 3, fillColor: "#1f6feb", fillOpacity: 0.18 };
   }
@@ -92,14 +177,42 @@ export function SituationMap({
   onDeleteFeature,
 }: {
   situation: Situation;
-  onCreateFeature: (geometry: MapFeature["geometry"], label: string) => Promise<void>;
+  onCreateFeature: (
+    geometry: PrivateMapFeatureInput["geometry"],
+    properties: PrivateFeatureProperties,
+  ) => Promise<boolean>;
   onUpdateFeature: (id: string, label: string) => Promise<void>;
   onDeleteFeature: (id: string) => Promise<void>;
 }) {
-  const [layers, setLayers] = useState({ warning: true, dsbStations: false, dsbCentral: false });
+  const [layers, setLayers] = useState({
+    warning: true,
+    dsbStations: false,
+    dsbCentral: false,
+    publicTransport: false,
+  });
+  const [bounds, setBounds] = useState<MapBounds>();
   const [mode, setMode] = useState<DrawingMode>(null);
+  const [selectedPreset, setSelectedPreset] = useState<MapToolPreset>(mapToolPresets[0]!);
   const [draft, setDraft] = useState<Array<[number, number]>>([]);
-  const [label, setLabel] = useState("Planområde - privat notat");
+  const [label, setLabel] = useState(mapToolPresets[0]!.defaultLabel);
+  const [radiusMeters, setRadiusMeters] = useState(500);
+  const [startBearing, setStartBearing] = useState(45);
+  const [endBearing, setEndBearing] = useState(135);
+  const stableBounds = useMemo(
+    () => bounds,
+    [bounds?.east, bounds?.north, bounds?.south, bounds?.west],
+  );
+  const {
+    data: publicTransportData,
+    loading: publicTransportLoading,
+    error: publicTransportError,
+    reload: reloadPublicTransport,
+  } = usePublicTransportMap({
+    modes: ["bus", "tram", "rail", "water"],
+    includeAlerts: true,
+    bounds: stableBounds,
+    enabled: layers.publicTransport,
+  });
   const visibleFeatures = useMemo(
     () =>
       situation.features.filter(
@@ -116,21 +229,94 @@ export function SituationMap({
       ? ([mappedPoint.geometry.coordinates[1], mappedPoint.geometry.coordinates[0]] as LatLngTuple)
       : [63.421, 10.395];
 
-  function capture(coordinate: [number, number]) {
+  const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
+    setBounds(nextBounds);
+  }, []);
+
+  function featureProperties(
+    preset: MapToolPreset,
+    measurement?: NonNullable<MapFeature["properties"]["measurement"]>,
+  ): PrivateFeatureProperties {
+    return {
+      label,
+      analysisType: preset.id,
+      confidence: preset.defaultConfidence,
+      scenario: preset.scenario,
+      styleKey: preset.styleKey,
+      ...(measurement ? { measurement } : {}),
+    };
+  }
+
+  function choosePreset(preset: MapToolPreset) {
+    setSelectedPreset(preset);
+    setMode(preset.geometryMode);
+    setDraft([]);
+    setLabel(preset.defaultLabel);
+  }
+
+  async function capture(coordinate: [number, number]) {
+    const preset = selectedPreset;
+    const safeRadiusMeters = clampRadiusMeters(radiusMeters);
+    const safeStartBearing = clampBearingDegrees(startBearing);
+    const safeEndBearing = clampBearingDegrees(endBearing);
     if (mode === "point") {
-      void onCreateFeature({ type: "Point", coordinates: coordinate }, label);
-      setMode(null);
+      if (
+        await onCreateFeature({ type: "Point", coordinates: coordinate }, featureProperties(preset))
+      ) {
+        setMode(null);
+      }
+      return;
+    }
+    if (mode === "circle") {
+      if (
+        await onCreateFeature(
+          circlePolygon(coordinate, safeRadiusMeters),
+          featureProperties(preset, { radiusMeters: safeRadiusMeters }),
+        )
+      ) {
+        setMode(null);
+      }
+      return;
+    }
+    if (mode === "sector") {
+      if (
+        await onCreateFeature(
+          sectorPolygon(coordinate, safeRadiusMeters, safeStartBearing, safeEndBearing),
+          featureProperties(preset, {
+            radiusMeters: safeRadiusMeters,
+            bearingDegrees: safeStartBearing,
+          }),
+        )
+      ) {
+        setMode(null);
+      }
       return;
     }
     setDraft((current) => [...current, coordinate]);
   }
 
   async function finishDrawing() {
+    const preset = selectedPreset;
     if (mode === "line" && draft.length >= 2) {
-      await onCreateFeature({ type: "LineString", coordinates: draft }, label);
+      const measurement = {
+        distanceMeters: Math.round(lineDistanceMeters(draft)),
+        ...(draft.length >= 2
+          ? { bearingDegrees: Math.round(bearingDegrees(draft[0]!, draft.at(-1)!)) }
+          : {}),
+      };
+      await onCreateFeature(
+        { type: "LineString", coordinates: draft },
+        featureProperties(preset, measurement),
+      );
     }
     if (mode === "area" && draft.length >= 3) {
-      await onCreateFeature({ type: "Polygon", coordinates: [[...draft, draft[0]!]] }, label);
+      const ring = [...draft, draft[0]!];
+      await onCreateFeature(
+        { type: "Polygon", coordinates: [ring] },
+        featureProperties(preset, {
+          areaSquareMeters: Math.round(polygonAreaSquareMeters(ring)),
+        }),
+      );
     }
     setDraft([]);
     setMode(null);
@@ -177,11 +363,23 @@ export function SituationMap({
             />{" "}
             110-sentral
           </label>
-          <small>Viser ressurser i området - ikke aktiv innsats</small>
+          <label>
+            <input
+              type="checkbox"
+              checked={layers.publicTransport}
+              onChange={(event) => setLayers({ ...layers, publicTransport: event.target.checked })}
+            />{" "}
+            Kollektivtrafikk-kontekst
+          </label>
+          <small>Viser ressurser i området – ikke aktiv innsats</small>
+          {layers.publicTransport ? (
+            <small>Kontekstlag – ikke bevis for aktiv hendelse</small>
+          ) : null}
         </div>
       </div>
       <MapContainer center={mapCenter} zoom={13} className="incident-map">
         <TileLayer url={tiles} attribution="© Kartverket" />
+        <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
         {layers.dsbStations ? (
           <WMSTileLayer
             url="https://ogc.dsb.no/wms.ashx"
@@ -222,8 +420,22 @@ export function SituationMap({
             }
           />
         ) : null}
+        <PublicTransportLayer
+          payload={publicTransportData}
+          visible={layers.publicTransport}
+          context
+        />
         <CaptureClicks mode={mode} onClick={capture} />
       </MapContainer>
+      {layers.publicTransport ? (
+        <PublicTransportSummary
+          payload={publicTransportData}
+          loading={publicTransportLoading}
+          error={publicTransportError}
+          onReload={reloadPublicTransport}
+          context
+        />
+      ) : null}
       <div className="map-legend">
         <span className="legend official">Offentlig oppgitt / DATEX trafikk</span>
         <span className="legend estimated">Anslag fra rapportering</span>
@@ -241,25 +453,78 @@ export function SituationMap({
             Mine markeringer <span>Privat</span>
           </h3>
           <p>Kun synlig for deg</p>
+          <p className="private-analysis-warning">Private analyser – ikke offentlig verifisert</p>
         </div>
         <input
           value={label}
           onChange={(event) => setLabel(event.target.value)}
           aria-label="Etikett for markering"
         />
-        {(["point", "line", "area"] as const).map((tool) => (
+        <label className="tool-number-input">
+          Radius
+          <input
+            type="number"
+            min={minToolRadiusMeters}
+            max={maxToolRadiusMeters}
+            step={25}
+            value={radiusMeters}
+            onChange={(event) => setRadiusMeters(clampRadiusMeters(Number(event.target.value)))}
+          />
+        </label>
+        {selectedPreset.geometryMode === "sector" ? (
+          <>
+            <label className="tool-number-input">
+              Fra
+              <input
+                type="number"
+                min={0}
+                max={360}
+                value={startBearing}
+                onChange={(event) =>
+                  setStartBearing(clampBearingDegrees(Number(event.target.value)))
+                }
+              />
+            </label>
+            <label className="tool-number-input">
+              Til
+              <input
+                type="number"
+                min={0}
+                max={360}
+                value={endBearing}
+                onChange={(event) => setEndBearing(clampBearingDegrees(Number(event.target.value)))}
+              />
+            </label>
+          </>
+        ) : null}
+        {mapToolPresets.map((preset) => (
           <button
-            key={tool}
-            className={mode === tool ? "selected" : ""}
-            onClick={() => {
-              setMode(tool);
-              setDraft([]);
-            }}
+            key={preset.id}
+            className={
+              selectedPreset.id === preset.id && mode === preset.geometryMode ? "selected" : ""
+            }
+            aria-pressed={selectedPreset.id === preset.id && mode === preset.geometryMode}
+            onClick={() => choosePreset(preset)}
           >
-            {tool === "point" ? "Punkt" : tool === "line" ? "Linje" : "Område"}
+            {preset.label}
           </button>
         ))}
-        <button onClick={() => setMode(null)}>Notat</button>
+        <button
+          aria-pressed={selectedPreset.id === "freehand_note" && mode === "point"}
+          onClick={() =>
+            choosePreset({
+              id: "freehand_note",
+              label: "Notat",
+              scenario: "general",
+              geometryMode: "point",
+              defaultConfidence: "speculative",
+              defaultLabel: "Planområde – privat notat",
+              styleKey: "private-note",
+            })
+          }
+        >
+          Notat
+        </button>
         {draft.length > 0 ? (
           <button className="finish" onClick={() => void finishDrawing()}>
             Fullfør

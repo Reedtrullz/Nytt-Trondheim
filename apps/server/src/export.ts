@@ -4,6 +4,9 @@ import PDFDocument from "pdfkit";
 import type { SituationWorkspace } from "@nytt/shared";
 import type { Store } from "./store.js";
 
+const privateAnalysisWarning =
+  "Private analyser er ikke offentlig verifisert og må ikke leses som operativ sannhet.";
+
 export function safeFilename(filename: string): string {
   const name = filename.split(/[\\/]/).pop() ?? "vedlegg";
   const sanitized = [...name]
@@ -59,6 +62,7 @@ function renderBrief(workspace: SituationWorkspace): Promise<Buffer> {
       "- DSB beredskap: ressurser i området, ikke aktive responspersonell eller plasseringer.",
     );
     doc.text("- Mine markeringer: privat arbeidsmateriale og aldri offentlig evidens.");
+    doc.text(`- ${privateAnalysisWarning}`);
     doc.moveDown(1).fontSize(15).text("Private arbeidsnotater");
     if (workspace.notes.length === 0) {
       doc.fontSize(10).fillColor("#586671").text("Ingen private notater.");
@@ -71,9 +75,26 @@ function renderBrief(workspace: SituationWorkspace): Promise<Buffer> {
       .moveDown(1)
       .fontSize(9)
       .fillColor("#586671")
-      .text("Privat eksport. Kartlag har ulik proveniens og må ikke blandes.");
+      .text(`Privat eksport. ${privateAnalysisWarning}`);
     doc.end();
   });
+}
+
+function exportManifest(workspace: SituationWorkspace, manifest?: unknown) {
+  const fallback = {
+    situationId: workspace.situation.id,
+    attachmentChecksums: workspace.attachments.map(({ filename, sha256, size }) => ({
+      filename: safeFilename(filename),
+      sha256,
+      size,
+    })),
+  };
+  const base =
+    manifest && typeof manifest === "object" && !Array.isArray(manifest) ? manifest : fallback;
+  return {
+    ...base,
+    privateAnalysisWarning,
+  };
 }
 
 export async function buildWorkspaceExport(
@@ -100,21 +121,10 @@ export async function buildWorkspaceExport(
   archive.append(JSON.stringify({ tasks: workspace.tasks, notes: workspace.notes }, null, 2), {
     name: "privat/arbeidsnotater.json",
   });
-  archive.append(
-    JSON.stringify(
-      manifest ?? {
-        situationId: workspace.situation.id,
-        attachmentChecksums: workspace.attachments.map(({ filename, sha256, size }) => ({
-          filename: safeFilename(filename),
-          sha256,
-          size,
-        })),
-      },
-      null,
-      2,
-    ),
-    { name: "manifest.json" },
-  );
+  archive.append(JSON.stringify(exportManifest(workspace, manifest), null, 2), {
+    name: "manifest.json",
+  });
+  archive.append(`${privateAnalysisWarning}\n`, { name: "README.txt" });
   for (const provenance of [
     "official",
     "reporting_estimate",

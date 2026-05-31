@@ -13,12 +13,106 @@ test("reader opens the active situation and keeps private map controls distinct"
   await page.getByRole("link", { name: /Åpne situasjonsrom/ }).click();
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
   await expect(page.getByText("Mine markeringer")).toBeVisible();
-  await expect(page.getByText("Viser ressurser i området - ikke aktiv innsats")).toBeVisible();
+  await expect(page.getByText("Viser ressurser i området – ikke aktiv innsats")).toBeVisible();
   const sourceItemsPanel = page.locator(".source-items-panel");
   await expect(sourceItemsPanel.getByRole("heading", { name: "Kildegrunnlag" })).toBeVisible();
   await expect(
     sourceItemsPanel.getByText(/Ingen kildeelementer er koblet ennå|nrk|adresseavisen|vegvesen/i),
   ).toBeVisible();
+});
+
+test("traffic map can show Entur public transport context", async ({ page }) => {
+  await page.route("**/api/map/public-transport**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: "2026-05-31T21:15:00.000Z",
+        vehicles: [
+          {
+            id: "entur-vehicle:ATB:8790",
+            source: "entur_vehicle_positions",
+            codespaceId: "ATB",
+            vehicleId: "8790",
+            mode: "bus",
+            publicCode: "45",
+            destinationName: "Hagen",
+            lastUpdated: "2026-05-31T21:02:50.207Z",
+            geometry: { type: "Point", coordinates: [10.4045538, 63.3708205] },
+            stale: false,
+          },
+        ],
+        alerts: [
+          {
+            id: "entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint",
+            source: "entur_service_alerts",
+            codespaceId: "ATB",
+            situationNumber: "ATB:SituationNumber:24982-stopPoint",
+            state: "active",
+            summary: "Rota flyttet",
+            updatedAt: "2026-05-31T21:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.760832, 63.431348] },
+          },
+        ],
+        sources: [
+          {
+            source: "entur_vehicle_positions",
+            label: "Entur kjøretøyposisjoner",
+            state: "ok",
+            detail: "1",
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto("/trafikk");
+  await expect(page.getByText("Kollektivtrafikk")).toBeVisible();
+  await page.getByLabel("Vis busser og trikk").check();
+  await expect(page.getByText("45 → Hagen")).toBeVisible();
+  await expect(page.getByText("Rota flyttet")).toBeVisible();
+});
+
+test("situation map exposes private fire and SAR planning tools", async ({ page }) => {
+  await page.goto("/situasjoner/skogbrann-bymarka");
+  await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Brannfront" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hotspot" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Røyk/vind" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Risikoring" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Evakuering/stengt" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sist sett" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Vitneobs." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Søksområde" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Søkerute/grid" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ressurs" })).toBeVisible();
+  await expect(page.getByText("Private analyser – ikke offentlig verifisert")).toBeVisible();
+});
+
+test("situation map can show Kollektivtrafikk-kontekst", async ({ page }) => {
+  await page.route("**/api/map/public-transport**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: "2026-05-31T21:15:00.000Z",
+        vehicles: [],
+        alerts: [],
+        sources: [
+          {
+            source: "entur_vehicle_positions",
+            label: "Entur kjøretøyposisjoner",
+            state: "ok",
+            detail: "0",
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto("/situasjoner/skogbrann-bymarka");
+  await expect(page.getByLabel("Kollektivtrafikk-kontekst")).toBeVisible();
+  await page.getByLabel("Kollektivtrafikk-kontekst").check();
+  await expect(page.getByText("Entur kjøretøyposisjoner")).toBeVisible();
+  await expect(page.getByText("Kontekstlag – ikke bevis for aktiv hendelse")).toBeVisible();
 });
 
 test("source item panel shows loading before the empty state", async ({ page }) => {

@@ -5,6 +5,7 @@ export interface RoadContextLayerVisibility {
   weather: boolean;
   cameras: boolean;
   counters: boolean;
+  publicTransport: boolean;
 }
 
 const presets: Array<{ value: Exclude<TrafficMapPreset, "custom">; label: string }> = [
@@ -143,6 +144,21 @@ export function TrafficFilterPanel({
             }
           />
           Trafikktelling
+        </label>
+        <h3>Kollektivtrafikk</h3>
+        <label>
+          <input
+            type="checkbox"
+            aria-label="Vis busser og trikk"
+            checked={visibleContextLayers.publicTransport}
+            onChange={() =>
+              onContextLayersChange({
+                ...visibleContextLayers,
+                publicTransport: !visibleContextLayers.publicTransport,
+              })
+            }
+          />
+          Vis busser og trikk
         </label>
       </section>
     </aside>

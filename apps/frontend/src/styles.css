@@ -1158,12 +1158,31 @@ button {
   font-size: 10px;
 }
 
+.drawing-tools .private-analysis-warning {
+  min-width: 210px;
+  color: #7c2d12;
+  font-weight: 600;
+}
+
 .drawing-tools input {
   min-width: 172px;
   padding: 8px 10px;
   border: 1px solid #dae0ed;
   background: white;
   font-size: 11px;
+}
+
+.drawing-tools .tool-number-input {
+  display: grid;
+  min-width: 82px;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.drawing-tools .tool-number-input input {
+  min-width: 0;
+  width: 82px;
 }
 
 .drawing-tools button {
@@ -1528,6 +1547,7 @@ button {
 .traffic-filter-panel,
 .traffic-brief-card,
 .traffic-event-list-card,
+.public-transport-card,
 .corridor-impact-card {
   padding: 18px;
   border: 1px solid var(--line);
@@ -1537,6 +1557,7 @@ button {
 .traffic-filter-panel h2,
 .traffic-brief-card h2,
 .traffic-event-list-card h2,
+.public-transport-card h2,
 .corridor-impact-card h2 {
   margin: 0;
   font: 28px/1.1 var(--serif);
@@ -1558,6 +1579,77 @@ button {
   margin: 8px 0;
   color: #39434b;
   font-size: 13px;
+}
+
+.public-transport-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.public-transport-card header span {
+  min-width: 28px;
+  padding: 4px 8px;
+  text-align: center;
+  color: #fff;
+  background: #7c3aed;
+  font-size: 12px;
+}
+
+.public-transport-card p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.incident-map-frame > .public-transport-card {
+  margin-top: 12px;
+}
+
+.public-transport-card.context {
+  background: #fbfbf8;
+}
+
+.public-transport-card ul {
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+
+.public-transport-card li {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.public-transport-card li strong,
+.public-transport-card li span,
+.public-transport-sources small,
+.public-transport-popup span {
+  display: block;
+}
+
+.public-transport-card li strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.public-transport-card li span,
+.public-transport-sources small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.public-transport-sources {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.public-transport-popup strong {
+  display: block;
+  margin-bottom: 4px;
 }
 
 .traffic-preset-list,
