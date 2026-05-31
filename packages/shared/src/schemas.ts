@@ -19,11 +19,50 @@ const geometrySchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+const privateMapAnalysisTypeSchema = z.enum([
+  "freehand_note",
+  "fire_perimeter",
+  "hotspot",
+  "smoke_wind_cone",
+  "risk_radius",
+  "water_access",
+  "evacuation_line",
+  "last_known_position",
+  "witness_observation",
+  "probable_route",
+  "search_sector",
+  "search_grid",
+  "command_point",
+  "resource_point",
+]);
+
+const privateMapConfidenceSchema = z.enum([
+  "observed_by_owner",
+  "reported_unverified",
+  "speculative",
+]);
+const privateMapScenarioSchema = z.enum(["general", "fire", "sar", "traffic", "weather"]);
+
+const privateMapMeasurementSchema = z
+  .object({
+    distanceMeters: z.number().nonnegative().optional(),
+    areaSquareMeters: z.number().nonnegative().optional(),
+    bearingDegrees: z.number().min(0).max(360).optional(),
+    radiusMeters: z.number().positive().max(50_000).optional(),
+  })
+  .strict();
+
 export const privateMapFeatureInputSchema = z.object({
   geometry: geometrySchema,
   properties: z.object({
     label: z.string().trim().min(1).max(160),
     note: z.string().trim().max(2000).optional(),
+    analysisType: privateMapAnalysisTypeSchema.default("freehand_note"),
+    confidence: privateMapConfidenceSchema.default("speculative"),
+    scenario: privateMapScenarioSchema.default("general"),
+    measurement: privateMapMeasurementSchema.optional(),
+    styleKey: z.string().trim().max(40).optional(),
+    sourceItemIds: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   }),
 });
 
@@ -49,6 +88,9 @@ export const sourceIdSchema = z.enum([
   "datex_cctv",
   "trafikkdata",
   "vegvesen_traffic_info",
+  "entur",
+  "entur_vehicle_positions",
+  "entur_service_alerts",
   "dsb",
   "politiloggen",
   "deepseek",
@@ -119,8 +161,9 @@ function csvListSchema<T extends z.ZodTypeAny>(itemSchema: T) {
   return z.preprocess((value) => {
     if (value === undefined) return undefined;
     const values = Array.isArray(value) ? value : [value];
+    if (values.some((entry) => typeof entry !== "string")) return value;
     return values
-      .flatMap((entry) => (typeof entry === "string" ? entry.split(",") : []))
+      .flatMap((entry) => entry.split(","))
       .map((entry) => entry.trim())
       .filter(Boolean);
   }, z.array(itemSchema).optional());
@@ -130,6 +173,58 @@ const coordinateParamSchema = z.preprocess(
   (value) => (value === "" ? Number.NaN : value),
   z.coerce.number().finite().optional(),
 );
+
+const publicTransportModeSchema = z.enum(["bus", "tram", "rail", "water", "metro", "unknown"]);
+const publicTransportLatitudeParamSchema = z.preprocess(
+  (value) => (value === "" ? Number.NaN : value),
+  z.coerce.number().min(-90).max(90).finite().optional(),
+);
+const publicTransportLongitudeParamSchema = z.preprocess(
+  (value) => (value === "" ? Number.NaN : value),
+  z.coerce.number().min(-180).max(180).finite().optional(),
+);
+
+export const publicTransportMapQuerySchema = z
+  .object({
+    modes: csvListSchema(publicTransportModeSchema),
+    includeAlerts: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+    north: publicTransportLatitudeParamSchema,
+    south: publicTransportLatitudeParamSchema,
+    east: publicTransportLongitudeParamSchema,
+    west: publicTransportLongitudeParamSchema,
+  })
+  .superRefine((value, context) => {
+    const bounds = [value.north, value.south, value.east, value.west];
+    const providedBounds = bounds.filter((entry) => entry !== undefined).length;
+    if (providedBounds > 0 && providedBounds < bounds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Kartutsnitt krever north, south, east og west.",
+        path: ["bounds"],
+      });
+      return;
+    }
+    if (providedBounds === 0) return;
+    if (value.north! < value.south!) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "north må være større enn eller lik south.",
+        path: ["north"],
+      });
+    }
+    if (value.east! < value.west!) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "east må være større enn eller lik west.",
+        path: ["east"],
+      });
+    }
+  });
+
+export type PublicTransportMapQueryInput = z.infer<typeof publicTransportMapQuerySchema>;
 
 export const trafficMapQuerySchema = z
   .object({

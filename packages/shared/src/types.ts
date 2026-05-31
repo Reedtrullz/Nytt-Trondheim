@@ -1,4 +1,4 @@
-import type { Feature, Geometry } from "geojson";
+import type { Feature, Geometry, LineString, Point, Polygon } from "geojson";
 
 export type SourceId =
   | "nrk"
@@ -14,6 +14,9 @@ export type SourceId =
   | "datex_cctv"
   | "trafikkdata"
   | "vegvesen_traffic_info"
+  | "entur"
+  | "entur_vehicle_positions"
+  | "entur_service_alerts"
   | "dsb"
   | "politiloggen"
   | "deepseek";
@@ -78,6 +81,24 @@ export interface EvidenceItem {
   publishedAt: string;
 }
 
+export type PrivateMapAnalysisType =
+  | "freehand_note"
+  | "fire_perimeter"
+  | "hotspot"
+  | "smoke_wind_cone"
+  | "risk_radius"
+  | "water_access"
+  | "evacuation_line"
+  | "last_known_position"
+  | "witness_observation"
+  | "probable_route"
+  | "search_sector"
+  | "search_grid"
+  | "command_point"
+  | "resource_point";
+export type PrivateMapConfidence = "observed_by_owner" | "reported_unverified" | "speculative";
+export type PrivateMapScenario = "general" | "fire" | "sar" | "traffic" | "weather";
+
 export interface MapFeature extends Feature<Geometry> {
   id: string;
   properties: {
@@ -88,8 +109,34 @@ export interface MapFeature extends Feature<Geometry> {
     updatedAt: string;
     note?: string;
     layer?: string;
+    analysisType?: PrivateMapAnalysisType;
+    confidence?: PrivateMapConfidence;
+    scenario?: PrivateMapScenario;
+    measurement?: {
+      distanceMeters?: number;
+      areaSquareMeters?: number;
+      bearingDegrees?: number;
+      radiusMeters?: number;
+    };
+    styleKey?: string;
+    sourceItemIds?: string[];
   };
 }
+
+export type PrivateMapFeatureInput = {
+  geometry: Point | LineString | Polygon;
+  properties: Pick<
+    MapFeature["properties"],
+    | "label"
+    | "note"
+    | "analysisType"
+    | "confidence"
+    | "scenario"
+    | "measurement"
+    | "styleKey"
+    | "sourceItemIds"
+  >;
+};
 
 export interface TimelineEntry {
   id: string;
