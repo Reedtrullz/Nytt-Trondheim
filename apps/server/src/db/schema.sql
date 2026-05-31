@@ -457,6 +457,56 @@ CREATE TABLE IF NOT EXISTS export_manifests (
 );
 ALTER TABLE export_manifests ADD COLUMN IF NOT EXISTS storage_path text;
 
+CREATE TABLE IF NOT EXISTS public_transport_vehicles (
+  id text PRIMARY KEY,
+  source text NOT NULL,
+  codespace_id text NOT NULL,
+  vehicle_id text NOT NULL,
+  mode text NOT NULL,
+  line_ref text,
+  public_code text,
+  line_name text,
+  operator_ref text,
+  operator_name text,
+  last_updated timestamptz NOT NULL,
+  expires_at timestamptz,
+  geometry geometry(Point, 4326) NOT NULL,
+  payload jsonb NOT NULL,
+  payload_hash text NOT NULL,
+  last_seen_at timestamptz NOT NULL,
+  stale boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (codespace_id, vehicle_id)
+);
+CREATE INDEX IF NOT EXISTS public_transport_vehicles_source_seen_idx
+  ON public_transport_vehicles (source, stale, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS public_transport_vehicles_geometry_idx
+  ON public_transport_vehicles USING gist (geometry);
+
+CREATE TABLE IF NOT EXISTS public_transport_service_alerts (
+  id text PRIMARY KEY,
+  source text NOT NULL,
+  codespace_id text NOT NULL,
+  situation_number text NOT NULL,
+  severity text,
+  report_type text,
+  state text NOT NULL CHECK (state IN ('active', 'expired', 'cancelled')),
+  summary text NOT NULL,
+  valid_from timestamptz,
+  valid_to timestamptz,
+  updated_at timestamptz NOT NULL,
+  geometry geometry(Geometry, 4326),
+  payload jsonb NOT NULL,
+  payload_hash text NOT NULL,
+  last_seen_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (codespace_id, situation_number)
+);
+CREATE INDEX IF NOT EXISTS public_transport_service_alerts_state_idx
+  ON public_transport_service_alerts (source, state, updated_at DESC);
+CREATE INDEX IF NOT EXISTS public_transport_service_alerts_geometry_idx
+  ON public_transport_service_alerts USING gist (geometry);
+
 CREATE TABLE IF NOT EXISTS source_health (
   source text PRIMARY KEY,
   label text NOT NULL,
@@ -488,3 +538,4 @@ INSERT INTO schema_migrations (version) VALUES ('003_collector_state') ON CONFLI
 INSERT INTO schema_migrations (version) VALUES ('004_traffic_map_events') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('005_road_context') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('006_trafikkdata_counters') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('007_entur_public_transport') ON CONFLICT DO NOTHING;

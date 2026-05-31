@@ -4,6 +4,8 @@ import type {
   AiProcessingRun,
   Article,
   OfficialEvent,
+  PublicTransportServiceAlert,
+  PublicTransportVehicle,
   RoadCamera,
   RoadWeatherObservation,
   Situation,
@@ -783,6 +785,149 @@ describe("WorkerRepository", () => {
 
     expect(query).not.toHaveBeenCalled();
   });
+
+  it("upserts Entur vehicle positions without source item promotion", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const vehicle = enturVehicle();
+
+    await repository.upsertPublicTransportVehicles([vehicle], "2026-05-31T21:03:00.000Z");
+
+    expect(String(query.mock.calls[0]?.[0])).toContain("INSERT INTO public_transport_vehicles");
+    expect(query.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(["ATB", "8790", "bus"]));
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO source_items"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO official_events"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situations"))).toBe(false);
+  });
+
+  it("marks missing Entur vehicles stale after expiration or five minutes unseen", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 2 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.markMissingPublicTransportVehiclesStale(
+        "entur_vehicle_positions",
+        "ATB",
+        ["8790"],
+        "2026-05-31T21:20:00.000Z",
+      ),
+    ).resolves.toBe(2);
+
+    expect(String(query.mock.calls.at(-1)?.[0])).toContain("UPDATE public_transport_vehicles");
+    expect(String(query.mock.calls.at(-1)?.[0])).toContain(
+      "last_seen_at < $4::timestamptz - interval '5 minutes'",
+    );
+    expect(String(query.mock.calls.at(-1)?.[0])).toContain("NOT (vehicle_id = ANY($3::text[]))");
+    expect(query.mock.calls.at(-1)?.[1]).toEqual([
+      "entur_vehicle_positions",
+      "ATB",
+      ["8790"],
+      "2026-05-31T21:20:00.000Z",
+    ]);
+  });
+
+  it("does not immediately stale open-ended Entur vehicles that were recently seen", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.markMissingPublicTransportVehiclesStale(
+        "entur_vehicle_positions",
+        "ATB",
+        [],
+        "2026-05-31T21:20:00.000Z",
+      ),
+    ).resolves.toBe(0);
+
+    const sql = String(query.mock.calls.at(-1)?.[0]);
+    expect(sql).toContain("(expires_at IS NOT NULL AND expires_at <= $4::timestamptz)");
+    expect(sql).toContain("OR last_seen_at < $4::timestamptz - interval '5 minutes'");
+  });
+
+  it("reads Entur vehicle positions with mode and bounds filters", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ payload: enturVehicle(), stale: false }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    const vehicles = await repository.listPublicTransportVehicles({
+      modes: ["bus"],
+      bounds: { north: 63.5, south: 63.3, east: 10.6, west: 10.2 },
+    });
+
+    expect(vehicles[0]?.id).toBe("entur-vehicle:ATB:8790");
+    expect(String(query.mock.calls[0]?.[0])).toContain("ST_MakeEnvelope");
+    expect(query.mock.calls[0]?.[1]).toEqual([["bus"], 10.2, 63.3, 10.6, 63.5]);
+  });
+
+  it("upserts Entur service alerts and mirrors only source items", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const alert = enturServiceAlert();
+
+    await repository.upsertPublicTransportServiceAlerts([alert], "2026-05-31T21:15:00.000Z");
+
+    expect(String(query.mock.calls[0]?.[0])).toContain(
+      "INSERT INTO public_transport_service_alerts",
+    );
+    expect(query.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining(["ATB", "ATB:SituationNumber:24982-stopPoint", "active"]),
+    );
+    expect(
+      query.mock.calls
+        .map(([sql]) => String(sql))
+        .some((sql) => sql.includes("INSERT INTO official_events")),
+    ).toBe(false);
+  });
+
+  it("expires missing Entur service alerts and mirrored source item state", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ codespace_id: "ATB", situation_number: "old-alert" }],
+      rowCount: 1,
+    });
+    const repository = new WorkerRepository(transactionalPool(query));
+
+    await expect(
+      repository.expireMissingPublicTransportServiceAlerts(
+        "entur_service_alerts",
+        "ATB",
+        ["current-alert"],
+        "2026-05-31T21:20:00.000Z",
+      ),
+    ).resolves.toBe(1);
+
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+    expect(sqlCalls[0]).toBe("BEGIN");
+    expect(sqlCalls.at(-1)).toBe("COMMIT");
+    expect(sqlCalls.some((sql) => sql.includes("UPDATE public_transport_service_alerts"))).toBe(
+      true,
+    );
+    expect(sqlCalls.some((sql) => sql.includes("UPDATE source_items"))).toBe(true);
+    const sourceItemUpdate = sqlCalls.find((sql) => sql.includes("UPDATE source_items"));
+    expect(sourceItemUpdate).toContain("normalized_payload=jsonb_set");
+    expect(sourceItemUpdate).not.toContain("raw_payload");
+    expect(query.mock.calls[2]?.[1]).toEqual([["ATB:old-alert"]]);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO official_events"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situations"))).toBe(false);
+  });
+
+  it("reads map-visible Entur service alerts with bounds", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ payload: enturServiceAlert(), state: "active" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    const alerts = await repository.listPublicTransportServiceAlerts({
+      bounds: { north: 63.5, south: 63.3, east: 10.8, west: 10.2 },
+    });
+
+    expect(alerts[0]?.id).toBe("entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint");
+    expect(String(query.mock.calls[0]?.[0])).toContain("geometry IS NOT NULL");
+    expect(String(query.mock.calls[0]?.[0])).toContain("state = ANY($1::text[])");
+    expect(String(query.mock.calls[0]?.[0])).toContain("ST_MakeEnvelope");
+    expect(query.mock.calls[0]?.[1]).toEqual([["active"], 10.2, 63.3, 10.8, 63.5]);
+  });
 });
 
 function transactionalPool(query: ReturnType<typeof vi.fn>): pg.Pool {
@@ -841,6 +986,45 @@ function trafficCounterSnapshot(
     coveragePercent: overrides.coveragePercent,
     baselineVolumeLastHour: overrides.baselineVolumeLastHour,
     anomalyRatio: overrides.anomalyRatio,
+  };
+}
+
+function enturVehicle(overrides: Partial<PublicTransportVehicle> = {}): PublicTransportVehicle {
+  return {
+    id: "entur-vehicle:ATB:8790",
+    source: "entur_vehicle_positions",
+    codespaceId: "ATB",
+    vehicleId: "8790",
+    mode: "bus",
+    lineRef: "ATB:Line:2_45",
+    publicCode: "45",
+    lineName: "Sjetnmarka- Tiller- Tillerringen- Sandmoen",
+    lastUpdated: "2026-05-31T21:02:50.207Z",
+    expiresAt: "2026-05-31T21:17:00.000Z",
+    geometry: { type: "Point", coordinates: [10.4045538, 63.3708205] },
+    stale: false,
+    ...overrides,
+  };
+}
+
+function enturServiceAlert(
+  overrides: Partial<PublicTransportServiceAlert> = {},
+): PublicTransportServiceAlert {
+  return {
+    id: "entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint",
+    source: "entur_service_alerts",
+    codespaceId: "ATB",
+    situationNumber: "ATB:SituationNumber:24982-stopPoint",
+    severity: "normal",
+    reportType: "general",
+    state: "active",
+    summary: "Rota - bussholdeplassen er midlertidig flyttet",
+    description: "Holdeplassen er midlertidig flyttet.",
+    validFrom: "2026-05-31T20:00:00.000Z",
+    updatedAt: "2026-05-31T21:00:00.000Z",
+    geometry: { type: "Point", coordinates: [10.760832, 63.431348] },
+    affectedStopNames: ["Rota"],
+    ...overrides,
   };
 }
 

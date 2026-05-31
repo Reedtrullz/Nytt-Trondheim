@@ -11,6 +11,8 @@ import { PgStore } from "../src/store.js";
 import type {
   Article,
   OfficialEvent,
+  PublicTransportServiceAlert,
+  PublicTransportVehicle,
   RoadCamera,
   RoadWeatherObservation,
   SourceHealth,
@@ -1131,5 +1133,68 @@ describe("private situation API", () => {
     expect(active.body.items).toHaveLength(0);
     const history = await agent.get("/api/situations?status=dismissed").expect(200);
     expect(history.body.items[0].id).toBe("skogbrann-bymarka");
+  });
+
+  it("returns bounds-filtered public transport vehicles and alerts", async () => {
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listPublicTransportVehicles").mockResolvedValue([
+      {
+        id: "entur-vehicle:ATB:8790",
+        source: "entur_vehicle_positions",
+        codespaceId: "ATB",
+        vehicleId: "8790",
+        mode: "bus",
+        publicCode: "45",
+        destinationName: "Hagen",
+        lastUpdated: "2026-05-31T21:02:50.207Z",
+        geometry: { type: "Point", coordinates: [10.4045538, 63.3708205] },
+        stale: false,
+      },
+    ] satisfies PublicTransportVehicle[]);
+    vi.spyOn(store, "listPublicTransportServiceAlerts").mockResolvedValue([
+      {
+        id: "entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint",
+        source: "entur_service_alerts",
+        codespaceId: "ATB",
+        situationNumber: "ATB:SituationNumber:24982-stopPoint",
+        state: "active",
+        summary: "Rota flyttet",
+        updatedAt: "2026-05-31T21:00:00.000Z",
+        geometry: { type: "Point", coordinates: [10.760832, 63.431348] },
+      },
+    ] satisfies PublicTransportServiceAlert[]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "entur_vehicle_positions",
+        label: "Entur kjøretøyposisjoner",
+        state: "ok",
+        detail: "1",
+      },
+      { source: "entur_service_alerts", label: "Entur avvik", state: "ok", detail: "1" },
+      { source: "datex", label: "DATEX", state: "ok", detail: "ignored" },
+    ] satisfies SourceHealth[]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get(
+        "/api/map/public-transport?modes=bus&includeAlerts=true&north=63.6&south=63.3&east=10.8&west=10.2",
+      )
+      .expect(200);
+
+    expect(response.body.vehicles).toHaveLength(1);
+    expect(response.body.alerts).toHaveLength(1);
+    expect(response.body.sources.map((source: SourceHealth) => source.source)).toEqual([
+      "entur_vehicle_positions",
+      "entur_service_alerts",
+    ]);
+    expect(store.listPublicTransportVehicles).toHaveBeenCalledWith({
+      modes: ["bus"],
+      bounds: { north: 63.6, south: 63.3, east: 10.8, west: 10.2 },
+    });
+    expect(store.listPublicTransportServiceAlerts).toHaveBeenCalledWith({
+      states: ["active"],
+      bounds: { north: 63.6, south: 63.3, east: 10.8, west: 10.2 },
+    });
   });
 });

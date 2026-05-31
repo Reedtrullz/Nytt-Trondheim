@@ -8,6 +8,8 @@ import type {
   MapFeature,
   OfficialEvent,
   OperationsStatus,
+  PublicTransportServiceAlert,
+  PublicTransportVehicle,
   RoadCamera,
   RoadWeatherObservation,
   Situation,
@@ -89,6 +91,14 @@ export interface Store {
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
+  listPublicTransportVehicles(filters: {
+    modes?: PublicTransportVehicle["mode"][];
+    bounds: NonNullable<Bounds>;
+  }): Promise<PublicTransportVehicle[]>;
+  listPublicTransportServiceAlerts(filters: {
+    states?: PublicTransportServiceAlert["state"][];
+    bounds: NonNullable<Bounds>;
+  }): Promise<PublicTransportServiceAlert[]>;
   listRoadWeatherObservations(bounds?: Bounds): Promise<RoadWeatherObservation[]>;
   listRoadCameras(bounds?: Bounds): Promise<RoadCamera[]>;
   listTrafficCounterSnapshots(bounds?: Bounds): Promise<TrafficCounterSnapshot[]>;
@@ -431,6 +441,14 @@ export class MemoryStore implements Store {
   }
 
   async listTrafficMapEvents(): Promise<TrafficMapEvent[]> {
+    return [];
+  }
+
+  async listPublicTransportVehicles(): Promise<PublicTransportVehicle[]> {
+    return [];
+  }
+
+  async listPublicTransportServiceAlerts(): Promise<PublicTransportServiceAlert[]> {
     return [];
   }
 
@@ -975,6 +993,83 @@ export class PgStore implements Store {
       params,
     );
 
+    return result.rows.map((row) => ({ ...row.payload, state: row.state }));
+  }
+
+  async listPublicTransportVehicles(filters: {
+    modes?: PublicTransportVehicle["mode"][];
+    bounds: NonNullable<Bounds>;
+  }): Promise<PublicTransportVehicle[]> {
+    const params: unknown[] = [];
+    const where = ["stale=false"];
+    if (filters.modes?.length) {
+      params.push(filters.modes);
+      where.push(`mode = ANY($${params.length}::text[])`);
+    }
+    params.push(
+      filters.bounds.west,
+      filters.bounds.south,
+      filters.bounds.east,
+      filters.bounds.north,
+    );
+    const westIndex = params.length - 3;
+    const southIndex = params.length - 2;
+    const eastIndex = params.length - 1;
+    const northIndex = params.length;
+    where.push(
+      `ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))`,
+    );
+
+    const result = await this.pool.query<{
+      payload: PublicTransportVehicle;
+      stale: boolean;
+    }>(
+      `SELECT payload, stale
+       FROM public_transport_vehicles
+       WHERE ${where.join(" AND ")}
+       ORDER BY last_updated DESC, vehicle_id ASC
+       LIMIT 1000`,
+      params,
+    );
+    return result.rows.map((row) => ({ ...row.payload, stale: row.stale }));
+  }
+
+  async listPublicTransportServiceAlerts(filters: {
+    states?: PublicTransportServiceAlert["state"][];
+    bounds: NonNullable<Bounds>;
+  }): Promise<PublicTransportServiceAlert[]> {
+    const params: unknown[] = [];
+    const where = ["geometry IS NOT NULL"];
+    const states: PublicTransportServiceAlert["state"][] = filters.states?.length
+      ? filters.states
+      : ["active"];
+    params.push(states);
+    where.push(`state = ANY($${params.length}::text[])`);
+    params.push(
+      filters.bounds.west,
+      filters.bounds.south,
+      filters.bounds.east,
+      filters.bounds.north,
+    );
+    const westIndex = params.length - 3;
+    const southIndex = params.length - 2;
+    const eastIndex = params.length - 1;
+    const northIndex = params.length;
+    where.push(
+      `ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))`,
+    );
+
+    const result = await this.pool.query<{
+      payload: PublicTransportServiceAlert;
+      state: PublicTransportServiceAlert["state"];
+    }>(
+      `SELECT payload, state
+       FROM public_transport_service_alerts
+       WHERE ${where.join(" AND ")}
+       ORDER BY updated_at DESC, situation_number ASC
+       LIMIT 500`,
+      params,
+    );
     return result.rows.map((row) => ({ ...row.payload, state: row.state }));
   }
 
