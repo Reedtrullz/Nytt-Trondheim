@@ -1199,6 +1199,14 @@ button {
   background: #474ea1;
 }
 
+.drawing-tools button:disabled,
+.drawing-tools .finish:disabled {
+  color: var(--muted);
+  background: #eef0f6;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .private-features {
   padding: 0;
   margin: 10px 0 0;

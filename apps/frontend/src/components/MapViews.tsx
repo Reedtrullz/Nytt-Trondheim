@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { GeoJsonObject } from "geojson";
 import L, { type LatLngTuple } from "leaflet";
 import {
@@ -198,6 +198,8 @@ export function SituationMap({
   const [radiusMeters, setRadiusMeters] = useState(500);
   const [startBearing, setStartBearing] = useState(45);
   const [endBearing, setEndBearing] = useState(135);
+  const [creatingFeature, setCreatingFeature] = useState(false);
+  const creatingFeatureRef = useRef(false);
   const stableBounds = useMemo(
     () => bounds,
     [bounds?.east, bounds?.north, bounds?.south, bounds?.west],
@@ -247,7 +249,23 @@ export function SituationMap({
     };
   }
 
+  async function createMapFeature(
+    geometry: PrivateMapFeatureInput["geometry"],
+    properties: PrivateFeatureProperties,
+  ): Promise<boolean> {
+    if (creatingFeatureRef.current) return false;
+    creatingFeatureRef.current = true;
+    setCreatingFeature(true);
+    try {
+      return await onCreateFeature(geometry, properties);
+    } finally {
+      creatingFeatureRef.current = false;
+      setCreatingFeature(false);
+    }
+  }
+
   function choosePreset(preset: MapToolPreset) {
+    if (creatingFeatureRef.current) return;
     setSelectedPreset(preset);
     setMode(preset.geometryMode);
     setDraft([]);
@@ -255,13 +273,17 @@ export function SituationMap({
   }
 
   async function capture(coordinate: [number, number]) {
+    if (creatingFeatureRef.current) return;
     const preset = selectedPreset;
     const safeRadiusMeters = clampRadiusMeters(radiusMeters);
     const safeStartBearing = clampBearingDegrees(startBearing);
     const safeEndBearing = clampBearingDegrees(endBearing);
     if (mode === "point") {
       if (
-        await onCreateFeature({ type: "Point", coordinates: coordinate }, featureProperties(preset))
+        await createMapFeature(
+          { type: "Point", coordinates: coordinate },
+          featureProperties(preset),
+        )
       ) {
         setMode(null);
       }
@@ -269,7 +291,7 @@ export function SituationMap({
     }
     if (mode === "circle") {
       if (
-        await onCreateFeature(
+        await createMapFeature(
           circlePolygon(coordinate, safeRadiusMeters),
           featureProperties(preset, { radiusMeters: safeRadiusMeters }),
         )
@@ -280,7 +302,7 @@ export function SituationMap({
     }
     if (mode === "sector") {
       if (
-        await onCreateFeature(
+        await createMapFeature(
           sectorPolygon(coordinate, safeRadiusMeters, safeStartBearing, safeEndBearing),
           featureProperties(preset, {
             radiusMeters: safeRadiusMeters,
@@ -296,31 +318,36 @@ export function SituationMap({
   }
 
   async function finishDrawing() {
+    if (creatingFeatureRef.current) return;
     const preset = selectedPreset;
+    let created = false;
     if (mode === "line" && draft.length >= 2) {
       const measurement = {
         distanceMeters: Math.round(lineDistanceMeters(draft)),
-        ...(draft.length >= 2
-          ? { bearingDegrees: Math.round(bearingDegrees(draft[0]!, draft.at(-1)!)) }
-          : {}),
+        bearingDegrees: Math.round(bearingDegrees(draft[0]!, draft.at(-1)!)),
       };
-      await onCreateFeature(
+      created = await createMapFeature(
         { type: "LineString", coordinates: draft },
         featureProperties(preset, measurement),
       );
     }
     if (mode === "area" && draft.length >= 3) {
       const ring = [...draft, draft[0]!];
-      await onCreateFeature(
+      created = await createMapFeature(
         { type: "Polygon", coordinates: [ring] },
         featureProperties(preset, {
           areaSquareMeters: Math.round(polygonAreaSquareMeters(ring)),
         }),
       );
     }
-    setDraft([]);
-    setMode(null);
+    if (created) {
+      setDraft([]);
+      setMode(null);
+    }
   }
+
+  const canFinishDraft =
+    (mode === "line" && draft.length >= 2) || (mode === "area" && draft.length >= 3);
 
   const draftGeoJson: MapFeature["geometry"] | undefined =
     draft.length > 1
@@ -425,7 +452,7 @@ export function SituationMap({
           visible={layers.publicTransport}
           context
         />
-        <CaptureClicks mode={mode} onClick={capture} />
+        <CaptureClicks mode={creatingFeature ? null : mode} onClick={capture} />
       </MapContainer>
       {layers.publicTransport ? (
         <PublicTransportSummary
@@ -459,6 +486,7 @@ export function SituationMap({
           value={label}
           onChange={(event) => setLabel(event.target.value)}
           aria-label="Etikett for markering"
+          disabled={creatingFeature}
         />
         <label className="tool-number-input">
           Radius
@@ -469,6 +497,7 @@ export function SituationMap({
             step={25}
             value={radiusMeters}
             onChange={(event) => setRadiusMeters(clampRadiusMeters(Number(event.target.value)))}
+            disabled={creatingFeature}
           />
         </label>
         {selectedPreset.geometryMode === "sector" ? (
@@ -483,6 +512,7 @@ export function SituationMap({
                 onChange={(event) =>
                   setStartBearing(clampBearingDegrees(Number(event.target.value)))
                 }
+                disabled={creatingFeature}
               />
             </label>
             <label className="tool-number-input">
@@ -493,6 +523,7 @@ export function SituationMap({
                 max={360}
                 value={endBearing}
                 onChange={(event) => setEndBearing(clampBearingDegrees(Number(event.target.value)))}
+                disabled={creatingFeature}
               />
             </label>
           </>
@@ -505,12 +536,14 @@ export function SituationMap({
             }
             aria-pressed={selectedPreset.id === preset.id && mode === preset.geometryMode}
             onClick={() => choosePreset(preset)}
+            disabled={creatingFeature}
           >
             {preset.label}
           </button>
         ))}
         <button
           aria-pressed={selectedPreset.id === "freehand_note" && mode === "point"}
+          disabled={creatingFeature}
           onClick={() =>
             choosePreset({
               id: "freehand_note",
@@ -526,7 +559,13 @@ export function SituationMap({
           Notat
         </button>
         {draft.length > 0 ? (
-          <button className="finish" onClick={() => void finishDrawing()}>
+          <button
+            className="finish"
+            onClick={() => void finishDrawing()}
+            disabled={!canFinishDraft || creatingFeature}
+            title={canFinishDraft ? undefined : "Legg til flere punkter før du fullfører"}
+            aria-busy={creatingFeature}
+          >
             Fullfør
           </button>
         ) : null}

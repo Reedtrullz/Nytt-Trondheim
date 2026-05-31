@@ -66,8 +66,8 @@ test("traffic map can show Entur public transport context", async ({ page }) => 
     });
   });
   await page.goto("/trafikk");
-  await expect(page.getByText("Kollektivtrafikk")).toBeVisible();
-  await page.getByLabel("Vis busser og trikk").check();
+  await expect(page.getByRole("heading", { name: "Kollektivtrafikk" })).toBeVisible();
+  await page.getByLabel("Vis kollektivtrafikk").check();
   await expect(page.getByText("45 → Hagen")).toBeVisible();
   await expect(page.getByText("Rota flyttet")).toBeVisible();
 });

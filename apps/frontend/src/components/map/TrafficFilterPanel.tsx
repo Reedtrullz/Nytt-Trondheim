@@ -149,7 +149,7 @@ export function TrafficFilterPanel({
         <label>
           <input
             type="checkbox"
-            aria-label="Vis busser og trikk"
+            aria-label="Vis kollektivtrafikk"
             checked={visibleContextLayers.publicTransport}
             onChange={() =>
               onContextLayersChange({
@@ -158,7 +158,7 @@ export function TrafficFilterPanel({
               })
             }
           />
-          Vis busser og trikk
+          Vis kollektivtrafikk
         </label>
       </section>
     </aside>
