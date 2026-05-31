@@ -1,10 +1,10 @@
-# Entur Public Transport And Situation Map Tools Implementation Plan
+# Entur Public Transport, Situation Map Tools, And Nytt Quality Pass Implementation Plan
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Add Entur public-transport tracking and richer private Situation Room map tools for forest-fire and search-and-rescue reasoning without turning telemetry or speculation into official incident evidence.
+**Goal:** Add Entur public-transport tracking, richer private Situation Room map tools, and a focused Nytt Trondheim quality pass that improves trust, usability, mobile traffic flow, save reliability and test isolation without changing core architecture or provenance rules.
 
-**Architecture:** Keep Entur high-churn vehicle positions as operations-only map telemetry in dedicated tables/source-health, and mirror only Entur service-alert/situation records into `source_items` as official evidence candidates. Expose authenticated map-context APIs from the server, render transport layers on `/trafikk` and selected Situation Room maps, and extend private annotations with typed scenario metadata while the server continues forcing `provenance="private_annotation"` for all user-created map features. No Entur vehicle row, departure prediction, private drawing, buffer, wind cone, or search-sector sketch may create `official_events` or activate/update `situations` in this plan.
+**Architecture:** Keep Entur high-churn vehicle positions as operations-only map telemetry in dedicated tables/source-health, and mirror only Entur service-alert/situation records into `source_items` as official evidence candidates. Expose authenticated map-context APIs from the server, render transport layers on `/trafikk` and selected Situation Room maps, and extend private annotations with typed scenario metadata while the server continues forcing `provenance="private_annotation"` for all user-created map features. Layer the quality pass on existing React Router, bootstrap/source-health, fetch API helpers, CSS and Express config plumbing: no new state library, no new UI framework, no auth changes, and no source-ingestion/provenance changes beyond the Entur work already scoped here.
 
 **Tech Stack:** TypeScript, Node 22, React/Vite, Leaflet/react-leaflet, Express, PostgreSQL/PostGIS, Vitest, Playwright, Entur GraphQL Vehicle Positions, Entur Journey Planner v3 situations, existing Nytt worker/source-health/source-item architecture.
 
@@ -138,6 +138,13 @@ In scope now:
 5. Situation Room optional context layer for nearby public transport disruption and vehicles.
 6. Private fire/SAR planning tools: typed labels, measurements, radius circles, smoke/wind cones, route/line sketches, search sectors, last-known-position markers.
 7. Manual evidence linking from Entur service-alert source items to a situation.
+8. Correct root bootstrap loading/error/429 states with retry.
+9. URL-backed header search and home filters (`q`, `scope`, `category`) that work from every route.
+10. Complete home category filter set including `Vær` and empty states that name the active search/filter.
+11. Header freshness derived from `sourceHealth.lastCheckedAt` instead of hardcoded “Oppdatert nå”.
+12. Mobile `/trafikk` ordering where heading and controls appear before the map while desktop split layout is preserved.
+13. Optimistic save rollback and in-flight click protection for article saves; visible action errors remain for situation saves.
+14. Config-driven rate-limit isolation for Playwright/dev tests while production limits remain unchanged.
 
 Non-goals for this implementation:
 
@@ -147,6 +154,9 @@ Non-goals for this implementation:
 - No automatic SAR inference from private drawings or news speculation.
 - No authenticated DSB skogbrann resource functions.
 - No NASA FIRMS/EFFIS ingestion in the first implementation; document as a follow-up because FIRMS requires API key setup and satellite false-positive handling.
+- No redesign, no new global state library, no new UI framework, and no changes to authentication/session semantics.
+- No new freshness API; use existing bootstrap `sourceHealth.lastCheckedAt` unless implementation proves it is insufficient.
+- No production rate-limit relaxation unless the explicit config flag is set.
 
 ## Acceptance criteria
 
@@ -162,8 +172,16 @@ Non-goals for this implementation:
 10. Fire presets cover fire perimeter, hotspot, smoke/wind direction cone, risk radius, water/access point and evacuation/closure line.
 11. SAR presets cover last-known position, witness observation, probable route, search sector, search grid/segment and command/resource point.
 12. Measurement helpers report distance, area and bearing with tests that include segment-aware line cases.
-13. Full gate passes: `npm run typecheck`, `npm test`, `npm run lint`, `npm run format:check`, `npm run build`, `npm run test:e2e`.
-14. Deployment is reported only after CI and deploy workflow runs for the pushed SHA complete with `status=completed, conclusion=success`, and live `curl`/DB checks verify data and non-promotion invariants.
+13. Bootstrap failures render either loading or error/retry, never both; 429 shows `For mange forespørsler. Prøv igjen om litt.` and 401 redirect remains unchanged.
+14. Header search is URL-backed: typing from any route navigates to `/` with `q`, and home initializes/syncs `q`, `scope`, and `category` query params.
+15. Home filters include `Vær`; empty states name the active search/filter/scope; active situation content is hidden during text search so unrelated situation copy does not dominate search results.
+16. Header freshness is derived from bootstrap `sourceHealth.lastCheckedAt`: `Oppdatert HH:MM` within 15 minutes, `Sist oppdatert HH:MM` when older, and `Oppdatering ukjent` when absent.
+17. Mobile `/trafikk` shows heading/context and preset/filter controls before the map, keeps a large map, then shows brief/events/corridor details; desktop split layout remains intact and there is no horizontal overflow.
+18. Article saves are optimistic but rollback on failed API calls, show visible errors, and disable repeated rapid clicks per article while saving.
+19. Situation saves keep visible action errors and block duplicate save/delete requests while one save request is pending.
+20. Rate limiting remains enabled in production/default config, but can be disabled via `RATE_LIMIT_ENABLED=false` for Playwright/dev test environments through `AppConfig`/`loadConfig()`.
+21. Full gate passes: `npm run typecheck`, `npm test`, `npm run lint`, `npm run format:check`, `npm run build`, `npm run test:e2e`.
+22. Deployment is reported only after CI and deploy workflow runs for the pushed SHA complete with `status=completed, conclusion=success`, and live `curl`/DB checks verify data and non-promotion invariants.
 
 ---
 
@@ -2371,9 +2389,1275 @@ git commit -m "feat: label private map analysis in exports"
 
 ---
 
-## Phase 5: Operations verification and post-implementation audit
 
-### Task 20: Add production verification checks for Entur invariants
+## Phase 5: Nytt Trondheim trust and usability quality pass
+
+This phase is a focused quality pass over the existing Nytt app shell, home feed, traffic map and server test configuration. It must preserve owner auth, CSRF-protected mutations, source ingestion, provenance rules, situation activation rules, and the Entur/map-tool boundaries introduced above. Treat current untracked files as user-owned and unrelated unless the parent session explicitly says otherwise.
+
+Implementation rules for every task in this phase:
+
+- Use Node 22: `source ~/.nvm/nvm.sh && nvm use 22` before every npm/vitest/playwright command.
+- Use TDD. Write the failing test, run it and verify the expected failure, implement the smallest change, then rerun the targeted test.
+- Prefer pure helper functions for URL/freshness/error formatting so behavior can be covered by Vitest without adding a new frontend test framework.
+- Use existing React Router, CSS, fetch helpers and Express config plumbing. Do not add Redux/Zustand/TanStack Query, a new component library, or a new API unless a test proves current bootstrap data cannot support the behavior.
+- 401 unauthenticated redirect behavior is unchanged. 429 gets friendlier copy, but still remains an error.
+- Situation and source provenance rules are untouched. This phase must not change source ingestion, activation logic, official evidence rules, or private annotation provenance.
+
+### Task 20: Preserve HTTP status in frontend API errors
+
+**Objective:** Let the UI distinguish 429 rate-limit responses from generic failures while preserving the existing 401 redirect.
+
+**Files:**
+- Modify: `apps/frontend/src/api.ts:19-51`
+- Modify: `apps/frontend/src/api.test.ts`
+
+**Step 1: Write failing API error tests**
+
+Add to `apps/frontend/src/api.test.ts`:
+
+```ts
+it("throws a friendly ApiError for 429 responses", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ error: "server wording should not leak here" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "42" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(api.bootstrap()).rejects.toMatchObject({
+    name: "ApiError",
+    status: 429,
+    retryAfter: "42",
+    message: "For mange forespørsler. Prøv igjen om litt.",
+  });
+});
+
+it("preserves non-429 server errors with status metadata", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ error: "Kilden er midlertidig utilgjengelig." }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(api.bootstrap()).rejects.toMatchObject({
+    name: "ApiError",
+    status: 503,
+    message: "Kilden er midlertidig utilgjengelig.",
+  });
+});
+```
+
+**Step 2: Run tests to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/api.test.ts
+```
+
+Expected: FAIL because `ApiError` does not exist and rejected `Error` objects do not carry `status`/`retryAfter`.
+
+**Step 3: Implement minimal API error class**
+
+In `apps/frontend/src/api.ts`, add above `csrfToken()`:
+
+```ts
+export class ApiError extends Error {
+  readonly status: number;
+  readonly retryAfter?: string;
+
+  constructor(message: string, status: number, retryAfter?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.retryAfter = retryAfter;
+  }
+}
+```
+
+Then replace the non-OK handling in `request<T>()` with:
+
+```ts
+  if (response.status === 401) {
+    window.location.href = "/auth/github";
+    throw new ApiError("Innlogging kreves", 401);
+  }
+  if (!response.ok) {
+    const retryAfter = response.headers.get("Retry-After") ?? undefined;
+    if (response.status === 429) {
+      throw new ApiError("For mange forespørsler. Prøv igjen om litt.", 429, retryAfter);
+    }
+    const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
+      error?: string;
+    };
+    throw new ApiError(body.error ?? "Forespørselen feilet", response.status, retryAfter);
+  }
+```
+
+Do not change any URL, CSRF or credential behavior.
+
+**Step 4: Run tests to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/api.test.ts
+```
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add apps/frontend/src/api.ts apps/frontend/src/api.test.ts
+git commit -m "fix: expose frontend API error status"
+```
+
+### Task 21: Add URL-backed home filter helpers
+
+**Objective:** Define one tested parser/builder for home search, scope and category query parameters before wiring React state.
+
+**Files:**
+- Create: `apps/frontend/src/homeFilters.ts`
+- Create: `apps/frontend/src/homeFilters.test.ts`
+- Modify later in Task 24: `apps/frontend/src/pages/HomePage.tsx`
+- Modify later in Task 23: `apps/frontend/src/App.tsx`
+
+**Step 1: Write failing helper tests**
+
+Create `apps/frontend/src/homeFilters.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import {
+  articleCategories,
+  buildHomeSearch,
+  parseHomeFilters,
+  searchSummary,
+} from "./homeFilters.js";
+
+describe("home filter query params", () => {
+  it("parses q, scope and category from a URL search string", () => {
+    expect(parseHomeFilters("?q=bru&scope=trondelag&category=V%C3%A6r")).toEqual({
+      q: "bru",
+      scope: "trondelag",
+      category: "Vær",
+    });
+  });
+
+  it("falls back to safe defaults for unknown params", () => {
+    expect(parseHomeFilters("?scope=bergen&category=Sport&q=%20%20")).toEqual({
+      q: "",
+      scope: "trondheim",
+      category: "Alle",
+    });
+  });
+
+  it("builds canonical search params without empty defaults", () => {
+    expect(buildHomeSearch({ q: " bru ", scope: "trondheim", category: "Alle" })).toBe("?q=bru");
+    expect(buildHomeSearch({ q: "", scope: "trondelag", category: "Transport" })).toBe(
+      "?scope=trondelag&category=Transport",
+    );
+  });
+
+  it("includes the Vær category", () => {
+    expect(articleCategories).toContain("Vær");
+  });
+
+  it("summarizes active filters for empty states", () => {
+    expect(searchSummary({ q: "bru", scope: "trondheim", category: "Alle" })).toBe(
+      '"bru" i Trondheim',
+    );
+    expect(searchSummary({ q: "", scope: "trondelag", category: "Vær" })).toBe(
+      "Vær i Trøndelag",
+    );
+  });
+});
+```
+
+**Step 2: Run tests to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/homeFilters.test.ts
+```
+
+Expected: FAIL because `homeFilters.ts` does not exist.
+
+**Step 3: Implement helper module**
+
+Create `apps/frontend/src/homeFilters.ts`:
+
+```ts
+import type { GeographicScope } from "@nytt/shared";
+
+export const articleCategories = [
+  "Alle",
+  "Nyheter",
+  "Hendelser",
+  "Byutvikling",
+  "Kultur",
+  "Transport",
+  "Politikk",
+  "Vær",
+] as const;
+
+export type ArticleCategoryFilter = (typeof articleCategories)[number];
+
+export interface HomeFilters {
+  q: string;
+  scope: GeographicScope;
+  category: ArticleCategoryFilter;
+}
+
+const categorySet = new Set<string>(articleCategories);
+
+export function parseHomeFilters(search: string): HomeFilters {
+  const parameters = new URLSearchParams(search);
+  const requestedScope = parameters.get("scope");
+  const requestedCategory = parameters.get("category");
+  return {
+    q: (parameters.get("q") ?? "").trim(),
+    scope: requestedScope === "trondelag" ? "trondelag" : "trondheim",
+    category: categorySet.has(requestedCategory ?? "")
+      ? (requestedCategory as ArticleCategoryFilter)
+      : "Alle",
+  };
+}
+
+export function buildHomeSearch(filters: HomeFilters): string {
+  const parameters = new URLSearchParams();
+  const query = filters.q.trim();
+  if (query) parameters.set("q", query);
+  if (filters.scope !== "trondheim") parameters.set("scope", filters.scope);
+  if (filters.category !== "Alle") parameters.set("category", filters.category);
+  const serialized = parameters.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+export function searchSummary(filters: HomeFilters): string {
+  const place = filters.scope === "trondheim" ? "Trondheim" : "Trøndelag";
+  const parts: string[] = [];
+  if (filters.q.trim()) parts.push(`"${filters.q.trim()}"`);
+  if (filters.category !== "Alle") parts.push(filters.category);
+  parts.push(`i ${place}`);
+  return parts.join(" ");
+}
+```
+
+**Step 4: Run tests to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/homeFilters.test.ts
+```
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add apps/frontend/src/homeFilters.ts apps/frontend/src/homeFilters.test.ts
+git commit -m "feat: add URL-backed home filter helpers"
+```
+
+### Task 22: Add header freshness label helper
+
+**Objective:** Replace hardcoded `Oppdatert nå` with deterministic text derived from bootstrap `sourceHealth.lastCheckedAt`.
+
+**Files:**
+- Create: `apps/frontend/src/freshness.ts`
+- Create: `apps/frontend/src/freshness.test.ts`
+- Modify later in Task 23: `apps/frontend/src/App.tsx`
+
+**Step 1: Write failing freshness tests**
+
+Create `apps/frontend/src/freshness.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { headerFreshnessLabel } from "./freshness.js";
+
+const now = new Date("2026-05-31T12:20:00+02:00");
+
+describe("header freshness label", () => {
+  it("shows Oppdatert HH:MM when the newest source check is fresh", () => {
+    expect(
+      headerFreshnessLabel(
+        [
+          { source: "nrk", label: "NRK", state: "ok", detail: "RSS", lastCheckedAt: "2026-05-31T12:08:00+02:00" },
+          { source: "adressa", label: "Adresseavisen", state: "ok", detail: "RSS", lastCheckedAt: "2026-05-31T11:40:00+02:00" },
+        ],
+        now,
+      ),
+    ).toBe("Oppdatert 12:08");
+  });
+
+  it("shows Sist oppdatert HH:MM when the newest source check is stale", () => {
+    expect(
+      headerFreshnessLabel(
+        [{ source: "nrk", label: "NRK", state: "ok", detail: "RSS", lastCheckedAt: "2026-05-31T11:59:00+02:00" }],
+        now,
+      ),
+    ).toBe("Sist oppdatert 11:59");
+  });
+
+  it("shows unknown when no source has a valid lastCheckedAt", () => {
+    expect(headerFreshnessLabel([{ source: "nrk", label: "NRK", state: "disabled", detail: "Av" }], now)).toBe(
+      "Oppdatering ukjent",
+    );
+  });
+});
+```
+
+**Step 2: Run tests to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/freshness.test.ts
+```
+
+Expected: FAIL because `freshness.ts` does not exist.
+
+**Step 3: Implement helper module**
+
+Create `apps/frontend/src/freshness.ts`:
+
+```ts
+import type { SourceHealth } from "@nytt/shared";
+
+const freshnessWindowMs = 15 * 60 * 1000;
+const timeFormatter = new Intl.DateTimeFormat("nb-NO", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Europe/Oslo",
+});
+
+export function headerFreshnessLabel(sources: SourceHealth[], now = new Date()): string {
+  const newest = sources
+    .map((source) => (source.lastCheckedAt ? new Date(source.lastCheckedAt).getTime() : Number.NaN))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+
+  if (newest === undefined || !Number.isFinite(newest)) return "Oppdatering ukjent";
+
+  const timestamp = new Date(newest);
+  const prefix = now.getTime() - newest <= freshnessWindowMs ? "Oppdatert" : "Sist oppdatert";
+  return `${prefix} ${timeFormatter.format(timestamp)}`;
+}
+```
+
+**Step 4: Run tests to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/freshness.test.ts
+```
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add apps/frontend/src/freshness.ts apps/frontend/src/freshness.test.ts
+git commit -m "feat: derive header freshness label"
+```
+
+### Task 23: Wire bootstrap retry, 429 state, header search and freshness
+
+**Objective:** Make root loading/error states honest and make header search visibly navigate to home results from any route.
+
+**Files:**
+- Modify: `apps/frontend/src/App.tsx:1-87`
+- Modify: `apps/frontend/src/styles.css:55-156` for retry/error affordance if needed
+- Modify: `e2e/app.spec.ts`
+- Depends on: Task 20, Task 21, Task 22
+
+**Step 1: Write failing e2e test for bootstrap 429 and retry**
+
+Add to `e2e/app.spec.ts`:
+
+```ts
+test("bootstrap 429 shows retryable error without stale loading", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/api/bootstrap", async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        headers: { "Retry-After": "30" },
+        body: JSON.stringify({ error: "Too many requests" }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toContainText("For mange forespørsler. Prøv igjen om litt.");
+  await expect(page.getByText("Henter siste nytt...")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Prøv igjen" }).click();
+  await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+});
+```
+
+**Step 2: Run e2e test to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "bootstrap 429" --project=desktop-chromium
+```
+
+Expected: FAIL because the app renders both the fatal error and `Henter siste nytt...`, and there is no retry button.
+
+**Step 3: Implement root bootstrap state machine**
+
+In `apps/frontend/src/App.tsx`:
+
+- Import `useMemo`, `ChangeEvent`, `useLocation`, `useNavigate`, `ApiError`, `buildHomeSearch`, `parseHomeFilters`, and `headerFreshnessLabel`.
+- Change `Header` to accept `freshnessLabel: string`.
+- Inside `Header`, use React Router location/search state instead of `window.dispatchEvent`:
+
+```tsx
+function Header({ freshnessLabel }: { freshnessLabel: string }) {
+  const [logoutError, setLogoutError] = useState<string>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const filters = useMemo(() => parseHomeFilters(location.search), [location.search]);
+
+  function searchChanged(event: ChangeEvent<HTMLInputElement>) {
+    const q = event.target.value;
+    const nextSearch = buildHomeSearch({
+      ...filters,
+      q,
+      scope: location.pathname === "/" ? filters.scope : "trondheim",
+      category: location.pathname === "/" ? filters.category : "Alle",
+    });
+    navigate({ pathname: "/", search: nextSearch });
+  }
+```
+
+Render the input as a controlled input:
+
+```tsx
+<input placeholder="Søk i saker" value={filters.q} onChange={searchChanged} />
+```
+
+Replace `Oppdatert nå` with:
+
+```tsx
+<div className="refreshed">{freshnessLabel}</div>
+```
+
+For `App`, use explicit loading/data/error/retry state:
+
+```tsx
+export function App() {
+  const [data, setData] = useState<BootstrapPayload>();
+  const [error, setError] = useState<string>();
+  const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let ignore = false;
+    setLoading(true);
+    setError(undefined);
+    api
+      .bootstrap()
+      .then((payload) => {
+        if (!ignore) setData(payload);
+      })
+      .catch((reason: Error) => {
+        if (!ignore) {
+          setData(undefined);
+          setError(
+            reason instanceof ApiError && reason.status === 429
+              ? "For mange forespørsler. Prøv igjen om litt."
+              : reason.message,
+          );
+        }
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [attempt]);
+
+  const freshnessLabel = headerFreshnessLabel(data?.sourceHealth ?? []);
+```
+
+Render states in this order:
+
+```tsx
+<Header freshnessLabel={freshnessLabel} />
+{loading ? <main className="loading">Henter siste nytt...</main> : null}
+{!loading && error ? (
+  <main className="fatal-error" role="alert">
+    <p>{error}</p>
+    <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+      Prøv igjen
+    </button>
+  </main>
+) : null}
+{!loading && data ? <Routes>...</Routes> : null}
+```
+
+Do not catch or suppress the `/auth/github` redirect from Task 20's 401 path.
+
+**Step 4: Run targeted tests to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/api.test.ts apps/frontend/src/homeFilters.test.ts apps/frontend/src/freshness.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "bootstrap 429" --project=desktop-chromium
+```
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add apps/frontend/src/App.tsx apps/frontend/src/styles.css e2e/app.spec.ts
+git commit -m "fix: make bootstrap errors retryable"
+```
+
+### Task 24: Make home filters URL-backed and search-result honest
+
+**Objective:** Make header search, scope, category and empty states share the URL; hide active-situation content during text search so filtered results are not dominated by unrelated situations.
+
+**Files:**
+- Modify: `apps/frontend/src/pages/HomePage.tsx:1-349`
+- Modify: `apps/frontend/src/styles.css` if a search-active empty state needs spacing
+- Modify: `e2e/app.spec.ts`
+- Depends on: Task 21, Task 23
+
+**Step 1: Write failing e2e tests for cross-route search and active-situation suppression**
+
+Add to `e2e/app.spec.ts`:
+
+```ts
+test("searching from trafikk navigates home and shows filtered results", async ({ page }) => {
+  await page.goto("/trafikk");
+  await page.getByPlaceholder("Søk i saker").fill("bru");
+
+  await expect(page).toHaveURL(/\/\?q=bru$/);
+  await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Ny bru over Nidelva/ })).toBeVisible();
+  await expect(page.locator(".situation-banner")).toHaveCount(0);
+});
+
+test("home filter URL shows Vær empty state with active filter context", async ({ page }) => {
+  await page.goto("/?q=bru&category=V%C3%A6r&scope=trondelag");
+
+  await expect(page.getByRole("button", { name: "Vær" })).toHaveClass(/selected/);
+  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trøndelag.')).toBeVisible();
+});
+```
+
+If sample data changes and the `bru`/`Vær` combination is no longer empty, adjust only the query text to one that has no result in the current sample/test DB; do not remove the contextual empty-state assertion.
+
+**Step 2: Run e2e tests to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "searching from trafikk|home filter URL" --project=desktop-chromium
+```
+
+Expected: FAIL because header search still uses a window event, `Vær` is missing, and the situation banner still renders during search.
+
+**Step 3: Replace local filter state with URL-derived filters**
+
+In `apps/frontend/src/pages/HomePage.tsx`:
+
+- Import `useSearchParams` from `react-router-dom`.
+- Import `articleCategories`, `buildHomeSearch`, `parseHomeFilters`, and `searchSummary` from `../homeFilters.js`.
+- Delete the local `categories` constant.
+- Replace local `scope`, `category`, and `query` state with URL-derived values:
+
+```tsx
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
+  const { scope, category, q: query } = filters;
+
+  function updateFilters(next: Partial<typeof filters>) {
+    setSearchParams(buildHomeSearch({ ...filters, ...next }));
+  }
+```
+
+React Router accepts the leading `?` string from `buildHomeSearch`; if TypeScript rejects it, pass `buildHomeSearch(...).replace(/^\?/, "")` instead and add that exact expression to the plan implementation notes.
+
+- Remove the `window.addEventListener("nytt-search", ...)` effect entirely.
+- Change scope buttons to call `updateFilters({ scope: "trondheim" })` / `updateFilters({ scope: "trondelag" })`.
+- Change category buttons to iterate `articleCategories` and call `updateFilters({ category: item })`.
+- Keep the article-fetch effect dependency as `[category, query, scope]` so URL changes refetch.
+
+**Step 4: Make search results visually honest**
+
+In `HomePage`:
+
+- Compute `const isTextSearch = query.trim().length > 0;`.
+- Render `<SituationBanner situations={situations} />` only when `!isTextSearch`.
+- Pass filtered/current articles to the rail instead of the original bootstrap list, or hide non-source rail sections while `isTextSearch` is true. Recommended v1:
+
+```tsx
+{!isTextSearch ? <SituationBanner situations={situations} /> : null}
+...
+<NearbyRail articles={filtered} data={initialData} />
+```
+
+Inside `NearbyRail`, derive the municipality list from `articles` instead of `data.articles`:
+
+```tsx
+  const civic = articles.filter((article) => article.source === "trondheim_kommune").slice(0, 2);
+```
+
+This prevents stale unrelated side-rail cards from dominating text-search result views while preserving source-health context.
+
+**Step 5: Add contextual empty state**
+
+Replace:
+
+```tsx
+<p className="feed-state">Ingen saker samsvarer med filteret.</p>
+```
+
+with:
+
+```tsx
+<p className="feed-state">Ingen saker samsvarer med {searchSummary(filters)}.</p>
+```
+
+**Step 6: Run tests to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/frontend/src/homeFilters.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "searching from trafikk|home filter URL" --project=desktop-chromium
+```
+
+Expected: PASS.
+
+**Step 7: Commit**
+
+```bash
+git add apps/frontend/src/pages/HomePage.tsx apps/frontend/src/styles.css e2e/app.spec.ts
+git commit -m "feat: back home search with URL filters"
+```
+
+### Task 25: Make article optimistic saves rollback on failure
+
+**Objective:** Keep optimistic article save feedback, but rollback failed saves, show a visible error, and block repeated clicks for the same article while a request is in flight.
+
+**Files:**
+- Modify: `apps/frontend/src/pages/HomePage.tsx`
+- Modify: `apps/frontend/src/styles.css` for `.save-error` / disabled save styling if needed
+- Modify: `e2e/app.spec.ts`
+
+**Step 1: Write failing e2e test for save rollback**
+
+Add to `e2e/app.spec.ts`:
+
+```ts
+test("article save failure rolls back optimistic state", async ({ page }) => {
+  await page.route("**/api/saved/articles/a-bridge", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Lagring er midlertidig utilgjengelig." }),
+    });
+  });
+
+  await page.goto("/?q=bru");
+  const saveButton = page.getByRole("button", { name: /Lagre sak: Ny bru over Nidelva/ });
+  await expect(saveButton).toBeEnabled();
+
+  await saveButton.click();
+  await expect(page.getByRole("alert")).toContainText("Lagring er midlertidig utilgjengelig.");
+  await expect(page.getByRole("button", { name: /Lagre sak: Ny bru over Nidelva/ })).toBeEnabled();
+});
+
+test("article save is disabled while a request is pending", async ({ page }) => {
+  let releaseSave!: () => void;
+  const saveCanFinish = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  let calls = 0;
+  await page.route("**/api/saved/articles/a-bridge", async (route) => {
+    calls += 1;
+    await saveCanFinish;
+    await route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/?q=bru");
+  const saveButton = page.getByRole("button", { name: /Lagre sak: Ny bru over Nidelva/ });
+  await saveButton.click();
+  const pendingSaveButton = page.getByRole("button", {
+    name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
+  });
+  await expect(pendingSaveButton).toBeDisabled();
+  await pendingSaveButton.click({ force: true }).catch(() => undefined);
+  releaseSave();
+
+  await expect(page.getByRole("button", { name: /Fjern fra lagret: Ny bru over Nidelva/ })).toBeEnabled();
+  expect(calls).toBe(1);
+});
+```
+
+If sample IDs drift, inspect `packages/shared/src/sample-data.ts` and adjust `a-bridge` to the current ID for the bridge article. Keep the route failure on a real displayed article.
+
+**Step 2: Run test to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "article save failure|article save is disabled" --project=desktop-chromium
+```
+
+Expected: FAIL because save buttons do not include article names, failed saves are not rolled back visibly, and repeated clicks are not blocked.
+
+**Step 3: Add in-flight and error state**
+
+In `HomePage` add state:
+
+```tsx
+  const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
+  const [saveError, setSaveError] = useState<string>();
+```
+
+Change `SaveButton` props to include `saving` and `onUpdate` as an async callback:
+
+```tsx
+function SaveButton({
+  article,
+  saving,
+  onUpdate,
+}: {
+  article: Article;
+  saving: boolean;
+  onUpdate: (id: string, saved: boolean) => Promise<void>;
+}) {
+  return (
+    <button
+      className="save"
+      aria-label={`${article.saved ? "Fjern fra lagret" : "Lagre sak"}: ${article.title}`}
+      disabled={saving}
+      onClick={() => void onUpdate(article.id, !article.saved)}
+    >
+      <BookmarkIcon selected={article.saved} />
+    </button>
+  );
+}
+```
+
+Implement rollback in `HomePage`:
+
+```tsx
+  async function updateSaved(id: string, saved: boolean) {
+    if (savingArticleIds.has(id)) return;
+    const previous = articles.find((item) => item.id === id)?.saved ?? false;
+    setSaveError(undefined);
+    setSavingArticleIds((current) => new Set(current).add(id));
+    setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
+    try {
+      await api.saveArticle(id, saved);
+    } catch (reason) {
+      setArticles((items) =>
+        items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
+      );
+      setSaveError(reason instanceof Error ? reason.message : "Kunne ikke lagre saken");
+    } finally {
+      setSavingArticleIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+```
+
+Pass `saving={savingArticleIds.has(article.id)}` from `LeadStory` and `NewsRow`. If `LeadStory`/`NewsRow` currently only accept `onSave`, add `savingArticleIds` or a `saving` boolean prop at each call site rather than creating global state.
+
+Render the visible error above the list:
+
+```tsx
+{saveError ? <p className="feed-state error" role="alert">{saveError}</p> : null}
+```
+
+**Step 4: Run tests to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "article save failure|article save is disabled" --project=desktop-chromium
+```
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add apps/frontend/src/pages/HomePage.tsx apps/frontend/src/styles.css e2e/app.spec.ts
+git commit -m "fix: rollback failed article saves"
+```
+
+### Task 26: Guard situation save clicks while preserving visible action errors
+
+**Objective:** Keep the existing situation action-error pattern, but prevent repeated rapid save clicks from creating duplicate save/delete requests.
+
+**Files:**
+- Modify: `apps/frontend/src/pages/SituationPage.tsx:37-41,257-266,372-376`
+- Modify: `e2e/app.spec.ts`
+
+**Step 1: Write failing e2e test for situation save in-flight guard**
+
+Add to `e2e/app.spec.ts`:
+
+```ts
+test("situation save failure stays visible and blocks duplicate clicks while pending", async ({ page }) => {
+  let releaseSave!: () => void;
+  const saveRequestSeen = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  let calls = 0;
+  await page.route("**/api/situations/skogbrann-bymarka/saved", async (route) => {
+    calls += 1;
+    await saveRequestSeen;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Situasjonen kunne ikke lagres." }),
+    });
+  });
+
+  await page.goto("/situasjoner/skogbrann-bymarka");
+  const saveButton = page.getByRole("button", { name: /Lagre situasjon|Fjern lagring/ });
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
+  await saveButton.click({ force: true });
+  releaseSave();
+
+  await expect(page.getByText("Situasjonen kunne ikke lagres.")).toBeVisible();
+  expect(calls).toBe(1);
+});
+```
+
+**Step 2: Run test to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "situation save failure" --project=desktop-chromium
+```
+
+Expected: FAIL because the save button is not disabled while the save request is pending.
+
+**Step 3: Add save-specific pending state**
+
+In `SituationPage` add:
+
+```tsx
+  const [savingSituation, setSavingSituation] = useState(false);
+```
+
+Replace `saveSituation()` with:
+
+```tsx
+  async function saveSituation() {
+    if (savingSituation) return;
+    const saved = !situation.saved;
+    setSavingSituation(true);
+    try {
+      await performAction(
+        () => api.saveSituation(id, saved),
+        () =>
+          setWorkspace((current) =>
+            current ? { ...current, situation: { ...current.situation, saved } } : current,
+          ),
+      );
+    } finally {
+      setSavingSituation(false);
+    }
+  }
+```
+
+Change the button:
+
+```tsx
+<button onClick={() => void saveSituation()} disabled={savingSituation}>
+  {situation.saved ? "Fjern lagring" : "Lagre situasjon"}
+</button>
+```
+
+Do not make situation saves optimistic in this task. Existing behavior applies only after API success, and `performAction` already renders `actionError` on failure.
+
+**Step 4: Run test to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "situation save failure" --project=desktop-chromium
+```
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add apps/frontend/src/pages/SituationPage.tsx e2e/app.spec.ts
+git commit -m "fix: guard situation save requests"
+```
+
+### Task 27: Reorder mobile traffic map flow without breaking desktop layout
+
+**Objective:** On mobile `/trafikk`, show title/context and preset/filter controls before the map, then show the large map, then brief/events/corridor details; keep desktop split layout.
+
+**Files:**
+- Modify: `apps/frontend/src/pages/TrafficMapPage.tsx:155-228`
+- Modify: `apps/frontend/src/styles.css:1490-1524,1867-2033`
+- Modify: `e2e/app.spec.ts`
+
+**Step 1: Write failing mobile e2e test**
+
+Add to `e2e/app.spec.ts`:
+
+```ts
+test("mobile traffic page shows heading and controls before the map", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/trafikk");
+
+  const heading = page.getByRole("heading", { name: "Trafikkart" });
+  await expect(heading).toBeVisible();
+  await expect(page.getByRole("button", { name: /Nå|Akkurat nå/ })).toBeVisible();
+
+  const headingBox = await heading.boundingBox();
+  const mapBox = await page.locator(".traffic-map").boundingBox();
+  expect(headingBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(
+    true,
+  );
+});
+```
+
+Use the exact preset button text from `TrafficFilterPanel` if it differs; do not weaken the test to only check URL load.
+
+**Step 2: Run mobile e2e test to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "mobile traffic" --project=mobile-chromium
+```
+
+Expected: FAIL because the mobile CSS currently orders `.traffic-map-sidebar` after the map.
+
+**Step 3: Refactor traffic page DOM into controls, map and details**
+
+In `TrafficMapPage.tsx`, change the return structure to three top-level children:
+
+```tsx
+<main className="traffic-map-page">
+  <section className="traffic-map-controls" aria-label="Trafikkartvalg">
+    <div className="traffic-map-heading">...</div>
+    <TrafficFilterPanel ... />
+  </section>
+
+  <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
+    ...
+  </MapContainer>
+
+  <section className="traffic-map-details" aria-label="Trafikkdetaljer">
+    {data?.brief ? <TrafficBriefCard ... /> : <section className="traffic-brief-card">...</section>}
+    {data?.events ? <TrafficEventList ... /> : null}
+    {data?.corridorImpacts ? <CorridorImpactCard ... /> : null}
+  </section>
+</main>
+```
+
+Keep all existing data, handlers and map layers unchanged. This is a layout-only refactor.
+
+**Step 4: Update CSS grid areas**
+
+Replace the traffic layout CSS with this structure:
+
+```css
+.traffic-map-page {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "controls map"
+    "details map";
+  min-height: calc(100vh - 84px);
+}
+
+.traffic-map-controls,
+.traffic-map-details {
+  min-width: 0;
+  padding: 28px 24px;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+}
+
+.traffic-map-controls {
+  grid-area: controls;
+}
+
+.traffic-map-details {
+  grid-area: details;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.traffic-map {
+  grid-area: map;
+  min-height: calc(100vh - 84px);
+  height: 100%;
+  width: 100%;
+}
+```
+
+For the existing `@media (max-width: 1080px)` rule that already includes `.traffic-map-page`, do not leave a one-column grid with two-column area names. Add a stack layout there:
+
+```css
+.traffic-map-page {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 560px auto;
+  grid-template-areas:
+    "controls"
+    "map"
+    "details";
+}
+```
+
+In `@media (max-width: 720px)`, use:
+
+```css
+.traffic-map-page {
+  grid-template-rows: auto 520px auto;
+  overflow-x: hidden;
+}
+
+.traffic-map-controls,
+.traffic-map-details {
+  border-right: 0;
+  border-top: 1px solid var(--line);
+}
+
+.traffic-map {
+  min-height: 520px;
+}
+```
+
+Delete the old mobile rule that set `.traffic-map-sidebar { order: 2; }`.
+
+**Step 5: Run e2e and typecheck to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "mobile traffic" --project=mobile-chromium
+source ~/.nvm/nvm.sh && nvm use 22 && npm run typecheck
+```
+
+Expected: PASS.
+
+**Step 6: Commit**
+
+```bash
+git add apps/frontend/src/pages/TrafficMapPage.tsx apps/frontend/src/styles.css e2e/app.spec.ts
+git commit -m "fix: improve mobile traffic map flow"
+```
+
+### Task 28: Make rate limiting configurable for tests
+
+**Objective:** Disable or relax API rate limiting in Playwright/dev test environments through config plumbing while keeping production behavior unchanged.
+
+**Files:**
+- Modify: `apps/server/src/config.ts:3-16,18-34`
+- Modify: `apps/server/src/app.ts:96-128,208-220`
+- Modify: `apps/server/test/api.test.ts`
+- Modify: `apps/server/test/source-items-api.test.ts`
+- Modify: `playwright.config.ts:11-20`
+
+**Step 1: Write failing server tests**
+
+Add to `apps/server/test/api.test.ts` near existing API/auth tests. Also update the imports at the top to include `loadConfig`:
+
+```ts
+import { loadConfig } from "../src/config.js";
+
+function withEnvValue<T>(key: string, value: string | undefined, run: () => T): T {
+  const previous = process.env[key];
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = previous;
+    }
+  }
+}
+
+it("defaults rate limiting on unless RATE_LIMIT_ENABLED explicitly disables it", () => {
+  expect(withEnvValue("RATE_LIMIT_ENABLED", undefined, () => loadConfig().rateLimitEnabled)).toBe(
+    true,
+  );
+  expect(withEnvValue("RATE_LIMIT_ENABLED", "false", () => loadConfig().rateLimitEnabled)).toBe(
+    false,
+  );
+});
+
+async function testAppWithRateLimit(rateLimitEnabled: boolean) {
+  const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
+  const runtime = await createApp({
+    port: 0,
+    nodeEnv: "development",
+    publicOrigin: "http://localhost",
+    seedDemo: true,
+    devAuthBypass: true,
+    githubAllowedLogin: "Reedtrullz",
+    sessionSecret: "test-only-secret",
+    uploadDir,
+    runtimeStatusDir: uploadDir,
+    rateLimitEnabled,
+  });
+  return { ...runtime, uploadDir };
+}
+
+it("can disable API rate limiting through config", async () => {
+  const { app } = await testAppWithRateLimit(false);
+  const agent = request.agent(app);
+  await agent.get("/api/session").expect(200);
+
+  for (let attempt = 0; attempt < 130; attempt += 1) {
+    await agent.get("/api/bootstrap").expect(200);
+  }
+});
+
+it("enforces API rate limiting when config enables it", async () => {
+  const { app } = await testAppWithRateLimit(true);
+  const agent = request.agent(app);
+  await agent.get("/api/session").expect(200);
+
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 130; attempt += 1) {
+    const response = await agent.get("/api/bootstrap");
+    lastStatus = response.status;
+    if (response.status === 429) {
+      expect(response.headers["retry-after"]).toBeTruthy();
+      expect(response.body.error).toContain("For mange forespørsler");
+      return;
+    }
+  }
+  throw new Error(`expected a 429 before loop finished, last status was ${lastStatus}`);
+});
+```
+
+If adding `rateLimitEnabled` to `AppConfig` makes existing test helper objects fail TypeScript before RED can run, temporarily add only the tests and run the test command; the expected failure may be a compile-time missing-property error. The implementation step fixes it.
+
+**Step 2: Run tests to verify RED**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/server/test/api.test.ts --testNamePattern "rate limiting"
+```
+
+Expected: FAIL because `AppConfig` does not include `rateLimitEnabled`, `loadConfig()` does not expose the flag, and `createApp` always installs the rate limiter.
+
+**Step 3: Add config plumbing**
+
+In `apps/server/src/config.ts`, add to `AppConfig`:
+
+```ts
+  rateLimitEnabled: boolean;
+```
+
+In `loadConfig()` return:
+
+```ts
+    rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
+```
+
+In `apps/server/src/app.ts`, install the middleware conditionally:
+
+```ts
+  if (config.rateLimitEnabled) {
+    app.use(createRateLimiter());
+  }
+```
+
+Do not read `process.env` inside `createRateLimiter()` or route handlers. The middleware should only know whether it was installed.
+
+**Step 4: Update all test config objects**
+
+If TypeScript reports missing `rateLimitEnabled` in existing `createApp({...})` calls, add `rateLimitEnabled: true` to test helpers and direct test setup objects. At minimum inspect and update both `apps/server/test/api.test.ts` and `apps/server/test/source-items-api.test.ts`, because each has its own `createApp` setup. Do not leave `rateLimitEnabled` optional just to avoid updating tests; explicit config makes production/test behavior auditable.
+
+**Step 5: Disable rate limiting for Playwright webServer only**
+
+In `playwright.config.ts`, add to `webServer.env`:
+
+```ts
+      RATE_LIMIT_ENABLED: "false",
+```
+
+Also change `reuseExistingServer` so Playwright normally starts the server with that env instead of reusing a locally running server that may still have rate limiting enabled:
+
+```ts
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "true",
+```
+
+Keep `NODE_ENV: "development"` and `DEV_AUTH_BYPASS: "true"` unchanged. If a developer intentionally sets `PLAYWRIGHT_REUSE_SERVER=true`, they must start the reused dev server with `RATE_LIMIT_ENABLED=false`; document this in the task implementation notes if needed.
+
+**Step 6: Run tests to verify GREEN**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run apps/server/test/api.test.ts --testNamePattern "rate limiting"
+source ~/.nvm/nvm.sh && nvm use 22 && npm run typecheck
+```
+
+Expected: PASS.
+
+**Step 7: Commit**
+
+```bash
+git add apps/server/src/config.ts apps/server/src/app.ts apps/server/test/api.test.ts apps/server/test/source-items-api.test.ts playwright.config.ts
+git commit -m "test: allow rate-limit isolation by config"
+```
+
+### Task 29: Run the focused quality-pass gate
+
+**Objective:** Prove the quality pass is internally consistent before returning to Entur operations verification.
+
+**Files:** none unless fixes are required.
+
+**Step 1: Run targeted unit and e2e checks**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npx vitest run \
+  apps/frontend/src/api.test.ts \
+  apps/frontend/src/homeFilters.test.ts \
+  apps/frontend/src/freshness.test.ts \
+  apps/server/test/api.test.ts
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "bootstrap 429|searching from trafikk|home filter URL|article save failure|article save is disabled|situation save failure" --project=desktop-chromium
+source ~/.nvm/nvm.sh && nvm use 22 && npx playwright test e2e/app.spec.ts --grep "mobile traffic" --project=mobile-chromium
+```
+
+Expected: all PASS.
+
+**Step 2: Run repo-wide static gates**
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 && npm run typecheck
+source ~/.nvm/nvm.sh && nvm use 22 && npm run lint
+source ~/.nvm/nvm.sh && nvm use 22 && npm run format:check
+```
+
+Expected: all PASS. If formatting fails, run `npm run format`, inspect diffs, and commit the mechanical formatting change separately.
+
+**Step 3: Commit any quality-pass gate fixes**
+
+```bash
+git status --short
+git add apps/frontend/src apps/server/src apps/server/test e2e/app.spec.ts playwright.config.ts
+git commit -m "chore: satisfy Nytt quality-pass gates"
+```
+
+Only commit if this task changes files. Do not use `git add -A` here: the repository may contain user-owned untracked files unrelated to this plan.
+
+---
+
+## Phase 6: Operations verification and post-implementation audit
+
+### Task 30: Add production verification checks for Entur invariants
 
 **Objective:** Prevent “data exists” from being confused with correct provenance separation.
 
@@ -2441,7 +3725,7 @@ git add docs/DEPLOYMENT.md ansible-playbook.yml
 git commit -m "docs: add Entur production verification checks"
 ```
 
-### Task 21: Run full local gate
+### Task 31: Run full local gate
 
 **Objective:** Verify the full repository after all tasks.
 
@@ -2470,7 +3754,7 @@ git commit -m "chore: satisfy Entur map gate checks"
 
 Only commit if gate fixes changed files.
 
-### Task 22: Post-implementation audit
+### Task 32: Post-implementation audit
 
 **Objective:** Audit the implementation beyond test pass/fail, especially provenance and geospatial correctness.
 
@@ -2512,7 +3796,7 @@ Review origin/main..HEAD for Entur public transport and Situation Room map-tool 
 
 Fix Critical/Important findings and re-review until approved.
 
-### Task 23: Deploy and verify live production
+### Task 33: Deploy and verify live production
 
 **Objective:** Deploy only after CI/deploy success for the exact SHA and prove live invariants.
 
@@ -2537,7 +3821,7 @@ ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production logs --tail=120 worker"
 ```
 
-Run the SQL block from Task 20. Expected live invariants:
+Run the SQL block from Task 30. Expected live invariants:
 
 - `/health` returns `200` with Postgres-backed `status: ok`.
 - `/trafikk` returns `200` and built frontend contains public transport UI strings.
@@ -2574,6 +3858,12 @@ Only after all checks pass, report the actual CI/deploy run IDs and live verific
 - [ ] Geospatial helpers have lon/lat tests and segment-aware proximity tests where relevant.
 - [ ] Frontend hooks invalidate request IDs on unmount.
 - [ ] Production checks separately count raw telemetry rows, ledger rows, official rows and promoted situations.
+- [ ] Bootstrap loading/error/429 tests prove stale loading text is not shown with retryable errors.
+- [ ] Header search, home `q`/`scope`/`category`, `Vær`, and contextual empty states are URL-backed and covered by helper/e2e tests.
+- [ ] Header freshness uses bootstrap `sourceHealth.lastCheckedAt`; no new API was added for freshness unless implementation proved bootstrap insufficient.
+- [ ] Mobile `/trafikk` ordering is tested in the mobile Playwright project and desktop grid behavior remains unchanged.
+- [ ] Article and situation save failures remain visible; article saves rollback and both save flows block duplicate in-flight requests.
+- [ ] Rate limiting is disabled only through `AppConfig.rateLimitEnabled`/`RATE_LIMIT_ENABLED=false` for test environments; production/default behavior remains covered by a 429 test.
 
 ## Plan review history
 
@@ -2581,3 +3871,7 @@ Only after all checks pass, report the actual CI/deploy run IDs and live verific
 - Review pass 1 found blockers around source-item repository seams, MultiPoint service-alert geometry, API boundary separation, stale lifecycle, strict TypeScript narrowing, MemoryStore stubs, private-feature metadata preservation, and empty catch/silent degradation. Patched the plan to address each class.
 - Review pass 2 found remaining blockers around strict TS Leaflet coordinates, strict TS projected tuples, missing fire/SAR presets, missing segment-aware proximity tests, and insufficient production non-promotion SQL. Patched the plan with guarded helpers, complete presets, segment-distance tests, and stronger DB invariants.
 - Final blocking-only re-review returned: no blocking issues.
+- Quality-pass update added 2026-06-01 for bootstrap retry/429 states, URL-backed search/filter behavior, `Vær` category, source-health freshness, mobile traffic UX, save rollback/in-flight guards, and config-driven rate-limit isolation.
+- Quality-pass review pass 1 found blockers around strict TypeScript freshness narrowing, missing `source-items-api.test.ts` config updates, missing `loadConfig()` default coverage, Playwright server reuse ignoring `RATE_LIMIT_ENABLED`, and insufficient article-save in-flight testing. Patched the plan to address each class.
+- Quality-pass review pass 2 found a remaining blocker in the article-save pending-state Playwright locator after optimistic accessible-name changes, plus a non-blocking `git add -A` staging risk. Patched the pending locator to match both save labels and narrowed the quality-pass gate commit scope.
+- Quality-pass final blocking-only re-review returned: no blockers.
