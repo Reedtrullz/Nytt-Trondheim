@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { MapFeature, SituationWorkspace, SourceItem } from "@nytt/shared";
+import type { PrivateMapFeatureInput, SituationWorkspace, SourceItem } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
@@ -103,28 +103,29 @@ export function SituationPage() {
     request: () => Promise<T>,
     apply: (value: T) => void,
     message?: string,
-  ) {
+  ): Promise<boolean> {
     setActionError(undefined);
     setActionMessage(undefined);
     try {
       const value = await request();
       apply(value);
       if (message) setActionMessage(message);
+      return true;
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : "Handlingen feilet");
+      return false;
     }
   }
 
-  async function createFeature(geometry: MapFeature["geometry"], label: string) {
-    await performAction(
+  async function createFeature(
+    geometry: PrivateMapFeatureInput["geometry"],
+    properties: PrivateMapFeatureInput["properties"],
+  ): Promise<boolean> {
+    return performAction(
       () =>
         api.addFeature(id, {
           geometry,
-          properties: {
-            label,
-            provenance: "private_annotation",
-            updatedAt: new Date().toISOString(),
-          },
+          properties,
         }),
       (feature) =>
         setWorkspace((current) =>

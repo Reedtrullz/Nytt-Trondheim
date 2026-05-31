@@ -566,6 +566,20 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.post("/api/situations/:id/features", async (req, res, next) => {
     try {
       const input = privateMapFeatureInputSchema.parse(req.body);
+      const login = currentLogin(req);
+      const sourceItemIds = input.properties.sourceItemIds ?? [];
+      if (sourceItemIds.length) {
+        const linkedIds = new Set(
+          (await store.listSituationSourceItems(req.params.id, login)).map((item) => item.id),
+        );
+        const invalidIds = sourceItemIds.filter((sourceItemId) => !linkedIds.has(sourceItemId));
+        if (invalidIds.length) {
+          return void res.status(400).json({
+            error:
+              "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
+          });
+        }
+      }
       const feature: MapFeature = {
         id: randomUUID(),
         type: "Feature",

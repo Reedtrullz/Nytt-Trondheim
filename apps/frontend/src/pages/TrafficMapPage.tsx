@@ -3,6 +3,10 @@ import { MapContainer, TileLayer } from "react-leaflet";
 import type { TrafficEventCategory, TrafficEventSeverity, TrafficEventState } from "@nytt/shared";
 import { CorridorImpactCard } from "../components/map/CorridorImpactCard.js";
 import { MapBoundsWatcher } from "../components/map/MapBoundsWatcher.js";
+import {
+  PublicTransportLayer,
+  PublicTransportSummary,
+} from "../components/map/PublicTransportLayer.js";
 import { RoadContextLayer } from "../components/map/RoadContextLayer.js";
 import { TrafficBriefCard } from "../components/map/TrafficBriefCard.js";
 import { TrafficEventList } from "../components/map/TrafficEventList.js";
@@ -12,6 +16,7 @@ import {
   type TrafficMapPreset,
 } from "../components/map/TrafficFilterPanel.js";
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
+import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
 
 interface MapBounds {
@@ -44,6 +49,7 @@ const defaultContextLayers: RoadContextLayerVisibility = {
   weather: true,
   cameras: false,
   counters: false,
+  publicTransport: false,
 };
 
 function addHours(date: Date, hours: number): Date {
@@ -101,6 +107,17 @@ export function TrafficMapPage() {
     from: timeWindow.from,
     to: timeWindow.to,
     bounds: stableBounds,
+  });
+  const {
+    data: publicTransportData,
+    loading: publicTransportLoading,
+    error: publicTransportError,
+    reload: reloadPublicTransport,
+  } = usePublicTransportMap({
+    modes: ["bus", "tram", "rail", "water"],
+    includeAlerts: true,
+    bounds: stableBounds,
+    enabled: visibleContextLayers.publicTransport,
   });
 
   const highlightedEventIds = useMemo(() => {
@@ -202,6 +219,14 @@ export function TrafficMapPage() {
             onSelectEvent={setSelectedEventId}
           />
         ) : null}
+        {visibleContextLayers.publicTransport ? (
+          <PublicTransportSummary
+            payload={publicTransportData}
+            loading={publicTransportLoading}
+            error={publicTransportError}
+            onReload={reloadPublicTransport}
+          />
+        ) : null}
         {data?.corridorImpacts ? (
           <CorridorImpactCard
             impacts={data.corridorImpacts}
@@ -224,6 +249,10 @@ export function TrafficMapPage() {
             counters={visibleContextLayers.counters ? data.counters : []}
           />
         ) : null}
+        <PublicTransportLayer
+          payload={publicTransportData}
+          visible={visibleContextLayers.publicTransport}
+        />
       </MapContainer>
     </main>
   );

@@ -1398,17 +1398,18 @@ export class PgStore implements Store {
   }
 
   async updatePrivateFeature(situationId: string, featureId: string, label: string, note?: string) {
-    const properties = {
+    const patch = {
       label,
       note,
       provenance: "private_annotation",
       updatedAt: new Date().toISOString(),
     };
     const result = await this.pool.query<MapFeature>(
-      `UPDATE map_features SET properties=$3
+      `UPDATE map_features
+       SET properties = properties || $3::jsonb
        WHERE id=$1 AND situation_id=$2 AND provenance='private_annotation'
        RETURNING id, 'Feature' AS type, ST_AsGeoJSON(geometry)::json AS geometry, properties`,
-      [featureId, situationId, properties],
+      [featureId, situationId, patch],
     );
     return result.rows[0];
   }

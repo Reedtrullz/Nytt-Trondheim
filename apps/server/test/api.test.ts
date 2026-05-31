@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import request from "supertest";
+import type { Response as SuperAgentResponse } from "superagent";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
@@ -20,6 +23,22 @@ import type {
   TrafficMapEvent,
   TrafficPulseCorridor,
 } from "@nytt/shared";
+
+const execFileAsync = promisify(execFile);
+const privateAnalysisWarning =
+  "Private analyser er ikke offentlig verifisert og må ikke leses som operativ sannhet.";
+
+function parseBinaryResponse(
+  response: SuperAgentResponse,
+  callback: (error: Error | null, body?: Buffer) => void,
+) {
+  const chunks: Buffer[] = [];
+  response.on("data", (chunk: Buffer | string) => {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  response.on("error", (error) => callback(error));
+  response.on("end", () => callback(null, Buffer.concat(chunks)));
+}
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
@@ -95,15 +114,76 @@ describe("private situation API", () => {
 
   it("forces user map drawings into the private layer", async () => {
     const { agent, csrf } = await ownerAgent();
+    const sourceItems = await agent.get("/api/source-items?limit=1").expect(200);
+    const sourceItemId = String(sourceItems.body.items[0].id);
+    await agent
+      .post(`/api/situations/skogbrann-bymarka/source-items/${sourceItemId}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ relationship: "context" })
+      .expect(201);
     const response = await agent
       .post("/api/situations/skogbrann-bymarka/features")
       .set("X-CSRF-Token", csrf)
       .send({
         geometry: { type: "Point", coordinates: [10.3, 63.4] },
-        properties: { label: "Mitt punkt", provenance: "official" },
+        properties: {
+          label: "Mitt punkt",
+          provenance: "official",
+          analysisType: "last_known_position",
+          confidence: "reported_unverified",
+          scenario: "sar",
+          measurement: { radiusMeters: 500 },
+          styleKey: "last-seen",
+          sourceItemIds: [sourceItemId],
+        },
       })
       .expect(201);
-    expect(response.body.properties.provenance).toBe("private_annotation");
+    expect(response.body.properties).toMatchObject({
+      provenance: "private_annotation",
+      analysisType: "last_known_position",
+      confidence: "reported_unverified",
+      scenario: "sar",
+      styleKey: "last-seen",
+      sourceItemIds: [sourceItemId],
+    });
+    expect(response.body.properties.measurement).toEqual({ radiusMeters: 500 });
+
+    const patched = await agent
+      .patch(`/api/situations/skogbrann-bymarka/features/${response.body.id as string}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ label: "Oppdatert punkt" })
+      .expect(200);
+    expect(patched.body.properties).toMatchObject({
+      label: "Oppdatert punkt",
+      provenance: "private_annotation",
+      analysisType: "last_known_position",
+      confidence: "reported_unverified",
+      scenario: "sar",
+      styleKey: "last-seen",
+      sourceItemIds: [sourceItemId],
+    });
+    expect(patched.body.properties.measurement).toEqual({ radiusMeters: 500 });
+  });
+
+  it("rejects private feature provenance links that are not attached to the situation", async () => {
+    const { agent, csrf } = await ownerAgent();
+    await agent
+      .post("/api/situations/skogbrann-bymarka/features")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        geometry: { type: "Point", coordinates: [10.3, 63.4] },
+        properties: {
+          label: "Ugyldig kildekobling",
+          analysisType: "last_known_position",
+          confidence: "reported_unverified",
+          scenario: "sar",
+          sourceItemIds: ["source:not-linked"],
+        },
+      })
+      .expect(400)
+      .expect((response) => {
+        expect(response.body.error).toMatch(/Kildeelementer må være koblet/);
+      });
   });
 
   it("provides owner data and exports a protected workspace zip", async () => {
@@ -133,15 +213,46 @@ describe("private situation API", () => {
       .expect((response) => {
         expect(response.body.articles.length).toBeGreaterThan(0);
       });
+    await agent
+      .post("/api/situations/skogbrann-bymarka/features")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        geometry: { type: "Point", coordinates: [10.32, 63.41] },
+        properties: {
+          label: "Sist sett",
+          analysisType: "last_known_position",
+          confidence: "reported_unverified",
+          scenario: "sar",
+          measurement: { radiusMeters: 500 },
+          styleKey: "last-seen",
+        },
+      })
+      .expect(201);
     const created = await agent
       .post("/api/situations/skogbrann-bymarka/exports")
       .set("X-CSRF-Token", csrf)
       .expect("Content-Type", /zip/)
       .expect(200);
-    await agent
+    const zip = await agent
       .get(created.headers.location as string)
+      .buffer(true)
+      .parse(parseBinaryResponse)
       .expect("Content-Type", /zip/)
       .expect(200);
+    const exportDir = await mkdtemp(path.join(os.tmpdir(), "nytt-export-"));
+    const zipPath = path.join(exportDir, "workspace.zip");
+    await writeFile(zipPath, zip.body as Buffer);
+    const { stdout } = await execFileAsync("unzip", [
+      "-p",
+      zipPath,
+      "manifest.json",
+      "kartlag/private_annotation.geojson",
+    ]);
+    expect(stdout).toContain(privateAnalysisWarning);
+    expect(stdout).toContain('"analysisType": "last_known_position"');
+    expect(stdout).toContain('"confidence": "reported_unverified"');
+    expect(stdout).toContain('"scenario": "sar"');
+    expect(stdout).toContain('"radiusMeters": 500');
   });
 
   it("returns normalized and filtered DATEX traffic map events", async () => {

@@ -4,6 +4,7 @@ import type {
   BootstrapPayload,
   MapFeature,
   OperationsStatus,
+  PrivateMapFeatureInput,
   SessionPayload,
   Situation,
   SituationPage,
@@ -116,7 +117,7 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status, dismissalReason }),
     }),
-  addFeature: (id: string, feature: Pick<MapFeature, "geometry" | "properties">) =>
+  addFeature: (id: string, feature: PrivateMapFeatureInput) =>
     request<MapFeature>(`${situationPath(id)}/features`, {
       method: "POST",
       body: JSON.stringify({ geometry: feature.geometry, properties: feature.properties }),
