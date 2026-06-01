@@ -71,6 +71,28 @@ describe("RSS collection policy", () => {
     );
   });
 
+  it("rejects non-http article URLs from feeds", async () => {
+    const unsafeRss = `<?xml version="1.0"?><rss><channel>
+      <item><title>Brann i Trondheim sentrum</title><description>Nødetatene er varslet.</description>
+      <link>javascript:alert(1)</link><pubDate>Tue, 26 May 2026 12:00:00 GMT</pubDate></item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      { id: "nrk", label: "NRK Trøndelag", url: "https://example.test/rss" },
+      async () => new Response(unsafeRss, { status: 200 }),
+    );
+
+    expect(articles).toEqual([]);
+  });
+
+  it("canonicalUrl allows only http and https schemes", () => {
+    expect(canonicalUrl("https://example.test/news?utm_source=rss&id=3#top")).toBe(
+      "https://example.test/news?id=3",
+    );
+    expect(() => canonicalUrl("javascript:alert(1)")).toThrow(/http or https/);
+    expect(() => canonicalUrl("data:text/html,hello")).toThrow(/http or https/);
+  });
+
   it("extracts publication times from municipal detail pages", async () => {
     const listing =
       '<article class="card"><a href="/aktuelt/sak/">Varsel om brann i Bymarka</a><div>Oppdatert informasjon.</div></article>';

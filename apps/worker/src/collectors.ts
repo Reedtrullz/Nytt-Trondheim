@@ -55,6 +55,9 @@ function nonEmptyEnv(value: string | undefined): string | undefined {
 
 export function canonicalUrl(rawUrl: string, base?: string): string {
   const url = new URL(rawUrl, base);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Article URL must use http or https");
+  }
   url.hash = "";
   for (const parameter of [...url.searchParams.keys()]) {
     if (parameter.startsWith("utm_") || parameter === "fbclid") {
@@ -84,7 +87,12 @@ export async function collectRss(
       .trim();
     const link = textValue(item.link).trim();
     if (!title || !link) return [];
-    const url = canonicalUrl(link);
+    let url: string;
+    try {
+      url = canonicalUrl(link);
+    } catch {
+      return [];
+    }
     const scope = detectScope(`${title} ${excerpt}`);
     if (!scope && !source.retainRegionalUnmatched) return [];
     return [
