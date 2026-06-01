@@ -293,19 +293,34 @@ function sourceItemSelectColumns(alias = "si"): string {
 
 const TRAFFIC_PULSE_STALE_AFTER_MS = 20 * 60 * 1000;
 
-function isOlderThan(value: Date | string | null | undefined, cutoffMs: number): boolean {
-  if (!value) return false;
+function validTimestampMs(value: Date | string | null | undefined): number | undefined {
+  if (!value) return undefined;
   const timestampMs = value instanceof Date ? value.getTime() : Date.parse(value);
-  return Number.isFinite(timestampMs) && timestampMs < cutoffMs;
+  return Number.isFinite(timestampMs) ? timestampMs : undefined;
+}
+
+function firstValidTimestampMs(...values: Array<Date | string | null | undefined>): number | undefined {
+  for (const value of values) {
+    const timestampMs = validTimestampMs(value);
+    if (timestampMs !== undefined) return timestampMs;
+  }
+  return undefined;
 }
 
 function withTrafficPulseStaleOverlay(
   corridor: TrafficPulseCorridor,
   measurementTo: Date | string | null | undefined,
+  updatedAt: Date | string | null | undefined,
   nowMs: number,
 ): TrafficPulseCorridor {
   const cutoffMs = nowMs - TRAFFIC_PULSE_STALE_AFTER_MS;
-  if (isOlderThan(measurementTo, cutoffMs) || isOlderThan(corridor.measurementTo, cutoffMs)) {
+  const measuredAt = firstValidTimestampMs(
+    measurementTo,
+    corridor.measurementTo,
+    updatedAt,
+    corridor.updatedAt,
+  );
+  if (measuredAt !== undefined && measuredAt < cutoffMs) {
     return { ...corridor, state: "stale" };
   }
   return corridor;
@@ -1571,8 +1586,9 @@ export class PgStore implements Store {
     const result = await this.pool.query<{
       payload: TrafficPulseCorridor;
       measurementTo?: Date | string | null;
+      updatedAt?: Date | string | null;
     }>(
-      `SELECT payload, measurement_to AS "measurementTo"
+      `SELECT payload, measurement_to AS "measurementTo", updated_at AS "updatedAt"
        FROM datex_travel_times
        ORDER BY delay_seconds DESC NULLS LAST, name ASC
        LIMIT $1`,
@@ -1580,7 +1596,7 @@ export class PgStore implements Store {
     );
     const responseTimeMs = Date.now();
     return result.rows.map((row) =>
-      withTrafficPulseStaleOverlay(row.payload, row.measurementTo, responseTimeMs),
+      withTrafficPulseStaleOverlay(row.payload, row.measurementTo, row.updatedAt, responseTimeMs),
     );
   }
 

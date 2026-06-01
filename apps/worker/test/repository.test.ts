@@ -386,7 +386,7 @@ describe("WorkerRepository", () => {
     expect(staleFromPayload.state).toBe("congested");
   });
 
-  it("overlays stale state when payload measurementTo is old even if measurement_to column is fresh", async () => {
+  it("keeps DATEX travel time fresh when measurement_to column is fresh even if payload is old", async () => {
     const payloadOldColumnFresh = travelTimeCorridor({
       id: "e6-old-payload-fresh-column",
       name: "E6 old payload fresh column",
@@ -398,6 +398,7 @@ describe("WorkerRepository", () => {
         {
           payload: payloadOldColumnFresh,
           measurement_to: new Date("2026-05-28T09:55:00.000Z"),
+          updated_at: new Date("2026-05-28T09:55:00.000Z"),
         },
       ],
     });
@@ -405,9 +406,59 @@ describe("WorkerRepository", () => {
 
     await expect(
       repository.datexTravelTimes(new Date("2026-05-28T10:00:00.000Z")),
-    ).resolves.toEqual([{ ...payloadOldColumnFresh, state: "stale" }]);
+    ).resolves.toEqual([payloadOldColumnFresh]);
 
     expect(payloadOldColumnFresh.state).toBe("slow");
+  });
+
+  it("falls back past invalid DATEX measurement timestamps before marking stale", async () => {
+    const payloadOld = travelTimeCorridor({
+      id: "e6-invalid-column-old-payload",
+      name: "E6 invalid column old payload",
+      state: "slow",
+      measurementTo: "2026-05-28T09:39:59.000Z",
+    });
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          payload: payloadOld,
+          measurement_to: "not-a-date",
+          updated_at: new Date("2026-05-28T09:55:00.000Z"),
+        },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.datexTravelTimes(new Date("2026-05-28T10:00:00.000Z")),
+    ).resolves.toEqual([{ ...payloadOld, state: "stale" }]);
+  });
+
+  it("overlays DATEX travel time stale state from updated_at when measurementTo is missing", async () => {
+    const openEnded = {
+      ...travelTimeCorridor({
+        id: "e6-open-ended",
+        name: "E6 open ended",
+        state: "slow",
+      }),
+      measurementTo: undefined,
+    } satisfies TrafficPulseCorridor;
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          payload: openEnded,
+          measurement_to: null,
+          updated_at: new Date("2026-05-28T09:39:59.000Z"),
+        },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(
+      repository.datexTravelTimes(new Date("2026-05-28T10:00:00.000Z")),
+    ).resolves.toEqual([{ ...openEnded, state: "stale" }]);
+
+    expect(String(query.mock.calls[0]?.[0])).toContain("updated_at");
   });
 
   it("upserts one latest road weather observation row per station without source item promotion", async () => {

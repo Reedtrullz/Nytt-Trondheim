@@ -1242,6 +1242,74 @@ describe("private situation API", () => {
     }
   });
 
+  it("PgStore overlays DATEX traffic pulse stale state from updated_at fallback", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-28T10:00:00.000Z"));
+    const corridor: TrafficPulseCorridor = {
+      id: "e6-open-ended",
+      name: "E6 open ended",
+      state: "slow",
+      updatedAt: "2026-05-28T09:39:59.000Z",
+      sourceUrl: "https://example.test/datex/travel-time/e6-open-ended",
+    };
+    const fakePool = {
+      async query(sql: string) {
+        expect(sql).toContain("updated_at");
+        return {
+          rows: [
+            {
+              payload: corridor,
+              measurementTo: null,
+              updatedAt: new Date("2026-05-28T09:39:59.000Z"),
+            },
+          ],
+        };
+      },
+    };
+
+    try {
+      const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+      await expect(store.listTrafficPulseCorridors()).resolves.toEqual([
+        { ...corridor, state: "stale" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("PgStore keeps DATEX traffic pulse fresh when column measurement_to is fresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-28T10:00:00.000Z"));
+    const corridor: TrafficPulseCorridor = {
+      id: "e6-old-payload-fresh-column",
+      name: "E6 old payload fresh column",
+      state: "slow",
+      measurementTo: "2026-05-28T09:39:59.000Z",
+      updatedAt: "2026-05-28T09:55:00.000Z",
+      sourceUrl: "https://example.test/datex/travel-time/e6-old-payload-fresh-column",
+    };
+    const fakePool = {
+      async query() {
+        return {
+          rows: [
+            {
+              payload: corridor,
+              measurementTo: new Date("2026-05-28T09:55:00.000Z"),
+              updatedAt: new Date("2026-05-28T09:55:00.000Z"),
+            },
+          ],
+        };
+      },
+    };
+
+    try {
+      const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+      await expect(store.listTrafficPulseCorridors()).resolves.toEqual([corridor]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sanitizes private filenames before they enter downloads and export paths", () => {
     expect(safeFilename('../rapport\r\n".txt')).toBe("rapport___.txt");
     expect(safeFilename("../../")).toBe("vedlegg");

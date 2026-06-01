@@ -795,13 +795,14 @@ export class WorkerRepository {
     const result = await this.pool.query<{
       payload: TrafficPulseCorridor;
       measurement_to: Date | string | null;
+      updated_at: Date | string | null;
     }>(
-      `SELECT payload, measurement_to
+      `SELECT payload, measurement_to, updated_at
        FROM datex_travel_times
        ORDER BY delay_seconds DESC NULLS LAST, name ASC`,
     );
     return result.rows.map((row) =>
-      isStaleDatexTravelTime(row.payload, row.measurement_to, now)
+      isStaleDatexTravelTime(row.payload, row.measurement_to, row.updated_at, now)
         ? { ...row.payload, state: "stale" }
         : row.payload,
     );
@@ -964,24 +965,31 @@ const datexTravelTimeStaleAfterMs = 20 * 60 * 1000;
 function isStaleDatexTravelTime(
   corridor: TrafficPulseCorridor,
   measurementToColumn: Date | string | null,
+  updatedAtColumn: Date | string | null,
   now: Date,
 ): boolean {
   const staleBefore = now.getTime() - datexTravelTimeStaleAfterMs;
-  return (
-    isOldDatexMeasurementTo(measurementToColumn, staleBefore) ||
-    isOldDatexMeasurementTo(corridor.measurementTo, staleBefore)
+  const measuredAt = firstValidTimestamp(
+    measurementToColumn,
+    corridor.measurementTo,
+    updatedAtColumn,
+    corridor.updatedAt,
   );
+  return measuredAt !== undefined && measuredAt < staleBefore;
 }
 
-function isOldDatexMeasurementTo(
-  measurementTo: Date | string | null | undefined,
-  staleBefore: number,
-): boolean {
-  if (!measurementTo) return false;
-  const measuredAt =
-    measurementTo instanceof Date ? measurementTo.getTime() : Date.parse(measurementTo);
-  if (Number.isNaN(measuredAt)) return false;
-  return measuredAt < staleBefore;
+function firstValidTimestamp(...values: Array<Date | string | null | undefined>): number | undefined {
+  for (const value of values) {
+    const timestamp = timestampMs(value);
+    if (timestamp !== undefined) return timestamp;
+  }
+  return undefined;
+}
+
+function timestampMs(value: Date | string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 function mergeSituation(existing: Situation | undefined, incoming: Situation): Situation {
