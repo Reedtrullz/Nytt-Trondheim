@@ -1,6 +1,15 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { sampleWorkspace } from "@nytt/shared";
+
+async function openTrafficLayersIfHidden(page: Page): Promise<void> {
+  const layersButton = page.getByRole("button", { name: "Lag" });
+  await layersButton.waitFor({ state: "attached", timeout: 1_000 }).catch(() => undefined);
+  const expanded = await layersButton.getAttribute("aria-expanded").catch(() => null);
+  if ((await layersButton.isVisible().catch(() => false)) && expanded !== "true") {
+    await layersButton.click();
+  }
+}
 
 test("reader opens the active situation and keeps private map controls distinct", async ({
   page,
@@ -26,6 +35,162 @@ test("reader opens the active situation and keeps private map controls distinct"
   await expect(
     sourceItemsPanel.getByText(/Ingen kildeelementer er koblet ennå|nrk|adresseavisen|vegvesen/i),
   ).toBeVisible();
+});
+
+test("traffic page shows summary cards semantic layers ranked list and detail drawer", async ({
+  page,
+}) => {
+  await page.route("**/api/map/traffic-events**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        events: [
+          {
+            id: "datex:e6-sluppen",
+            source: "datex",
+            sourceEventId: "e6-sluppen",
+            category: "closure",
+            severity: "critical",
+            state: "active",
+            title: "E6 Omkjøring ved Sluppen",
+            description: "Sørgående felt er stengt.",
+            roadName: "E6",
+            locationName: "Sluppen",
+            updatedAt: "2026-06-01T16:42:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.4] },
+            confidence: 0.98,
+            relatedArticles: [
+              {
+                id: "article-1",
+                title: "Adresseavisen: Kø ved Sluppen",
+                url: "https://example.test/article",
+                distanceMeters: 120,
+                location: { lat: 63.4, lng: 10.4, label: "Sluppen" },
+              },
+            ],
+          },
+          {
+            id: "vegvesen-traffic-info:lade",
+            source: "vegvesen_traffic_info",
+            sourceEventId: "lade",
+            category: "other",
+            severity: "medium",
+            state: "active",
+            title: "Mindre melding ved Lade",
+            description: "Lavere påvirkning enn E6-hendelsen.",
+            roadName: "fv. 6660",
+            locationName: "Lade",
+            updatedAt: "2026-06-01T15:30:00.000Z",
+            geometry: { type: "Point", coordinates: [10.45, 63.44] },
+            confidence: 0.9,
+          },
+        ],
+        brief: {
+          headline: "2 trafikkhendelser",
+          severity: "critical",
+          freshness: "fresh",
+          generatedAt: "2026-06-01T16:42:00.000Z",
+          bullets: [],
+          primaryEventIds: ["datex:e6-sluppen"],
+          counts: {
+            total: 2,
+            byCategory: { closure: 1, other: 1 },
+            bySeverity: { critical: 1, medium: 1 },
+          },
+        },
+        corridorImpacts: [
+          {
+            id: "e6-south",
+            name: "E6 Sluppen → Tiller",
+            eventCount: 1,
+            affectedEventIds: ["datex:e6-sluppen"],
+            highestSeverity: "critical",
+            travelTime: {
+              id: "100141",
+              name: "E6 Sluppen → Tiller",
+              state: "congested",
+              travelTimeSeconds: 1260,
+              freeFlowSeconds: 540,
+              delaySeconds: 720,
+              delayRatio: 2.33,
+              updatedAt: "2026-06-01T16:41:00.000Z",
+              sourceUrl: "https://example.test/datex/travel-time",
+            },
+          },
+        ],
+        sources: [
+          {
+            source: "datex",
+            label: "Vegvesen DATEX",
+            state: "ok",
+            detail: "Sist hentet nå",
+            lastCheckedAt: "2026-06-01T16:42:00.000Z",
+          },
+          {
+            source: "datex_travel_time",
+            label: "DATEX reisetid",
+            state: "ok",
+            detail: "1 korridor",
+            lastCheckedAt: "2026-06-01T16:41:00.000Z",
+          },
+        ],
+        weather: [],
+        cameras: [],
+        counters: [],
+      }),
+    });
+  });
+  await page.route("**/api/map/public-transport**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        vehicles: [],
+        alerts: [
+          {
+            id: "entur-service-alert:ATB:line3",
+            source: "entur_service_alerts",
+            codespaceId: "ATB",
+            situationNumber: "line3",
+            summary: "Forsinkelse på linje 3",
+            updatedAt: "2026-06-01T16:41:00.000Z",
+            state: "active",
+          },
+        ],
+        sources: [
+          {
+            source: "entur_service_alerts",
+            label: "Entur avvik",
+            state: "ok",
+            detail: "1 aktivt avvik",
+            lastCheckedAt: "2026-06-01T16:41:00.000Z",
+          },
+        ],
+        generatedAt: "2026-06-01T16:42:00.000Z",
+      }),
+    });
+  });
+
+  await page.goto("/trafikk");
+
+  await expect(page.getByRole("heading", { name: "Nå i trafikken" })).toBeVisible();
+  const summary = page.getByRole("region", { name: "Nå i trafikken" });
+  await expect(summary.getByText("OFFISIELL").first()).toBeVisible();
+  await expect(summary.getByText("REISETID").first()).toBeVisible();
+  await expect(summary.getByText("KOLLEKTIV").first()).toBeVisible();
+  await expect(page.getByLabel("Trafikkart og kartlag")).toContainText("Estimerte nyhetssteder");
+  await expect(page.getByRole("heading", { name: "Aktive trafikksituasjoner" })).toBeVisible();
+  const rankedRows = page.locator(".traffic-event-list li");
+  await expect(rankedRows.nth(0)).toContainText("E6 Omkjøring ved Sluppen");
+  await expect(rankedRows.nth(1)).toContainText("Mindre melding ved Lade");
+  await expect(page.getByText("E6 Sluppen → Tiller").first()).toBeVisible();
+  await expect(page.getByText("Normal: 9 min · Nå: 21 min · +12 min").first()).toBeVisible();
+  await page.getByRole("button", { name: /E6 Omkjøring ved Sluppen/ }).click();
+  const drawer = page.getByLabel("Detaljer om trafikkhendelse");
+  await expect(drawer).toContainText("Hvorfor ser jeg dette?");
+  await expect(drawer).toContainText("Statens vegvesen DATEX Situation");
+  await expect(drawer).toContainText("Adresseavisen: Kø ved Sluppen");
 });
 
 test("traffic map travel planner shows route-specific traffic and public transport advice", async ({
@@ -115,6 +280,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   });
 
   await page.goto("/trafikk");
+  await openTrafficLayersIfHidden(page);
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
@@ -184,6 +350,7 @@ test("traffic map clears a stale route when planner validation fails", async ({ 
   });
 
   await page.goto("/trafikk");
+  await openTrafficLayersIfHidden(page);
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
@@ -241,6 +408,7 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
   });
 
   await page.goto("/trafikk");
+  await openTrafficLayersIfHidden(page);
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
@@ -301,9 +469,10 @@ test("traffic map can show Entur public transport context", async ({ page }) => 
   });
   await page.goto("/trafikk");
   await expect(page.getByRole("heading", { name: "Kollektivtrafikk" })).toBeVisible();
-  await page.getByLabel("Vis kollektivtrafikk").check();
+  await openTrafficLayersIfHidden(page);
+  await page.getByLabel("Kjøretøyposisjoner").check();
   await expect(page.getByText("45 → Hagen")).toBeVisible();
-  await expect(page.getByText("Rota flyttet")).toBeVisible();
+  await expect(page.getByText("Rota flyttet").first()).toBeVisible();
 });
 
 test("bootstrap 429 shows retryable error without stale loading", async ({ page }) => {
@@ -825,13 +994,16 @@ test("mobile traffic page shows heading and controls before the map", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/trafikk");
 
-  const heading = page.getByRole("heading", { name: "Trafikkart" });
+  const heading = page.getByRole("heading", { name: "Nå i trafikken" });
   await expect(heading).toBeVisible();
-  await expect(page.getByRole("button", { name: "Nå" })).toBeVisible();
+  const layersButton = page.getByRole("button", { name: "Lag" });
+  await expect(layersButton).toBeVisible();
 
   const headingBox = await heading.boundingBox();
+  const layersBox = await layersButton.boundingBox();
   const mapBox = await page.locator(".traffic-map").boundingBox();
   expect(headingBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
+  expect(layersBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
   ).toBe(true);
