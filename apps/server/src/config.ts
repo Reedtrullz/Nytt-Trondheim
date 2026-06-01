@@ -16,6 +16,16 @@ export interface AppConfig {
   rateLimitEnabled: boolean;
 }
 
+function sessionSecretForEnvironment(nodeEnv: string): string {
+  const configured = process.env.SESSION_SECRET?.trim();
+  if (nodeEnv !== "production") return configured || "development-only-session-secret";
+  if (!configured) throw new Error("SESSION_SECRET is required in production");
+  if (configured.length < 32) {
+    throw new Error("SESSION_SECRET must be at least 32 characters in production");
+  }
+  return configured;
+}
+
 export function loadConfig(): AppConfig {
   const nodeEnv = process.env.NODE_ENV ?? "development";
   return {
@@ -28,7 +38,7 @@ export function loadConfig(): AppConfig {
     githubClientId: process.env.GITHUB_CLIENT_ID,
     githubClientSecret: process.env.GITHUB_CLIENT_SECRET,
     githubAllowedLogin: process.env.GITHUB_ALLOWED_LOGIN ?? "Reedtrullz",
-    sessionSecret: process.env.SESSION_SECRET ?? "development-only-session-secret",
+    sessionSecret: sessionSecretForEnvironment(nodeEnv),
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
