@@ -1,105 +1,56 @@
-import type { TrafficMapEvent } from "@nytt/shared";
+import type { RankedTrafficEventModel } from "../../trafficViewModel.js";
 
 interface TrafficEventListProps {
-  events: TrafficMapEvent[];
+  rankedEvents: RankedTrafficEventModel[];
   selectedEventId?: string;
+  showAll: boolean;
+  onShowAllChange: (showAll: boolean) => void;
   onSelectEvent: (eventId: string) => void;
 }
 
-function formatEventTime(event: TrafficMapEvent) {
-  const value = event.validFrom ?? event.updatedAt;
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "Ukjent tid";
-  return new Intl.DateTimeFormat("nb-NO", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(date);
-}
-
-function categoryLabel(category: TrafficMapEvent["category"]) {
-  switch (category) {
-    case "roadworks":
-      return "Veiarbeid";
-    case "accident":
-      return "Ulykke";
-    case "closure":
-      return "Stengt vei";
-    case "congestion":
-      return "Kø/forsinkelse";
-    case "weather":
-      return "Vær/føre";
-    case "restriction":
-      return "Restriksjon";
-    case "obstruction":
-      return "Hindring";
-    default:
-      return "Annet";
-  }
-}
-
-function severityLabel(severity: TrafficMapEvent["severity"]) {
-  switch (severity) {
-    case "critical":
-      return "kritisk";
-    case "high":
-      return "høy";
-    case "medium":
-      return "middels";
-    default:
-      return "lav";
-  }
-}
-
-function stateLabel(state: TrafficMapEvent["state"]) {
-  switch (state) {
-    case "active":
-      return "aktiv";
-    case "planned":
-      return "planlagt";
-    case "expired":
-      return "utløpt";
-    case "cancelled":
-      return "kansellert";
-    default:
-      return state;
-  }
-}
-
 export function TrafficEventList({
-  events,
+  rankedEvents,
   selectedEventId,
+  showAll,
+  onShowAllChange,
   onSelectEvent,
 }: TrafficEventListProps) {
   return (
     <section className="traffic-event-list-card">
       <header>
-        <h2>Hendelser i kartet</h2>
-        <span>{events.length}</span>
+        <div>
+          <h2>Aktive trafikksituasjoner</h2>
+          <span>{rankedEvents.length}</span>
+        </div>
+        <button type="button" onClick={() => onShowAllChange(!showAll)}>
+          {showAll ? "Skjul mindre" : "Vis alle"}
+        </button>
       </header>
-      {events.length === 0 ? <p>Ingen hendelser i valgt kartutsnitt og filter.</p> : null}
+      {rankedEvents.length === 0 ? (
+        <p>Ingen aktive hendelser i valgt kartutsnitt. Prøv å zoome ut eller slå på “Vis alle”.</p>
+      ) : null}
       <ol className="traffic-event-list">
-        {events.slice(0, 80).map((event) => (
-          <li key={event.id}>
+        {rankedEvents.map((row) => (
+          <li key={row.id}>
             <button
               type="button"
-              className={event.id === selectedEventId ? "selected" : undefined}
-              aria-pressed={event.id === selectedEventId}
-              onClick={() => onSelectEvent(event.id)}
+              className={row.id === selectedEventId ? "selected" : undefined}
+              aria-pressed={row.id === selectedEventId}
+              onClick={() => onSelectEvent(row.id)}
             >
-              <strong>{event.title}</strong>
-              <span>
-                {categoryLabel(event.category)} · {severityLabel(event.severity)} ·{" "}
-                {stateLabel(event.state)}
+              <strong>{row.title}</strong>
+              <span>{row.meta}</span>
+              <span className="traffic-row-badges">
+                {row.badges.map((badge) => (
+                  <span key={badge} className="trust-badge">
+                    {badge}
+                  </span>
+                ))}
               </span>
-              {(event.locationName ?? event.roadName) ? (
-                <span>{event.locationName ?? event.roadName}</span>
-              ) : null}
-              <small>{formatEventTime(event)}</small>
             </button>
           </li>
         ))}
       </ol>
-      {events.length > 80 ? <p>Viser de 80 første hendelsene.</p> : null}
     </section>
   );
 }

@@ -24,6 +24,8 @@ import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { fetchTravelPlan } from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
+import { compactTrafficEventRow } from "../trafficEventRows.js";
+import { badgesForTrafficEvent } from "../trafficProvenance.js";
 import { visibleByDefault } from "../trafficViewModel.js";
 
 interface MapBounds {
@@ -320,6 +322,18 @@ export function TrafficMapPage() {
     visibleContextLayers.showAll,
   ]);
 
+  const temporaryRankedEvents = useMemo(
+    () =>
+      visibleTrafficEvents.map((event) => ({
+        id: event.id,
+        event,
+        ...compactTrafficEventRow(event, data?.corridorImpacts ?? []),
+        badges: badgesForTrafficEvent(event),
+        score: 0,
+      })),
+    [visibleTrafficEvents, data?.corridorImpacts],
+  );
+
   const highlightedEventIds = useMemo(() => {
     const highlightedIds = new Set<string>();
     if (selectedEventId) highlightedIds.add(selectedEventId);
@@ -453,7 +467,12 @@ export function TrafficMapPage() {
         <TileLayer attribution="© Kartverket" url={tiles} />
         <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
         {data?.events ? (
-          <TrafficLayer events={visibleTrafficEvents} highlightedEventIds={highlightedEventIds} />
+          <TrafficLayer
+            events={visibleTrafficEvents}
+            highlightedEventIds={highlightedEventIds}
+            showEstimatedNews={visibleContextLayers.estimatedNews}
+            onSelectEvent={setSelectedEventId}
+          />
         ) : null}
         {data ? (
           <RoadContextLayer
@@ -497,8 +516,12 @@ export function TrafficMapPage() {
         )}
         {data?.events ? (
           <TrafficEventList
-            events={visibleTrafficEvents}
+            rankedEvents={temporaryRankedEvents}
             selectedEventId={selectedEventId}
+            showAll={visibleContextLayers.showAll}
+            onShowAllChange={(showAll) =>
+              setVisibleContextLayers((current) => ({ ...current, showAll }))
+            }
             onSelectEvent={setSelectedEventId}
           />
         ) : null}
