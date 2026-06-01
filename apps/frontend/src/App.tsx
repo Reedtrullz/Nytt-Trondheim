@@ -10,6 +10,7 @@ import { SavedPage } from "./pages/SavedPage.js";
 import { SituationPage } from "./pages/SituationPage.js";
 import { SituationsPage } from "./pages/SituationsPage.js";
 import { TrafficMapPage } from "./pages/TrafficMapPage.js";
+import { WeatherPage } from "./pages/WeatherPage.js";
 
 function Header({ freshnessLabel }: { freshnessLabel: string }) {
   const [logoutError, setLogoutError] = useState<string>();
@@ -48,6 +49,7 @@ function Header({ freshnessLabel }: { freshnessLabel: string }) {
           <NavLink to="/">Siste nytt</NavLink>
           <NavLink to="/situasjoner">Situasjonsrom</NavLink>
           <NavLink to="/trafikk">Trafikkart</NavLink>
+          <NavLink to="/vaer">Vær</NavLink>
           <NavLink to="/lagret">Lagret</NavLink>
           <NavLink to="/drift">Drift</NavLink>
         </nav>
@@ -119,6 +121,7 @@ export function App() {
           <Route path="/situasjoner" element={<SituationsPage />} />
           <Route path="/situasjoner/:id" element={<SituationPage />} />
           <Route path="/trafikk" element={<TrafficMapPage />} />
+          <Route path="/vaer" element={<WeatherPage />} />
           <Route path="/lagret" element={<SavedPage />} />
           <Route path="/drift" element={<OperationsPage />} />
         </Routes>
