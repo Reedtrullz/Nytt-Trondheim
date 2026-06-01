@@ -533,14 +533,29 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.post("/api/situations/:id/features", async (req, res, next) => {
+  const ensureSituationExists: express.RequestHandler = async (req, res, next) => {
+    try {
+      const situationId = String(req.params.id);
+      const workspace = await store.getWorkspace(situationId, currentLogin(req));
+      if (!workspace) {
+        res.status(404).json({ error: "Situasjonen finnes ikke." });
+        return;
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  app.post("/api/situations/:id/features", ensureSituationExists, async (req, res, next) => {
     try {
       const input = privateMapFeatureInputSchema.parse(req.body);
       const login = currentLogin(req);
+      const situationId = String(req.params.id);
       const sourceItemIds = input.properties.sourceItemIds ?? [];
       if (sourceItemIds.length) {
         const linkedIds = new Set(
-          (await store.listSituationSourceItems(req.params.id, login)).map((item) => item.id),
+          (await store.listSituationSourceItems(situationId, login)).map((item) => item.id),
         );
         const invalidIds = sourceItemIds.filter((sourceItemId) => !linkedIds.has(sourceItemId));
         if (invalidIds.length) {
@@ -560,7 +575,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           updatedAt: new Date().toISOString(),
         },
       };
-      res.status(201).json(await store.addPrivateFeature(req.params.id, feature));
+      res.status(201).json(await store.addPrivateFeature(situationId, feature));
     } catch (error) {
       next(error);
     }
@@ -593,10 +608,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.post("/api/situations/:id/tasks", async (req, res, next) => {
+  app.post("/api/situations/:id/tasks", ensureSituationExists, async (req, res, next) => {
     try {
       const { text } = taskInputSchema.parse(req.body);
-      res.status(201).json(await store.addTask(req.params.id, text));
+      res.status(201).json(await store.addTask(String(req.params.id), text));
     } catch (error) {
       next(error);
     }
@@ -633,10 +648,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.post("/api/situations/:id/notes", async (req, res, next) => {
+  app.post("/api/situations/:id/notes", ensureSituationExists, async (req, res, next) => {
     try {
       const { text } = noteInputSchema.parse(req.body);
-      res.status(201).json(await store.addNote(req.params.id, text));
+      res.status(201).json(await store.addNote(String(req.params.id), text));
     } catch (error) {
       next(error);
     }
@@ -665,19 +680,6 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   });
 
   const upload = multer({ dest: config.uploadDir, limits: { fileSize: 20 * 1024 * 1024 } });
-  const ensureSituationExists: express.RequestHandler = async (req, res, next) => {
-    try {
-      const situationId = String(req.params.id);
-      const workspace = await store.getWorkspace(situationId, currentLogin(req));
-      if (!workspace) {
-        res.status(404).json({ error: "Situasjonen finnes ikke." });
-        return;
-      }
-      next();
-    } catch (error) {
-      next(error);
-    }
-  };
   app.post(
     "/api/situations/:id/attachments",
     ensureSituationExists,

@@ -1363,6 +1363,32 @@ describe("private situation API", () => {
       .expect(403);
   });
 
+  it("returns 404 when creating workspace records for a missing situation", async () => {
+    const { agent, csrf } = await ownerAgent();
+    const missingId = "missing-situation-id";
+
+    await agent
+      .post(`/api/situations/${missingId}/tasks`)
+      .set("X-CSRF-Token", csrf)
+      .send({ text: "Call innsatsleder" })
+      .expect(404);
+
+    await agent
+      .post(`/api/situations/${missingId}/notes`)
+      .set("X-CSRF-Token", csrf)
+      .send({ text: "Notat" })
+      .expect(404);
+
+    await agent
+      .post(`/api/situations/${missingId}/features`)
+      .set("X-CSRF-Token", csrf)
+      .send({
+        geometry: { type: "Point", coordinates: [10.39, 63.39] },
+        properties: { label: "Markering" },
+      })
+      .expect(404);
+  });
+
   it("returns JSON 404 responses for unknown API routes", async () => {
     const { agent } = await ownerAgent();
     const response = await agent
