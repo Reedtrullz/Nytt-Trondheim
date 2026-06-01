@@ -1000,6 +1000,82 @@ describe("private situation API", () => {
     expect(events).toEqual([{ ...payload, state: "active" }]);
   });
 
+  it("PgStore hides expired or long-unseen public transport vehicles", async () => {
+    let capturedSql = "";
+    let capturedParams: unknown[] = [];
+    const vehicle: PublicTransportVehicle = {
+      id: "entur-vehicle:ATB:8790",
+      source: "entur_vehicle_positions",
+      codespaceId: "ATB",
+      vehicleId: "8790",
+      mode: "bus",
+      lastUpdated: "2026-05-31T21:02:50.207Z",
+      geometry: { type: "Point", coordinates: [10.4045538, 63.3708205] },
+      stale: false,
+    };
+    const fakePool = {
+      async query(sql: string, params: unknown[]) {
+        capturedSql = sql.replace(/\s+/g, " ").trim();
+        capturedParams = params;
+        return { rows: [{ payload: vehicle, stale: false }] };
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    const vehicles = await store.listPublicTransportVehicles({
+      modes: ["bus"],
+      bounds: { north: 63.5, south: 63.3, east: 10.5, west: 10.2 },
+    });
+
+    expect(capturedSql).toContain("FROM public_transport_vehicles");
+    expect(capturedSql).toContain("stale=false");
+    expect(capturedSql).toContain("(expires_at IS NULL OR expires_at > now())");
+    expect(capturedSql).toContain("last_seen_at >= now() - interval '5 minutes'");
+    expect(capturedSql).toContain("mode = ANY($1::text[])");
+    expect(capturedParams).toEqual([["bus"], 10.2, 63.3, 10.5, 63.5]);
+    expect(vehicles).toEqual([vehicle]);
+  });
+
+  it("PgStore keeps line-only active public transport alerts eligible and excludes expired active alerts", async () => {
+    let capturedSql = "";
+    let capturedParams: unknown[] = [];
+    const alert: PublicTransportServiceAlert = {
+      id: "entur-service-alert:ATB:line-only",
+      source: "entur_service_alerts",
+      codespaceId: "ATB",
+      situationNumber: "line-only",
+      state: "active",
+      summary: "Linje 3 er innstilt",
+      updatedAt: "2026-05-31T21:00:00.000Z",
+      affectedLineRefs: ["ATB:Line:2_3"],
+      affectedLineNames: ["Linje 3"],
+    };
+    const fakePool = {
+      async query(sql: string, params: unknown[]) {
+        capturedSql = sql.replace(/\s+/g, " ").trim();
+        capturedParams = params;
+        return {
+          rows: [{ payload: alert, state: "active" as PublicTransportServiceAlert["state"] }],
+        };
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    const alerts = await store.listPublicTransportServiceAlerts({
+      states: ["active"],
+      bounds: { north: 63.5, south: 63.3, east: 10.5, west: 10.2 },
+    });
+
+    expect(capturedSql).toContain("FROM public_transport_service_alerts");
+    expect(capturedSql).toContain("state = ANY($1::text[])");
+    expect(capturedSql).toContain("(valid_to IS NULL OR valid_to >= now())");
+    expect(capturedSql).toContain(
+      "(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326)))",
+    );
+    expect(capturedParams).toEqual([["active"], 10.2, 63.3, 10.5, 63.5]);
+    expect(alerts).toEqual([alert]);
+  });
+
   it("PgStore lists road weather, camera, and counter rows with bounds SQL filters", async () => {
     const weatherPayload: RoadWeatherObservation = {
       id: "datex-weather:SN123",

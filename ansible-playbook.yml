@@ -454,10 +454,11 @@
 
           SELECT count(*) INTO entur_source_health_count
           FROM source_health
-          WHERE source IN ('entur_vehicle_positions','entur_service_alerts');
+          WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
+            AND state='ok';
 
           IF entur_source_health_count <> 2 THEN
-            RAISE EXCEPTION 'Expected 2 Entur source_health rows, found %', entur_source_health_count;
+            RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;
           END IF;
 
           SELECT count(*) INTO accidental_vehicle_source_items
@@ -502,6 +503,10 @@
       args:
         chdir: "{{ app_dir }}"
         executable: /bin/bash
+      register: entur_verification
+      until: entur_verification.rc == 0
+      retries: 12
+      delay: 10
       changed_when: false
 
     - name: Verify source item query sanity

@@ -101,10 +101,11 @@ function alertGeometry(stops: Record<string, unknown>[]): Point | MultiPoint | u
 }
 
 function stateFromAlert(alert: Record<string, unknown>): PublicTransportServiceAlert["state"] {
-  const haystack = [alert.severity, alert.reportType, alert.state, alert.status]
+  const lifecycle = [alert.state, alert.status]
     .map((value) => text(value)?.toLocaleLowerCase("en") ?? "")
     .join(" ");
-  if (/cancelled|canceled|cancellation/.test(haystack)) return "cancelled";
+  if (/cancelled|canceled/.test(lifecycle)) return "cancelled";
+  if (/expired|closed|ended|inactive/.test(lifecycle)) return "expired";
   return "active";
 }
 

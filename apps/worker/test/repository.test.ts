@@ -845,7 +845,7 @@ describe("WorkerRepository", () => {
     expect(sql).toContain("OR last_seen_at < $4::timestamptz - interval '5 minutes'");
   });
 
-  it("reads Entur vehicle positions with mode and bounds filters", async () => {
+  it("reads only fresh Entur vehicle positions with mode and bounds filters", async () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({ rows: [{ payload: enturVehicle(), stale: false }] });
@@ -856,8 +856,12 @@ describe("WorkerRepository", () => {
       bounds: { north: 63.5, south: 63.3, east: 10.6, west: 10.2 },
     });
 
+    const sql = String(query.mock.calls[0]?.[0]).replace(/\s+/g, " ").trim();
     expect(vehicles[0]?.id).toBe("entur-vehicle:ATB:8790");
-    expect(String(query.mock.calls[0]?.[0])).toContain("ST_MakeEnvelope");
+    expect(sql).toContain("stale=false");
+    expect(sql).toContain("(expires_at IS NULL OR expires_at > now())");
+    expect(sql).toContain("last_seen_at >= now() - interval '5 minutes'");
+    expect(sql).toContain("ST_MakeEnvelope");
     expect(query.mock.calls[0]?.[1]).toEqual([["bus"], 10.2, 63.3, 10.6, 63.5]);
   });
 
@@ -912,20 +916,23 @@ describe("WorkerRepository", () => {
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situations"))).toBe(false);
   });
 
-  it("reads map-visible Entur service alerts with bounds", async () => {
-    const query = vi
-      .fn()
-      .mockResolvedValueOnce({ rows: [{ payload: enturServiceAlert(), state: "active" }] });
+  it("reads active Entur service alerts including line-only context while excluding expired validity", async () => {
+    const query = vi.fn().mockResolvedValueOnce({
+      rows: [{ payload: enturServiceAlert({ geometry: undefined }), state: "active" }],
+    });
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);
 
     const alerts = await repository.listPublicTransportServiceAlerts({
       bounds: { north: 63.5, south: 63.3, east: 10.8, west: 10.2 },
     });
 
+    const sql = String(query.mock.calls[0]?.[0]).replace(/\s+/g, " ").trim();
     expect(alerts[0]?.id).toBe("entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint");
-    expect(String(query.mock.calls[0]?.[0])).toContain("geometry IS NOT NULL");
-    expect(String(query.mock.calls[0]?.[0])).toContain("state = ANY($1::text[])");
-    expect(String(query.mock.calls[0]?.[0])).toContain("ST_MakeEnvelope");
+    expect(sql).toContain("(valid_to IS NULL OR valid_to >= now())");
+    expect(sql).toContain("state = ANY($1::text[])");
+    expect(sql).toContain(
+      "(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326)))",
+    );
     expect(query.mock.calls[0]?.[1]).toEqual([["active"], 10.2, 63.3, 10.8, 63.5]);
   });
 });

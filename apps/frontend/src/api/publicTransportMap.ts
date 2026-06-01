@@ -1,4 +1,5 @@
 import type { PublicTransportMapPayload, PublicTransportVehicleMode } from "@nytt/shared";
+import { ApiError } from "../api.js";
 
 export interface PublicTransportMapRequest {
   modes?: PublicTransportVehicleMode[];
@@ -29,8 +30,23 @@ export async function fetchPublicTransportMap(
   });
   if (response.status === 401) {
     window.location.href = "/auth/github";
-    throw new Error("Innlogging kreves");
+    throw new ApiError("Innlogging kreves", 401);
   }
-  if (!response.ok) throw new Error("Kunne ikke hente kollektivtrafikk.");
+  if (!response.ok) {
+    const retryAfter = response.headers.get("Retry-After") ?? undefined;
+    if (response.status === 429) {
+      throw new ApiError("For mange forespørsler. Prøv igjen om litt.", 429, retryAfter);
+    }
+    const body = (await response
+      .json()
+      .catch(() => ({ error: "Kunne ikke hente kollektivtrafikk." }))) as {
+      error?: string;
+    };
+    throw new ApiError(
+      body.error ?? "Kunne ikke hente kollektivtrafikk.",
+      response.status,
+      retryAfter,
+    );
+  }
   return (await response.json()) as PublicTransportMapPayload;
 }

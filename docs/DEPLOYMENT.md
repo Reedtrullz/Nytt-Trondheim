@@ -135,7 +135,7 @@ SQL
 
 Expected results:
 
-- Entur source health rows are present; `entur_vehicle_positions` should normally be `ok` with non-zero row count when Entur is reachable.
+- Entur source health rows are present and `state='ok'`; the deploy playbook retries this check after promotion so transient worker startup lag does not create a false red deploy. `entur_vehicle_positions` may legitimately report zero vehicles when Entur has none inside the configured bounds.
 - `source_items WHERE provider='entur'` can be non-zero for service alerts.
 - `accidental_vehicle_source_items` must be zero; this proves vehicle telemetry did not enter `source_items` either under `entur_vehicle_positions` or disguised as `provider='entur'` rows.
 - `official_events` for Entur sources must be zero in this plan.

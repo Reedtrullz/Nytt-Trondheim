@@ -224,7 +224,11 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [feedError, setFeedError] = useState<string>();
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
-  const pendingArticleSavedRef = useRef<Map<string, boolean>>(new Map());
+  const articleSavedOverridesRef = useRef<Map<string, boolean>>(new Map());
+  const feedKey = `${scope}\u0000${category}\u0000${query}`;
+  const feedKeyRef = useRef(feedKey);
+  const loadMoreRequestIdRef = useRef(0);
+  feedKeyRef.current = feedKey;
   const [saveError, setSaveError] = useState<string>();
 
   function updateFilters(next: Partial<HomeFilters>) {
@@ -234,6 +238,8 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadingMore(false);
+    loadMoreRequestIdRef.current += 1;
     setNextCursor(undefined);
     setFeedError(undefined);
     const timeout = window.setTimeout(
@@ -243,7 +249,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
           .then((page) => {
             if (!cancelled) {
               setArticles(() => {
-                const pendingSavedById = pendingArticleSavedRef.current;
+                const pendingSavedById = articleSavedOverridesRef.current;
                 if (pendingSavedById.size === 0) return page.items;
                 return page.items.map((item) =>
                   pendingSavedById.has(item.id)
@@ -288,12 +294,16 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
     setSaveError(undefined);
     const pending = new Set(savingArticleIdsRef.current).add(id);
     savingArticleIdsRef.current = pending;
-    pendingArticleSavedRef.current = new Map(pendingArticleSavedRef.current).set(id, saved);
+    articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(id, saved);
     setSavingArticleIds(pending);
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
     try {
       await api.saveArticle(id, saved);
     } catch (reason) {
+      articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(
+        id,
+        previous,
+      );
       setArticles((items) =>
         items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
       );
@@ -302,28 +312,36 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
       const next = new Set(savingArticleIdsRef.current);
       next.delete(id);
       savingArticleIdsRef.current = next;
-      const pendingSaved = new Map(pendingArticleSavedRef.current);
-      pendingSaved.delete(id);
-      pendingArticleSavedRef.current = pendingSaved;
       setSavingArticleIds(next);
     }
   }
 
   async function loadMore() {
     if (!nextCursor) return;
+    const requestId = loadMoreRequestIdRef.current + 1;
+    loadMoreRequestIdRef.current = requestId;
+    const requestFeedKey = feedKeyRef.current;
+    const requestCursor = nextCursor;
     setLoadingMore(true);
     setFeedError(undefined);
     try {
-      const page = await api.articles({ scope, category, q: query, cursor: nextCursor });
+      const page = await api.articles({ scope, category, q: query, cursor: requestCursor });
+      if (loadMoreRequestIdRef.current !== requestId || feedKeyRef.current !== requestFeedKey) {
+        return;
+      }
       setArticles((current) => [
         ...current,
         ...page.items.filter((item) => !current.some((existing) => existing.id === item.id)),
       ]);
       setNextCursor(page.nextCursor);
     } catch (reason) {
-      setFeedError(reason instanceof Error ? reason.message : "Kunne ikke hente flere saker");
+      if (loadMoreRequestIdRef.current === requestId) {
+        setFeedError(reason instanceof Error ? reason.message : "Kunne ikke hente flere saker");
+      }
     } finally {
-      setLoadingMore(false);
+      if (loadMoreRequestIdRef.current === requestId) {
+        setLoadingMore(false);
+      }
     }
   }
 

@@ -73,6 +73,36 @@ describe("Entur service alerts", () => {
     expect(result.alerts[0]?.summary).toBe("Norsk uten språkfelt");
   });
 
+  it("keeps live cancellation disruption alerts active", () => {
+    const payload = JSON.stringify({
+      data: {
+        situations: [
+          {
+            id: "ATB:SituationNumber:cancelled-departures",
+            situationNumber: "ATB:SituationNumber:cancelled-departures",
+            reportType: "cancellation",
+            severity: "normal",
+            status: "open",
+            summary: [{ language: "no", value: "Flere avganger er innstilt" }],
+            creationTime: "2026-05-31T20:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    const result = parseEnturServiceAlerts(payload, {
+      codespaceId: "ATB",
+      receivedAt: "2026-05-31T21:15:00.000Z",
+    });
+
+    expect(result.alerts[0]).toMatchObject({
+      situationNumber: "ATB:SituationNumber:cancelled-departures",
+      reportType: "cancellation",
+      state: "active",
+    });
+    expect(result.activeSituationNumbers).toEqual(["ATB:SituationNumber:cancelled-departures"]);
+  });
+
   it("mirrors service alerts to source_items with raw upstream payload", async () => {
     const payload = await readFile(fixturePath, "utf8");
     const result = parseEnturServiceAlerts(payload, {

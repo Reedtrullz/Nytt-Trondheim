@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api.js";
+import { fetchPublicTransportMap } from "./api/publicTransportMap.js";
 
 describe("frontend source item API helpers", () => {
   beforeEach(() => {
@@ -101,6 +102,23 @@ describe("frontend source item API helpers", () => {
       name: "ApiError",
       status: 503,
       message: "Kilden er midlertidig utilgjengelig.",
+    });
+  });
+
+  it("preserves public transport rate-limit status and retry metadata", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "server wording should not leak here" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "30" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPublicTransportMap()).rejects.toMatchObject({
+      name: "ApiError",
+      status: 429,
+      retryAfter: "30",
+      message: "For mange forespørsler. Prøv igjen om litt.",
     });
   });
 });

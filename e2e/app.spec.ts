@@ -204,6 +204,149 @@ test("article save is disabled while a request is pending", async ({ page }) => 
   expect(calls).toBe(1);
 });
 
+test("stale article refresh after save completion does not undo optimistic saved state", async ({
+  page,
+}) => {
+  let releaseArticleRefresh!: () => void;
+  const staleArticleRefreshMayFinish = new Promise<void>((resolve) => {
+    releaseArticleRefresh = resolve;
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    await staleArticleRefreshMayFinish;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "a-bridge",
+            source: "adressa",
+            sourceLabel: "Adresseavisen",
+            title: "Ny bru over Nidelva åpnet for gående og syklende",
+            excerpt: "Stale refresh after save completion.",
+            url: "https://www.adressa.no/nyheter/trondheim",
+            publishedAt: "2026-05-26T10:18:00.000Z",
+            scope: "trondheim",
+            category: "Transport",
+            places: ["Midtbyen", "Skansen"],
+            saved: false,
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/saved/articles/a-bridge", async (route) => {
+    await route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/?q=bru");
+  const saveButton = page.getByRole("button", {
+    name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
+  });
+  const initialLabel = (await saveButton.getAttribute("aria-label")) ?? "";
+  const saveResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/saved/articles/a-bridge"),
+  );
+  await saveButton.click();
+  await saveResponse;
+
+  const staleRefreshResponse = page.waitForResponse(
+    (response) => response.url().includes("/api/articles?") && response.status() === 200,
+  );
+  releaseArticleRefresh();
+  await staleRefreshResponse;
+
+  const expectedLabel = initialLabel.startsWith("Fjern fra lagret")
+    ? /Lagre sak: Ny bru over Nidelva/
+    : /Fjern fra lagret: Ny bru over Nidelva/;
+  await expect(page.getByRole("button", { name: expectedLabel })).toBeEnabled();
+});
+
+test("load more response from an old filter is ignored after URL filter changes", async ({
+  page,
+}) => {
+  let releaseOldPage!: () => void;
+  const oldPageMayFinish = new Promise<void>((resolve) => {
+    releaseOldPage = resolve;
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("cursor") === "old-bru-page") {
+      await oldPageMayFinish;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            {
+              id: "a-old-bru",
+              source: "adressa",
+              sourceLabel: "Adresseavisen",
+              title: "Gammel bru-sak fra forrige filter",
+              excerpt: "Denne skal ikke blandes inn etter filterbytte.",
+              url: "https://www.adressa.no/nyheter/trondheim/gammel-bru",
+              publishedAt: "2026-05-25T10:18:00.000Z",
+              scope: "trondheim",
+              category: "Transport",
+              places: ["Midtbyen"],
+              saved: false,
+            },
+          ],
+        }),
+      });
+      return;
+    }
+    if (url.searchParams.get("category") === "Vær") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [] }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "a-bridge",
+            source: "adressa",
+            sourceLabel: "Adresseavisen",
+            title: "Ny bru over Nidelva åpnet for gående og syklende",
+            excerpt: "Første side for bru-filteret.",
+            url: "https://www.adressa.no/nyheter/trondheim",
+            publishedAt: "2026-05-26T10:18:00.000Z",
+            scope: "trondheim",
+            category: "Transport",
+            places: ["Midtbyen", "Skansen"],
+            saved: false,
+          },
+        ],
+        nextCursor: "old-bru-page",
+      }),
+    });
+  });
+
+  await page.goto("/?q=bru");
+  await expect(page.getByRole("button", { name: "Vis flere saker" })).toBeVisible();
+  await page.getByRole("button", { name: "Vis flere saker" }).click();
+  const weatherRefreshResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/articles" && url.searchParams.get("category") === "Vær";
+  });
+  await page.getByRole("button", { name: "Vær" }).click();
+  await expect(page).toHaveURL(/category=V%C3%A6r/);
+  await weatherRefreshResponse;
+  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trondheim.')).toBeVisible();
+  releaseOldPage();
+
+  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trondheim.')).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Gammel bru-sak fra forrige filter" }),
+  ).toHaveCount(0);
+});
+
 test("situation save failure stays visible and blocks duplicate clicks while pending", async ({
   page,
 }) => {
@@ -373,6 +516,66 @@ test("source item panel announces retryable errors and renders only safe externa
   await expect(links.first()).toHaveAttribute("href", "https://example.test/source");
   await expect(links.first()).toHaveAttribute("target", "_blank");
   await expect(links.first()).toHaveAttribute("rel", "noreferrer noopener");
+});
+
+test("situation evidence and related links render only safe external URLs", async ({ page }) => {
+  await page.route("**/api/situations/skogbrann-bymarka", async (route) => {
+    const evidenceTemplate = sampleWorkspace.situation.evidence[0]!;
+    const relatedTemplate = sampleWorkspace.relatedArticles[0]!;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleWorkspace,
+        situation: {
+          ...sampleWorkspace.situation,
+          evidence: [
+            {
+              ...evidenceTemplate,
+              id: "safe-evidence",
+              claim: "Trygg originalmelding",
+              sourceUrl: "https://example.test/evidence",
+            },
+            {
+              ...evidenceTemplate,
+              id: "unsafe-evidence",
+              claim: "Utrygg originalmelding",
+              sourceUrl: "javascript:alert(1)",
+            },
+          ],
+        },
+        relatedArticles: [
+          {
+            ...relatedTemplate,
+            id: "safe-related",
+            title: "Trygg relatert sak",
+            url: "https://example.test/related",
+          },
+          {
+            ...relatedTemplate,
+            id: "unsafe-related",
+            title: "Utrygg relatert sak",
+            url: "javascript:alert(1)",
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/situations/skogbrann-bymarka/source-items", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.goto("/situasjoner/skogbrann-bymarka");
+
+  const evidenceLinks = page.getByRole("link", { name: "Se originalmelding" });
+  await expect(evidenceLinks).toHaveCount(1);
+  await expect(evidenceLinks.first()).toHaveAttribute("href", "https://example.test/evidence");
+  await expect(page.getByRole("link", { name: "Trygg relatert sak" })).toHaveAttribute(
+    "href",
+    "https://example.test/related",
+  );
+  await expect(page.getByRole("link", { name: "Utrygg relatert sak" })).toHaveCount(0);
+  await expect(page.getByText("Utrygg relatert sak")).toBeVisible();
 });
 
 test("workspace attachment links encode reserved route characters", async ({ page }) => {

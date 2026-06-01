@@ -405,17 +405,22 @@ export function SituationPage() {
         <aside className="intelligence">
           <section>
             <h2>Dette vet vi nå</h2>
-            {situation.evidence.map((evidence) => (
-              <div className="fact" key={evidence.id}>
-                <p>{evidence.claim}</p>
-                <span>
-                  {evidence.sourceLabel} · {formatTime(evidence.publishedAt)}
-                </span>
-                <a href={evidence.sourceUrl} target="_blank" rel="noreferrer">
-                  Se originalmelding
-                </a>
-              </div>
-            ))}
+            {situation.evidence.map((evidence) => {
+              const sourceUrl = safeExternalUrl(evidence.sourceUrl);
+              return (
+                <div className="fact" key={evidence.id}>
+                  <p>{evidence.claim}</p>
+                  <span>
+                    {evidence.sourceLabel} · {formatTime(evidence.publishedAt)}
+                  </span>
+                  {sourceUrl ? (
+                    <a href={sourceUrl} target="_blank" rel="noreferrer noopener">
+                      Se originalmelding
+                    </a>
+                  ) : null}
+                </div>
+              );
+            })}
           </section>
           <section className="timeline">
             <h2>Utvikling</h2>
@@ -465,14 +470,24 @@ export function SituationPage() {
           </section>
           <section className="related">
             <h2>Relaterte saker</h2>
-            {workspace.relatedArticles.map((article) => (
-              <a key={article.id} href={article.url} target="_blank" rel="noreferrer">
-                <small>
-                  {article.sourceLabel} · {formatTime(article.publishedAt)}
-                </small>
-                {article.title}
-              </a>
-            ))}
+            {workspace.relatedArticles.map((article) => {
+              const articleUrl = safeExternalUrl(article.url);
+              const content = (
+                <>
+                  <small>
+                    {article.sourceLabel} · {formatTime(article.publishedAt)}
+                  </small>
+                  {article.title}
+                </>
+              );
+              return articleUrl ? (
+                <a key={article.id} href={articleUrl} target="_blank" rel="noreferrer noopener">
+                  {content}
+                </a>
+              ) : (
+                <article key={article.id}>{content}</article>
+              );
+            })}
           </section>
         </aside>
       </div>

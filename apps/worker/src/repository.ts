@@ -469,7 +469,11 @@ export class WorkerRepository {
     bounds: PublicTransportBounds;
   }): Promise<PublicTransportVehicle[]> {
     const params: unknown[] = [];
-    const where = ["stale=false"];
+    const where = [
+      "stale=false",
+      "(expires_at IS NULL OR expires_at > now())",
+      "last_seen_at >= now() - interval '5 minutes'",
+    ];
     if (filters.modes?.length) {
       params.push(filters.modes);
       where.push(`mode = ANY($${params.length}::text[])`);
@@ -592,7 +596,7 @@ export class WorkerRepository {
     bounds: PublicTransportBounds;
   }): Promise<PublicTransportServiceAlert[]> {
     const params: unknown[] = [];
-    const where = ["geometry IS NOT NULL"];
+    const where = ["(valid_to IS NULL OR valid_to >= now())"];
     const states: PublicTransportServiceAlert["state"][] = filters.states?.length
       ? filters.states
       : ["active"];
@@ -609,7 +613,7 @@ export class WorkerRepository {
     const eastIndex = params.length - 1;
     const northIndex = params.length;
     where.push(
-      `ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))`,
+      `(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326)))`,
     );
 
     const result = await this.pool.query<{
