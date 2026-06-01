@@ -54,4 +54,26 @@ describe("deployment playbook Entur verification", () => {
     expect(deploymentDoc).toMatch(/destructive schema changes must be split into a later deploy/i);
     expect(deploymentDoc).not.toMatch(/failed backup, migration or canary does not leave the site offline/i);
   });
+
+  it("requires DATEX source health rows to be ok and fresh", () => {
+    const taskStart = playbook.indexOf("- name: Verify DATEX source health rows when DATEX is enabled");
+    const taskEnd = playbook.indexOf("- name: Verify Entur source health", taskStart);
+    const task = playbook.slice(taskStart, taskEnd);
+
+    expect(taskStart).toBeGreaterThan(-1);
+    expect(task).toContain("state='ok'");
+    expect(task).toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
+    expect(task).toContain("until:");
+    expect(task).toMatch(/retries:\s*\d+/);
+  });
+
+  it("verifies worker freshness instead of only running container state", () => {
+    const workerTaskStart = playbook.indexOf("- name: Verify worker");
+    const workerTaskEnd = playbook.indexOf("- name: Verify DATEX source health", workerTaskStart);
+    const task = playbook.slice(workerTaskStart, workerTaskEnd);
+
+    expect(workerTaskStart).toBeGreaterThan(-1);
+    expect(task).not.toContain("ps --services --filter status=running worker | grep -qx worker");
+    expect(task).toMatch(/source_health|runtime-status|last_checked_at/);
+  });
 });

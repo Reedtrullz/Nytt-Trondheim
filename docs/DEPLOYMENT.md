@@ -79,7 +79,7 @@ Do not add these values to the required deployment secrets list; the playbook wr
 
 ## DATEX Verification
 
-The deployment playbook now automatically verifies live health, worker container status, DATEX/datex_travel_time `source_health` row presence when DATEX credentials are enabled, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
+The deployment playbook now automatically verifies live health, worker source-health freshness, fresh `state='ok'` DATEX/datex_travel_time `source_health` rows when DATEX credentials are enabled, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
 
 ```bash
 curl -fsS https://nytt.reidar.tech/health
@@ -94,7 +94,7 @@ ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select id,name,state,travel_time_seconds,free_flow_seconds,delay_seconds,measurement_to from datex_travel_times order by delay_seconds desc nulls last, name asc limit 10;\""
 ```
 
-A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on `source_health.state='ok'`, worker logs and container uptime to distinguish that from collector failure. TravelTime source health appears as `datex_travel_time`; rows in `datex_travel_times` are measured/estimated travel time and delay pulse data only. They do not create `official_events`, do not promote or create `OfficialEvent` rows, and do not create or update `situations`. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
+A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on fresh `source_health.state='ok'`, worker logs and source-health timestamps to distinguish that from collector failure. TravelTime source health appears as `datex_travel_time`; rows in `datex_travel_times` are measured/estimated travel time and delay pulse data only. They do not create `official_events`, do not promote or create `OfficialEvent` rows, and do not create or update `situations`. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
 
 ## Entur Verification
 

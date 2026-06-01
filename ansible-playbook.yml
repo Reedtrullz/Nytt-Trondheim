@@ -415,23 +415,43 @@
           retries: 6
           delay: 5
 
-        - name: Verify worker container is running
+        - name: Verify worker source health freshness
           ansible.builtin.shell: |
             set -euo pipefail
-            docker compose --env-file .env.production ps --services --filter status=running worker | grep -qx worker
+            docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -Atqc "
+              SELECT count(*)
+              FROM source_health
+              WHERE state='ok'
+                AND last_checked_at > now() - interval '20 minutes'
+                AND source IN ('datex','datex_travel_time','entur_vehicle_positions','entur_service_alerts','vegvesen_traffic_info','trafikkdata');
+            " | grep -Eq '^[1-9][0-9]*$'
           args:
             chdir: "{{ app_dir }}"
             executable: /bin/bash
+          register: worker_freshness
+          until: worker_freshness.rc == 0
+          retries: 12
+          delay: 10
           changed_when: false
 
         - name: Verify DATEX source health rows when DATEX is enabled
           ansible.builtin.shell: |
             set -euo pipefail
-            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "SELECT count(*) FROM source_health WHERE source IN ('datex','datex_travel_time');")"
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "
+              SELECT count(*)
+              FROM source_health
+              WHERE source IN ('datex','datex_travel_time')
+                AND state='ok'
+                AND last_checked_at > now() - interval '30 minutes';
+            ")"
             test "$count" -eq 2
           args:
             chdir: "{{ app_dir }}"
             executable: /bin/bash
+          register: datex_source_health
+          until: datex_source_health.rc == 0
+          retries: 12
+          delay: 10
           changed_when: false
           when:
             - lookup('env', 'NYTT_DATEX_USERNAME') | length > 0
