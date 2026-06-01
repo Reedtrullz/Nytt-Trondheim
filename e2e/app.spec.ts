@@ -7,6 +7,13 @@ test("reader opens the active situation and keeps private map controls distinct"
 }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+  const municipalityArchiveLink = page.getByRole("link", { name: "Se alle", exact: true });
+  await expect(municipalityArchiveLink).toHaveAttribute(
+    "href",
+    "https://www.trondheim.kommune.no/aktuelt/nyheter/",
+  );
+  await expect(municipalityArchiveLink).toHaveAttribute("target", "_blank");
+  await expect(municipalityArchiveLink).toHaveAttribute("rel", "noreferrer noopener");
   await expect(
     page.getByRole("heading", { name: "Skogbrann ved Bymarka", exact: true }),
   ).toBeVisible();

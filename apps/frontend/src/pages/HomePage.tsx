@@ -159,6 +159,9 @@ function NewsRow({
 
 function NearbyRail({ articles, data }: { articles: Article[]; data: BootstrapPayload }) {
   const located = articles.filter((article) => article.location).slice(0, 3);
+  const municipalityArchiveUrl = safeExternalUrl(
+    "https://www.trondheim.kommune.no/aktuelt/nyheter/",
+  );
   const civic = articles.filter((article) => article.source === "trondheim_kommune").slice(0, 2);
   return (
     <aside className="home-rail">
@@ -183,9 +186,11 @@ function NearbyRail({ articles, data }: { articles: Article[]; data: BootstrapPa
       <section className="municipality">
         <div className="rail-title">
           <h2>Fra kommunen</h2>
-          <a href="https://www.trondheim.kommune.no/aktuelt/nyheter/">
-            Se alle <ArrowIcon />
-          </a>
+          {municipalityArchiveUrl ? (
+            <a href={municipalityArchiveUrl} target="_blank" rel="noreferrer noopener">
+              Se alle <ArrowIcon />
+            </a>
+          ) : null}
         </div>
         {civic.map((article) => {
           const articleUrl = safeExternalUrl(article.url);

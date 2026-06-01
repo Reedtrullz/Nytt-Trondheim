@@ -324,6 +324,11 @@
             chdir: "{{ app_dir }}"
           changed_when: true
 
+        - name: Record candidate promotion timestamp
+          ansible.builtin.command: date -u +%Y-%m-%dT%H:%M:%SZ
+          register: candidate_promoted_at
+          changed_when: false
+
         - name: Remove healthy canary
           community.docker.docker_container:
             name: nytt-trondheim-canary
@@ -415,6 +420,19 @@
           retries: 6
           delay: 5
 
+        - name: Verify worker container is running after candidate promotion
+          ansible.builtin.shell: |
+            set -euo pipefail
+            docker compose --env-file .env.production ps --services --filter status=running worker | grep -qx worker
+          args:
+            chdir: "{{ app_dir }}"
+            executable: /bin/bash
+          register: promoted_worker_running
+          until: promoted_worker_running.rc == 0
+          retries: 6
+          delay: 5
+          changed_when: false
+
         - name: Verify worker source health freshness
           ansible.builtin.shell: |
             set -euo pipefail
@@ -423,6 +441,7 @@
               FROM source_health
               WHERE state='ok'
                 AND last_checked_at > now() - interval '20 minutes'
+                AND last_checked_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz
                 AND source IN ('datex','datex_travel_time','entur_vehicle_positions','entur_service_alerts','vegvesen_traffic_info','trafikkdata');
             " | grep -Eq '^[1-9][0-9]*$'
           args:
@@ -442,7 +461,8 @@
               FROM source_health
               WHERE source IN ('datex','datex_travel_time')
                 AND state='ok'
-                AND last_checked_at > now() - interval '30 minutes';
+                AND last_checked_at > now() - interval '30 minutes'
+                AND last_checked_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz;
             ")"
             test "$count" -eq 2
           args:

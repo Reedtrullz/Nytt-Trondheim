@@ -26,6 +26,7 @@ describe("deployment playbook Entur verification", () => {
 
     const validationBlock = playbook.slice(blockStart, rescueStart);
     expect(validationBlock).toContain("- name: Promote API and worker");
+    expect(validationBlock).toContain("- name: Record candidate promotion timestamp");
     expect(validationBlock).toContain("- name: Verify production health");
     expect(validationBlock).toMatch(/- name: Verify worker/);
     expect(validationBlock).toContain(
@@ -75,17 +76,25 @@ describe("deployment playbook Entur verification", () => {
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("state='ok'");
     expect(task).toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
+    expect(task).toContain("candidate_promoted_at.stdout");
+    expect(task).toMatch(
+      /last_checked_at\s*>=\s*'\{\{ candidate_promoted_at\.stdout \}\}'::timestamptz/,
+    );
     expect(task).toContain("until:");
     expect(task).toMatch(/retries:\s*\d+/);
   });
 
-  it("verifies worker freshness instead of only running container state", () => {
+  it("verifies promoted worker container state and candidate source freshness", () => {
     const workerTaskStart = playbook.indexOf("- name: Verify worker");
     const workerTaskEnd = playbook.indexOf("- name: Verify DATEX source health", workerTaskStart);
     const task = playbook.slice(workerTaskStart, workerTaskEnd);
 
     expect(workerTaskStart).toBeGreaterThan(-1);
-    expect(task).not.toContain("ps --services --filter status=running worker | grep -qx worker");
+    expect(task).toContain("ps --services --filter status=running worker | grep -qx worker");
     expect(task).toMatch(/source_health|runtime-status|last_checked_at/);
+    expect(task).toContain("candidate_promoted_at.stdout");
+    expect(task).toMatch(
+      /last_checked_at\s*>=\s*'\{\{ candidate_promoted_at\.stdout \}\}'::timestamptz/,
+    );
   });
 });
