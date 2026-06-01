@@ -59,7 +59,7 @@ describe("DATEX situation parsing", () => {
     const xml = await readFile(fixturePath, "utf8");
 
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -85,7 +85,7 @@ describe("DATEX situation parsing", () => {
     const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-29T10:00:00Z</publicationTime><situation id="NO-SVV-COORDS" version="1"><situationRecord xsi:type="EnvironmentalObstruction" id="R1" version="1"><situationRecordVersionTime>2026-05-29T10:00:00Z</situationRecordVersionTime><severity>low</severity><validity><validityStatus>active</validityStatus></validity><groupOfLocations><locationContainedInGroup xsi:type="PointLocation"><coordinatesForDisplay><latitude>63.279343</latitude><longitude>9.641987</longitude></coordinatesForDisplay><supplementaryPositionalDescription><locationDescription><values><value lang="no">Kv. 1810 Gangåsen i Orkland, Trøndelag</value></values></locationDescription><roadInformation><roadName>Gangåsvegen</roadName><roadNumber>K1810</roadNumber></roadInformation></supplementaryPositionalDescription></locationContainedInGroup></groupOfLocations><generalPublicComment><comment><values><value>Hindring i vegbanen.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
 
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no",
       receivedAt: "2026-05-29T10:05:00.000Z",
     });
 
@@ -107,7 +107,7 @@ describe("DATEX situation parsing", () => {
     const xml = await readFile(fixturePath, "utf8");
 
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -125,7 +125,7 @@ describe("DATEX situation parsing", () => {
   it("marks accidents and closures as promotable traffic situations", async () => {
     const xml = await readFile(fixturePath, "utf8");
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -137,7 +137,7 @@ describe("DATEX situation parsing", () => {
   it("keeps low-impact planned roadworks as official events without promotion", () => {
     const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-WORK" version="1"><situationRecord xsi:type="MaintenanceWorks" id="R1" version="1"><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><severity>low</severity><validity><validityStatus>active</validityStatus></validity><generalPublicComment><comment><values><value>Planlagt kantklipp i Trondheim.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -150,11 +150,11 @@ describe("DATEX situation parsing", () => {
     const updated = xml.replaceAll('version="3"', 'version="4"');
 
     const first = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
     const second = parseDatexSituationPublication(updated, {
-      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:10:00.000Z",
     });
 
@@ -165,7 +165,7 @@ describe("DATEX situation parsing", () => {
   it("uses receivedAt as fallback expiry for open-ended active records", () => {
     const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-OPEN" version="1"><situationRecord xsi:type="Accident" id="R1" version="1"><situationRecordCreationTime>2026-05-26T09:55:00Z</situationRecordCreationTime><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><validity><validityStatus>active</validityStatus><validityTimeSpecification><overallStartTime>2026-05-26T09:55:00Z</overallStartTime></validityTimeSpecification></validity><groupOfLocations><locationForDisplay><latitude>63.361</latitude><longitude>10.376</longitude></locationForDisplay></groupOfLocations><generalPublicComment><comment><values><value>Ulykke på E6 ved Tiller.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -178,7 +178,7 @@ describe("DATEX situation parsing", () => {
     const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-OSLO" version="1"><situationRecord id="R1" version="1"><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><validity><validityStatus>active</validityStatus></validity><groupOfLocations><locationForDisplay><latitude>59.91</latitude><longitude>10.75</longitude></locationForDisplay></groupOfLocations><generalPublicComment><comment><values><value>Ulykke på Ring 3.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
 
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -189,7 +189,7 @@ describe("DATEX situation parsing", () => {
     const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-TRD" version="1"><situationRecord id="R1" version="1"><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><validity><validityStatus>active</validityStatus></validity><generalPublicComment><comment><values><value>Vegarbeid i Trondheim sentrum.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
 
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex.example.test",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -202,7 +202,7 @@ describe("DATEX situation parsing", () => {
     let capturedHeaders: Headers | undefined;
 
     const result = await collectDatexSituationEvents({
-      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       username: "svv-user",
       password: "svv-pass",
       lastModified: "Wed, 27 May 2026 10:00:00 GMT",
@@ -225,7 +225,7 @@ describe("DATEX situation parsing", () => {
 
   it("returns notModified without parsing a 304 DATEX response", async () => {
     const result = await collectDatexSituationEvents({
-      endpoint: "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata",
+      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       username: "svv-user",
       password: "svv-pass",
       lastModified: "Wed, 27 May 2026 10:00:00 GMT",
