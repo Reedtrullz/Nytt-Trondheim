@@ -316,11 +316,14 @@ test("searching from trafikk navigates home and shows filtered results", async (
   await expect(page.locator(".situation-banner")).toHaveCount(0);
 });
 
-test("home filter URL shows Vær empty state with active filter context", async ({ page }) => {
+test("home keeps Vær as weather page navigation, not an article category filter", async ({
+  page,
+}) => {
   await page.goto("/?q=bru&category=V%C3%A6r&scope=trondelag");
 
-  await expect(page.getByRole("button", { name: "Vær" })).toHaveClass(/selected/);
-  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trøndelag.')).toBeVisible();
+  await expect(page.getByRole("link", { name: "Vær" })).toHaveAttribute("href", "/vaer");
+  await expect(page.getByRole("button", { name: "Vær" })).toHaveCount(0);
+  await expect(page.getByText('Ingen saker samsvarer med "bru" i Trøndelag.')).toBeVisible();
 });
 
 test("article save failure rolls back optimistic state", async ({ page }) => {
@@ -504,7 +507,7 @@ test("load more response from an old filter is ignored after URL filter changes"
       });
       return;
     }
-    if (url.searchParams.get("category") === "Vær") {
+    if (url.searchParams.get("category") === "Politikk") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -539,17 +542,21 @@ test("load more response from an old filter is ignored after URL filter changes"
   await page.goto("/?q=bru");
   await expect(page.getByRole("button", { name: "Vis flere saker" })).toBeVisible();
   await page.getByRole("button", { name: "Vis flere saker" }).click();
-  const weatherRefreshResponse = page.waitForResponse((response) => {
+  const politicsRefreshResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
-    return url.pathname === "/api/articles" && url.searchParams.get("category") === "Vær";
+    return url.pathname === "/api/articles" && url.searchParams.get("category") === "Politikk";
   });
-  await page.getByRole("button", { name: "Vær" }).click();
-  await expect(page).toHaveURL(/category=V%C3%A6r/);
-  await weatherRefreshResponse;
-  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trondheim.')).toBeVisible();
+  await page.getByRole("button", { name: "Politikk" }).click();
+  await expect(page).toHaveURL(/category=Politikk/);
+  await politicsRefreshResponse;
+  await expect(
+    page.getByText('Ingen saker samsvarer med "bru" Politikk i Trondheim.'),
+  ).toBeVisible();
   releaseOldPage();
 
-  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trondheim.')).toBeVisible();
+  await expect(
+    page.getByText('Ingen saker samsvarer med "bru" Politikk i Trondheim.'),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Gammel bru-sak fra forrige filter" }),
   ).toHaveCount(0);

@@ -8,10 +8,10 @@ import {
 
 describe("home filter query params", () => {
   it("parses q, scope and category from a URL search string", () => {
-    expect(parseHomeFilters("?q=bru&scope=trondelag&category=V%C3%A6r")).toEqual({
+    expect(parseHomeFilters("?q=bru&scope=trondelag&category=Transport")).toEqual({
       q: "bru",
       scope: "trondelag",
-      category: "Vær",
+      category: "Transport",
     });
   });
 
@@ -30,14 +30,21 @@ describe("home filter query params", () => {
     );
   });
 
-  it("includes the Vær category", () => {
-    expect(articleCategories).toContain("Vær");
+  it("keeps Vær out of article category filters because it has its own page", () => {
+    expect(articleCategories).not.toContain("Vær");
+    expect(parseHomeFilters("?q=bru&scope=trondelag&category=V%C3%A6r")).toEqual({
+      q: "bru",
+      scope: "trondelag",
+      category: "Alle",
+    });
   });
 
   it("summarizes active filters for empty states", () => {
     expect(searchSummary({ q: "bru", scope: "trondheim", category: "Alle" })).toBe(
       '"bru" i Trondheim',
     );
-    expect(searchSummary({ q: "", scope: "trondelag", category: "Vær" })).toBe("Vær i Trøndelag");
+    expect(searchSummary({ q: "", scope: "trondelag", category: "Transport" })).toBe(
+      "Transport i Trøndelag",
+    );
   });
 });

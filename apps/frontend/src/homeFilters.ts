@@ -8,7 +8,6 @@ export const articleCategories = [
   "Kultur",
   "Transport",
   "Politikk",
-  "Vær",
 ] as const;
 
 export type ArticleCategoryFilter = (typeof articleCategories)[number];
