@@ -40,4 +40,18 @@ describe("deployment playbook Entur verification", () => {
     expect(rescueBlock).toContain("nytt-trondheim-worker:latest");
     expect(rescueBlock).toContain("docker compose --env-file .env.production up -d app worker");
   });
+
+  it("documents that migrations before canary must be expand-contract compatible", () => {
+    expect(playbook).toContain("Create and verify encrypted pre-migration backup");
+    const migrationStart = playbook.indexOf("- name: Apply database migrations");
+    const canaryStart = playbook.indexOf("- name: Start API canary with production database");
+    expect(migrationStart).toBeGreaterThan(-1);
+    expect(canaryStart).toBeGreaterThan(-1);
+    expect(migrationStart).toBeLessThan(canaryStart);
+    const deploymentDoc = readFileSync(new URL("../../../docs/DEPLOYMENT.md", import.meta.url), "utf8");
+    expect(deploymentDoc).toMatch(/migrations run before canary against the production database/i);
+    expect(deploymentDoc).toMatch(/expand\/contract-compatible with the previous release/i);
+    expect(deploymentDoc).toMatch(/destructive schema changes must be split into a later deploy/i);
+    expect(deploymentDoc).not.toMatch(/failed backup, migration or canary does not leave the site offline/i);
+  });
 });
