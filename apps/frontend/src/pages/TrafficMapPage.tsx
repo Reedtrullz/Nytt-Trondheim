@@ -17,13 +17,14 @@ import { TrafficBriefCard } from "../components/map/TrafficBriefCard.js";
 import { TrafficEventList } from "../components/map/TrafficEventList.js";
 import {
   TrafficFilterPanel,
-  type RoadContextLayerVisibility,
+  type TrafficLayerVisibility,
   type TrafficMapPreset,
 } from "../components/map/TrafficFilterPanel.js";
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { fetchTravelPlan } from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
+import { visibleByDefault } from "../trafficViewModel.js";
 
 interface MapBounds {
   north: number;
@@ -51,11 +52,16 @@ const allCategories: TrafficEventCategory[] = [
   "other",
 ];
 const allSeverities: TrafficEventSeverity[] = ["low", "medium", "high", "critical"];
-const defaultContextLayers: RoadContextLayerVisibility = {
-  weather: true,
-  cameras: false,
-  counters: false,
-  publicTransport: false,
+const defaultTrafficLayers: TrafficLayerVisibility = {
+  incidents: true,
+  roadworks: true,
+  travelTime: true,
+  publicTransportDisruptions: true,
+  publicTransportVehicles: false,
+  weatherRisk: false,
+  estimatedNews: false,
+  privateNotes: false,
+  showAll: false,
 };
 
 function addHours(date: Date, hours: number): Date {
@@ -230,7 +236,7 @@ export function TrafficMapPage() {
   const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>();
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
   const [visibleContextLayers, setVisibleContextLayers] =
-    useState<RoadContextLayerVisibility>(defaultContextLayers);
+    useState<TrafficLayerVisibility>(defaultTrafficLayers);
   const [originInput, setOriginInput] = useState("");
   const [destinationInput, setDestinationInput] = useState("");
   const [travelPlan, setTravelPlan] = useState<TravelPlanPayload>();
@@ -271,17 +277,48 @@ export function TrafficMapPage() {
     to: timeWindow.to,
     bounds: stableBounds,
   });
+  const publicTransportVisible =
+    visibleContextLayers.publicTransportDisruptions || visibleContextLayers.publicTransportVehicles;
   const {
     data: publicTransportData,
     loading: publicTransportLoading,
     error: publicTransportError,
     reload: reloadPublicTransport,
   } = usePublicTransportMap({
-    modes: ["bus", "tram", "rail", "water"],
-    includeAlerts: true,
+    modes: visibleContextLayers.publicTransportVehicles ? ["bus", "tram", "rail", "water"] : [],
+    includeAlerts: visibleContextLayers.publicTransportDisruptions,
     bounds: stableBounds,
-    enabled: visibleContextLayers.publicTransport,
+    enabled: publicTransportVisible,
   });
+
+  const publicTransportDisplayData = useMemo(() => {
+    if (!publicTransportData) return undefined;
+    return {
+      ...publicTransportData,
+      alerts: visibleContextLayers.publicTransportDisruptions ? publicTransportData.alerts : [],
+      vehicles: visibleContextLayers.publicTransportVehicles ? publicTransportData.vehicles : [],
+    };
+  }, [
+    publicTransportData,
+    visibleContextLayers.publicTransportDisruptions,
+    visibleContextLayers.publicTransportVehicles,
+  ]);
+
+  const visibleTrafficEvents = useMemo(() => {
+    const events = data?.events ?? [];
+    return events.filter((event) => {
+      const isRoadwork = event.category === "roadworks";
+      if (isRoadwork && !visibleContextLayers.roadworks) return false;
+      if (!isRoadwork && !visibleContextLayers.incidents) return false;
+      if (!visibleContextLayers.showAll && !visibleByDefault(event)) return false;
+      return true;
+    });
+  }, [
+    data?.events,
+    visibleContextLayers.incidents,
+    visibleContextLayers.roadworks,
+    visibleContextLayers.showAll,
+  ]);
 
   const highlightedEventIds = useMemo(() => {
     const highlightedIds = new Set<string>();
@@ -354,7 +391,7 @@ export function TrafficMapPage() {
       const payload = await fetchTravelPlan({ from, to }, { signal: controller.signal });
       if (travelPlanRequestIdRef.current !== requestId) return;
       setTravelPlan(payload);
-      setVisibleContextLayers((current) => ({ ...current, publicTransport: true }));
+      setVisibleContextLayers((current) => ({ ...current, publicTransportDisruptions: true }));
     } catch (reason) {
       if (travelPlanRequestIdRef.current === requestId) {
         setTravelPlanError(reason instanceof Error ? reason.message : "Kunne ikke hente reiseråd.");
@@ -416,18 +453,18 @@ export function TrafficMapPage() {
         <TileLayer attribution="© Kartverket" url={tiles} />
         <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
         {data?.events ? (
-          <TrafficLayer events={data.events} highlightedEventIds={highlightedEventIds} />
+          <TrafficLayer events={visibleTrafficEvents} highlightedEventIds={highlightedEventIds} />
         ) : null}
         {data ? (
           <RoadContextLayer
-            weather={visibleContextLayers.weather ? data.weather : []}
-            cameras={visibleContextLayers.cameras ? data.cameras : []}
-            counters={visibleContextLayers.counters ? data.counters : []}
+            weather={visibleContextLayers.weatherRisk ? data.weather : []}
+            cameras={[]}
+            counters={[]}
           />
         ) : null}
         <PublicTransportLayer
-          payload={publicTransportData}
-          visible={visibleContextLayers.publicTransport}
+          payload={publicTransportDisplayData}
+          visible={publicTransportVisible}
         />
         <TravelPlanLayer plan={travelPlan} />
       </MapContainer>
@@ -460,23 +497,23 @@ export function TrafficMapPage() {
         )}
         {data?.events ? (
           <TrafficEventList
-            events={data.events}
+            events={visibleTrafficEvents}
             selectedEventId={selectedEventId}
             onSelectEvent={setSelectedEventId}
           />
         ) : null}
-        {visibleContextLayers.publicTransport ? (
+        {visibleContextLayers.publicTransportDisruptions ? (
           <PublicTransportSummary
-            payload={publicTransportData}
+            payload={publicTransportDisplayData}
             loading={publicTransportLoading}
             error={publicTransportError}
             onReload={reloadPublicTransport}
           />
         ) : null}
-        {data?.corridorImpacts ? (
+        {visibleContextLayers.travelTime && data?.corridorImpacts ? (
           <CorridorImpactCard
             impacts={data.corridorImpacts}
-            events={data.events}
+            events={visibleTrafficEvents}
             selectedImpactId={selectedCorridorId}
             onSelectImpact={setSelectedCorridorId}
           />
