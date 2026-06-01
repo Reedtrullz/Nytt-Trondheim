@@ -27,9 +27,10 @@ DATABASE_URL=postgres://nytt:nytt@localhost:5432/nytt npm run db:migrate
 ## Application Areas
 
 - `Siste nytt`: chronological Trondheim/Trøndelag views, categories, search, saved links and nearby map.
+- `Trafikk`: live traffic map with route-aware `Fra`/`Til` travel advice, Vegvesen traffic impacts near the chosen route, road-context layers, and Entur/AtB public-transport context.
 - `Situasjonsrom`: event timeline, attributed evidence, warning/context layers, official traffic layers, related stories and private planning workspace.
 - `Drift`: owner-only collection, DATEX/source health, DATEX TravelTime traffic pulse, AI and encrypted-backup verification status.
-- Map provenance is explicit: official information, official DATEX traffic coordinates, reporting-derived estimates, DSB preparedness context and private drawings are separate layers.
+- Map provenance is explicit: official information, official DATEX/Vegvesen traffic coordinates, route corridors, reporting-derived estimates, DSB preparedness context and private drawings are separate layers.
 - Situation processing stores MET/NVE official warning context, validated DeepSeek-cited summaries and municipality corroboration without treating warnings as emergency confirmation.
 - Statens vegvesen DATEX II v3.1 ingestion uses server-side Basic Auth, an SRTI-filtered default endpoint, conditional polling when available, and promotes only high-impact official traffic records. The same credentials power DATEX TravelTime in Drift as measured/estimated corridor travel time and delay pulse data only.
 - Private workspace mutations use CSRF protection; persisted protected exports include manifests, checksums and provenance-separated GeoJSON.

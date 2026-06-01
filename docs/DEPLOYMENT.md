@@ -19,7 +19,7 @@ The deploy workflow fails before SSH/Ansible if any required SSH, application, G
 - `app`: authenticated API and built web interface, exposed only on VPS localhost for Caddy.
 - `worker`: scheduled ingestion and analysis process.
 
-PostgreSQL runs only on the internal `nytt_database` network. The playbook provisions the external `nytt_outbound` egress network before canary startup; `app` and `worker` join it so GitHub authorization, RSS, Kartverket, MET/NVE and DeepSeek requests can reach external services. The API remains bound only to VPS localhost for Caddy.
+PostgreSQL runs only on the internal `nytt_database` network. The playbook provisions the external `nytt_outbound` egress network before canary startup; `app` and `worker` join it so GitHub authorization, RSS, Kartverket, MET/NVE, DeepSeek, Nominatim/OpenStreetMap and OSRM requests can reach external services. The API remains bound only to VPS localhost for Caddy.
 
 The playbook also normalizes persisted upload-volume ownership for the non-root API container before promotion, so private attachments and protected ZIP exports remain writable after initial volume creation or restore.
 
@@ -160,8 +160,9 @@ curl -fsS https://nytt.reidar.tech/health
 curl -sS -o /tmp/trafikk.html -w '%{http_code}\n' https://nytt.reidar.tech/trafikk
 ASSET=$(grep -oE '/assets/[^"]+\.js' /tmp/trafikk.html | head -n 1)
 curl -fsSL "https://nytt.reidar.tech${ASSET}" -o /tmp/trafikk.js
-grep -Eq 'Trafikk akkurat nå|Kartlag|road-context-marker' /tmp/trafikk.js
+grep -Eq 'Trafikk akkurat nå|Finn reiseråd|Reiseråd for ruten|road-context-marker' /tmp/trafikk.js
 curl -sS -o /tmp/traffic-api.json -w '%{http_code}\n' 'https://nytt.reidar.tech/api/map/traffic-events?north=63.5&south=63.3&east=10.6&west=10.1'
+curl -sS -o /tmp/travel-plan-api.json -w '%{http_code}\n' 'https://nytt.reidar.tech/api/map/travel-plan?from=Munkegata&to=Leangen'
 
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -P pager=off -F ' | ' -At" <<'SQL'
 SELECT source, state, detail, last_checked_at
@@ -185,8 +186,8 @@ SQL
 Expected live results:
 
 - `/health` returns `200` with Postgres-backed `status: ok`.
-- `/trafikk` returns `200` and the built asset contains the current traffic-map UI strings.
-- Anonymous `/api/map/traffic-events` returns `401`; this is expected for the protected API and is not a zero-event result.
+- `/trafikk` returns `200` and the built asset contains the current traffic-map UI strings, including the route planner controls.
+- Anonymous `/api/map/traffic-events` and `/api/map/travel-plan` return `401`; this is expected for protected map APIs and is not a zero-event or route-planner failure.
 - `source_health.source='vegvesen_traffic_info'` is `ok`, `traffic_map_events` has non-zero `vegvesen_traffic_info` rows, and active/planned count is non-zero when Vegvesen has visible Trøndelag messages.
 - `datex_travel_times` and `traffic_counter_snapshots` are non-zero when the upstream feeds are available. DATEX weather/CCTV rows may legitimately be zero if the current bounded endpoints have no matching observations/status updates; rely on `source_health` and freshness labels rather than treating zero rows as an automatic deployment failure.
 - `source_items` has `vegvesen_traffic_info | official_event` provenance rows, but context telemetry providers (`datex_weather`, `datex_cctv`, `trafikkdata`, `datex_travel_time`) have zero `source_items` rows.

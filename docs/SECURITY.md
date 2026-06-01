@@ -1,7 +1,7 @@
 # Security
 
 - Production access is restricted through GitHub App user authorization and the `GITHUB_ALLOWED_LOGIN=Reedtrullz` allowlist.
-- All `/api` data, notes, drawings, attachments and exports require an authenticated owner session.
+- All `/api` data, notes, drawings, attachments and exports require an authenticated owner session. The route-planner API is also authenticated; free-text origin/destination queries are sent server-side to Nominatim/OpenStreetMap and OSRM only for transient geocoding/routing and are not persisted by Nytt.
 - Secrets are supplied through GitHub Actions/VPS-managed environment files and must never be committed.
 - Uploaded files are stored outside the web root, size-limited, and checksum-recorded.
 - State-changing authenticated API requests require an owner-session CSRF token and same-origin browser requests.
