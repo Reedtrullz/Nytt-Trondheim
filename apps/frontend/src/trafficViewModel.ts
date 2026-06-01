@@ -8,7 +8,8 @@ import type {
   TrafficMapSourceStatus,
 } from "@nytt/shared";
 import type { TrafficTrustBadge } from "./trafficProvenance.js";
-import { badgesForTrafficEvent, sourceDisplayLabel } from "./trafficProvenance.js";
+import { badgesForTrafficEvent } from "./trafficProvenance.js";
+import { compactTrafficEventRow } from "./trafficEventRows.js";
 
 export interface TrafficSummaryCardModel {
   id: "critical" | "delays" | "roadworks" | "publicTransport" | "updated";
@@ -93,28 +94,6 @@ function sourceFreshness(sources: TrafficFreshnessSource[]): string {
   return degradedCount > 1 ? `${base} · ${degradedCount} kilder degradert` : base;
 }
 
-function stateLabel(state: TrafficMapEvent["state"]): string {
-  switch (state) {
-    case "active":
-      return "Aktiv";
-    case "planned":
-      return "Planlagt";
-    case "expired":
-      return "Utløpt";
-    case "cancelled":
-      return "Kansellert";
-    default:
-      return state;
-  }
-}
-
-function eventMeta(event: TrafficMapEvent): string {
-  const source = sourceDisplayLabel(event.source);
-  const updated = `Oppdatert ${formatClock(event.updatedAt)}`;
-  const place = event.locationName ?? event.roadName;
-  return [stateLabel(event.state), source, updated, place].filter(Boolean).join(" · ");
-}
-
 function eventScore(event: TrafficMapEvent): number {
   const active = event.state === "active" ? 1000 : event.state === "planned" ? 500 : 0;
   const severity = severityRank[event.severity] * 100;
@@ -149,14 +128,17 @@ export function buildTrafficViewModel({
   const transitAlerts = publicTransport?.alerts.filter((alert) => alert.state === "active") ?? [];
   const allSources = [...(traffic?.sources ?? []), ...(publicTransport?.sources ?? [])];
   const rankedEvents = visibleEvents
-    .map((event) => ({
-      id: event.id,
-      event,
-      title: event.title,
-      meta: eventMeta(event),
-      badges: badgesForTrafficEvent(event),
-      score: eventScore(event),
-    }))
+    .map((event) => {
+      const row = compactTrafficEventRow(event, delayCorridors);
+      return {
+        id: event.id,
+        event,
+        title: row.title,
+        meta: row.meta,
+        badges: badgesForTrafficEvent(event),
+        score: eventScore(event),
+      };
+    })
     .sort((left, right) => right.score - left.score);
   const rankedVisibleEvents = rankedEvents.map((row) => row.event);
   const critical = rankedVisibleEvents.filter(
