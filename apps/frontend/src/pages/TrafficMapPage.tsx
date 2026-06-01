@@ -13,7 +13,7 @@ import {
   PublicTransportSummary,
 } from "../components/map/PublicTransportLayer.js";
 import { RoadContextLayer } from "../components/map/RoadContextLayer.js";
-import { TrafficBriefCard } from "../components/map/TrafficBriefCard.js";
+import { TrafficDetailDrawer } from "../components/map/TrafficDetailDrawer.js";
 import { TrafficEventList } from "../components/map/TrafficEventList.js";
 import {
   TrafficFilterPanel,
@@ -21,12 +21,13 @@ import {
   type TrafficMapPreset,
 } from "../components/map/TrafficFilterPanel.js";
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
+import { TrafficLegend } from "../components/map/TrafficLegend.js";
+import { TrafficNowSummary } from "../components/map/TrafficNowSummary.js";
 import { fetchTravelPlan } from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
 import { compactTrafficEventRow } from "../trafficEventRows.js";
-import { badgesForTrafficEvent } from "../trafficProvenance.js";
-import { visibleByDefault } from "../trafficViewModel.js";
+import { buildTrafficViewModel, visibleByDefault } from "../trafficViewModel.js";
 
 interface MapBounds {
   north: number;
@@ -93,7 +94,7 @@ function timeWindowForPreset(preset: TrafficMapPreset): TrafficTimeWindow {
       return { states: ["active", "planned"] };
     case "now":
     default:
-      return { states: ["active"] };
+      return { states: ["active", "planned"] };
   }
 }
 
@@ -271,10 +272,13 @@ export function TrafficMapPage() {
     () => bounds,
     [bounds?.east, bounds?.north, bounds?.south, bounds?.west],
   );
+  const requestedTrafficStates: TrafficEventState[] = visibleContextLayers.showAll
+    ? ["active", "planned", "expired", "cancelled"]
+    : timeWindow.states;
   const { data, loading, error, reload } = useTrafficMap({
     categories: selectedCategories,
     severities: selectedSeverities,
-    states: timeWindow.states,
+    states: requestedTrafficStates,
     from: timeWindow.from,
     to: timeWindow.to,
     bounds: stableBounds,
@@ -294,7 +298,7 @@ export function TrafficMapPage() {
   });
 
   const publicTransportDisplayData = useMemo(() => {
-    if (!publicTransportData) return undefined;
+    if (!publicTransportVisible || !publicTransportData) return undefined;
     return {
       ...publicTransportData,
       alerts: visibleContextLayers.publicTransportDisruptions ? publicTransportData.alerts : [],
@@ -302,9 +306,30 @@ export function TrafficMapPage() {
     };
   }, [
     publicTransportData,
+    publicTransportVisible,
     visibleContextLayers.publicTransportDisruptions,
     visibleContextLayers.publicTransportVehicles,
   ]);
+
+  const trafficViewModel = useMemo(
+    () =>
+      buildTrafficViewModel({
+        traffic: data,
+        publicTransport: publicTransportDisplayData,
+        showAll: visibleContextLayers.showAll,
+      }),
+    [data, publicTransportDisplayData, visibleContextLayers.showAll],
+  );
+
+  const summaryCardsForDisplay = data
+    ? trafficViewModel.summaryCards
+    : trafficViewModel.summaryCards.map((card) => ({
+        ...card,
+        title: card.id === "updated" ? "Oppdatert" : "Henter",
+        count: 0,
+        detail: error ?? (loading ? "Henter trafikkdata ..." : "Ingen trafikkdata hentet ennå."),
+        severity: "low" as const,
+      }));
 
   const visibleTrafficEvents = useMemo(() => {
     const events = data?.events ?? [];
@@ -322,16 +347,22 @@ export function TrafficMapPage() {
     visibleContextLayers.showAll,
   ]);
 
-  const temporaryRankedEvents = useMemo(
+  const visibleEventIds = useMemo(
+    () => new Set(visibleTrafficEvents.map((event) => event.id)),
+    [visibleTrafficEvents],
+  );
+
+  const selectedEvent = useMemo(
+    () => visibleTrafficEvents.find((event) => event.id === selectedEventId),
+    [visibleTrafficEvents, selectedEventId],
+  );
+
+  const rankedEventsForList = useMemo(
     () =>
-      visibleTrafficEvents.map((event) => ({
-        id: event.id,
-        event,
-        ...compactTrafficEventRow(event, data?.corridorImpacts ?? []),
-        badges: badgesForTrafficEvent(event),
-        score: 0,
-      })),
-    [visibleTrafficEvents, data?.corridorImpacts],
+      trafficViewModel.rankedEvents
+        .filter((row) => visibleEventIds.has(row.id))
+        .map((row) => ({ ...row, ...compactTrafficEventRow(row.event, data?.corridorImpacts ?? []) })),
+    [trafficViewModel.rankedEvents, visibleEventIds, data?.corridorImpacts],
   );
 
   const highlightedEventIds = useMemo(() => {
@@ -419,128 +450,136 @@ export function TrafficMapPage() {
   }
 
   return (
-    <main className="traffic-map-page">
-      <section className="traffic-map-controls" aria-label="Trafikkartvalg">
-        <div className="traffic-map-heading">
-          <p className="label">Trafikkdata fra Statens vegvesen</p>
-          <h1>Trafikkart</h1>
-          <p>Live trafikkhendelser, veiarbeid og påvirkning rundt Trondheim.</p>
-        </div>
-        <TrafficFilterPanel
-          selectedCategories={selectedCategories}
-          selectedSeverities={selectedSeverities}
-          selectedPreset={selectedPreset}
-          visibleContextLayers={visibleContextLayers}
-          onCategoriesChange={handleCategoriesChange}
-          onSeveritiesChange={handleSeveritiesChange}
-          onPresetChange={applyPreset}
-          onContextLayersChange={setVisibleContextLayers}
-        />
-        <form
-          className="route-planner-form"
-          onSubmit={(event) => void handleTravelPlanSubmit(event)}
-        >
-          <div>
-            <label htmlFor="travel-origin">Hvor er du?</label>
-            <input
-              id="travel-origin"
-              value={originInput}
-              onChange={(event) => handleTravelInputChange(event.target.value, setOriginInput)}
-              placeholder="F.eks. Munkegata eller 63.43, 10.39"
-            />
-          </div>
-          <div>
-            <label htmlFor="travel-destination">Hvor skal du?</label>
-            <input
-              id="travel-destination"
-              value={destinationInput}
-              onChange={(event) => handleTravelInputChange(event.target.value, setDestinationInput)}
-              placeholder="F.eks. Leangen"
-            />
-          </div>
-          <button type="submit" disabled={travelPlanLoading}>
-            {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
-          </button>
-        </form>
-      </section>
-      <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
-        <TileLayer attribution="© Kartverket" url={tiles} />
-        <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
-        {data?.events ? (
-          <TrafficLayer
-            events={visibleTrafficEvents}
-            highlightedEventIds={highlightedEventIds}
-            showEstimatedNews={visibleContextLayers.estimatedNews}
-            onSelectEvent={setSelectedEventId}
+    <main className="traffic-page-shell">
+      <TrafficNowSummary cards={summaryCardsForDisplay} />
+
+      <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
+        <div className="traffic-workspace-sidebar">
+          <TrafficFilterPanel
+            selectedCategories={selectedCategories}
+            selectedSeverities={selectedSeverities}
+            selectedPreset={selectedPreset}
+            visibleContextLayers={visibleContextLayers}
+            onCategoriesChange={handleCategoriesChange}
+            onSeveritiesChange={handleSeveritiesChange}
+            onPresetChange={applyPreset}
+            onContextLayersChange={setVisibleContextLayers}
           />
-        ) : null}
-        {data ? (
-          <RoadContextLayer
-            weather={visibleContextLayers.weatherRisk ? data.weather : []}
-            cameras={[]}
-            counters={[]}
-          />
-        ) : null}
-        <PublicTransportLayer
-          payload={publicTransportDisplayData}
-          visible={publicTransportVisible}
-        />
-        <TravelPlanLayer plan={travelPlan} />
-      </MapContainer>
-      <section className="traffic-map-details" aria-label="Trafikkdetaljer">
-        <TravelPlanCard plan={travelPlan} loading={travelPlanLoading} error={travelPlanError} />
-        {data?.brief ? (
-          <TrafficBriefCard
-            brief={data.brief}
-            sources={data.sources}
-            loading={loading}
-            error={error}
-            onReload={reload}
-          />
-        ) : (
-          <section className="traffic-brief-card">
-            <header>
-              <h2>Trafikk akkurat nå</h2>
+          <TrafficLegend />
+          <form
+            className="route-planner-form"
+            onSubmit={(event) => void handleTravelPlanSubmit(event)}
+          >
+            <div>
+              <label htmlFor="travel-origin">Hvor er du?</label>
+              <input
+                id="travel-origin"
+                value={originInput}
+                onChange={(event) => handleTravelInputChange(event.target.value, setOriginInput)}
+                placeholder="F.eks. Munkegata eller 63.43, 10.39"
+              />
+            </div>
+            <div>
+              <label htmlFor="travel-destination">Hvor skal du?</label>
+              <input
+                id="travel-destination"
+                value={destinationInput}
+                onChange={(event) => handleTravelInputChange(event.target.value, setDestinationInput)}
+                placeholder="F.eks. Leangen"
+              />
+            </div>
+            <button type="submit" disabled={travelPlanLoading}>
+              {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
+            </button>
+          </form>
+          {loading || error ? (
+            <section className="traffic-status-card">
+              <h2>Datastatus</h2>
               <button type="button" onClick={reload} disabled={loading}>
                 {loading ? "Oppdaterer ..." : "Oppdater"}
               </button>
-            </header>
-            {error ? (
-              <p role="alert">{error}</p>
-            ) : loading ? (
-              <p>Henter trafikkdata ...</p>
-            ) : (
-              <p>Velg et kartutsnitt eller trykk Oppdater for å hente trafikkdata.</p>
-            )}
-          </section>
-        )}
-        {data?.events ? (
-          <TrafficEventList
-            rankedEvents={temporaryRankedEvents}
-            selectedEventId={selectedEventId}
-            showAll={visibleContextLayers.showAll}
-            onShowAllChange={(showAll) =>
-              setVisibleContextLayers((current) => ({ ...current, showAll }))
-            }
-            onSelectEvent={setSelectedEventId}
-          />
-        ) : null}
-        {visibleContextLayers.publicTransportDisruptions ? (
-          <PublicTransportSummary
-            payload={publicTransportDisplayData}
-            loading={publicTransportLoading}
-            error={publicTransportError}
-            onReload={reloadPublicTransport}
-          />
-        ) : null}
-        {visibleContextLayers.travelTime && data?.corridorImpacts ? (
-          <CorridorImpactCard
-            impacts={data.corridorImpacts}
-            events={visibleTrafficEvents}
-            selectedImpactId={selectedCorridorId}
-            onSelectImpact={setSelectedCorridorId}
-          />
-        ) : null}
+              {error ? <p role="alert">{error}</p> : <p>Henter trafikkdata ...</p>}
+            </section>
+          ) : null}
+        </div>
+        <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
+          <TileLayer attribution="© Kartverket" url={tiles} />
+          <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
+          {data?.events ? (
+            <TrafficLayer
+              events={visibleTrafficEvents}
+              highlightedEventIds={highlightedEventIds}
+              showEstimatedNews={visibleContextLayers.estimatedNews}
+              onSelectEvent={setSelectedEventId}
+            />
+          ) : null}
+          {data ? (
+            <RoadContextLayer
+              weather={visibleContextLayers.weatherRisk ? data.weather : []}
+              cameras={[]}
+              counters={[]}
+            />
+          ) : null}
+          <PublicTransportLayer payload={publicTransportDisplayData} visible={publicTransportVisible} />
+          <TravelPlanLayer plan={travelPlan} />
+        </MapContainer>
+      </section>
+
+      <section className="traffic-bottom-panel" aria-label="Trafikkdetaljer">
+        <div className="traffic-bottom-list">
+          <TravelPlanCard plan={travelPlan} loading={travelPlanLoading} error={travelPlanError} />
+          {!data ? (
+            <section className="traffic-event-list-card">
+              <header>
+                <div>
+                  <h2>Aktive trafikksituasjoner</h2>
+                  <span>0</span>
+                </div>
+                <button type="button" onClick={reload} disabled={loading}>
+                  {loading ? "Oppdaterer ..." : "Oppdater"}
+                </button>
+              </header>
+              {error ? (
+                <p role="alert">{error}</p>
+              ) : loading ? (
+                <p>Henter trafikkdata ...</p>
+              ) : (
+                <p>Venter på første trafikkhenting ...</p>
+              )}
+            </section>
+          ) : (
+            <TrafficEventList
+              rankedEvents={rankedEventsForList}
+              selectedEventId={selectedEventId}
+              showAll={visibleContextLayers.showAll}
+              onShowAllChange={(showAll) =>
+                setVisibleContextLayers((current) => ({ ...current, showAll }))
+              }
+              onSelectEvent={setSelectedEventId}
+            />
+          )}
+          {visibleContextLayers.travelTime && data?.corridorImpacts ? (
+            <CorridorImpactCard
+              impacts={data.corridorImpacts}
+              events={visibleTrafficEvents}
+              selectedImpactId={selectedCorridorId}
+              onSelectImpact={setSelectedCorridorId}
+            />
+          ) : null}
+          {visibleContextLayers.publicTransportDisruptions ? (
+            <PublicTransportSummary
+              payload={publicTransportDisplayData}
+              loading={publicTransportLoading}
+              error={publicTransportError}
+              onReload={reloadPublicTransport}
+            />
+          ) : null}
+        </div>
+        <TrafficDetailDrawer
+          event={selectedEvent}
+          corridorImpacts={data?.corridorImpacts ?? []}
+          onClose={() => setSelectedEventId(undefined)}
+        />
       </section>
     </main>
   );
