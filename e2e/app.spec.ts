@@ -139,6 +139,35 @@ test("article save failure rolls back optimistic state", async ({ page }) => {
 });
 
 test("article save is disabled while a request is pending", async ({ page }) => {
+  let releaseArticleRefresh!: () => void;
+  const articleRefreshMayFinish = new Promise<void>((resolve) => {
+    releaseArticleRefresh = resolve;
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    await articleRefreshMayFinish;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "a-bridge",
+            source: "adressa",
+            sourceLabel: "Adresseavisen",
+            title: "Ny bru over Nidelva åpnet for gående og syklende",
+            excerpt: "Stale refresh while save is pending.",
+            url: "https://www.adressa.no/nyheter/trondheim",
+            publishedAt: "2026-05-26T10:18:00.000Z",
+            scope: "trondheim",
+            category: "Transport",
+            places: ["Midtbyen", "Skansen"],
+            saved: false,
+          },
+        ],
+      }),
+    });
+  });
+
   let releaseSave!: () => void;
   const saveCanFinish = new Promise<void>((resolve) => {
     releaseSave = resolve;
@@ -156,6 +185,11 @@ test("article save is disabled while a request is pending", async ({ page }) => 
   });
   const initialLabel = (await saveButton.getAttribute("aria-label")) ?? "";
   await saveButton.click();
+  const articleRefreshResponse = page.waitForResponse(
+    (response) => response.url().includes("/api/articles?") && response.status() === 200,
+  );
+  releaseArticleRefresh();
+  await articleRefreshResponse;
   const pendingSaveButton = page.getByRole("button", {
     name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
   });

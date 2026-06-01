@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Article, BootstrapPayload } from "@nytt/shared";
 import { api } from "../api.js";
@@ -223,6 +223,8 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
+  const savingArticleIdsRef = useRef<Set<string>>(new Set());
+  const pendingArticleSavedRef = useRef<Map<string, boolean>>(new Map());
   const [saveError, setSaveError] = useState<string>();
 
   function updateFilters(next: Partial<HomeFilters>) {
@@ -240,7 +242,15 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
           .articles({ scope, category, q: query })
           .then((page) => {
             if (!cancelled) {
-              setArticles(page.items);
+              setArticles(() => {
+                const pendingSavedById = pendingArticleSavedRef.current;
+                if (pendingSavedById.size === 0) return page.items;
+                return page.items.map((item) =>
+                  pendingSavedById.has(item.id)
+                    ? { ...item, saved: pendingSavedById.get(item.id) ?? item.saved }
+                    : item,
+                );
+              });
               setNextCursor(page.nextCursor);
             }
           })
@@ -273,10 +283,13 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const secondary = filtered.filter((article) => article.id !== lead?.id);
 
   async function updateSaved(id: string, saved: boolean) {
-    if (savingArticleIds.has(id)) return;
+    if (savingArticleIdsRef.current.has(id)) return;
     const previous = articles.find((item) => item.id === id)?.saved ?? false;
     setSaveError(undefined);
-    setSavingArticleIds((current) => new Set(current).add(id));
+    const pending = new Set(savingArticleIdsRef.current).add(id);
+    savingArticleIdsRef.current = pending;
+    pendingArticleSavedRef.current = new Map(pendingArticleSavedRef.current).set(id, saved);
+    setSavingArticleIds(pending);
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
     try {
       await api.saveArticle(id, saved);
@@ -286,11 +299,13 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
       );
       setSaveError(reason instanceof Error ? reason.message : "Kunne ikke lagre saken");
     } finally {
-      setSavingArticleIds((current) => {
-        const next = new Set(current);
-        next.delete(id);
-        return next;
-      });
+      const next = new Set(savingArticleIdsRef.current);
+      next.delete(id);
+      savingArticleIdsRef.current = next;
+      const pendingSaved = new Map(pendingArticleSavedRef.current);
+      pendingSaved.delete(id);
+      pendingArticleSavedRef.current = pendingSaved;
+      setSavingArticleIds(next);
     }
   }
 
