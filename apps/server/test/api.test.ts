@@ -1069,6 +1069,7 @@ describe("private situation API", () => {
     expect(capturedSql).toContain("FROM public_transport_service_alerts");
     expect(capturedSql).toContain("state = ANY($1::text[])");
     expect(capturedSql).toContain("(valid_to IS NULL OR valid_to >= now())");
+    expect(capturedSql).toContain("(valid_from IS NULL OR valid_from <= now())");
     expect(capturedSql).toContain(
       "(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326)))",
     );

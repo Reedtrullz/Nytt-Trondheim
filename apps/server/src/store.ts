@@ -1043,7 +1043,10 @@ export class PgStore implements Store {
     bounds: NonNullable<Bounds>;
   }): Promise<PublicTransportServiceAlert[]> {
     const params: unknown[] = [];
-    const where = ["(valid_to IS NULL OR valid_to >= now())"];
+    const where = [
+      "(valid_to IS NULL OR valid_to >= now())",
+      "(valid_from IS NULL OR valid_from <= now())",
+    ];
     const states: PublicTransportServiceAlert["state"][] = filters.states?.length
       ? filters.states
       : ["active"];

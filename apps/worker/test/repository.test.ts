@@ -929,6 +929,7 @@ describe("WorkerRepository", () => {
     const sql = String(query.mock.calls[0]?.[0]).replace(/\s+/g, " ").trim();
     expect(alerts[0]?.id).toBe("entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint");
     expect(sql).toContain("(valid_to IS NULL OR valid_to >= now())");
+    expect(sql).toContain("(valid_from IS NULL OR valid_from <= now())");
     expect(sql).toContain("state = ANY($1::text[])");
     expect(sql).toContain(
       "(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326)))",
