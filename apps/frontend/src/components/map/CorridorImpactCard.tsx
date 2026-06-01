@@ -1,4 +1,5 @@
 import type { TrafficCorridorImpact, TrafficMapEvent } from "@nytt/shared";
+import { delaySummary } from "../../trafficViewModel.js";
 
 interface CorridorImpactCardProps {
   impacts: TrafficCorridorImpact[];
@@ -20,21 +21,9 @@ function severityLabel(severity: TrafficCorridorImpact["highestSeverity"]) {
   }
 }
 
-function minutesLabel(seconds: number): string {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `${minutes} min`;
-}
-
-function travelTimeSummary(impact: TrafficCorridorImpact): string | undefined {
-  const travelTime = impact.travelTime;
-  if (!travelTime) return undefined;
-  if (typeof travelTime.delaySeconds === "number" && travelTime.delaySeconds > 0) {
-    return `Forsinkelse ${minutesLabel(travelTime.delaySeconds)} · ${travelTime.state}`;
-  }
-  if (typeof travelTime.travelTimeSeconds === "number") {
-    return `Reisetid ${minutesLabel(travelTime.travelTimeSeconds)}`;
-  }
-  return travelTime.state;
+function delaySeconds(impact: TrafficCorridorImpact): number {
+  const delay = impact.travelTime?.delaySeconds;
+  return typeof delay === "number" && Number.isFinite(delay) ? delay : 0;
 }
 
 export function CorridorImpactCard({
@@ -43,8 +32,9 @@ export function CorridorImpactCard({
   selectedImpactId,
   onSelectImpact,
 }: CorridorImpactCardProps) {
+  const sortedImpacts = [...impacts].sort((left, right) => delaySeconds(right) - delaySeconds(left));
   const selectedImpact = impacts.find((impact) => impact.id === selectedImpactId);
-  const selectedTravelTimeSummary = selectedImpact ? travelTimeSummary(selectedImpact) : undefined;
+  const selectedTravelTimeSummary = selectedImpact ? delaySummary(selectedImpact) : undefined;
   const affectedEvents = selectedImpact
     ? selectedImpact.affectedEventIds
         .map((eventId) => events.find((event) => event.id === eventId))
@@ -54,7 +44,7 @@ export function CorridorImpactCard({
   return (
     <section className="corridor-impact-card">
       <header>
-        <h2>Korridorpåvirkning</h2>
+        <h2>Reisetidskorridorer</h2>
         {selectedImpact ? (
           <button type="button" onClick={() => onSelectImpact(undefined)}>
             Nullstill
@@ -62,8 +52,8 @@ export function CorridorImpactCard({
         ) : null}
       </header>
       <div className="corridor-impact-list">
-        {impacts.map((impact) => {
-          const summary = travelTimeSummary(impact);
+        {sortedImpacts.map((impact) => {
+          const summary = delaySummary(impact);
           return (
             <button
               key={impact.id}
@@ -72,6 +62,7 @@ export function CorridorImpactCard({
               onClick={() => onSelectImpact(impact.id === selectedImpactId ? undefined : impact.id)}
             >
               <span>{impact.name}</span>
+              {impact.travelTime ? <span className="trust-badge">REISETID</span> : null}
               <small>
                 {impact.eventCount} hendelser · {severityLabel(impact.highestSeverity)}
                 {summary ? ` · ${summary}` : ""}
@@ -83,6 +74,7 @@ export function CorridorImpactCard({
       {selectedImpact ? (
         <div className="corridor-impact-events">
           <h3>{selectedImpact.name}</h3>
+          {selectedImpact.travelTime ? <span className="trust-badge">REISETID</span> : null}
           {selectedTravelTimeSummary ? (
             <p className="corridor-impact-travel-time">{selectedTravelTimeSummary}</p>
           ) : null}
