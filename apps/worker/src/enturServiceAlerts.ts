@@ -234,13 +234,11 @@ export async function fetchEnturServiceAlerts({
       description { language value }
       advice { language value }
       validityPeriod { startTime endTime }
-      affects {
-        stopPlaces {
-          id name latitude longitude
-          quays { id name latitude longitude }
-        }
-        lines { id publicCode name }
+      stopPlaces {
+        id name latitude longitude
+        quays { id name latitude longitude }
       }
+      lines { id publicCode name }
       infoLinks { uri label }
     }
   }`;

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   enturServiceAlertSourceItemInput,
+  fetchEnturServiceAlerts,
   parseEnturServiceAlerts,
 } from "../src/enturServiceAlerts.js";
 
@@ -93,5 +94,55 @@ describe("Entur service alerts", () => {
       geoHint: alert.geometry,
     });
     expect(item.rawPayload).toEqual(result.rawAlertsBySituationNumber.get(alert.situationNumber));
+  });
+
+  it("queries Entur service-alert stop places and lines from PtSituationElement fields", async () => {
+    let requestBody = "";
+    const fetcher = (async (_url, init) => {
+      requestBody = String(init?.body ?? "");
+      return new Response(
+        JSON.stringify({
+          data: {
+            situations: [
+              {
+                id: "situation-live-shape",
+                situationNumber: "ATB:SituationNumber:live-shape",
+                creationTime: "2026-05-31T20:00:00Z",
+                summary: [{ language: "no", value: "Live shape" }],
+                stopPlaces: [
+                  {
+                    id: "NSR:StopPlace:1",
+                    name: "Sentrum",
+                    latitude: 63.4305,
+                    longitude: 10.3951,
+                  },
+                ],
+                lines: [{ id: "ATB:Line:2_3", publicCode: "3", name: "Linje 3" }],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await fetchEnturServiceAlerts({
+      endpoint: "https://example.test/graphql",
+      clientName: "nytt-test",
+      codespaceId: "ATB",
+      receivedAt: "2026-05-31T21:15:00.000Z",
+      fetcher,
+    });
+
+    const body = JSON.parse(requestBody) as { query: string };
+    expect(body.query).toContain("stopPlaces {");
+    expect(body.query).toContain("lines {");
+    expect(body.query).not.toMatch(/\baffects\s*\{/);
+    expect(result.alerts[0]).toMatchObject({
+      situationNumber: "ATB:SituationNumber:live-shape",
+      affectedStopNames: ["Sentrum"],
+      affectedLineNames: ["Linje 3"],
+      geometry: { type: "Point", coordinates: [10.3951, 63.4305] },
+    });
   });
 });
