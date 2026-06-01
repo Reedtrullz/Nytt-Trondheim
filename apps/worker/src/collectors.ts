@@ -205,10 +205,10 @@ async function probeDatex(fetcher: typeof fetch): Promise<OfficialProbeResult> {
     };
   }
 
-  const endpoint = normalizeDatexSituationEndpoint(
-    nonEmptyEnv(process.env.DATEX_ENDPOINT) ?? defaultDatexSituationEndpoint,
-  );
   try {
+    const endpoint = normalizeDatexSituationEndpoint(
+      nonEmptyEnv(process.env.DATEX_ENDPOINT) ?? defaultDatexSituationEndpoint,
+    );
     await probeDatexAccess({ endpoint, username, password, fetcher });
     return {
       source: "datex",

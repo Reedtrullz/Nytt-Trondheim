@@ -9,15 +9,29 @@ type DatexObject = Record<string, unknown>;
 export const defaultDatexSituationEndpoint =
   "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=True";
 
-export function normalizeDatexSituationEndpoint(endpoint: string): string {
+const allowedDatexCredentialHosts = new Set(["datex-server-get-v3-1.atlas.vegvesen.no"]);
+
+export function normalizeDatexCredentialedEndpoint(endpoint: string, envName = "DATEX_ENDPOINT"): string {
   const trimmed = endpoint.trim();
+  let url: URL;
   try {
-    const url = new URL(trimmed);
-    url.searchParams.set("srti", "True");
-    return url.toString();
+    url = new URL(trimmed);
   } catch {
-    throw new Error("DATEX_ENDPOINT must be an absolute URL");
+    throw new Error(`${envName} must be an absolute URL`);
   }
+  if (url.protocol !== "https:") throw new Error(`${envName} must use https`);
+  if (url.username || url.password) throw new Error(`${envName} must not include URL credentials`);
+  if (!allowedDatexCredentialHosts.has(url.hostname)) {
+    throw new Error(`${envName} must use an allowed Vegvesen host`);
+  }
+  return url.toString();
+}
+
+export function normalizeDatexSituationEndpoint(endpoint: string): string {
+  const normalized = normalizeDatexCredentialedEndpoint(endpoint, "DATEX_ENDPOINT");
+  const url = new URL(normalized);
+  url.searchParams.set("srti", "True");
+  return url.toString();
 }
 
 function isObject(value: unknown): value is DatexObject {
@@ -85,7 +99,8 @@ export async function probeDatexAccess(options: {
   password: string;
   fetcher?: typeof fetch;
 }): Promise<void> {
-  const response = await (options.fetcher ?? fetch)(options.endpoint, {
+  const endpoint = normalizeDatexSituationEndpoint(options.endpoint);
+  const response = await (options.fetcher ?? fetch)(endpoint, {
     headers: {
       "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
       Authorization: datexBasicAuthHeader(options.username, options.password),
@@ -102,18 +117,19 @@ export async function collectDatexSituationEvents({
   fetcher = fetch,
   now = () => new Date(),
 }: DatexCollectOptions): Promise<DatexCollectResult> {
+  const normalizedEndpoint = normalizeDatexSituationEndpoint(endpoint);
   const headers: Record<string, string> = {
     "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
     Authorization: datexBasicAuthHeader(username, password),
   };
   if (lastModified) headers["If-Modified-Since"] = lastModified;
 
-  const response = await fetcher(endpoint, { headers });
+  const response = await fetcher(normalizedEndpoint, { headers });
   if (response.status === 304) return { events: [], notModified: true, lastModified };
   if (!response.ok) throw new Error(`DATEX returned HTTP ${response.status}`);
 
   const parsed = parseDatexSituationPublication(await response.text(), {
-    endpoint,
+    endpoint: normalizedEndpoint,
     receivedAt: now().toISOString(),
   });
   return {

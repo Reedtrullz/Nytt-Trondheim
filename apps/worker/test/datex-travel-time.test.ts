@@ -13,9 +13,9 @@ import {
 const locationsFixturePath = new URL("./fixtures/datex-travel-time-locations.xml", import.meta.url);
 const dataFixturePath = new URL("./fixtures/datex-travel-time-data.xml", import.meta.url);
 const travelTimeLocationsSourceUrl =
-  "https://datex.example.test/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata";
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata";
 const travelTimeDataSourceUrl =
-  "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata";
+  "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata";
 const expectedTravelTimeAuthorization = "Basic ZGF0ZXgtdXNlcjpkYXRleC1wYXNz";
 const expectedTravelTimeUserAgent = "NyttTrondheim/0.1 kontakt@reidar.tech";
 
@@ -57,7 +57,7 @@ const _trafficPulseCorridorTypeCheck = {
   measurementFrom: "2026-05-28T09:55:00.000Z",
   measurementTo: "2026-05-28T10:00:00.000Z",
   updatedAt: "2026-05-28T10:00:00.000Z",
-  sourceUrl: "https://datex.example.test/datexapi/GetTravelTimeData/pullsnapshotdata",
+  sourceUrl: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata",
 } satisfies TrafficPulseCorridor;
 
 const _sourceHealthTypeCheck = {

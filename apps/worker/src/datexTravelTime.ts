@@ -1,6 +1,6 @@
 import type { TrafficPulseCorridor } from "@nytt/shared";
 import { XMLParser } from "fast-xml-parser";
-import { datexBasicAuthHeader } from "./datex.js";
+import { datexBasicAuthHeader, normalizeDatexCredentialedEndpoint } from "./datex.js";
 
 export const defaultDatexTravelTimeLocationsEndpoint =
   "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata";
@@ -265,6 +265,14 @@ export async function collectDatexTravelTimePulse({
   fetcher = fetch,
   now = () => new Date(),
 }: DatexTravelTimeCollectOptions): Promise<DatexTravelTimeCollectResult> {
+  const normalizedLocationsEndpoint = normalizeDatexCredentialedEndpoint(
+    locationsEndpoint,
+    "DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT",
+  );
+  const normalizedDataEndpoint = normalizeDatexCredentialedEndpoint(
+    dataEndpoint,
+    "DATEX_TRAVEL_TIME_DATA_ENDPOINT",
+  );
   const headers: Record<string, string> = {
     "User-Agent": datexTravelTimeUserAgent,
     Authorization: datexBasicAuthHeader(username, password),
@@ -273,17 +281,17 @@ export async function collectDatexTravelTimePulse({
   const locationsXml = await fetchDatexTravelTimeSnapshot(
     fetcher,
     "locations",
-    locationsEndpoint,
+    normalizedLocationsEndpoint,
     headers,
   );
-  const dataXml = await fetchDatexTravelTimeSnapshot(fetcher, "data", dataEndpoint, headers);
+  const dataXml = await fetchDatexTravelTimeSnapshot(fetcher, "data", normalizedDataEndpoint, headers);
 
   return {
     corridors: trafficPulseFromDatexTravelTime(
       parseDatexTravelTimeLocations(locationsXml),
       parseDatexTravelTimeData(dataXml),
       {
-        sourceUrl: dataEndpoint,
+        sourceUrl: normalizedDataEndpoint,
         receivedAt: now().toISOString(),
       },
     ),

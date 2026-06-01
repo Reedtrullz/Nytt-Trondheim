@@ -25,6 +25,7 @@ import {
   collectDatexSituationEvents,
   datexBasicAuthHeader,
   defaultDatexSituationEndpoint,
+  normalizeDatexCredentialedEndpoint,
   normalizeDatexSituationEndpoint,
 } from "./datex.js";
 import {
@@ -422,14 +423,16 @@ async function fetchDatexText(
   username: string,
   password: string,
   fetcher: typeof fetch,
+  envName = "DATEX_ENDPOINT",
 ): Promise<string> {
-  const response = await fetcher(endpoint, {
+  const normalizedEndpoint = normalizeDatexCredentialedEndpoint(endpoint, envName);
+  const response = await fetcher(normalizedEndpoint, {
     headers: {
       "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
       Authorization: datexBasicAuthHeader(username, password),
     },
   });
-  if (!response.ok) throw new Error(`DATEX returned HTTP ${response.status} for ${endpoint}`);
+  if (!response.ok) throw new Error(`DATEX returned HTTP ${response.status} for ${normalizedEndpoint}`);
   return response.text();
 }
 
@@ -477,8 +480,20 @@ export async function collectDatexRoadWeatherContext({
 
   try {
     const [siteXml, measurementXml] = await Promise.all([
-      fetchDatexText(sitesEndpoint, credentials.username, credentials.password, fetcher),
-      fetchDatexText(measurementsEndpoint, credentials.username, credentials.password, fetcher),
+      fetchDatexText(
+        sitesEndpoint,
+        credentials.username,
+        credentials.password,
+        fetcher,
+        "DATEX_WEATHER_SITES_ENDPOINT",
+      ),
+      fetchDatexText(
+        measurementsEndpoint,
+        credentials.username,
+        credentials.password,
+        fetcher,
+        "DATEX_WEATHER_MEASUREMENTS_ENDPOINT",
+      ),
     ]);
     const observations = parser(siteXml, measurementXml, { receivedAt: checkedAt });
     await repository.upsertRoadWeatherObservations(observations);
@@ -541,8 +556,20 @@ export async function collectDatexCctvContext({
 
   try {
     const [siteXml, statusXml] = await Promise.all([
-      fetchDatexText(sitesEndpoint, credentials.username, credentials.password, fetcher),
-      fetchDatexText(statusEndpoint, credentials.username, credentials.password, fetcher),
+      fetchDatexText(
+        sitesEndpoint,
+        credentials.username,
+        credentials.password,
+        fetcher,
+        "DATEX_CCTV_SITES_ENDPOINT",
+      ),
+      fetchDatexText(
+        statusEndpoint,
+        credentials.username,
+        credentials.password,
+        fetcher,
+        "DATEX_CCTV_STATUS_ENDPOINT",
+      ),
     ]);
     const cameras = parser(siteXml, statusXml, { receivedAt: checkedAt });
     await repository.upsertRoadCameras(cameras);

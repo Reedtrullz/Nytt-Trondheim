@@ -19,6 +19,7 @@ import {
   normalizeDatexSituationEndpoint,
   shouldResolveMissingDatexSituations,
 } from "../src/index.js";
+import { normalizeDatexCredentialedEndpoint } from "../src/datex.js";
 
 function trafficInfoEvent(overrides: Partial<TrafficMapEvent> = {}): TrafficMapEvent {
   return {
@@ -96,19 +97,51 @@ function okXmlResponse(xml: string): Response {
 describe("worker lifecycle helpers", () => {
   it("enforces SRTI on configured DATEX situation endpoints", () => {
     const withoutSrti = normalizeDatexSituationEndpoint(
-      "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata?foo=bar",
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?foo=bar",
     );
     expect(new URL(withoutSrti).searchParams.get("srti")).toBe("True");
     expect(new URL(withoutSrti).searchParams.get("foo")).toBe("bar");
 
     const overriddenSrti = normalizeDatexSituationEndpoint(
-      "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata?srti=false",
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=false",
     );
     expect(new URL(overriddenSrti).searchParams.get("srti")).toBe("True");
   });
 
   it("rejects invalid DATEX situation endpoints", () => {
     expect(() => normalizeDatexSituationEndpoint("not a url")).toThrow(/DATEX_ENDPOINT/);
+  });
+
+  it("rejects non-HTTPS DATEX situation endpoints", () => {
+    expect(() =>
+      normalizeDatexSituationEndpoint(
+        "http://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      ),
+    ).toThrow(/must use https/);
+  });
+
+  it("rejects non-Vegvesen DATEX situation endpoints before credentials are sent", () => {
+    expect(() =>
+      normalizeDatexSituationEndpoint("https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata"),
+    ).toThrow(/must use an allowed Vegvesen host/);
+  });
+
+  it("normalizes only allowed credentialed DATEX override endpoints", () => {
+    expect(
+      normalizeDatexCredentialedEndpoint(
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata",
+        "DATEX_TRAVEL_TIME_DATA_ENDPOINT",
+      ),
+    ).toContain("atlas.vegvesen.no");
+    expect(() =>
+      normalizeDatexCredentialedEndpoint("https://evil.example.test/datex", "DATEX_TRAVEL_TIME_DATA_ENDPOINT"),
+    ).toThrow(/allowed Vegvesen host/);
+    expect(() =>
+      normalizeDatexCredentialedEndpoint(
+        "https://svv:secret@datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata",
+        "DATEX_TRAVEL_TIME_DATA_ENDPOINT",
+      ),
+    ).toThrow(/must not include URL credentials/);
   });
 
   it("resolves missing DATEX situations only after a fresh snapshot", () => {
@@ -262,8 +295,8 @@ describe("DATEX road context collection", () => {
 
     await collectDatexRoadWeatherContext({
       repository: repository as never,
-      sitesEndpoint: "https://datex.example.test/weather-sites",
-      measurementsEndpoint: "https://datex.example.test/weather-measurements",
+      sitesEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-sites",
+      measurementsEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-measurements",
       username: " user ",
       password: " pass ",
       nextPollAt,
@@ -273,8 +306,8 @@ describe("DATEX road context collection", () => {
     });
 
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls[0]?.[0]).toBe("https://datex.example.test/weather-sites");
-    expect(fetcher.mock.calls[1]?.[0]).toBe("https://datex.example.test/weather-measurements");
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://datex-server-get-v3-1.atlas.vegvesen.no/weather-sites");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("https://datex-server-get-v3-1.atlas.vegvesen.no/weather-measurements");
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       headers: expect.objectContaining({
         "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
@@ -305,8 +338,8 @@ describe("DATEX road context collection", () => {
 
     await collectDatexRoadWeatherContext({
       repository: repository as never,
-      sitesEndpoint: "https://datex.example.test/weather-sites",
-      measurementsEndpoint: "https://datex.example.test/weather-measurements",
+      sitesEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-sites",
+      measurementsEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-measurements",
       username: "",
       password: "pass",
       nextPollAt,
@@ -336,8 +369,8 @@ describe("DATEX road context collection", () => {
 
     await collectDatexRoadWeatherContext({
       repository: repository as never,
-      sitesEndpoint: "https://datex.example.test/weather-sites",
-      measurementsEndpoint: "https://datex.example.test/weather-measurements",
+      sitesEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-sites",
+      measurementsEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-measurements",
       username: "user",
       password: "pass",
       nextPollAt,
@@ -379,8 +412,8 @@ describe("DATEX road context collection", () => {
 
     await collectDatexCctvContext({
       repository: repository as never,
-      sitesEndpoint: "https://datex.example.test/cctv-sites",
-      statusEndpoint: "https://datex.example.test/cctv-status",
+      sitesEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/cctv-sites",
+      statusEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/cctv-status",
       username: "user",
       password: "pass",
       nextPollAt,
@@ -411,8 +444,8 @@ describe("DATEX road context collection", () => {
 
     await collectDatexCctvContext({
       repository: repository as never,
-      sitesEndpoint: "https://datex.example.test/cctv-sites",
-      statusEndpoint: "https://datex.example.test/cctv-status",
+      sitesEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/cctv-sites",
+      statusEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/cctv-status",
       username: "user",
       password: " ",
       nextPollAt,
@@ -446,8 +479,8 @@ describe("DATEX road context collection", () => {
 
     await collectDatexCctvContext({
       repository: repository as never,
-      sitesEndpoint: "https://datex.example.test/cctv-sites",
-      statusEndpoint: "https://datex.example.test/cctv-status",
+      sitesEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/cctv-sites",
+      statusEndpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/cctv-status",
       username: "user",
       password: "pass",
       nextPollAt,

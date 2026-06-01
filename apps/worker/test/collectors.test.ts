@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   canonicalUrl,
   collectMunicipality,
@@ -131,7 +131,7 @@ describe("DATEX official source probe", () => {
 
   it("checks the DATEX endpoint with Basic Auth when username and password are configured", async () => {
     process.env.DATEX_ENDPOINT =
-      "https://datex.example.test/datexapi/GetSituation/pullsnapshotdata?srti=false&foo=bar";
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?srti=false&foo=bar";
     process.env.DATEX_USERNAME = "svv-user";
     process.env.DATEX_PASSWORD = "svv-pass";
     let datexUrl: string | undefined;
@@ -156,5 +156,24 @@ describe("DATEX official source probe", () => {
       state: "ok",
       detail: "Tilgang konfigurert og testet mot DATEX GetSituation",
     });
+  });
+
+  it("does not probe disallowed DATEX endpoints with Basic Auth", async () => {
+    process.env.DATEX_ENDPOINT = "https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata";
+    process.env.DATEX_USERNAME = "svv-user";
+    process.env.DATEX_PASSWORD = "svv-pass";
+    const fetcher = vi.fn(async () => new Response("ok", { status: 200 }));
+
+    const statuses = await probeOfficialSources(fetcher);
+
+    const datex = statuses.find((status) => status.source === "datex");
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes("attacker.example.test"))).toBe(
+      false,
+    );
+    expect(datex).toMatchObject({
+      label: "Vegvesen DATEX",
+      state: "degraded",
+    });
+    expect(datex?.detail).toContain("allowed Vegvesen host");
   });
 });
