@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Article, Situation } from "@nytt/shared";
 import { api } from "../api.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
 function time(value: string) {
@@ -59,15 +60,25 @@ export function SavedPage() {
       {articles.length ? (
         <section className="saved-group saved-articles">
           <h2>Saker</h2>
-          {articles.map((article) => (
-            <a key={article.id} href={article.url} target="_blank" rel="noreferrer">
-              <small>
-                {article.sourceLabel} · {time(article.publishedAt)}
-              </small>
-              <strong>{article.title}</strong>
-              <p>{article.excerpt}</p>
-            </a>
-          ))}
+          {articles.map((article) => {
+            const articleUrl = safeExternalUrl(article.url);
+            const content = (
+              <>
+                <small>
+                  {article.sourceLabel} · {time(article.publishedAt)}
+                </small>
+                <strong>{article.title}</strong>
+                <p>{article.excerpt}</p>
+              </>
+            );
+            return articleUrl ? (
+              <a key={article.id} href={articleUrl} target="_blank" rel="noreferrer noopener">
+                {content}
+              </a>
+            ) : (
+              <article key={article.id}>{content}</article>
+            );
+          })}
         </section>
       ) : null}
     </main>

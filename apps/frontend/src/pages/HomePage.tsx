@@ -12,6 +12,7 @@ import {
   type ArticleCategoryFilter,
   type HomeFilters,
 } from "../homeFilters.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
 function formatTime(date: string) {
@@ -101,6 +102,7 @@ function LeadStory({
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
 }) {
+  const articleUrl = safeExternalUrl(article.url);
   return (
     <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
       {article.imageUrl ? <img src={article.imageUrl} alt="" /> : null}
@@ -113,9 +115,11 @@ function LeadStory({
         <p>{article.excerpt}</p>
         <div className="lead-footer">
           <span className={`topic ${article.category.toLowerCase()}`}>{article.category}</span>
-          <a href={article.url} target="_blank" rel="noreferrer">
-            Les mer <ArrowIcon />
-          </a>
+          {articleUrl ? (
+            <a href={articleUrl} target="_blank" rel="noreferrer noopener">
+              Les mer <ArrowIcon />
+            </a>
+          ) : null}
         </div>
       </div>
     </article>
@@ -131,15 +135,20 @@ function NewsRow({
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
 }) {
+  const articleUrl = safeExternalUrl(article.url);
   return (
     <article className="news-row">
       <div>
         <p className="metadata compact">
           {article.sourceLabel.toUpperCase()} · {formatTime(article.publishedAt)}
         </p>
-        <a className="headline" href={article.url} target="_blank" rel="noreferrer">
-          {article.title}
-        </a>
+        {articleUrl ? (
+          <a className="headline" href={articleUrl} target="_blank" rel="noreferrer noopener">
+            {article.title}
+          </a>
+        ) : (
+          <span className="headline">{article.title}</span>
+        )}
         <p className="excerpt">{article.excerpt}</p>
       </div>
       <span className={`topic ${article.category.toLowerCase()}`}>{article.category}</span>
@@ -178,21 +187,33 @@ function NearbyRail({ articles, data }: { articles: Article[]; data: BootstrapPa
             Se alle <ArrowIcon />
           </a>
         </div>
-        {civic.map((article) => (
-          <a
-            className="notice"
-            href={article.url}
-            key={article.id}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <span aria-hidden="true">○</span>
-            <div>
-              <strong>{article.title}</strong>
-              <p>{article.excerpt}</p>
-            </div>
-          </a>
-        ))}
+        {civic.map((article) => {
+          const articleUrl = safeExternalUrl(article.url);
+          const content = (
+            <>
+              <span aria-hidden="true">○</span>
+              <div>
+                <strong>{article.title}</strong>
+                <p>{article.excerpt}</p>
+              </div>
+            </>
+          );
+          return articleUrl ? (
+            <a
+              className="notice"
+              href={articleUrl}
+              key={article.id}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              {content}
+            </a>
+          ) : (
+            <article className="notice" key={article.id}>
+              {content}
+            </article>
+          );
+        })}
       </section>
       <section className="source-status">
         <h2>Kilder</h2>

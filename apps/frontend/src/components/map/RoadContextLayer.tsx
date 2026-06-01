@@ -1,5 +1,6 @@
 import type { RoadCamera, RoadWeatherObservation, TrafficCounterSnapshot } from "@nytt/shared";
 import { CircleMarker, Popup } from "react-leaflet";
+import { safeExternalUrl } from "../../safeExternalUrl.js";
 
 interface RoadContextLayerProps {
   weather?: RoadWeatherObservation[];
@@ -94,6 +95,8 @@ function WeatherPopup({ observation }: { observation: RoadWeatherObservation }) 
 
 function CameraPopup({ camera }: { camera: RoadCamera }) {
   const previewUrl = cameraPreviewUrl(camera.imageUrl);
+  const sourceUrl = safeExternalUrl(camera.sourceUrl);
+  const imageUrl = safeExternalUrl(camera.imageUrl);
   return (
     <Popup>
       <article className="road-context-popup road-context-popup-camera">
@@ -103,12 +106,12 @@ function CameraPopup({ camera }: { camera: RoadCamera }) {
         {previewUrl ? (
           <img src={previewUrl} alt={`Webkamera: ${camera.name}`} loading="lazy" />
         ) : null}
-        {camera.sourceUrl ? (
-          <a href={camera.sourceUrl} target="_blank" rel="noreferrer">
+        {sourceUrl ? (
+          <a href={sourceUrl} target="_blank" rel="noreferrer noopener">
             Åpne kamera
           </a>
-        ) : camera.imageUrl ? (
-          <a href={camera.imageUrl} target="_blank" rel="noreferrer">
+        ) : imageUrl ? (
+          <a href={imageUrl} target="_blank" rel="noreferrer noopener">
             Åpne bilde
           </a>
         ) : null}

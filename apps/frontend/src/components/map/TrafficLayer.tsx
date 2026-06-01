@@ -1,6 +1,7 @@
 import type { Feature, Geometry } from "geojson";
 import type { TrafficEventSeverity, TrafficMapEvent } from "@nytt/shared";
 import { CircleMarker, GeoJSON, Popup } from "react-leaflet";
+import { safeExternalUrl } from "../../safeExternalUrl.js";
 
 interface TrafficLayerProps {
   events: TrafficMapEvent[];
@@ -86,6 +87,7 @@ function sourceLabel(source: TrafficMapEvent["source"]) {
 function TrafficPopup({ event }: { event: TrafficMapEvent }) {
   const validFrom = formatTime(event.validFrom);
   const validTo = formatTime(event.validTo);
+  const sourceUrl = safeExternalUrl(event.sourceUrl);
 
   return (
     <Popup>
@@ -115,19 +117,26 @@ function TrafficPopup({ event }: { event: TrafficMapEvent }) {
           <section className="traffic-popup-related">
             <strong>Relaterte saker</strong>
             <ul>
-              {event.relatedArticles.map((article) => (
-                <li key={article.id}>
-                  <a href={article.url} target="_blank" rel="noreferrer">
-                    {article.title}
-                  </a>{" "}
-                  <small>{article.distanceMeters} m unna</small>
-                </li>
-              ))}
+              {event.relatedArticles.map((article) => {
+                const articleUrl = safeExternalUrl(article.url);
+                return (
+                  <li key={article.id}>
+                    {articleUrl ? (
+                      <a href={articleUrl} target="_blank" rel="noreferrer noopener">
+                        {article.title}
+                      </a>
+                    ) : (
+                      <span>{article.title}</span>
+                    )}{" "}
+                    <small>{article.distanceMeters} m unna</small>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ) : null}
-        {event.sourceUrl ? (
-          <a href={event.sourceUrl} target="_blank" rel="noreferrer">
+        {sourceUrl ? (
+          <a href={sourceUrl} target="_blank" rel="noreferrer noopener">
             Åpne kilde
           </a>
         ) : null}

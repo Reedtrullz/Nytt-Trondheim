@@ -4,6 +4,7 @@ import type { PrivateMapFeatureInput, SituationWorkspace, SourceItem } from "@ny
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
 import { formatSituationTimestamp } from "../situationTime.js";
 
 function formatTime(value: string) {
@@ -13,16 +14,6 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function safeExternalUrl(value?: string) {
-  if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export function SituationPage() {
