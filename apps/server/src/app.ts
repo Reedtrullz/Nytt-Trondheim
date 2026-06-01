@@ -21,7 +21,6 @@ import {
   trafficMapQuerySchema,
   type MapFeature,
   type SourceHealth,
-  type SourceItem,
   type TrafficEventState,
   type TrafficMapEvent,
   type TrafficMapSourceStatus,
@@ -31,10 +30,7 @@ import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from
 import { buildWorkspaceExport, safeFilename } from "./export.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
 import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
-import {
-  officialEventToTrafficMapEvent,
-  sourceItemToTrafficMapEvent,
-} from "./traffic/datex-normalizer.js";
+import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
 import { buildTrafficBrief } from "./traffic/traffic-brief.js";
@@ -186,25 +182,6 @@ function filterTrafficMapEvents(
   });
 }
 
-async function listAllDatexSourceItems(store: Store, login: string): Promise<SourceItem[]> {
-  const items: SourceItem[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-
-  while (true) {
-    const page = await store.listSourceItems({ provider: "datex", limit: 500, cursor }, login);
-    items.push(...page.items);
-    if (!page.nextCursor) break;
-    if (seenCursors.has(page.nextCursor)) {
-      throw new Error("Ugyldig DATEX sidepeker fra lageret.");
-    }
-    seenCursors.add(page.nextCursor);
-    cursor = page.nextCursor;
-  }
-
-  return items;
-}
-
 export interface AppRuntime {
   app: express.Express;
   store: Store;
@@ -310,7 +287,6 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const [
         trafficInfoEvents,
         officialEvents,
-        sourceItems,
         articlesPage,
         sourceHealth,
         trafficPulse,
@@ -331,7 +307,6 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           login,
         ),
         store.listOfficialEvents({ source: "datex" }, login),
-        listAllDatexSourceItems(store, login),
         store.listArticles({ limit: 500 }, login),
         store.listSourceHealth(),
         store.listTrafficPulseCorridors(50),
@@ -349,13 +324,6 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         const trafficEvent = officialEventToTrafficMapEvent(event);
         if (trafficEvent) eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
       }
-      for (const item of sourceItems) {
-        const trafficEvent = sourceItemToTrafficMapEvent(item);
-        if (trafficEvent && !eventsBySourceKey.has(sourceKey(trafficEvent))) {
-          eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
-        }
-      }
-
       const events = filterTrafficMapEvents([...eventsBySourceKey.values()], query).map((event) => {
         const relatedArticles = relatedTrafficArticlesForEvent(event, articlesPage.items);
         return relatedArticles.length > 0 ? { ...event, relatedArticles } : event;

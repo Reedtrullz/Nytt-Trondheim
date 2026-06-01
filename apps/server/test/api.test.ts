@@ -624,6 +624,46 @@ describe("private situation API", () => {
     );
   });
 
+  it("does not fall back from DATEX source_items into active traffic map events", async () => {
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    const listSourceItems = vi.spyOn(store, "listSourceItems").mockResolvedValue({
+      items: [
+        {
+          id: "datex-source-expired",
+          provider: "datex",
+          kind: "official_event",
+          externalId: "expired-accident",
+          title: "Gammel ulykke på E6",
+          summary: "Skal ikke vises som aktiv fordi source_items er ledger, ikke state table.",
+          originalUrl: "https://example.test/datex/expired-accident",
+          publishedAt: "2026-05-28T08:00:00.000Z",
+          fetchedAt: "2026-05-28T08:00:00.000Z",
+          captureHash: "sha256:test-expired-datex-source-item",
+          geoHint: { type: "Point", coordinates: [10.39, 63.39] },
+          reliabilityTier: "official",
+          linkedSituationIds: [],
+        },
+      ],
+    });
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listTrafficPulseCorridors").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadCameras").mockResolvedValue([]);
+    vi.spyOn(store, "listTrafficCounterSnapshots").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get("/api/map/traffic-events?north=63.5&south=63.3&east=10.5&west=10.2")
+      .expect(200);
+
+    expect(response.body.events).toEqual([]);
+    expect(listSourceItems).not.toHaveBeenCalled();
+  });
+
   it("returns road weather and camera context inside traffic map bounds", async () => {
     const { app, store } = await testApp();
     const insideWeather: RoadWeatherObservation = {

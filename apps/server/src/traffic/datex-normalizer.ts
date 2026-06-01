@@ -1,6 +1,5 @@
 import type {
   OfficialEvent,
-  SourceItem,
   TrafficEventCategory,
   TrafficEventSeverity,
   TrafficEventState,
@@ -94,28 +93,5 @@ export function officialEventToTrafficMapEvent(event: OfficialEvent): TrafficMap
     sourceUrl: event.sourceUrl,
     geometry: event.geometry,
     rawType,
-  };
-}
-
-export function sourceItemToTrafficMapEvent(item: SourceItem): TrafficMapEvent | undefined {
-  if (item.provider !== "datex" || !item.geoHint) return undefined;
-
-  const category = categoryFromDatex(item.kind, item.title, item.summary);
-  const severity = severityFromDatex(undefined, category);
-
-  return {
-    id: `datex-source-item:${item.id}`,
-    source: "datex",
-    sourceEventId: item.externalId ?? item.id,
-    category,
-    severity,
-    state: "active",
-    title: item.title ?? "Trafikkhendelse",
-    description: item.summary,
-    validFrom: item.publishedAt,
-    updatedAt: item.fetchedAt,
-    sourceUrl: item.originalUrl,
-    geometry: item.geoHint,
-    rawType: item.kind,
   };
 }
