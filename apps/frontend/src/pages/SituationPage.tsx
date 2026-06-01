@@ -35,6 +35,7 @@ export function SituationPage() {
   const [taskText, setTaskText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [savingSituation, setSavingSituation] = useState(false);
   const [error, setError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
   const [actionMessage, setActionMessage] = useState<string>();
@@ -256,14 +257,20 @@ export function SituationPage() {
   }
 
   async function saveSituation() {
+    if (savingSituation) return;
     const saved = !situation.saved;
-    await performAction(
-      () => api.saveSituation(id, saved),
-      () =>
-        setWorkspace((current) =>
-          current ? { ...current, situation: { ...current.situation, saved } } : current,
-        ),
-    );
+    setSavingSituation(true);
+    try {
+      await performAction(
+        () => api.saveSituation(id, saved),
+        () =>
+          setWorkspace((current) =>
+            current ? { ...current, situation: { ...current.situation, saved } } : current,
+          ),
+      );
+    } finally {
+      setSavingSituation(false);
+    }
   }
 
   async function resolveSituation() {
@@ -372,7 +379,7 @@ export function SituationPage() {
           <strong>Sist oppdatert {formatSituationTimestamp(situation.updatedAt)}</strong>
           <small>Hendelsen startet {formatSituationTimestamp(situation.createdAt)}</small>
           <small>{situation.verificationStatus}</small>
-          <button onClick={() => void saveSituation()}>
+          <button onClick={() => void saveSituation()} disabled={savingSituation}>
             {situation.saved ? "Fjern lagring" : "Lagre situasjon"}
           </button>
           {situation.status !== "resolved" && situation.status !== "dismissed" ? (

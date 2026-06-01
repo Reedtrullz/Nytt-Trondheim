@@ -19,6 +19,18 @@ import type {
 
 let csrfTokenPromise: Promise<string> | undefined;
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly retryAfter?: string;
+
+  constructor(message: string, status: number, retryAfter?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.retryAfter = retryAfter;
+  }
+}
+
 async function csrfToken(): Promise<string> {
   csrfTokenPromise ??= fetch("/api/session", { credentials: "include" }).then(async (response) => {
     if (!response.ok) throw new Error("Innlogging kreves");
@@ -40,13 +52,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
   if (response.status === 401) {
     window.location.href = "/auth/github";
-    throw new Error("Innlogging kreves");
+    throw new ApiError("Innlogging kreves", 401);
   }
   if (!response.ok) {
+    const retryAfter = response.headers.get("Retry-After") ?? undefined;
+    if (response.status === 429) {
+      throw new ApiError("For mange forespørsler. Prøv igjen om litt.", 429, retryAfter);
+    }
     const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
       error?: string;
     };
-    throw new Error(body.error ?? "Forespørselen feilet");
+    throw new ApiError(body.error ?? "Forespørselen feilet", response.status, retryAfter);
   }
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }

@@ -171,7 +171,7 @@ export function TrafficMapPage() {
 
   return (
     <main className="traffic-map-page">
-      <div className="traffic-map-sidebar">
+      <section className="traffic-map-controls" aria-label="Trafikkartvalg">
         <div className="traffic-map-heading">
           <p className="label">Trafikkdata fra Statens vegvesen</p>
           <h1>Trafikkart</h1>
@@ -187,6 +187,26 @@ export function TrafficMapPage() {
           onPresetChange={applyPreset}
           onContextLayersChange={setVisibleContextLayers}
         />
+      </section>
+      <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
+        <TileLayer attribution="© Kartverket" url={tiles} />
+        <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
+        {data?.events ? (
+          <TrafficLayer events={data.events} highlightedEventIds={highlightedEventIds} />
+        ) : null}
+        {data ? (
+          <RoadContextLayer
+            weather={visibleContextLayers.weather ? data.weather : []}
+            cameras={visibleContextLayers.cameras ? data.cameras : []}
+            counters={visibleContextLayers.counters ? data.counters : []}
+          />
+        ) : null}
+        <PublicTransportLayer
+          payload={publicTransportData}
+          visible={visibleContextLayers.publicTransport}
+        />
+      </MapContainer>
+      <section className="traffic-map-details" aria-label="Trafikkdetaljer">
         {data?.brief ? (
           <TrafficBriefCard
             brief={data.brief}
@@ -235,25 +255,7 @@ export function TrafficMapPage() {
             onSelectImpact={setSelectedCorridorId}
           />
         ) : null}
-      </div>
-      <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
-        <TileLayer attribution="© Kartverket" url={tiles} />
-        <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
-        {data?.events ? (
-          <TrafficLayer events={data.events} highlightedEventIds={highlightedEventIds} />
-        ) : null}
-        {data ? (
-          <RoadContextLayer
-            weather={visibleContextLayers.weather ? data.weather : []}
-            cameras={visibleContextLayers.cameras ? data.cameras : []}
-            counters={visibleContextLayers.counters ? data.counters : []}
-          />
-        ) : null}
-        <PublicTransportLayer
-          payload={publicTransportData}
-          visible={visibleContextLayers.publicTransport}
-        />
-      </MapContainer>
+      </section>
     </main>
   );
 }

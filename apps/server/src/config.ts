@@ -13,6 +13,7 @@ export interface AppConfig {
   sessionSecret: string;
   uploadDir: string;
   runtimeStatusDir: string;
+  rateLimitEnabled: boolean;
 }
 
 export function loadConfig(): AppConfig {
@@ -30,5 +31,6 @@ export function loadConfig(): AppConfig {
     sessionSecret: process.env.SESSION_SECRET ?? "development-only-session-secret",
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
+    rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
   };
 }

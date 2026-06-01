@@ -70,4 +70,37 @@ describe("frontend source item API helpers", () => {
       }),
     );
   });
+
+  it("throws a friendly ApiError for 429 responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "server wording should not leak here" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "42" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.bootstrap()).rejects.toMatchObject({
+      name: "ApiError",
+      status: 429,
+      retryAfter: "42",
+      message: "For mange forespørsler. Prøv igjen om litt.",
+    });
+  });
+
+  it("preserves non-429 server errors with status metadata", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "Kilden er midlertidig utilgjengelig." }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.bootstrap()).rejects.toMatchObject({
+      name: "ApiError",
+      status: 503,
+      message: "Kilden er midlertidig utilgjengelig.",
+    });
+  });
 });

@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
+import { loadConfig } from "../src/config.js";
 import { PgStore } from "../src/store.js";
 import type {
   Article,
@@ -52,8 +53,44 @@ async function testApp() {
     sessionSecret: "test-only-secret",
     uploadDir,
     runtimeStatusDir: uploadDir,
+    rateLimitEnabled: true,
   });
   return { ...runtime, uploadDir };
+}
+
+async function testAppWithRateLimit(rateLimitEnabled: boolean) {
+  const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
+  const runtime = await createApp({
+    port: 0,
+    nodeEnv: "development",
+    publicOrigin: "http://localhost",
+    seedDemo: true,
+    devAuthBypass: true,
+    githubAllowedLogin: "Reedtrullz",
+    sessionSecret: "test-only-secret",
+    uploadDir,
+    runtimeStatusDir: uploadDir,
+    rateLimitEnabled,
+  });
+  return { ...runtime, uploadDir };
+}
+
+function withEnvValue<T>(key: string, value: string | undefined, run: () => T): T {
+  const previous = process.env[key];
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = previous;
+    }
+  }
 }
 
 async function ownerAgent() {
@@ -64,6 +101,43 @@ async function ownerAgent() {
 }
 
 describe("private situation API", () => {
+  it("defaults rate limiting on unless RATE_LIMIT_ENABLED explicitly disables it", () => {
+    expect(withEnvValue("RATE_LIMIT_ENABLED", undefined, () => loadConfig().rateLimitEnabled)).toBe(
+      true,
+    );
+    expect(withEnvValue("RATE_LIMIT_ENABLED", "false", () => loadConfig().rateLimitEnabled)).toBe(
+      false,
+    );
+  });
+
+  it("can disable API rate limiting through config", async () => {
+    const { app } = await testAppWithRateLimit(false);
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    for (let attempt = 0; attempt < 130; attempt += 1) {
+      await agent.get("/api/bootstrap").expect(200);
+    }
+  });
+
+  it("enforces API rate limiting when config enables it", async () => {
+    const { app } = await testAppWithRateLimit(true);
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < 130; attempt += 1) {
+      const response = await agent.get("/api/bootstrap");
+      lastStatus = response.status;
+      if (response.status === 429) {
+        expect(response.headers["retry-after"]).toBeTruthy();
+        expect(response.body.error).toContain("For mange forespørsler");
+        return;
+      }
+    }
+    throw new Error(`expected a 429 before loop finished, last status was ${lastStatus}`);
+  });
+
   it("accepts only the configured GitHub owner account", () => {
     expect(
       authorizeGitHubProfile({ username: "someone-else", displayName: "Other" }, "Reedtrullz"),
@@ -87,6 +161,7 @@ describe("private situation API", () => {
       sessionSecret: "test-only-secret",
       uploadDir,
       runtimeStatusDir: uploadDir,
+      rateLimitEnabled: true,
     });
     await request(app).get("/api/bootstrap").expect(401);
   });
@@ -105,6 +180,7 @@ describe("private situation API", () => {
       sessionSecret: "test-only-secret",
       uploadDir,
       runtimeStatusDir: uploadDir,
+      rateLimitEnabled: true,
     });
     const response = await request.agent(app).get("/auth/github").expect(302);
     const target = new URL(response.headers.location as string);

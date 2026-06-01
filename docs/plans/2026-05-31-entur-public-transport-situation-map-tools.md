@@ -192,6 +192,7 @@ Non-goals for this implementation:
 **Objective:** Define API-safe Entur/public-transport contracts before worker/server/frontend implementation.
 
 **Files:**
+
 - Create: `packages/shared/src/public-transport.ts`
 - Modify: `packages/shared/src/types.ts:3-19`
 - Modify: `packages/shared/src/index.ts`
@@ -417,6 +418,7 @@ git commit -m "feat: add Entur public transport shared types"
 **Objective:** Validate public transport map bounds and typed private map-tool metadata at the API boundary.
 
 **Files:**
+
 - Modify: `packages/shared/src/schemas.ts:38-55`
 - Test: `packages/shared/test/public-transport-schemas.test.ts`
 
@@ -430,7 +432,9 @@ import { privateMapFeatureInputSchema, publicTransportMapQuerySchema } from "../
 
 describe("public transport and map tool schemas", () => {
   it("requires complete public transport bounds when any bound is provided", () => {
-    expect(() => publicTransportMapQuerySchema.parse({ north: "63.5" })).toThrow(/north, south, east og west/);
+    expect(() => publicTransportMapQuerySchema.parse({ north: "63.5" })).toThrow(
+      /north, south, east og west/,
+    );
     expect(
       publicTransportMapQuerySchema.parse({
         north: "63.5",
@@ -517,10 +521,18 @@ export const publicTransportMapQuerySchema = z
     }
     if (providedBounds === 0) return;
     if (value.north! < value.south!) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: "north må være større enn eller lik south.", path: ["north"] });
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "north må være større enn eller lik south.",
+        path: ["north"],
+      });
     }
     if (value.east! < value.west!) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: "east må være større enn eller lik west.", path: ["east"] });
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "east må være større enn eller lik west.",
+        path: ["east"],
+      });
     }
   });
 
@@ -541,7 +553,11 @@ const privateMapAnalysisTypeSchema = z.enum([
   "resource_point",
 ]);
 
-const privateMapConfidenceSchema = z.enum(["observed_by_owner", "reported_unverified", "speculative"]);
+const privateMapConfidenceSchema = z.enum([
+  "observed_by_owner",
+  "reported_unverified",
+  "speculative",
+]);
 const privateMapScenarioSchema = z.enum(["general", "fire", "sar", "traffic", "weather"]);
 
 const privateMapMeasurementSchema = z
@@ -594,6 +610,7 @@ git commit -m "feat: validate public transport map and private tool metadata"
 **Objective:** Make Entur client identification explicit and non-secret across local and production runtime configuration.
 
 **Files:**
+
 - Modify: `.env.example`
 - Modify: `docs/SOURCES.md:18-31`
 - Modify: `docs/DEPLOYMENT.md`
@@ -614,17 +631,17 @@ ENTUR_VEHICLE_BOUNDS=63.30,10.20,63.55,10.65
 In `ansible-playbook.yml` environment file block, add:
 
 ```yaml
-          ENTUR_CLIENT_NAME={{ lookup('env', 'NYTT_ENTUR_CLIENT_NAME') | default('reidar-nytt-trondheim', true) }}
-          ENTUR_CODESPACES={{ lookup('env', 'NYTT_ENTUR_CODESPACES') | default('ATB', true) }}
-          ENTUR_VEHICLE_BOUNDS={{ lookup('env', 'NYTT_ENTUR_VEHICLE_BOUNDS') | default('63.30,10.20,63.55,10.65', true) }}
+ENTUR_CLIENT_NAME={{ lookup('env', 'NYTT_ENTUR_CLIENT_NAME') | default('reidar-nytt-trondheim', true) }}
+ENTUR_CODESPACES={{ lookup('env', 'NYTT_ENTUR_CODESPACES') | default('ATB', true) }}
+ENTUR_VEHICLE_BOUNDS={{ lookup('env', 'NYTT_ENTUR_VEHICLE_BOUNDS') | default('63.30,10.20,63.55,10.65', true) }}
 ```
 
 In `.github/workflows/deploy.yml`, add optional variable env entries:
 
 ```yaml
-      NYTT_ENTUR_CLIENT_NAME: ${{ vars.NYTT_ENTUR_CLIENT_NAME }}
-      NYTT_ENTUR_CODESPACES: ${{ vars.NYTT_ENTUR_CODESPACES }}
-      NYTT_ENTUR_VEHICLE_BOUNDS: ${{ vars.NYTT_ENTUR_VEHICLE_BOUNDS }}
+NYTT_ENTUR_CLIENT_NAME: ${{ vars.NYTT_ENTUR_CLIENT_NAME }}
+NYTT_ENTUR_CODESPACES: ${{ vars.NYTT_ENTUR_CODESPACES }}
+NYTT_ENTUR_VEHICLE_BOUNDS: ${{ vars.NYTT_ENTUR_VEHICLE_BOUNDS }}
 ```
 
 Do not add these to the required secrets list; they have safe defaults.
@@ -665,6 +682,7 @@ git commit -m "docs: document Entur public transport configuration"
 **Objective:** Create dedicated PostGIS-backed storage for Entur vehicles and service alerts.
 
 **Files:**
+
 - Modify: `apps/server/src/db/schema.sql:460-490`
 - Test: covered by repository SQL tests in following tasks.
 
@@ -750,6 +768,7 @@ git commit -m "feat: add public transport persistence tables"
 **Objective:** Prove Entur vehicle upsert, bounds read and stale lifecycle before implementation.
 
 **Files:**
+
 - Modify: `apps/worker/test/repository.test.ts`
 - Modify later: `apps/worker/src/repository.ts`
 
@@ -790,7 +809,9 @@ await repository.markMissingPublicTransportVehiclesStale(
   "2026-05-31T21:20:00.000Z",
 );
 expect(String(query.mock.calls.at(-1)?.[0])).toContain("UPDATE public_transport_vehicles");
-expect(String(query.mock.calls.at(-1)?.[0])).toContain("last_seen_at < $3::timestamptz - interval '5 minutes'");
+expect(String(query.mock.calls.at(-1)?.[0])).toContain(
+  "last_seen_at < $3::timestamptz - interval '5 minutes'",
+);
 ```
 
 Add a second stale test with a missing vehicle whose `expires_at` is `NULL` and `last_seen_at` is newer than the five-minute cutoff; expected SQL still runs but fixture/assertion documents that the WHERE clause does not immediately stale open-ended vehicles.
@@ -826,6 +847,7 @@ Continue to Task 6 and commit tests + implementation together.
 **Objective:** Persist/list/stale Entur vehicle rows idempotently.
 
 **Files:**
+
 - Modify: `apps/worker/src/repository.ts`
 - Modify: `apps/worker/test/repository.test.ts`
 - Modify: `apps/server/src/store.ts` (read interface and PgStore read method)
@@ -934,6 +956,7 @@ git commit -m "feat: persist Entur vehicle positions"
 **Objective:** Normalize Entur GraphQL vehicle positions into map-safe vehicle payloads.
 
 **Files:**
+
 - Create: `apps/worker/test/fixtures/entur-vehicles-atb.json`
 - Create: `apps/worker/test/entur-vehicles.test.ts`
 - Modify later: `apps/worker/src/enturVehicles.ts`
@@ -949,7 +972,11 @@ Use a minimal scrubbed fixture based on the verified live response:
       {
         "vehicleId": "8790",
         "mode": "BUS",
-        "line": { "lineRef": "ATB:Line:2_45", "publicCode": "45", "lineName": "Sjetnmarka- Tiller- Tillerringen- Sandmoen" },
+        "line": {
+          "lineRef": "ATB:Line:2_45",
+          "publicCode": "45",
+          "lineName": "Sjetnmarka- Tiller- Tillerringen- Sandmoen"
+        },
         "operator": { "operatorRef": "ATB:Operator:171", "name": "Tide Buss" },
         "originName": "Sandmoen",
         "destinationName": "Hagen",
@@ -1009,7 +1036,14 @@ describe("Entur vehicle positions", () => {
 
   it("skips vehicles with missing id or invalid coordinates", () => {
     const result = parseEnturVehicles(
-      JSON.stringify({ data: { vehicles: [{ vehicleId: "", location: { latitude: 63.4, longitude: 10.4 } }, { vehicleId: "bad", location: { latitude: 200, longitude: 10.4 } }] } }),
+      JSON.stringify({
+        data: {
+          vehicles: [
+            { vehicleId: "", location: { latitude: 63.4, longitude: 10.4 } },
+            { vehicleId: "bad", location: { latitude: 200, longitude: 10.4 } },
+          ],
+        },
+      }),
       { codespaceId: "ATB" },
     );
     expect(result.vehicles).toEqual([]);
@@ -1030,6 +1064,7 @@ Expected: FAIL because `enturVehicles.ts` does not exist.
 **Objective:** Fetch and parse Entur vehicle GraphQL responses through a testable seam.
 
 **Files:**
+
 - Create: `apps/worker/src/enturVehicles.ts`
 - Modify: `apps/worker/test/entur-vehicles.test.ts`
 
@@ -1053,12 +1088,18 @@ export function enturHeaders(clientName: string): Record<string, string> {
 
 function modeFromEntur(value: unknown): PublicTransportVehicleMode {
   switch (String(value ?? "").toUpperCase()) {
-    case "BUS": return "bus";
-    case "TRAM": return "tram";
-    case "RAIL": return "rail";
-    case "WATER": return "water";
-    case "METRO": return "metro";
-    default: return "unknown";
+    case "BUS":
+      return "bus";
+    case "TRAM":
+      return "tram";
+    case "RAIL":
+      return "rail";
+    case "WATER":
+      return "water";
+    case "METRO":
+      return "metro";
+    default:
+      return "unknown";
   }
 }
 
@@ -1072,7 +1113,9 @@ function finite(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function validLatLon(location: { latitude?: unknown; longitude?: unknown } | undefined): { lat: number; lon: number } | undefined {
+function validLatLon(
+  location: { latitude?: unknown; longitude?: unknown } | undefined,
+): { lat: number; lon: number } | undefined {
   const lat = finite(location?.latitude);
   const lon = finite(location?.longitude);
   if (lat === undefined || lon === undefined) return undefined;
@@ -1084,8 +1127,12 @@ export function parseEnturVehicles(
   payload: string,
   options: { codespaceId: string },
 ): { vehicles: PublicTransportVehicle[]; activeVehicleIds: string[] } {
-  const parsed = JSON.parse(payload) as { data?: { vehicles?: Array<Record<string, unknown>> }; errors?: unknown };
-  if (parsed.errors) throw new Error(`Entur vehicle GraphQL returned errors: ${JSON.stringify(parsed.errors)}`);
+  const parsed = JSON.parse(payload) as {
+    data?: { vehicles?: Array<Record<string, unknown>> };
+    errors?: unknown;
+  };
+  if (parsed.errors)
+    throw new Error(`Entur vehicle GraphQL returned errors: ${JSON.stringify(parsed.errors)}`);
   const vehicles: PublicTransportVehicle[] = [];
   for (const item of parsed.data?.vehicles ?? []) {
     const vehicleId = typeof item.vehicleId === "string" ? item.vehicleId.trim() : "";
@@ -1120,9 +1167,11 @@ export function parseEnturVehicles(
       occupancyStatus: typeof item.occupancyStatus === "string" ? item.occupancyStatus : undefined,
       vehicleStatus: typeof item.vehicleStatus === "string" ? item.vehicleStatus : undefined,
       monitored: typeof item.monitored === "boolean" ? item.monitored : undefined,
-      currentStopPointRef: typeof monitoredCall?.stopPointRef === "string" ? monitoredCall.stopPointRef : undefined,
+      currentStopPointRef:
+        typeof monitoredCall?.stopPointRef === "string" ? monitoredCall.stopPointRef : undefined,
       currentStopOrder: finite(monitoredCall?.order),
-      vehicleAtStop: typeof monitoredCall?.vehicleAtStop === "boolean" ? monitoredCall.vehicleAtStop : undefined,
+      vehicleAtStop:
+        typeof monitoredCall?.vehicleAtStop === "boolean" ? monitoredCall.vehicleAtStop : undefined,
       progressPercent: finite(progress?.percentage),
       stale: false,
     });
@@ -1197,6 +1246,7 @@ git commit -m "feat: collect Entur vehicle positions"
 **Objective:** Poll Entur vehicles every 60 seconds without making all other collectors run every minute.
 
 **Files:**
+
 - Modify: `apps/worker/src/index.ts:58-88,701-719`
 - Modify: `apps/worker/test/index.test.ts`
 
@@ -1226,9 +1276,18 @@ it("collects Entur vehicle positions into telemetry only and writes source healt
     collector,
   });
 
-  expect(repository.upsertPublicTransportVehicles).toHaveBeenCalledWith(expect.any(Array), "2026-05-31T21:15:00.000Z");
-  expect(repository.markMissingPublicTransportVehiclesStale).toHaveBeenCalledWith("entur_vehicle_positions", ["8790"], "2026-05-31T21:15:00.000Z");
-  expect(repository.setHealth).toHaveBeenCalledWith(expect.objectContaining({ source: "entur_vehicle_positions", state: "ok" }));
+  expect(repository.upsertPublicTransportVehicles).toHaveBeenCalledWith(
+    expect.any(Array),
+    "2026-05-31T21:15:00.000Z",
+  );
+  expect(repository.markMissingPublicTransportVehiclesStale).toHaveBeenCalledWith(
+    "entur_vehicle_positions",
+    ["8790"],
+    "2026-05-31T21:15:00.000Z",
+  );
+  expect(repository.setHealth).toHaveBeenCalledWith(
+    expect.objectContaining({ source: "entur_vehicle_positions", state: "ok" }),
+  );
 });
 ```
 
@@ -1264,7 +1323,10 @@ export async function collectEnturVehiclesForMap({
   now = () => new Date(),
   collector = fetchEnturVehicles,
 }: {
-  repository: Pick<WorkerRepository, "upsertPublicTransportVehicles" | "markMissingPublicTransportVehiclesStale" | "setHealth">;
+  repository: Pick<
+    WorkerRepository,
+    "upsertPublicTransportVehicles" | "markMissingPublicTransportVehiclesStale" | "setHealth"
+  >;
   clientName: string;
   codespaceId: string;
   bounds: EnturVehicleBounds;
@@ -1310,14 +1372,15 @@ const enturClientName = process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-tr
 const enturCodespaceId = (process.env.ENTUR_CODESPACES?.split(",")[0] ?? "ATB").trim() || "ATB";
 const enturVehicleBounds = enturBoundsFromEnv(process.env.ENTUR_VEHICLE_BOUNDS);
 const enturVehicleIntervalMs = 60 * 1000;
-const guardedEnturVehicles = createCollectionGuard(() =>
-  collectEnturVehiclesForMap({
-    repository,
-    clientName: enturClientName,
-    codespaceId: enturCodespaceId,
-    bounds: enturVehicleBounds,
-    nextPollAt: new Date(Date.now() + enturVehicleIntervalMs).toISOString(),
-  }),
+const guardedEnturVehicles = createCollectionGuard(
+  () =>
+    collectEnturVehiclesForMap({
+      repository,
+      clientName: enturClientName,
+      codespaceId: enturCodespaceId,
+      bounds: enturVehicleBounds,
+      nextPollAt: new Date(Date.now() + enturVehicleIntervalMs).toISOString(),
+    }),
   () => console.warn("[worker] skipping Entur vehicle tick; previous cycle still running"),
 );
 ```
@@ -1346,6 +1409,7 @@ git commit -m "feat: poll Entur vehicles on fast worker interval"
 **Objective:** Normalize Entur Journey Planner situations, preserve raw payload, and classify alerts as official source items without promotion.
 
 **Files:**
+
 - Create: `apps/worker/test/fixtures/entur-service-alerts-atb.json`
 - Create: `apps/worker/test/entur-service-alerts.test.ts`
 - Modify later: `apps/worker/src/enturServiceAlerts.ts`
@@ -1359,14 +1423,20 @@ Use the verified response shape with one moved-stop alert, one multi-stop line a
 ```ts
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { parseEnturServiceAlerts, enturServiceAlertSourceItemInput } from "../src/enturServiceAlerts.js";
+import {
+  parseEnturServiceAlerts,
+  enturServiceAlertSourceItemInput,
+} from "../src/enturServiceAlerts.js";
 
 const fixturePath = new URL("./fixtures/entur-service-alerts-atb.json", import.meta.url);
 
 describe("Entur service alerts", () => {
   it("normalizes service alerts with stable identity and affected stop geometry", async () => {
     const payload = await readFile(fixturePath, "utf8");
-    const result = parseEnturServiceAlerts(payload, { codespaceId: "ATB", receivedAt: "2026-05-31T21:15:00.000Z" });
+    const result = parseEnturServiceAlerts(payload, {
+      codespaceId: "ATB",
+      receivedAt: "2026-05-31T21:15:00.000Z",
+    });
     expect(result.alerts[0]).toMatchObject({
       id: "entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint",
       source: "entur_service_alerts",
@@ -1376,13 +1446,20 @@ describe("Entur service alerts", () => {
       geometry: { type: "Point", coordinates: [10.760832, 63.431348] },
       affectedStopNames: ["Rota"],
     });
-    expect(result.rawAlertsBySituationNumber.get("ATB:SituationNumber:24982-stopPoint")).toBeTruthy();
+    expect(
+      result.rawAlertsBySituationNumber.get("ATB:SituationNumber:24982-stopPoint"),
+    ).toBeTruthy();
   });
 
   it("preserves multiple affected stop coordinates as MultiPoint", async () => {
     const payload = await readFile(fixturePath, "utf8");
-    const result = parseEnturServiceAlerts(payload, { codespaceId: "ATB", receivedAt: "2026-05-31T21:15:00.000Z" });
-    const multiStopAlert = result.alerts.find((alert) => alert.situationNumber === "ATB:SituationNumber:multi-stop-test");
+    const result = parseEnturServiceAlerts(payload, {
+      codespaceId: "ATB",
+      receivedAt: "2026-05-31T21:15:00.000Z",
+    });
+    const multiStopAlert = result.alerts.find(
+      (alert) => alert.situationNumber === "ATB:SituationNumber:multi-stop-test",
+    );
     expect(multiStopAlert?.geometry).toEqual({
       type: "MultiPoint",
       coordinates: [
@@ -1394,7 +1471,10 @@ describe("Entur service alerts", () => {
 
   it("mirrors service alerts to source_items with raw upstream payload", async () => {
     const payload = await readFile(fixturePath, "utf8");
-    const result = parseEnturServiceAlerts(payload, { codespaceId: "ATB", receivedAt: "2026-05-31T21:15:00.000Z" });
+    const result = parseEnturServiceAlerts(payload, {
+      codespaceId: "ATB",
+      receivedAt: "2026-05-31T21:15:00.000Z",
+    });
     const alert = result.alerts[0]!;
     const item = enturServiceAlertSourceItemInput(alert, {
       fetchedAt: "2026-05-31T21:15:00.000Z",
@@ -1427,6 +1507,7 @@ Expected: FAIL because module does not exist.
 **Objective:** Store alert snapshot rows, mirror source items, and expire disappeared alerts only after successful snapshots.
 
 **Files:**
+
 - Create: `apps/worker/src/enturServiceAlerts.ts`
 - Modify: `apps/worker/src/repository.ts`
 - Modify: `apps/worker/src/index.ts`
@@ -1471,7 +1552,14 @@ export function enturServiceAlertSourceItemInput(
     publishedAt: alert.createdAt,
     rawPayload: options.rawAlert,
     normalizedPayload: alert,
-    captureHash: sha256(JSON.stringify(["entur", "official_event", alert.situationNumber, alert.version ?? alert.updatedAt])),
+    captureHash: sha256(
+      JSON.stringify([
+        "entur",
+        "official_event",
+        alert.situationNumber,
+        alert.version ?? alert.updatedAt,
+      ]),
+    ),
     geoHint: alert.geometry,
     reliabilityTier: "official",
   };
@@ -1485,10 +1573,10 @@ Use local `sha256`/`sourceItemId` helpers as done in `vegvesenTrafficInfo.ts`, d
 Add:
 
 ```ts
-upsertPublicTransportServiceAlerts(alerts, fetchedAt)
-upsertEnturServiceAlertSourceItems(items)
-expireMissingPublicTransportServiceAlerts(source, activeSituationNumbers, fetchedAt)
-listPublicTransportServiceAlerts(filters)
+upsertPublicTransportServiceAlerts(alerts, fetchedAt);
+upsertEnturServiceAlertSourceItems(items);
+expireMissingPublicTransportServiceAlerts(source, activeSituationNumbers, fetchedAt);
+listPublicTransportServiceAlerts(filters);
 ```
 
 Implement the source-item mirror helper explicitly because `upsertSourceItem` is private and provider-specific helpers are the public repository seam:
@@ -1514,7 +1602,10 @@ After official source collection and before AI/situation activation, add:
 await collectEnturServiceAlerts({
   repository,
   clientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",
-  codespaceIds: (process.env.ENTUR_CODESPACES ?? "ATB").split(",").map((value) => value.trim()).filter(Boolean),
+  codespaceIds: (process.env.ENTUR_CODESPACES ?? "ATB")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
   nextPollAt,
 });
 ```
@@ -1551,6 +1642,7 @@ git commit -m "feat: ingest Entur service alerts"
 **Objective:** Serve Entur vehicle and alert overlays through Nytt's authenticated API with bounds/mode filtering.
 
 **Files:**
+
 - Modify: `apps/server/src/store.ts`
 - Modify: `apps/server/src/app.ts:10-27,290-367`
 - Modify: `apps/server/test/api.test.ts`
@@ -1589,14 +1681,21 @@ it("returns bounds-filtered public transport vehicles and alerts", async () => {
     },
   ]);
   vi.spyOn(store, "listSourceHealth").mockResolvedValue([
-    { source: "entur_vehicle_positions", label: "Entur kjøretøyposisjoner", state: "ok", detail: "1" },
+    {
+      source: "entur_vehicle_positions",
+      label: "Entur kjøretøyposisjoner",
+      state: "ok",
+      detail: "1",
+    },
     { source: "entur_service_alerts", label: "Entur avvik", state: "ok", detail: "1" },
   ]);
 
   const agent = request.agent(app);
   await agent.get("/api/session").expect(200);
   const response = await agent
-    .get("/api/map/public-transport?modes=bus&includeAlerts=true&north=63.6&south=63.3&east=10.8&west=10.2")
+    .get(
+      "/api/map/public-transport?modes=bus&includeAlerts=true&north=63.6&south=63.3&east=10.8&west=10.2",
+    )
     .expect(200);
 
   expect(response.body.vehicles).toHaveLength(1);
@@ -1633,23 +1732,32 @@ Update both store implementations:
 Add Express route. It must always pass bounds to the store: use explicit query bounds when supplied, otherwise the fixed Trondheim-region fallback matching `ENTUR_VEHICLE_BOUNDS`. This prevents accidental unbounded reads and keeps unlocated alerts out of map results.
 
 ```ts
-const defaultPublicTransportBounds: Bounds = { north: 63.55, south: 63.30, east: 10.65, west: 10.20 };
+const defaultPublicTransportBounds: Bounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
 
 app.get("/api/map/public-transport", async (req, res, next) => {
   try {
     const query = publicTransportMapQuerySchema.parse(req.query);
-    const bounds = typeof query.north === "number" && typeof query.south === "number" && typeof query.east === "number" && typeof query.west === "number"
-      ? { north: query.north, south: query.south, east: query.east, west: query.west }
-      : defaultPublicTransportBounds;
+    const bounds =
+      typeof query.north === "number" &&
+      typeof query.south === "number" &&
+      typeof query.east === "number" &&
+      typeof query.west === "number"
+        ? { north: query.north, south: query.south, east: query.east, west: query.west }
+        : defaultPublicTransportBounds;
     const [vehicles, alerts, sourceHealth] = await Promise.all([
       store.listPublicTransportVehicles({ modes: query.modes, bounds }),
-      query.includeAlerts === false ? Promise.resolve([]) : store.listPublicTransportServiceAlerts({ states: ["active"], bounds }),
+      query.includeAlerts === false
+        ? Promise.resolve([])
+        : store.listPublicTransportServiceAlerts({ states: ["active"], bounds }),
       store.listSourceHealth(),
     ]);
     res.json({
       vehicles,
       alerts,
-      sources: sourceHealth.filter((source) => source.source === "entur_vehicle_positions" || source.source === "entur_service_alerts"),
+      sources: sourceHealth.filter(
+        (source) =>
+          source.source === "entur_vehicle_positions" || source.source === "entur_service_alerts",
+      ),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -1681,6 +1789,7 @@ git commit -m "feat: expose Entur public transport map API"
 **Objective:** Fetch public transport map data with the same abort-safe request pattern as `useTrafficMap`.
 
 **Files:**
+
 - Create: `apps/frontend/src/api/publicTransportMap.ts`
 - Create: `apps/frontend/src/hooks/usePublicTransportMap.ts`
 - Test: pure hook behavior via e2e in later task; typecheck now.
@@ -1702,7 +1811,8 @@ export async function fetchPublicTransportMap(
 ): Promise<PublicTransportMapPayload> {
   const params = new URLSearchParams();
   if (request.modes?.length) params.set("modes", request.modes.join(","));
-  if (request.includeAlerts !== undefined) params.set("includeAlerts", String(request.includeAlerts));
+  if (request.includeAlerts !== undefined)
+    params.set("includeAlerts", String(request.includeAlerts));
   if (request.bounds) {
     params.set("north", String(request.bounds.north));
     params.set("south", String(request.bounds.south));
@@ -1747,6 +1857,7 @@ git commit -m "feat: add public transport map hook"
 **Objective:** Add map toggles and markers for Entur vehicles/service alerts without cluttering road event layers.
 
 **Files:**
+
 - Create: `apps/frontend/src/components/map/PublicTransportLayer.tsx`
 - Modify: `apps/frontend/src/components/map/TrafficFilterPanel.tsx`
 - Modify: `apps/frontend/src/pages/TrafficMapPage.tsx`
@@ -1765,29 +1876,40 @@ test("traffic map can show Entur public transport context", async ({ page }) => 
       contentType: "application/json",
       body: JSON.stringify({
         generatedAt: "2026-05-31T21:15:00.000Z",
-        vehicles: [{
-          id: "entur-vehicle:ATB:8790",
-          source: "entur_vehicle_positions",
-          codespaceId: "ATB",
-          vehicleId: "8790",
-          mode: "bus",
-          publicCode: "45",
-          destinationName: "Hagen",
-          lastUpdated: "2026-05-31T21:02:50.207Z",
-          geometry: { type: "Point", coordinates: [10.4045538, 63.3708205] },
-          stale: false,
-        }],
-        alerts: [{
-          id: "entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint",
-          source: "entur_service_alerts",
-          codespaceId: "ATB",
-          situationNumber: "ATB:SituationNumber:24982-stopPoint",
-          state: "active",
-          summary: "Rota flyttet",
-          updatedAt: "2026-05-31T21:00:00.000Z",
-          geometry: { type: "Point", coordinates: [10.760832, 63.431348] },
-        }],
-        sources: [{ source: "entur_vehicle_positions", label: "Entur kjøretøyposisjoner", state: "ok", detail: "1" }],
+        vehicles: [
+          {
+            id: "entur-vehicle:ATB:8790",
+            source: "entur_vehicle_positions",
+            codespaceId: "ATB",
+            vehicleId: "8790",
+            mode: "bus",
+            publicCode: "45",
+            destinationName: "Hagen",
+            lastUpdated: "2026-05-31T21:02:50.207Z",
+            geometry: { type: "Point", coordinates: [10.4045538, 63.3708205] },
+            stale: false,
+          },
+        ],
+        alerts: [
+          {
+            id: "entur-service-alert:ATB:ATB:SituationNumber:24982-stopPoint",
+            source: "entur_service_alerts",
+            codespaceId: "ATB",
+            situationNumber: "ATB:SituationNumber:24982-stopPoint",
+            state: "active",
+            summary: "Rota flyttet",
+            updatedAt: "2026-05-31T21:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.760832, 63.431348] },
+          },
+        ],
+        sources: [
+          {
+            source: "entur_vehicle_positions",
+            label: "Entur kjøretøyposisjoner",
+            state: "ok",
+            detail: "1",
+          },
+        ],
       }),
     });
   });
@@ -1824,11 +1946,19 @@ function alertPositions(alert: PublicTransportServiceAlert): Array<[number, numb
     return typeof lon === "number" && typeof lat === "number" ? [[lat, lon]] : [];
   }
   return alert.geometry.coordinates.flatMap(([lon, lat]) =>
-    typeof lon === "number" && typeof lat === "number" ? ([[lat, lon]] as Array<[number, number]>) : [],
+    typeof lon === "number" && typeof lat === "number"
+      ? ([[lat, lon]] as Array<[number, number]>)
+      : [],
   );
 }
 
-export function PublicTransportLayer({ payload, visible }: { payload?: PublicTransportMapPayload; visible: boolean }) {
+export function PublicTransportLayer({
+  payload,
+  visible,
+}: {
+  payload?: PublicTransportMapPayload;
+  visible: boolean;
+}) {
   if (!visible || !payload) return null;
   return (
     <>
@@ -1843,16 +1973,30 @@ export function PublicTransportLayer({ payload, visible }: { payload?: PublicTra
             pathOptions={{ color: vehicle.stale ? "#64748b" : "#7c3aed", fillOpacity: 0.8 }}
           >
             <Popup>
-              <strong>{vehicle.publicCode ? `${vehicle.publicCode} → ${vehicle.destinationName ?? "ukjent"}` : vehicle.lineName ?? vehicle.vehicleId}</strong>
-              <span>Entur · oppdatert {new Date(vehicle.lastUpdated).toLocaleTimeString("nb-NO")}</span>
+              <strong>
+                {vehicle.publicCode
+                  ? `${vehicle.publicCode} → ${vehicle.destinationName ?? "ukjent"}`
+                  : (vehicle.lineName ?? vehicle.vehicleId)}
+              </strong>
+              <span>
+                Entur · oppdatert {new Date(vehicle.lastUpdated).toLocaleTimeString("nb-NO")}
+              </span>
             </Popup>
           </CircleMarker>,
         ];
       })}
       {payload.alerts.flatMap((alert) =>
         alertPositions(alert).map((center, index) => (
-          <CircleMarker key={`${alert.id}:${index}`} center={center} radius={8} pathOptions={{ color: "#f97316", fillOpacity: 0.65 }}>
-            <Popup><strong>{alert.summary}</strong><span>Entur avvik</span></Popup>
+          <CircleMarker
+            key={`${alert.id}:${index}`}
+            center={center}
+            radius={8}
+            pathOptions={{ color: "#f97316", fillOpacity: 0.65 }}
+          >
+            <Popup>
+              <strong>{alert.summary}</strong>
+              <span>Entur avvik</span>
+            </Popup>
           </CircleMarker>
         )),
       )}
@@ -1892,6 +2036,7 @@ git commit -m "feat: show Entur public transport on traffic map"
 **Objective:** Let private annotations carry scenario/tool metadata while server-side provenance remains private.
 
 **Files:**
+
 - Modify: `packages/shared/src/types.ts:81-91`
 - Modify: `apps/server/src/app.ts:532-559`
 - Modify: `apps/server/src/store.ts:575-585,1305-1318`
@@ -1969,7 +2114,12 @@ addFeature: (id: string, feature: PrivateMapFeatureInput) =>
 In `MemoryStore.updatePrivateFeature`, keep the existing spread/merge behavior. In `PgStore.updatePrivateFeature`, do not replace the whole properties object with only label/note. Fetch/merge via SQL so existing typed metadata survives label edits:
 
 ```ts
-const patch = { label, note, provenance: "private_annotation", updatedAt: new Date().toISOString() };
+const patch = {
+  label,
+  note,
+  provenance: "private_annotation",
+  updatedAt: new Date().toISOString(),
+};
 const result = await this.pool.query<MapFeature>(
   `UPDATE map_features
    SET properties = properties || $3::jsonb
@@ -2000,6 +2150,7 @@ git commit -m "feat: preserve typed private map analysis metadata"
 **Objective:** Compute distance, area, bearing, radius circles and sector polygons for private map tools with deterministic tests.
 
 **Files:**
+
 - Create: `apps/frontend/src/mapTools/geometry.ts`
 - Create: `apps/frontend/src/mapTools/geometry.test.ts`
 
@@ -2007,12 +2158,29 @@ git commit -m "feat: preserve typed private map analysis metadata"
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { bearingDegrees, circlePolygon, lineDistanceMeters, pointToLineDistanceMeters, polygonAreaSquareMeters, sectorPolygon } from "./geometry.js";
+import {
+  bearingDegrees,
+  circlePolygon,
+  lineDistanceMeters,
+  pointToLineDistanceMeters,
+  polygonAreaSquareMeters,
+  sectorPolygon,
+} from "./geometry.js";
 
 describe("map tool geometry helpers", () => {
   it("measures a line distance in meters", () => {
-    expect(lineDistanceMeters([[10.3951, 63.4305], [10.4051, 63.4305]])).toBeGreaterThan(490);
-    expect(lineDistanceMeters([[10.3951, 63.4305], [10.4051, 63.4305]])).toBeLessThan(510);
+    expect(
+      lineDistanceMeters([
+        [10.3951, 63.4305],
+        [10.4051, 63.4305],
+      ]),
+    ).toBeGreaterThan(490);
+    expect(
+      lineDistanceMeters([
+        [10.3951, 63.4305],
+        [10.4051, 63.4305],
+      ]),
+    ).toBeLessThan(510);
   });
 
   it("calculates bearing from west to east", () => {
@@ -2021,10 +2189,16 @@ describe("map tool geometry helpers", () => {
   });
 
   it("measures distance to the middle of a line segment, not just vertices", () => {
-    const line: Array<[number, number]> = [[10.0, 63.43], [10.8, 63.43]];
+    const line: Array<[number, number]> = [
+      [10.0, 63.43],
+      [10.8, 63.43],
+    ];
     const point: [number, number] = [10.4, 63.431];
     const segmentDistance = pointToLineDistanceMeters(point, line);
-    const vertexDistance = Math.min(lineDistanceMeters([point, line[0]!]), lineDistanceMeters([point, line[1]!]));
+    const vertexDistance = Math.min(
+      lineDistanceMeters([point, line[0]!]),
+      lineDistanceMeters([point, line[1]!]),
+    );
     expect(segmentDistance).toBeLessThan(150);
     expect(vertexDistance).toBeGreaterThan(19_000);
   });
@@ -2076,7 +2250,9 @@ export function distanceMeters(a: LonLat, b: LonLat): number {
 }
 
 export function lineDistanceMeters(coordinates: LonLat[]): number {
-  return coordinates.slice(1).reduce((total, point, index) => total + distanceMeters(coordinates[index]!, point), 0);
+  return coordinates
+    .slice(1)
+    .reduce((total, point, index) => total + distanceMeters(coordinates[index]!, point), 0);
 }
 
 function projectMeters(point: LonLat, origin: LonLat): [number, number] {
@@ -2121,21 +2297,38 @@ function destination(center: LonLat, distance: number, bearing: number): LonLat 
   const brng = toRad(bearing);
   const lat1 = toRad(center[1]);
   const lon1 = toRad(center[0]);
-  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(angularDistance) + Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(brng));
-  const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(angularDistance) * Math.cos(lat1), Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2));
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angularDistance) +
+      Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(brng),
+  );
+  const lon2 =
+    lon1 +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(angularDistance) * Math.cos(lat1),
+      Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2),
+    );
   return [toDeg(lon2), toDeg(lat2)];
 }
 
 export function circlePolygon(center: LonLat, radiusMeters: number, steps = 48): Polygon {
-  const ring = Array.from({ length: steps }, (_, index) => destination(center, radiusMeters, (360 * index) / steps));
+  const ring = Array.from({ length: steps }, (_, index) =>
+    destination(center, radiusMeters, (360 * index) / steps),
+  );
   ring.push(ring[0]!);
   return { type: "Polygon", coordinates: [ring] };
 }
 
-export function sectorPolygon(center: LonLat, radiusMeters: number, startBearing: number, endBearing: number, steps = 16): Polygon {
-  const span = ((endBearing - startBearing + 360) % 360) || 360;
+export function sectorPolygon(
+  center: LonLat,
+  radiusMeters: number,
+  startBearing: number,
+  endBearing: number,
+  steps = 16,
+): Polygon {
+  const span = (endBearing - startBearing + 360) % 360 || 360;
   const ring: LonLat[] = [center];
-  for (let index = 0; index <= steps; index += 1) ring.push(destination(center, radiusMeters, startBearing + (span * index) / steps));
+  for (let index = 0; index <= steps; index += 1)
+    ring.push(destination(center, radiusMeters, startBearing + (span * index) / steps));
   ring.push(center);
   return { type: "Polygon", coordinates: [ring] };
 }
@@ -2144,7 +2337,10 @@ export function polygonAreaSquareMeters(ring: LonLat[]): number {
   const origin: LonLat = ring[0] ?? [0, 0];
   const metersPerDegreeLat = 111_320;
   const metersPerDegreeLon = Math.cos(toRad(origin[1])) * 111_320;
-  const projected: Array<[number, number]> = ring.map(([lon, lat]) => [(lon - origin[0]) * metersPerDegreeLon, (lat - origin[1]) * metersPerDegreeLat]);
+  const projected: Array<[number, number]> = ring.map(([lon, lat]) => [
+    (lon - origin[0]) * metersPerDegreeLon,
+    (lat - origin[1]) * metersPerDegreeLat,
+  ]);
   let sum = 0;
   for (let index = 0; index < projected.length - 1; index += 1) {
     const [x1, y1] = projected[index]!;
@@ -2176,6 +2372,7 @@ git commit -m "feat: add situation map geometry helpers"
 **Objective:** Replace generic point/line/area-only drawing with explicit private tools for forest-fire and SAR analysis.
 
 **Files:**
+
 - Create: `apps/frontend/src/mapTools/presets.ts`
 - Modify: `apps/frontend/src/components/MapViews.tsx:42-283`
 - Modify: `apps/frontend/src/pages/SituationPage.tsx:118-143`
@@ -2228,19 +2425,123 @@ export interface MapToolPreset {
 }
 
 export const mapToolPresets: MapToolPreset[] = [
-  { id: "fire_perimeter", label: "Brannfront", scenario: "fire", geometryMode: "line", defaultConfidence: "reported_unverified", defaultLabel: "Brannfront - privat anslag", styleKey: "fire-front" },
-  { id: "hotspot", label: "Hotspot", scenario: "fire", geometryMode: "point", defaultConfidence: "reported_unverified", defaultLabel: "Mulig hotspot", styleKey: "fire-hotspot" },
-  { id: "smoke_wind_cone", label: "Røyk/vind", scenario: "fire", geometryMode: "sector", defaultConfidence: "speculative", defaultLabel: "Mulig røyk-/vindretning", styleKey: "smoke-cone" },
-  { id: "risk_radius", label: "Risikoring", scenario: "fire", geometryMode: "circle", defaultConfidence: "speculative", defaultLabel: "Mulig risikosone", styleKey: "risk-radius" },
-  { id: "water_access", label: "Vann/tilkomst", scenario: "fire", geometryMode: "point", defaultConfidence: "observed_by_owner", defaultLabel: "Vann/tilkomst", styleKey: "resource" },
-  { id: "evacuation_line", label: "Evakuering/stengt", scenario: "fire", geometryMode: "line", defaultConfidence: "reported_unverified", defaultLabel: "Evakuering/stengt linje", styleKey: "evacuation-line" },
-  { id: "last_known_position", label: "Sist sett", scenario: "sar", geometryMode: "point", defaultConfidence: "reported_unverified", defaultLabel: "Sist sett", styleKey: "last-seen" },
-  { id: "witness_observation", label: "Vitneobs.", scenario: "sar", geometryMode: "point", defaultConfidence: "reported_unverified", defaultLabel: "Vitneobservasjon", styleKey: "witness" },
-  { id: "probable_route", label: "Mulig rute", scenario: "sar", geometryMode: "line", defaultConfidence: "speculative", defaultLabel: "Mulig rute", styleKey: "sar-route" },
-  { id: "search_sector", label: "Søksområde", scenario: "sar", geometryMode: "sector", defaultConfidence: "speculative", defaultLabel: "Søksområde", styleKey: "search-sector" },
-  { id: "search_grid", label: "Søkerute/grid", scenario: "sar", geometryMode: "area", defaultConfidence: "speculative", defaultLabel: "Søkerute/grid", styleKey: "search-grid" },
-  { id: "command_point", label: "KO", scenario: "sar", geometryMode: "point", defaultConfidence: "observed_by_owner", defaultLabel: "KO", styleKey: "command" },
-  { id: "resource_point", label: "Ressurs", scenario: "sar", geometryMode: "point", defaultConfidence: "observed_by_owner", defaultLabel: "Ressurs", styleKey: "resource" },
+  {
+    id: "fire_perimeter",
+    label: "Brannfront",
+    scenario: "fire",
+    geometryMode: "line",
+    defaultConfidence: "reported_unverified",
+    defaultLabel: "Brannfront - privat anslag",
+    styleKey: "fire-front",
+  },
+  {
+    id: "hotspot",
+    label: "Hotspot",
+    scenario: "fire",
+    geometryMode: "point",
+    defaultConfidence: "reported_unverified",
+    defaultLabel: "Mulig hotspot",
+    styleKey: "fire-hotspot",
+  },
+  {
+    id: "smoke_wind_cone",
+    label: "Røyk/vind",
+    scenario: "fire",
+    geometryMode: "sector",
+    defaultConfidence: "speculative",
+    defaultLabel: "Mulig røyk-/vindretning",
+    styleKey: "smoke-cone",
+  },
+  {
+    id: "risk_radius",
+    label: "Risikoring",
+    scenario: "fire",
+    geometryMode: "circle",
+    defaultConfidence: "speculative",
+    defaultLabel: "Mulig risikosone",
+    styleKey: "risk-radius",
+  },
+  {
+    id: "water_access",
+    label: "Vann/tilkomst",
+    scenario: "fire",
+    geometryMode: "point",
+    defaultConfidence: "observed_by_owner",
+    defaultLabel: "Vann/tilkomst",
+    styleKey: "resource",
+  },
+  {
+    id: "evacuation_line",
+    label: "Evakuering/stengt",
+    scenario: "fire",
+    geometryMode: "line",
+    defaultConfidence: "reported_unverified",
+    defaultLabel: "Evakuering/stengt linje",
+    styleKey: "evacuation-line",
+  },
+  {
+    id: "last_known_position",
+    label: "Sist sett",
+    scenario: "sar",
+    geometryMode: "point",
+    defaultConfidence: "reported_unverified",
+    defaultLabel: "Sist sett",
+    styleKey: "last-seen",
+  },
+  {
+    id: "witness_observation",
+    label: "Vitneobs.",
+    scenario: "sar",
+    geometryMode: "point",
+    defaultConfidence: "reported_unverified",
+    defaultLabel: "Vitneobservasjon",
+    styleKey: "witness",
+  },
+  {
+    id: "probable_route",
+    label: "Mulig rute",
+    scenario: "sar",
+    geometryMode: "line",
+    defaultConfidence: "speculative",
+    defaultLabel: "Mulig rute",
+    styleKey: "sar-route",
+  },
+  {
+    id: "search_sector",
+    label: "Søksområde",
+    scenario: "sar",
+    geometryMode: "sector",
+    defaultConfidence: "speculative",
+    defaultLabel: "Søksområde",
+    styleKey: "search-sector",
+  },
+  {
+    id: "search_grid",
+    label: "Søkerute/grid",
+    scenario: "sar",
+    geometryMode: "area",
+    defaultConfidence: "speculative",
+    defaultLabel: "Søkerute/grid",
+    styleKey: "search-grid",
+  },
+  {
+    id: "command_point",
+    label: "KO",
+    scenario: "sar",
+    geometryMode: "point",
+    defaultConfidence: "observed_by_owner",
+    defaultLabel: "KO",
+    styleKey: "command",
+  },
+  {
+    id: "resource_point",
+    label: "Ressurs",
+    scenario: "sar",
+    geometryMode: "point",
+    defaultConfidence: "observed_by_owner",
+    defaultLabel: "Ressurs",
+    styleKey: "resource",
+  },
 ];
 ```
 
@@ -2251,7 +2552,10 @@ Update `onCreateFeature` signature to accept properties metadata:
 ```ts
 onCreateFeature: (
   geometry: MapFeature["geometry"],
-  properties: Pick<MapFeature["properties"], "label" | "note" | "analysisType" | "confidence" | "scenario" | "measurement" | "styleKey">,
+  properties: Pick<
+    MapFeature["properties"],
+    "label" | "note" | "analysisType" | "confidence" | "scenario" | "measurement" | "styleKey"
+  >,
 ) => Promise<void>;
 ```
 
@@ -2286,6 +2590,7 @@ git commit -m "feat: add private fire and SAR map tool presets"
 **Objective:** Let a situation map show nearby Entur vehicles/alerts as optional context without linking them as evidence automatically.
 
 **Files:**
+
 - Modify: `apps/frontend/src/components/MapViews.tsx`
 - Modify: `apps/frontend/src/pages/SituationPage.tsx`
 - Modify: `apps/frontend/src/hooks/usePublicTransportMap.ts`
@@ -2346,6 +2651,7 @@ git commit -m "feat: add Entur context layer to situation maps"
 **Objective:** Make exported workspace GeoJSON/manifest clearly distinguish private speculation from official/provenance evidence.
 
 **Files:**
+
 - Modify: `apps/server/src/export.ts`
 - Modify: `apps/server/test/api.test.ts`
 
@@ -2389,7 +2695,6 @@ git commit -m "feat: label private map analysis in exports"
 
 ---
 
-
 ## Phase 5: Nytt Trondheim trust and usability quality pass
 
 This phase is a focused quality pass over the existing Nytt app shell, home feed, traffic map and server test configuration. It must preserve owner auth, CSRF-protected mutations, source ingestion, provenance rules, situation activation rules, and the Entur/map-tool boundaries introduced above. Treat current untracked files as user-owned and unrelated unless the parent session explicitly says otherwise.
@@ -2408,6 +2713,7 @@ Implementation rules for every task in this phase:
 **Objective:** Let the UI distinguish 429 rate-limit responses from generic failures while preserving the existing 401 redirect.
 
 **Files:**
+
 - Modify: `apps/frontend/src/api.ts:19-51`
 - Modify: `apps/frontend/src/api.test.ts`
 
@@ -2479,20 +2785,20 @@ export class ApiError extends Error {
 Then replace the non-OK handling in `request<T>()` with:
 
 ```ts
-  if (response.status === 401) {
-    window.location.href = "/auth/github";
-    throw new ApiError("Innlogging kreves", 401);
+if (response.status === 401) {
+  window.location.href = "/auth/github";
+  throw new ApiError("Innlogging kreves", 401);
+}
+if (!response.ok) {
+  const retryAfter = response.headers.get("Retry-After") ?? undefined;
+  if (response.status === 429) {
+    throw new ApiError("For mange forespørsler. Prøv igjen om litt.", 429, retryAfter);
   }
-  if (!response.ok) {
-    const retryAfter = response.headers.get("Retry-After") ?? undefined;
-    if (response.status === 429) {
-      throw new ApiError("For mange forespørsler. Prøv igjen om litt.", 429, retryAfter);
-    }
-    const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
-      error?: string;
-    };
-    throw new ApiError(body.error ?? "Forespørselen feilet", response.status, retryAfter);
-  }
+  const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
+    error?: string;
+  };
+  throw new ApiError(body.error ?? "Forespørselen feilet", response.status, retryAfter);
+}
 ```
 
 Do not change any URL, CSRF or credential behavior.
@@ -2517,6 +2823,7 @@ git commit -m "fix: expose frontend API error status"
 **Objective:** Define one tested parser/builder for home search, scope and category query parameters before wiring React state.
 
 **Files:**
+
 - Create: `apps/frontend/src/homeFilters.ts`
 - Create: `apps/frontend/src/homeFilters.test.ts`
 - Modify later in Task 24: `apps/frontend/src/pages/HomePage.tsx`
@@ -2567,9 +2874,7 @@ describe("home filter query params", () => {
     expect(searchSummary({ q: "bru", scope: "trondheim", category: "Alle" })).toBe(
       '"bru" i Trondheim',
     );
-    expect(searchSummary({ q: "", scope: "trondelag", category: "Vær" })).toBe(
-      "Vær i Trøndelag",
-    );
+    expect(searchSummary({ q: "", scope: "trondelag", category: "Vær" })).toBe("Vær i Trøndelag");
   });
 });
 ```
@@ -2663,6 +2968,7 @@ git commit -m "feat: add URL-backed home filter helpers"
 **Objective:** Replace hardcoded `Oppdatert nå` with deterministic text derived from bootstrap `sourceHealth.lastCheckedAt`.
 
 **Files:**
+
 - Create: `apps/frontend/src/freshness.ts`
 - Create: `apps/frontend/src/freshness.test.ts`
 - Modify later in Task 23: `apps/frontend/src/App.tsx`
@@ -2682,8 +2988,20 @@ describe("header freshness label", () => {
     expect(
       headerFreshnessLabel(
         [
-          { source: "nrk", label: "NRK", state: "ok", detail: "RSS", lastCheckedAt: "2026-05-31T12:08:00+02:00" },
-          { source: "adressa", label: "Adresseavisen", state: "ok", detail: "RSS", lastCheckedAt: "2026-05-31T11:40:00+02:00" },
+          {
+            source: "nrk",
+            label: "NRK",
+            state: "ok",
+            detail: "RSS",
+            lastCheckedAt: "2026-05-31T12:08:00+02:00",
+          },
+          {
+            source: "adressa",
+            label: "Adresseavisen",
+            state: "ok",
+            detail: "RSS",
+            lastCheckedAt: "2026-05-31T11:40:00+02:00",
+          },
         ],
         now,
       ),
@@ -2693,16 +3011,24 @@ describe("header freshness label", () => {
   it("shows Sist oppdatert HH:MM when the newest source check is stale", () => {
     expect(
       headerFreshnessLabel(
-        [{ source: "nrk", label: "NRK", state: "ok", detail: "RSS", lastCheckedAt: "2026-05-31T11:59:00+02:00" }],
+        [
+          {
+            source: "nrk",
+            label: "NRK",
+            state: "ok",
+            detail: "RSS",
+            lastCheckedAt: "2026-05-31T11:59:00+02:00",
+          },
+        ],
         now,
       ),
     ).toBe("Sist oppdatert 11:59");
   });
 
   it("shows unknown when no source has a valid lastCheckedAt", () => {
-    expect(headerFreshnessLabel([{ source: "nrk", label: "NRK", state: "disabled", detail: "Av" }], now)).toBe(
-      "Oppdatering ukjent",
-    );
+    expect(
+      headerFreshnessLabel([{ source: "nrk", label: "NRK", state: "disabled", detail: "Av" }], now),
+    ).toBe("Oppdatering ukjent");
   });
 });
 ```
@@ -2763,6 +3089,7 @@ git commit -m "feat: derive header freshness label"
 **Objective:** Make root loading/error states honest and make header search visibly navigate to home results from any route.
 
 **Files:**
+
 - Modify: `apps/frontend/src/App.tsx:1-87`
 - Modify: `apps/frontend/src/styles.css:55-156` for retry/error affordance if needed
 - Modify: `e2e/app.spec.ts`
@@ -2790,7 +3117,9 @@ test("bootstrap 429 shows retryable error without stale loading", async ({ page 
   });
 
   await page.goto("/");
-  await expect(page.getByRole("alert")).toContainText("For mange forespørsler. Prøv igjen om litt.");
+  await expect(page.getByRole("alert")).toContainText(
+    "For mange forespørsler. Prøv igjen om litt.",
+  );
   await expect(page.getByText("Henter siste nytt...")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Prøv igjen" }).click();
@@ -2887,17 +3216,23 @@ export function App() {
 Render states in this order:
 
 ```tsx
-<Header freshnessLabel={freshnessLabel} />
-{loading ? <main className="loading">Henter siste nytt...</main> : null}
-{!loading && error ? (
-  <main className="fatal-error" role="alert">
-    <p>{error}</p>
-    <button type="button" onClick={() => setAttempt((value) => value + 1)}>
-      Prøv igjen
-    </button>
-  </main>
-) : null}
-{!loading && data ? <Routes>...</Routes> : null}
+<Header freshnessLabel={freshnessLabel} />;
+{
+  loading ? <main className="loading">Henter siste nytt...</main> : null;
+}
+{
+  !loading && error ? (
+    <main className="fatal-error" role="alert">
+      <p>{error}</p>
+      <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+        Prøv igjen
+      </button>
+    </main>
+  ) : null;
+}
+{
+  !loading && data ? <Routes>...</Routes> : null;
+}
 ```
 
 Do not catch or suppress the `/auth/github` redirect from Task 20's 401 path.
@@ -2923,6 +3258,7 @@ git commit -m "fix: make bootstrap errors retryable"
 **Objective:** Make header search, scope, category and empty states share the URL; hide active-situation content during text search so filtered results are not dominated by unrelated situations.
 
 **Files:**
+
 - Modify: `apps/frontend/src/pages/HomePage.tsx:1-349`
 - Modify: `apps/frontend/src/styles.css` if a search-active empty state needs spacing
 - Modify: `e2e/app.spec.ts`
@@ -2971,13 +3307,13 @@ In `apps/frontend/src/pages/HomePage.tsx`:
 - Replace local `scope`, `category`, and `query` state with URL-derived values:
 
 ```tsx
-  const [searchParams, setSearchParams] = useSearchParams();
-  const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
-  const { scope, category, q: query } = filters;
+const [searchParams, setSearchParams] = useSearchParams();
+const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
+const { scope, category, q: query } = filters;
 
-  function updateFilters(next: Partial<typeof filters>) {
-    setSearchParams(buildHomeSearch({ ...filters, ...next }));
-  }
+function updateFilters(next: Partial<typeof filters>) {
+  setSearchParams(buildHomeSearch({ ...filters, ...next }));
+}
 ```
 
 React Router accepts the leading `?` string from `buildHomeSearch`; if TypeScript rejects it, pass `buildHomeSearch(...).replace(/^\?/, "")` instead and add that exact expression to the plan implementation notes.
@@ -3004,7 +3340,7 @@ In `HomePage`:
 Inside `NearbyRail`, derive the municipality list from `articles` instead of `data.articles`:
 
 ```tsx
-  const civic = articles.filter((article) => article.source === "trondheim_kommune").slice(0, 2);
+const civic = articles.filter((article) => article.source === "trondheim_kommune").slice(0, 2);
 ```
 
 This prevents stale unrelated side-rail cards from dominating text-search result views while preserving source-health context.
@@ -3044,6 +3380,7 @@ git commit -m "feat: back home search with URL filters"
 **Objective:** Keep optimistic article save feedback, but rollback failed saves, show a visible error, and block repeated clicks for the same article while a request is in flight.
 
 **Files:**
+
 - Modify: `apps/frontend/src/pages/HomePage.tsx`
 - Modify: `apps/frontend/src/styles.css` for `.save-error` / disabled save styling if needed
 - Modify: `e2e/app.spec.ts`
@@ -3093,7 +3430,9 @@ test("article save is disabled while a request is pending", async ({ page }) => 
   await pendingSaveButton.click({ force: true }).catch(() => undefined);
   releaseSave();
 
-  await expect(page.getByRole("button", { name: /Fjern fra lagret: Ny bru over Nidelva/ })).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: /Fjern fra lagret: Ny bru over Nidelva/ }),
+  ).toBeEnabled();
   expect(calls).toBe(1);
 });
 ```
@@ -3113,8 +3452,8 @@ Expected: FAIL because save buttons do not include article names, failed saves a
 In `HomePage` add state:
 
 ```tsx
-  const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
-  const [saveError, setSaveError] = useState<string>();
+const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
+const [saveError, setSaveError] = useState<string>();
 ```
 
 Change `SaveButton` props to include `saving` and `onUpdate` as an async callback:
@@ -3145,27 +3484,27 @@ function SaveButton({
 Implement rollback in `HomePage`:
 
 ```tsx
-  async function updateSaved(id: string, saved: boolean) {
-    if (savingArticleIds.has(id)) return;
-    const previous = articles.find((item) => item.id === id)?.saved ?? false;
-    setSaveError(undefined);
-    setSavingArticleIds((current) => new Set(current).add(id));
-    setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
-    try {
-      await api.saveArticle(id, saved);
-    } catch (reason) {
-      setArticles((items) =>
-        items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
-      );
-      setSaveError(reason instanceof Error ? reason.message : "Kunne ikke lagre saken");
-    } finally {
-      setSavingArticleIds((current) => {
-        const next = new Set(current);
-        next.delete(id);
-        return next;
-      });
-    }
+async function updateSaved(id: string, saved: boolean) {
+  if (savingArticleIds.has(id)) return;
+  const previous = articles.find((item) => item.id === id)?.saved ?? false;
+  setSaveError(undefined);
+  setSavingArticleIds((current) => new Set(current).add(id));
+  setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
+  try {
+    await api.saveArticle(id, saved);
+  } catch (reason) {
+    setArticles((items) =>
+      items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
+    );
+    setSaveError(reason instanceof Error ? reason.message : "Kunne ikke lagre saken");
+  } finally {
+    setSavingArticleIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
   }
+}
 ```
 
 Pass `saving={savingArticleIds.has(article.id)}` from `LeadStory` and `NewsRow`. If `LeadStory`/`NewsRow` currently only accept `onSave`, add `savingArticleIds` or a `saving` boolean prop at each call site rather than creating global state.
@@ -3173,7 +3512,13 @@ Pass `saving={savingArticleIds.has(article.id)}` from `LeadStory` and `NewsRow`.
 Render the visible error above the list:
 
 ```tsx
-{saveError ? <p className="feed-state error" role="alert">{saveError}</p> : null}
+{
+  saveError ? (
+    <p className="feed-state error" role="alert">
+      {saveError}
+    </p>
+  ) : null;
+}
 ```
 
 **Step 4: Run tests to verify GREEN**
@@ -3196,6 +3541,7 @@ git commit -m "fix: rollback failed article saves"
 **Objective:** Keep the existing situation action-error pattern, but prevent repeated rapid save clicks from creating duplicate save/delete requests.
 
 **Files:**
+
 - Modify: `apps/frontend/src/pages/SituationPage.tsx:37-41,257-266,372-376`
 - Modify: `e2e/app.spec.ts`
 
@@ -3204,7 +3550,9 @@ git commit -m "fix: rollback failed article saves"
 Add to `e2e/app.spec.ts`:
 
 ```ts
-test("situation save failure stays visible and blocks duplicate clicks while pending", async ({ page }) => {
+test("situation save failure stays visible and blocks duplicate clicks while pending", async ({
+  page,
+}) => {
   let releaseSave!: () => void;
   const saveRequestSeen = new Promise<void>((resolve) => {
     releaseSave = resolve;
@@ -3245,28 +3593,28 @@ Expected: FAIL because the save button is not disabled while the save request is
 In `SituationPage` add:
 
 ```tsx
-  const [savingSituation, setSavingSituation] = useState(false);
+const [savingSituation, setSavingSituation] = useState(false);
 ```
 
 Replace `saveSituation()` with:
 
 ```tsx
-  async function saveSituation() {
-    if (savingSituation) return;
-    const saved = !situation.saved;
-    setSavingSituation(true);
-    try {
-      await performAction(
-        () => api.saveSituation(id, saved),
-        () =>
-          setWorkspace((current) =>
-            current ? { ...current, situation: { ...current.situation, saved } } : current,
-          ),
-      );
-    } finally {
-      setSavingSituation(false);
-    }
+async function saveSituation() {
+  if (savingSituation) return;
+  const saved = !situation.saved;
+  setSavingSituation(true);
+  try {
+    await performAction(
+      () => api.saveSituation(id, saved),
+      () =>
+        setWorkspace((current) =>
+          current ? { ...current, situation: { ...current.situation, saved } } : current,
+        ),
+    );
+  } finally {
+    setSavingSituation(false);
   }
+}
 ```
 
 Change the button:
@@ -3299,6 +3647,7 @@ git commit -m "fix: guard situation save requests"
 **Objective:** On mobile `/trafikk`, show title/context and preset/filter controls before the map, then show the large map, then brief/events/corridor details; keep desktop split layout.
 
 **Files:**
+
 - Modify: `apps/frontend/src/pages/TrafficMapPage.tsx:155-228`
 - Modify: `apps/frontend/src/styles.css:1490-1524,1867-2033`
 - Modify: `e2e/app.spec.ts`
@@ -3319,9 +3668,9 @@ test("mobile traffic page shows heading and controls before the map", async ({ p
   const headingBox = await heading.boundingBox();
   const mapBox = await page.locator(".traffic-map").boundingBox();
   expect(headingBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(
-    true,
-  );
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
 });
 ```
 
@@ -3457,6 +3806,7 @@ git commit -m "fix: improve mobile traffic map flow"
 **Objective:** Disable or relax API rate limiting in Playwright/dev test environments through config plumbing while keeping production behavior unchanged.
 
 **Files:**
+
 - Modify: `apps/server/src/config.ts:3-16,18-34`
 - Modify: `apps/server/src/app.ts:96-128,208-220`
 - Modify: `apps/server/test/api.test.ts`
@@ -3558,7 +3908,7 @@ Expected: FAIL because `AppConfig` does not include `rateLimitEnabled`, `loadCon
 In `apps/server/src/config.ts`, add to `AppConfig`:
 
 ```ts
-  rateLimitEnabled: boolean;
+rateLimitEnabled: boolean;
 ```
 
 In `loadConfig()` return:
@@ -3570,9 +3920,9 @@ In `loadConfig()` return:
 In `apps/server/src/app.ts`, install the middleware conditionally:
 
 ```ts
-  if (config.rateLimitEnabled) {
-    app.use(createRateLimiter());
-  }
+if (config.rateLimitEnabled) {
+  app.use(createRateLimiter());
+}
 ```
 
 Do not read `process.env` inside `createRateLimiter()` or route handlers. The middleware should only know whether it was installed.
@@ -3662,6 +4012,7 @@ Only commit if this task changes files. Do not use `git add -A` here: the reposi
 **Objective:** Prevent “data exists” from being confused with correct provenance separation.
 
 **Files:**
+
 - Modify: `docs/DEPLOYMENT.md`
 - Modify: `ansible-playbook.yml` deployment validation block if present near existing source-health checks.
 

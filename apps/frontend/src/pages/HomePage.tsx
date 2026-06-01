@@ -1,20 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import type { Article, BootstrapPayload, GeographicScope } from "@nytt/shared";
+import { Link, useSearchParams } from "react-router-dom";
+import type { Article, BootstrapPayload } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
 import { NewsMap } from "../components/MapViews.js";
+import {
+  articleCategories,
+  buildHomeSearch,
+  parseHomeFilters,
+  searchSummary,
+  type ArticleCategoryFilter,
+  type HomeFilters,
+} from "../homeFilters.js";
 import { situationTimeMeta } from "../situationTime.js";
-
-const categories = [
-  "Alle",
-  "Nyheter",
-  "Hendelser",
-  "Byutvikling",
-  "Kultur",
-  "Transport",
-  "Politikk",
-];
 
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("nb-NO", { hour: "2-digit", minute: "2-digit" }).format(
@@ -24,20 +22,19 @@ function formatTime(date: string) {
 
 function SaveButton({
   article,
+  saving,
   onUpdate,
 }: {
   article: Article;
-  onUpdate: (id: string, saved: boolean) => void;
+  saving: boolean;
+  onUpdate: (id: string, saved: boolean) => Promise<void>;
 }) {
   return (
     <button
       className="save"
-      aria-label={article.saved ? "Fjern fra lagret" : "Lagre sak"}
-      onClick={() => {
-        const saved = !article.saved;
-        onUpdate(article.id, saved);
-        void api.saveArticle(article.id, saved);
-      }}
+      aria-label={`${article.saved ? "Fjern fra lagret" : "Lagre sak"}: ${article.title}`}
+      disabled={saving}
+      onClick={() => void onUpdate(article.id, !article.saved)}
     >
       <BookmarkIcon selected={article.saved} />
     </button>
@@ -97,10 +94,12 @@ function SituationBanner({
 
 function LeadStory({
   article,
+  saving,
   onSave,
 }: {
   article: Article;
-  onSave: (id: string, saved: boolean) => void;
+  saving: boolean;
+  onSave: (id: string, saved: boolean) => Promise<void>;
 }) {
   return (
     <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
@@ -109,7 +108,7 @@ function LeadStory({
         <div className="metadata">
           {article.sourceLabel} · {formatTime(article.publishedAt)}
         </div>
-        <SaveButton article={article} onUpdate={onSave} />
+        <SaveButton article={article} saving={saving} onUpdate={onSave} />
         <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
         <div className="lead-footer">
@@ -125,10 +124,12 @@ function LeadStory({
 
 function NewsRow({
   article,
+  saving,
   onSave,
 }: {
   article: Article;
-  onSave: (id: string, saved: boolean) => void;
+  saving: boolean;
+  onSave: (id: string, saved: boolean) => Promise<void>;
 }) {
   return (
     <article className="news-row">
@@ -142,16 +143,14 @@ function NewsRow({
         <p className="excerpt">{article.excerpt}</p>
       </div>
       <span className={`topic ${article.category.toLowerCase()}`}>{article.category}</span>
-      <SaveButton article={article} onUpdate={onSave} />
+      <SaveButton article={article} saving={saving} onUpdate={onSave} />
     </article>
   );
 }
 
 function NearbyRail({ articles, data }: { articles: Article[]; data: BootstrapPayload }) {
   const located = articles.filter((article) => article.location).slice(0, 3);
-  const civic = data.articles
-    .filter((article) => article.source === "trondheim_kommune")
-    .slice(0, 2);
+  const civic = articles.filter((article) => article.source === "trondheim_kommune").slice(0, 2);
   return (
     <aside className="home-rail">
       <section>
@@ -209,22 +208,26 @@ function NearbyRail({ articles, data }: { articles: Article[]; data: BootstrapPa
   );
 }
 
+function searchParamsFor(filters: HomeFilters) {
+  return buildHomeSearch(filters).replace(/^\?/, "");
+}
+
 export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
-  const [scope, setScope] = useState<GeographicScope>("trondheim");
-  const [category, setCategory] = useState("Alle");
-  const [query, setQuery] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
+  const { scope, category, q: query } = filters;
   const [articles, setArticles] = useState(initialData.articles);
   const [nextCursor, setNextCursor] = useState<string>();
   const [situations, setSituations] = useState<BootstrapPayload["situations"]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
+  const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
+  const [saveError, setSaveError] = useState<string>();
 
-  useEffect(() => {
-    const onSearch = (event: Event) => setQuery((event as CustomEvent<string>).detail);
-    window.addEventListener("nytt-search", onSearch);
-    return () => window.removeEventListener("nytt-search", onSearch);
-  }, []);
+  function updateFilters(next: Partial<HomeFilters>) {
+    setSearchParams(searchParamsFor({ ...filters, ...next }));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -264,12 +267,31 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   }, [initialData.situations]);
 
   const filtered = useMemo(() => articles, [articles]);
+  const isTextSearch = query.trim().length > 0;
 
   const lead = filtered[0];
   const secondary = filtered.filter((article) => article.id !== lead?.id);
 
-  function updateSaved(id: string, saved: boolean) {
+  async function updateSaved(id: string, saved: boolean) {
+    if (savingArticleIds.has(id)) return;
+    const previous = articles.find((item) => item.id === id)?.saved ?? false;
+    setSaveError(undefined);
+    setSavingArticleIds((current) => new Set(current).add(id));
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
+    try {
+      await api.saveArticle(id, saved);
+    } catch (reason) {
+      setArticles((items) =>
+        items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
+      );
+      setSaveError(reason instanceof Error ? reason.message : "Kunne ikke lagre saken");
+    } finally {
+      setSavingArticleIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
   }
 
   async function loadMore() {
@@ -296,44 +318,56 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
         <div className="scope-switch" aria-label="Geografisk visning">
           <button
             className={scope === "trondheim" ? "selected" : ""}
-            onClick={() => setScope("trondheim")}
+            onClick={() => updateFilters({ scope: "trondheim" })}
           >
             Trondheim
           </button>
           <button
             className={scope === "trondelag" ? "selected" : ""}
-            onClick={() => setScope("trondelag")}
+            onClick={() => updateFilters({ scope: "trondelag" })}
           >
             Trøndelag
           </button>
         </div>
         <div className="filters" aria-label="Filtrer saker">
-          {categories.map((item) => (
+          {articleCategories.map((item: ArticleCategoryFilter) => (
             <button
               className={category === item ? "selected" : ""}
               key={item}
-              onClick={() => setCategory(item)}
+              onClick={() => updateFilters({ category: item })}
             >
               {item}
             </button>
           ))}
         </div>
       </div>
-      <SituationBanner situations={situations} />
+      {!isTextSearch ? <SituationBanner situations={situations} /> : null}
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
           {feedError ? (
             <p className="feed-state error">Kunne ikke hente saker: {feedError}</p>
           ) : null}
+          {saveError ? (
+            <p className="feed-state error" role="alert">
+              {saveError}
+            </p>
+          ) : null}
           {loading ? <p className="feed-state">Oppdaterer saker...</p> : null}
-          {lead ? <LeadStory article={lead} onSave={updateSaved} /> : null}
+          {lead ? (
+            <LeadStory article={lead} saving={savingArticleIds.has(lead.id)} onSave={updateSaved} />
+          ) : null}
           {!loading && !lead ? (
-            <p className="feed-state">Ingen saker samsvarer med filteret.</p>
+            <p className="feed-state">Ingen saker samsvarer med {searchSummary(filters)}.</p>
           ) : null}
           <div className="news-list">
             {secondary.map((article) => (
-              <NewsRow key={article.id} article={article} onSave={updateSaved} />
+              <NewsRow
+                key={article.id}
+                article={article}
+                saving={savingArticleIds.has(article.id)}
+                onSave={updateSaved}
+              />
             ))}
           </div>
           {nextCursor ? (
@@ -342,7 +376,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
             </button>
           ) : null}
         </section>
-        <NearbyRail articles={initialData.articles} data={initialData} />
+        <NearbyRail articles={filtered} data={initialData} />
       </div>
     </main>
   );

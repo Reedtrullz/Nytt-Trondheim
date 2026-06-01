@@ -72,6 +72,152 @@ test("traffic map can show Entur public transport context", async ({ page }) => 
   await expect(page.getByText("Rota flyttet")).toBeVisible();
 });
 
+test("bootstrap 429 shows retryable error without stale loading", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/api/bootstrap", async (route) => {
+    attempts += 1;
+    if (attempts <= 2) {
+      await route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        headers: { "Retry-After": "30" },
+        body: JSON.stringify({ error: "Too many requests" }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toContainText(
+    "For mange forespørsler. Prøv igjen om litt.",
+  );
+  await expect(page.getByText("Henter siste nytt...")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Prøv igjen" }).click();
+  await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+});
+
+test("searching from trafikk navigates home and shows filtered results", async ({ page }) => {
+  await page.goto("/trafikk");
+  await page.getByPlaceholder("Søk i saker").fill("bru");
+
+  await expect(page).toHaveURL(/\/\?q=bru$/);
+  await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Ny bru over Nidelva/ })).toBeVisible();
+  await expect(page.locator(".situation-banner")).toHaveCount(0);
+});
+
+test("home filter URL shows Vær empty state with active filter context", async ({ page }) => {
+  await page.goto("/?q=bru&category=V%C3%A6r&scope=trondelag");
+
+  await expect(page.getByRole("button", { name: "Vær" })).toHaveClass(/selected/);
+  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trøndelag.')).toBeVisible();
+});
+
+test("article save failure rolls back optimistic state", async ({ page }) => {
+  await page.route("**/api/saved/articles/a-bridge", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Lagring er midlertidig utilgjengelig." }),
+    });
+  });
+
+  await page.goto("/?q=bru");
+  const saveButton = page.getByRole("button", {
+    name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
+  });
+  const initialLabel = await saveButton.getAttribute("aria-label");
+  await expect(saveButton).toBeEnabled();
+
+  await saveButton.click();
+  await expect(page.getByRole("alert")).toContainText("Lagring er midlertidig utilgjengelig.");
+  await expect(
+    page.getByRole("button", { name: initialLabel ?? /Ny bru over Nidelva/ }),
+  ).toBeEnabled();
+});
+
+test("article save is disabled while a request is pending", async ({ page }) => {
+  let releaseSave!: () => void;
+  const saveCanFinish = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  let calls = 0;
+  await page.route("**/api/saved/articles/a-bridge", async (route) => {
+    calls += 1;
+    await saveCanFinish;
+    await route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/?q=bru");
+  const saveButton = page.getByRole("button", {
+    name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
+  });
+  const initialLabel = (await saveButton.getAttribute("aria-label")) ?? "";
+  await saveButton.click();
+  const pendingSaveButton = page.getByRole("button", {
+    name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
+  });
+  await expect(pendingSaveButton).toBeDisabled();
+  await pendingSaveButton.click({ force: true }).catch(() => undefined);
+  releaseSave();
+
+  const expectedLabel = initialLabel.startsWith("Fjern fra lagret")
+    ? /Lagre sak: Ny bru over Nidelva/
+    : /Fjern fra lagret: Ny bru over Nidelva/;
+  await expect(page.getByRole("button", { name: expectedLabel })).toBeEnabled();
+  expect(calls).toBe(1);
+});
+
+test("situation save failure stays visible and blocks duplicate clicks while pending", async ({
+  page,
+}) => {
+  let releaseSave!: () => void;
+  const saveRequestSeen = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  let calls = 0;
+  await page.route("**/api/situations/skogbrann-bymarka/saved", async (route) => {
+    calls += 1;
+    await saveRequestSeen;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Situasjonen kunne ikke lagres." }),
+    });
+  });
+
+  await page.goto("/situasjoner/skogbrann-bymarka");
+  const saveButton = page.getByRole("button", { name: /Lagre situasjon|Fjern lagring/ });
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
+  await saveButton.click({ force: true }).catch(() => undefined);
+  releaseSave();
+
+  await expect(page.getByText("Situasjonen kunne ikke lagres.")).toBeVisible();
+  expect(calls).toBe(1);
+});
+
+test("mobile traffic page shows heading and controls before the map", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-chromium", "mobile layout contract");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/trafikk");
+
+  const heading = page.getByRole("heading", { name: "Trafikkart" });
+  await expect(heading).toBeVisible();
+  await expect(page.getByRole("button", { name: "Nå" })).toBeVisible();
+
+  const headingBox = await heading.boundingBox();
+  const mapBox = await page.locator(".traffic-map").boundingBox();
+  expect(headingBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+});
+
 test("situation map exposes private fire and SAR planning tools", async ({ page }) => {
   await page.goto("/situasjoner/skogbrann-bymarka");
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();

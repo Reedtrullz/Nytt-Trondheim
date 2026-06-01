@@ -19,6 +19,7 @@ async function testApp(devAuthBypass = true) {
     sessionSecret: "test-only-secret",
     uploadDir,
     runtimeStatusDir: uploadDir,
+    rateLimitEnabled: true,
   });
 }
 

@@ -221,7 +221,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   await mkdir(config.uploadDir, { recursive: true });
   app.set("trust proxy", 1);
-  app.use(createRateLimiter());
+  if (config.rateLimitEnabled) {
+    app.use(createRateLimiter());
+  }
   app.use(
     helmet({
       contentSecurityPolicy:

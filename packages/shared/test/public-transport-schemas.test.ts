@@ -21,7 +21,12 @@ describe("public transport and map tool schemas", () => {
     expect(() => publicTransportMapQuerySchema.parse({ modes: { bus: true } })).toThrow();
     expect(() => publicTransportMapQuerySchema.parse({ modes: "hoverboard" })).toThrow();
     expect(() =>
-      publicTransportMapQuerySchema.parse({ north: "63.2", south: "63.5", east: "10.6", west: "10.2" }),
+      publicTransportMapQuerySchema.parse({
+        north: "63.2",
+        south: "63.5",
+        east: "10.6",
+        west: "10.2",
+      }),
     ).toThrow(/north/);
   });
 

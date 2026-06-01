@@ -458,6 +458,12 @@ button {
   background: transparent;
 }
 
+.save:disabled {
+  color: var(--muted);
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .bookmark .filled {
   fill: rgba(186, 80, 49, 0.16);
 }
@@ -1518,18 +1524,31 @@ button {
 .traffic-map-page {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "controls map"
+    "details map";
   min-height: calc(100vh - 84px);
 }
 
-.traffic-map-sidebar {
+.traffic-map-controls,
+.traffic-map-details {
   min-width: 0;
   padding: 28px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   overflow: auto;
   border-right: 1px solid var(--line);
   background: var(--paper);
+}
+
+.traffic-map-controls {
+  grid-area: controls;
+}
+
+.traffic-map-details {
+  grid-area: details;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .traffic-map-heading h1 {
@@ -1546,6 +1565,7 @@ button {
 }
 
 .traffic-map {
+  grid-area: map;
   min-height: calc(100vh - 84px);
   height: 100%;
   width: 100%;
@@ -1984,9 +2004,17 @@ button {
 
   .home-grid,
   .situation-layout,
-  .operations-detail,
+  .operations-detail {
+    grid-template-columns: 1fr;
+  }
+
   .traffic-map-page {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 560px auto;
+    grid-template-areas:
+      "controls"
+      "map"
+      "details";
   }
 
   .home-rail,
@@ -2122,8 +2150,13 @@ button {
     height: 390px;
   }
 
-  .traffic-map-sidebar {
-    order: 2;
+  .traffic-map-page {
+    grid-template-rows: auto 520px auto;
+    overflow-x: hidden;
+  }
+
+  .traffic-map-controls,
+  .traffic-map-details {
     border-right: 0;
     border-top: 1px solid var(--line);
   }

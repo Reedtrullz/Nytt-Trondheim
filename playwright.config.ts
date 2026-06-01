@@ -11,12 +11,13 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     url: "http://127.0.0.1:8080/health",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "true",
     timeout: 120_000,
     env: {
       DEV_AUTH_BYPASS: "true",
       NODE_ENV: "development",
       PUBLIC_ORIGIN: "http://127.0.0.1:5173",
+      RATE_LIMIT_ENABLED: "false",
     },
   },
   projects: [
