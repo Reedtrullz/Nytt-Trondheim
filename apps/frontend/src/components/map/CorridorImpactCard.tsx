@@ -32,7 +32,9 @@ export function CorridorImpactCard({
   selectedImpactId,
   onSelectImpact,
 }: CorridorImpactCardProps) {
-  const sortedImpacts = [...impacts].sort((left, right) => delaySeconds(right) - delaySeconds(left));
+  const sortedImpacts = [...impacts].sort(
+    (left, right) => delaySeconds(right) - delaySeconds(left),
+  );
   const selectedImpact = impacts.find((impact) => impact.id === selectedImpactId);
   const selectedTravelTimeSummary = selectedImpact ? delaySummary(selectedImpact) : undefined;
   const affectedEvents = selectedImpact

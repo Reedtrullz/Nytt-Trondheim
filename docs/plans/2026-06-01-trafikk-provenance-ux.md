@@ -546,8 +546,19 @@ const sources: TrafficMapSourceStatus[] = [
 const traffic: TrafficMapPayload = {
   events: [
     event(),
-    event({ id: "roadwork-1", category: "roadworks", severity: "medium", title: "Veiarbeid på Omkjøringsvegen" }),
-    event({ id: "minor-expired", category: "other", severity: "low", state: "expired", title: "Gammel melding" }),
+    event({
+      id: "roadwork-1",
+      category: "roadworks",
+      severity: "medium",
+      title: "Veiarbeid på Omkjøringsvegen",
+    }),
+    event({
+      id: "minor-expired",
+      category: "other",
+      severity: "low",
+      state: "expired",
+      title: "Gammel melding",
+    }),
   ],
   brief: {
     headline: "2 trafikkhendelser",
@@ -620,17 +631,33 @@ describe("traffic view model", () => {
     ]);
     expect(model.summaryCards[0]).toMatchObject({ title: "Kritisk", count: 1, badge: "OFFISIELL" });
     expect(model.summaryCards[1]?.detail).toContain("+8 min");
-    expect(model.summaryCards[3]).toMatchObject({ title: "Kollektiv", count: 1, badge: "KOLLEKTIV" });
+    expect(model.summaryCards[3]).toMatchObject({
+      title: "Kollektiv",
+      count: 1,
+      badge: "KOLLEKTIV",
+    });
     expect(model.summaryCards[4]?.detail).toContain("18:42");
   });
 
   it("hides expired/minor rows by default but shows them with showAll", () => {
-    expect(buildTrafficViewModel({ traffic, publicTransport, showAll: false }).rankedEvents.map((row) => row.id)).not.toContain("minor-expired");
-    expect(buildTrafficViewModel({ traffic, publicTransport, showAll: true }).rankedEvents.map((row) => row.id)).toContain("minor-expired");
+    expect(
+      buildTrafficViewModel({ traffic, publicTransport, showAll: false }).rankedEvents.map(
+        (row) => row.id,
+      ),
+    ).not.toContain("minor-expired");
+    expect(
+      buildTrafficViewModel({ traffic, publicTransport, showAll: true }).rankedEvents.map(
+        (row) => row.id,
+      ),
+    ).toContain("minor-expired");
   });
 
   it("keeps TravelTime as a delay card, not an incident row", () => {
-    const model = buildTrafficViewModel({ traffic: { ...traffic, events: [] }, publicTransport, showAll: false });
+    const model = buildTrafficViewModel({
+      traffic: { ...traffic, events: [] },
+      publicTransport,
+      showAll: false,
+    });
     expect(model.summaryCards.find((card) => card.id === "delays")?.count).toBe(1);
     expect(model.rankedEvents).toEqual([]);
   });
@@ -757,7 +784,8 @@ function sourceFreshness(sources: TrafficFreshnessSource[]): string {
 }
 
 function eventMeta(event: TrafficMapEvent): string {
-  const state = event.state === "active" ? "Aktiv" : event.state === "planned" ? "Planlagt" : event.state;
+  const state =
+    event.state === "active" ? "Aktiv" : event.state === "planned" ? "Planlagt" : event.state;
   const source = sourceDisplayLabel(event.source);
   const updated = `Oppdatert ${formatClock(event.updatedAt)}`;
   const place = event.locationName ?? event.roadName;
@@ -768,7 +796,10 @@ function eventScore(event: TrafficMapEvent): number {
   const active = event.state === "active" ? 1000 : event.state === "planned" ? 500 : 0;
   const severity = severityRank[event.severity] * 100;
   const official = event.source === "datex" || event.source === "vegvesen_traffic_info" ? 25 : 0;
-  const freshness = Math.max(0, 50 - Math.max(0, Date.now() - Date.parse(event.updatedAt)) / 60_000 / 10);
+  const freshness = Math.max(
+    0,
+    50 - Math.max(0, Date.now() - Date.parse(event.updatedAt)) / 60_000 / 10,
+  );
   return active + severity + official + freshness;
 }
 
@@ -795,7 +826,9 @@ export function buildTrafficViewModel({
   const roadworks = visibleEvents.filter((event) => event.category === "roadworks");
   const delayCorridors = (traffic?.corridorImpacts ?? [])
     .filter((impact) => (impact.travelTime?.delaySeconds ?? 0) > 0)
-    .sort((left, right) => (right.travelTime?.delaySeconds ?? 0) - (left.travelTime?.delaySeconds ?? 0));
+    .sort(
+      (left, right) => (right.travelTime?.delaySeconds ?? 0) - (left.travelTime?.delaySeconds ?? 0),
+    );
   const transitAlerts = publicTransport?.alerts.filter((alert) => alert.state === "active") ?? [];
   const allSources = [...(traffic?.sources ?? []), ...(publicTransport?.sources ?? [])];
 
@@ -813,7 +846,9 @@ export function buildTrafficViewModel({
         id: "delays",
         title: "Forsinkelser",
         count: delayCorridors.length,
-        detail: delayCorridors[0] ? `${delayCorridors[0].name}: ${delaySummary(delayCorridors[0])}` : "Ingen unormal reisetid i kjente korridorer.",
+        detail: delayCorridors[0]
+          ? `${delayCorridors[0].name}: ${delaySummary(delayCorridors[0])}`
+          : "Ingen unormal reisetid i kjente korridorer.",
         badge: "REISETID",
         severity: delayCorridors[0]?.highestSeverity ?? "low",
       },
@@ -849,7 +884,9 @@ export function buildTrafficViewModel({
         badges: badgesForTrafficEvent(event),
         score: eventScore(event),
       }))
-      .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title, "nb")),
+      .sort(
+        (left, right) => right.score - left.score || left.title.localeCompare(right.title, "nb"),
+      ),
     delayCorridors,
     sources: allSources,
   };
@@ -1010,7 +1047,10 @@ function clock(value: string): string {
   });
 }
 
-function delayForEvent(event: TrafficMapEvent, corridors: TrafficCorridorImpact[]): string | undefined {
+function delayForEvent(
+  event: TrafficMapEvent,
+  corridors: TrafficCorridorImpact[],
+): string | undefined {
   const impact = corridors.find((item) => item.affectedEventIds.includes(event.id));
   const delaySeconds = impact?.travelTime?.delaySeconds;
   if (typeof delaySeconds !== "number" || delaySeconds <= 0) return undefined;
@@ -1199,10 +1239,38 @@ import { TrafficNowSummary } from "./TrafficNowSummary.js";
 import type { TrafficSummaryCardModel } from "../../trafficViewModel.js";
 
 const cards: TrafficSummaryCardModel[] = [
-  { id: "critical", title: "Kritisk", count: 2, detail: "E6 stengt", badge: "OFFISIELL", severity: "critical" },
-  { id: "delays", title: "Forsinkelser", count: 1, detail: "E6 Sluppen: +8 min", badge: "REISETID", severity: "medium" },
-  { id: "roadworks", title: "Veiarbeid", count: 7, detail: "Omkjøringsvegen", badge: "OFFISIELL", severity: "medium" },
-  { id: "publicTransport", title: "Kollektiv", count: 3, detail: "Linje 3", badge: "KOLLEKTIV", severity: "medium" },
+  {
+    id: "critical",
+    title: "Kritisk",
+    count: 2,
+    detail: "E6 stengt",
+    badge: "OFFISIELL",
+    severity: "critical",
+  },
+  {
+    id: "delays",
+    title: "Forsinkelser",
+    count: 1,
+    detail: "E6 Sluppen: +8 min",
+    badge: "REISETID",
+    severity: "medium",
+  },
+  {
+    id: "roadworks",
+    title: "Veiarbeid",
+    count: 7,
+    detail: "Omkjøringsvegen",
+    badge: "OFFISIELL",
+    severity: "medium",
+  },
+  {
+    id: "publicTransport",
+    title: "Kollektiv",
+    count: 3,
+    detail: "Linje 3",
+    badge: "KOLLEKTIV",
+    severity: "medium",
+  },
   { id: "updated", title: "Oppdatert", count: 4, detail: "Sist hentet 18:42" },
 ];
 
@@ -1537,22 +1605,46 @@ export function TrafficDetailDrawer({
       </header>
       <div className="traffic-drawer-badges">
         {badgesForTrafficEvent(event).map((badge) => (
-          <span key={badge} className="trust-badge">{badge}</span>
+          <span key={badge} className="trust-badge">
+            {badge}
+          </span>
         ))}
       </div>
       <dl>
-        <div><dt>Status</dt><dd>{stateLabel(event.state)}</dd></div>
-        <div><dt>Type</dt><dd>{event.category}</dd></div>
-        <div><dt>Kilde</dt><dd>{sourceDisplayLabel(event.source)}</dd></div>
-        <div><dt>Oppdatert</dt><dd>{clock(event.updatedAt)}</dd></div>
-        <div><dt>Plassering</dt><dd>Offisiell koordinat/geometri</dd></div>
-        {event.confidence !== undefined ? <div><dt>Konfidens</dt><dd>{Math.round(event.confidence * 100)} %</dd></div> : null}
+        <div>
+          <dt>Status</dt>
+          <dd>{stateLabel(event.state)}</dd>
+        </div>
+        <div>
+          <dt>Type</dt>
+          <dd>{event.category}</dd>
+        </div>
+        <div>
+          <dt>Kilde</dt>
+          <dd>{sourceDisplayLabel(event.source)}</dd>
+        </div>
+        <div>
+          <dt>Oppdatert</dt>
+          <dd>{clock(event.updatedAt)}</dd>
+        </div>
+        <div>
+          <dt>Plassering</dt>
+          <dd>Offisiell koordinat/geometri</dd>
+        </div>
+        {event.confidence !== undefined ? (
+          <div>
+            <dt>Konfidens</dt>
+            <dd>{Math.round(event.confidence * 100)} %</dd>
+          </div>
+        ) : null}
       </dl>
       {event.description ? <p>{event.description}</p> : null}
       {impact?.travelTime ? (
         <section>
           <h3>Trafikkpuls</h3>
-          <p>{impact.name}: {delaySummary(impact)}</p>
+          <p>
+            {impact.name}: {delaySummary(impact)}
+          </p>
         </section>
       ) : null}
       {event.relatedArticles?.length ? (
@@ -1563,15 +1655,28 @@ export function TrafficDetailDrawer({
               const href = safeExternalUrl(article.url);
               return (
                 <li key={article.id}>
-                  {href ? <a href={href} target="_blank" rel="noreferrer noopener">{article.title}</a> : <span>{article.title}</span>}
-                  <small>{article.location ? "estimert nyhetsplassering" : "relatert artikkel"} · {article.distanceMeters} m unna</small>
+                  {href ? (
+                    <a href={href} target="_blank" rel="noreferrer noopener">
+                      {article.title}
+                    </a>
+                  ) : (
+                    <span>{article.title}</span>
+                  )}
+                  <small>
+                    {article.location ? "estimert nyhetsplassering" : "relatert artikkel"} ·{" "}
+                    {article.distanceMeters} m unna
+                  </small>
                 </li>
               );
             })}
           </ul>
         </section>
       ) : null}
-      {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer noopener">Åpne kilde</a> : null}
+      {sourceUrl ? (
+        <a href={sourceUrl} target="_blank" rel="noreferrer noopener">
+          Åpne kilde
+        </a>
+      ) : null}
     </aside>
   );
 }
@@ -1646,7 +1751,12 @@ describe("traffic map objects", () => {
   it("keeps official road geometry separate from estimated news points", () => {
     expect(trafficMapObjectsForEvent(event, { estimatedNews: true })).toEqual([
       expect.objectContaining({ kind: "official-road-event", eventId: "traffic-event-1" }),
-      expect.objectContaining({ kind: "estimated-news-location", eventId: "traffic-event-1", articleId: "article-1", center: [63.395, 10.4] }),
+      expect.objectContaining({
+        kind: "estimated-news-location",
+        eventId: "traffic-event-1",
+        articleId: "article-1",
+        center: [63.395, 10.4],
+      }),
     ]);
   });
 
@@ -1852,7 +1962,12 @@ const event: TrafficMapEvent = {
 describe("CorridorImpactCard", () => {
   it("renders traffic-pulse language, not raw telemetry", () => {
     const html = renderToStaticMarkup(
-      <CorridorImpactCard impacts={[impact]} events={[event]} selectedImpactId="e6-south" onSelectImpact={vi.fn()} />,
+      <CorridorImpactCard
+        impacts={[impact]}
+        events={[event]}
+        selectedImpactId="e6-south"
+        onSelectImpact={vi.fn()}
+      />,
     );
 
     expect(html).toContain("Reisetidskorridorer");
@@ -1950,7 +2065,13 @@ const rankedEvents: RankedTrafficEventModel[] = [
 describe("TrafficEventList", () => {
   it("renders ranked rows with trust badges and progressive disclosure copy", () => {
     const html = renderToStaticMarkup(
-      <TrafficEventList rankedEvents={rankedEvents} selectedEventId="event-1" onSelectEvent={vi.fn()} showAll={false} onShowAllChange={vi.fn()} />,
+      <TrafficEventList
+        rankedEvents={rankedEvents}
+        selectedEventId="event-1"
+        onSelectEvent={vi.fn()}
+        showAll={false}
+        onShowAllChange={vi.fn()}
+      />,
     );
 
     expect(html).toContain("Aktive trafikksituasjoner");
@@ -2157,13 +2278,21 @@ const visibleTrafficEvents = useMemo(() => {
     if (!visibleTrafficLayers.showAll && !visibleByDefault(event)) return false;
     return true;
   });
-}, [data?.events, visibleTrafficLayers.incidents, visibleTrafficLayers.roadworks, visibleTrafficLayers.showAll]);
+}, [
+  data?.events,
+  visibleTrafficLayers.incidents,
+  visibleTrafficLayers.roadworks,
+  visibleTrafficLayers.showAll,
+]);
 
 const rankedEventsForList = useMemo(
   () =>
     trafficViewModel.rankedEvents
       .filter((row) => visibleTrafficEvents.some((event) => event.id === row.id))
-      .map((row) => ({ ...row, ...compactTrafficEventRow(row.event, data?.corridorImpacts ?? []) })),
+      .map((row) => ({
+        ...row,
+        ...compactTrafficEventRow(row.event, data?.corridorImpacts ?? []),
+      })),
   [trafficViewModel.rankedEvents, visibleTrafficEvents, data?.corridorImpacts],
 );
 ```
@@ -2523,7 +2652,9 @@ git commit -m "feat: add mobile traffic map bottom sheet"
 Add a test near the existing traffic tests:
 
 ```ts
-test("traffic page shows summary cards semantic layers ranked list and detail drawer", async ({ page }) => {
+test("traffic page shows summary cards semantic layers ranked list and detail drawer", async ({
+  page,
+}) => {
   await page.route("**/api/map/traffic-events**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -2646,9 +2777,15 @@ test("traffic page shows summary cards semantic layers ranked list and detail dr
   await expect(page.getByLabel("Trafikkart og kartlag")).toContainText("Estimerte nyhetssteder");
   await expect(page.getByRole("heading", { name: "Aktive trafikksituasjoner" })).toBeVisible();
   await page.getByRole("button", { name: /E6 Omkjøring ved Sluppen/ }).click();
-  await expect(page.getByLabel("Detaljer om trafikkhendelse")).toContainText("Hvorfor ser jeg dette?");
-  await expect(page.getByLabel("Detaljer om trafikkhendelse")).toContainText("Statens vegvesen DATEX Situation");
-  await expect(page.getByLabel("Detaljer om trafikkhendelse")).toContainText("Adresseavisen: Kø ved Sluppen");
+  await expect(page.getByLabel("Detaljer om trafikkhendelse")).toContainText(
+    "Hvorfor ser jeg dette?",
+  );
+  await expect(page.getByLabel("Detaljer om trafikkhendelse")).toContainText(
+    "Statens vegvesen DATEX Situation",
+  );
+  await expect(page.getByLabel("Detaljer om trafikkhendelse")).toContainText(
+    "Adresseavisen: Kø ved Sluppen",
+  );
 });
 ```
 

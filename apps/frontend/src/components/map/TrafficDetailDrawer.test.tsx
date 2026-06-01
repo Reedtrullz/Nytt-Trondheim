@@ -71,9 +71,9 @@ describe("TrafficDetailDrawer", () => {
   });
 
   it("returns no markup when no event is selected", () => {
-    expect(renderToStaticMarkup(<TrafficDetailDrawer corridorImpacts={[]} onClose={vi.fn()} />)).toBe(
-      "",
-    );
+    expect(
+      renderToStaticMarkup(<TrafficDetailDrawer corridorImpacts={[]} onClose={vi.fn()} />),
+    ).toBe("");
   });
 
   it("suppresses unsafe URLs and invalid optional measurements", () => {

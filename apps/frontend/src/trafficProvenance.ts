@@ -32,9 +32,7 @@ export function badgesForTrafficEvent(event: TrafficMapEvent): TrafficTrustBadge
   return badges;
 }
 
-export function badgeForTrafficPulse(
-  impact: TrafficCorridorImpact,
-): TrafficTrustBadge | undefined {
+export function badgeForTrafficPulse(impact: TrafficCorridorImpact): TrafficTrustBadge | undefined {
   return impact.travelTime ? "REISETID" : undefined;
 }
 
@@ -43,13 +41,13 @@ export function badgeForWeatherContext(): TrafficTrustBadge {
 }
 
 export function badgeForPublicTransportAlert(
-  _alert: PublicTransportServiceAlert,
+  alert: PublicTransportServiceAlert,
 ): TrafficTrustBadge {
+  void alert;
   return "KOLLEKTIV";
 }
 
-export function badgeForPublicTransportVehicle(
-  _vehicle: PublicTransportVehicle,
-): TrafficTrustBadge {
+export function badgeForPublicTransportVehicle(vehicle: PublicTransportVehicle): TrafficTrustBadge {
+  void vehicle;
   return "KOLLEKTIV";
 }

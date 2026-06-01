@@ -32,12 +32,16 @@ function clock(value: string): string {
   });
 }
 
-function delayForEvent(event: TrafficMapEvent, corridors: TrafficCorridorImpact[]): string | undefined {
+function delayForEvent(
+  event: TrafficMapEvent,
+  corridors: TrafficCorridorImpact[],
+): string | undefined {
   const delayMinutes = corridors
     .filter((item) => item.affectedEventIds.includes(event.id))
     .map((item) => item.travelTime?.delaySeconds)
-    .filter((delaySeconds): delaySeconds is number =>
-      typeof delaySeconds === "number" && Number.isFinite(delaySeconds) && delaySeconds > 0,
+    .filter(
+      (delaySeconds): delaySeconds is number =>
+        typeof delaySeconds === "number" && Number.isFinite(delaySeconds) && delaySeconds > 0,
     )
     .map((delaySeconds) => Math.max(1, Math.round(delaySeconds / 60)))
     .sort((left, right) => right - left)[0];

@@ -362,7 +362,10 @@ export function TrafficMapPage() {
     () =>
       trafficViewModel.rankedEvents
         .filter((row) => visibleEventIds.has(row.id))
-        .map((row) => ({ ...row, ...compactTrafficEventRow(row.event, data?.corridorImpacts ?? []) })),
+        .map((row) => ({
+          ...row,
+          ...compactTrafficEventRow(row.event, data?.corridorImpacts ?? []),
+        })),
     [trafficViewModel.rankedEvents, visibleEventIds, data?.corridorImpacts],
   );
 
@@ -497,7 +500,9 @@ export function TrafficMapPage() {
               <input
                 id="travel-destination"
                 value={destinationInput}
-                onChange={(event) => handleTravelInputChange(event.target.value, setDestinationInput)}
+                onChange={(event) =>
+                  handleTravelInputChange(event.target.value, setDestinationInput)
+                }
                 placeholder="F.eks. Leangen"
               />
             </div>
@@ -533,7 +538,10 @@ export function TrafficMapPage() {
               counters={[]}
             />
           ) : null}
-          <PublicTransportLayer payload={publicTransportDisplayData} visible={publicTransportVisible} />
+          <PublicTransportLayer
+            payload={publicTransportDisplayData}
+            visible={publicTransportVisible}
+          />
           <TravelPlanLayer plan={travelPlan} />
         </MapContainer>
       </section>

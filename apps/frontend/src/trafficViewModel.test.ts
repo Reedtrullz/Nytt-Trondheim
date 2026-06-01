@@ -156,22 +156,38 @@ describe("traffic view model", () => {
     expect(model.summaryCards[0]).toMatchObject({ title: "Kritisk", count: 2, badge: "OFFISIELL" });
     expect(model.summaryCards[0]?.detail).toBe("E6 stengt ved Sluppen");
     expect(model.summaryCards[1]?.detail).toContain("+8 min");
-    expect(model.summaryCards[3]).toMatchObject({ title: "Kollektiv", count: 1, badge: "KOLLEKTIV" });
+    expect(model.summaryCards[3]).toMatchObject({
+      title: "Kollektiv",
+      count: 1,
+      badge: "KOLLEKTIV",
+    });
     expect(model.summaryCards[4]?.detail).toContain("18:42");
   });
 
   it("hides expired and minor rows by default but shows them with showAll", () => {
-    const defaultIds = buildTrafficViewModel({ traffic, publicTransport, showAll: false }).rankedEvents.map((row) => row.id);
+    const defaultIds = buildTrafficViewModel({
+      traffic,
+      publicTransport,
+      showAll: false,
+    }).rankedEvents.map((row) => row.id);
     expect(defaultIds).not.toContain("minor-active");
     expect(defaultIds).not.toContain("expired-medium");
 
-    const showAllIds = buildTrafficViewModel({ traffic, publicTransport, showAll: true }).rankedEvents.map((row) => row.id);
+    const showAllIds = buildTrafficViewModel({
+      traffic,
+      publicTransport,
+      showAll: true,
+    }).rankedEvents.map((row) => row.id);
     expect(showAllIds).toContain("minor-active");
     expect(showAllIds).toContain("expired-medium");
   });
 
   it("keeps TravelTime as a delay card, not an incident row", () => {
-    const model = buildTrafficViewModel({ traffic: { ...traffic, events: [] }, publicTransport, showAll: false });
+    const model = buildTrafficViewModel({
+      traffic: { ...traffic, events: [] },
+      publicTransport,
+      showAll: false,
+    });
     expect(model.summaryCards.find((card) => card.id === "delays")?.count).toBe(1);
     expect(model.rankedEvents).toEqual([]);
   });

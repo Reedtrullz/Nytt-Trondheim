@@ -124,7 +124,9 @@ export function buildTrafficViewModel({
   const visibleEvents = showAll ? events : events.filter(visibleByDefault);
   const delayCorridors = (traffic?.corridorImpacts ?? [])
     .filter((impact) => (impact.travelTime?.delaySeconds ?? 0) > 0)
-    .sort((left, right) => (right.travelTime?.delaySeconds ?? 0) - (left.travelTime?.delaySeconds ?? 0));
+    .sort(
+      (left, right) => (right.travelTime?.delaySeconds ?? 0) - (left.travelTime?.delaySeconds ?? 0),
+    );
   const transitAlerts = publicTransport?.alerts.filter((alert) => alert.state === "active") ?? [];
   const allSources = [...(traffic?.sources ?? []), ...(publicTransport?.sources ?? [])];
   const rankedEvents = visibleEvents

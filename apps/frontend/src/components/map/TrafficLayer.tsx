@@ -107,7 +107,8 @@ function TrafficPopup({ event }: { event: TrafficMapEvent }) {
       <article className="traffic-popup">
         <strong>{event.title}</strong>
         <p>
-          {categoryLabel(event.category)} · {severityLabel(event.severity)} · {sourceLabel(event.source)}
+          {categoryLabel(event.category)} · {severityLabel(event.severity)} ·{" "}
+          {sourceLabel(event.source)}
         </p>
         {event.description ? <p>{event.description}</p> : null}
         {event.locationName ? (

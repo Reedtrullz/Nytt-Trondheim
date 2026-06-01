@@ -8,7 +8,9 @@ vi.mock("react-leaflet", () => ({
       {children}
     </div>
   ),
-  GeoJSON: ({ children }: { children?: React.ReactNode }) => <div data-layer="geojson">{children}</div>,
+  GeoJSON: ({ children }: { children?: React.ReactNode }) => (
+    <div data-layer="geojson">{children}</div>
+  ),
   Popup: ({ children }: { children?: React.ReactNode }) => <div data-layer="popup">{children}</div>,
 }));
 
