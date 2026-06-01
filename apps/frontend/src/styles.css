@@ -181,8 +181,7 @@ button {
 }
 
 .scope-switch button,
-.filters button,
-.filters a {
+.filters button {
   padding: 16px 2px;
   border: 0;
   color: var(--muted);
@@ -196,9 +195,7 @@ button {
   border-bottom: 2px solid var(--blue);
 }
 
-.filters button.selected,
-.filters a:hover,
-.filters a:focus-visible {
+.filters button.selected {
   color: var(--blue);
   font-weight: 600;
 }

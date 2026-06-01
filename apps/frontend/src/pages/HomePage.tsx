@@ -383,22 +383,16 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
             Trøndelag
           </button>
         </div>
-        <div className="filters" aria-label="Filtrer saker og åpne temasider">
-          {articleCategories.map((item: ArticleCategoryFilter) =>
-            item === "Vær" ? (
-              <Link className="dashboard-weather-link" key={item} to="/vaer">
-                {item}
-              </Link>
-            ) : (
-              <button
-                className={category === item ? "selected" : ""}
-                key={item}
-                onClick={() => updateFilters({ category: item })}
-              >
-                {item}
-              </button>
-            ),
-          )}
+        <div className="filters" aria-label="Filtrer saker">
+          {articleCategories.map((item: ArticleCategoryFilter) => (
+            <button
+              className={category === item ? "selected" : ""}
+              key={item}
+              onClick={() => updateFilters({ category: item })}
+            >
+              {item}
+            </button>
+          ))}
         </div>
       </div>
       {!isTextSearch ? <SituationBanner situations={situations} /> : null}
