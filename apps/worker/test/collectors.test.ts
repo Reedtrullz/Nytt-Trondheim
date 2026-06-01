@@ -159,7 +159,8 @@ describe("DATEX official source probe", () => {
   });
 
   it("does not probe disallowed DATEX endpoints with Basic Auth", async () => {
-    process.env.DATEX_ENDPOINT = "https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata";
+    process.env.DATEX_ENDPOINT =
+      "https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata";
     process.env.DATEX_USERNAME = "svv-user";
     process.env.DATEX_PASSWORD = "svv-pass";
     const fetcher = vi.fn(async () => new Response("ok", { status: 200 }));

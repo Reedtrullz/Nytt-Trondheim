@@ -59,7 +59,8 @@ describe("DATEX situation parsing", () => {
     const xml = await readFile(fixturePath, "utf8");
 
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      endpoint:
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -107,7 +108,8 @@ describe("DATEX situation parsing", () => {
     const xml = await readFile(fixturePath, "utf8");
 
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      endpoint:
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -150,11 +152,13 @@ describe("DATEX situation parsing", () => {
     const updated = xml.replaceAll('version="3"', 'version="4"');
 
     const first = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      endpoint:
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
     const second = parseDatexSituationPublication(updated, {
-      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      endpoint:
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:10:00.000Z",
     });
 
@@ -165,7 +169,8 @@ describe("DATEX situation parsing", () => {
   it("uses receivedAt as fallback expiry for open-ended active records", () => {
     const xml = `<?xml version="1.0"?><d2LogicalModel><payloadPublication><publicationTime>2026-05-28T10:00:00Z</publicationTime><situation id="NO-SVV-OPEN" version="1"><situationRecord xsi:type="Accident" id="R1" version="1"><situationRecordCreationTime>2026-05-26T09:55:00Z</situationRecordCreationTime><situationRecordVersionTime>2026-05-28T10:00:00Z</situationRecordVersionTime><validity><validityStatus>active</validityStatus><validityTimeSpecification><overallStartTime>2026-05-26T09:55:00Z</overallStartTime></validityTimeSpecification></validity><groupOfLocations><locationForDisplay><latitude>63.361</latitude><longitude>10.376</longitude></locationForDisplay></groupOfLocations><generalPublicComment><comment><values><value>Ulykke på E6 ved Tiller.</value></values></comment></generalPublicComment></situationRecord></situation></payloadPublication></d2LogicalModel>`;
     const result = parseDatexSituationPublication(xml, {
-      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      endpoint:
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       receivedAt: "2026-05-28T10:05:00.000Z",
     });
 
@@ -202,7 +207,8 @@ describe("DATEX situation parsing", () => {
     let capturedHeaders: Headers | undefined;
 
     const result = await collectDatexSituationEvents({
-      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      endpoint:
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       username: "svv-user",
       password: "svv-pass",
       lastModified: "Wed, 27 May 2026 10:00:00 GMT",
@@ -225,7 +231,8 @@ describe("DATEX situation parsing", () => {
 
   it("returns notModified without parsing a 304 DATEX response", async () => {
     const result = await collectDatexSituationEvents({
-      endpoint: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
+      endpoint:
+        "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata",
       username: "svv-user",
       password: "svv-pass",
       lastModified: "Wed, 27 May 2026 10:00:00 GMT",

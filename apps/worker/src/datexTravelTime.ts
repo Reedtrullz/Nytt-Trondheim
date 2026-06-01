@@ -284,7 +284,12 @@ export async function collectDatexTravelTimePulse({
     normalizedLocationsEndpoint,
     headers,
   );
-  const dataXml = await fetchDatexTravelTimeSnapshot(fetcher, "data", normalizedDataEndpoint, headers);
+  const dataXml = await fetchDatexTravelTimeSnapshot(
+    fetcher,
+    "data",
+    normalizedDataEndpoint,
+    headers,
+  );
 
   return {
     corridors: trafficPulseFromDatexTravelTime(

@@ -28,12 +28,17 @@ describe("deployment playbook Entur verification", () => {
     expect(validationBlock).toContain("- name: Promote API and worker");
     expect(validationBlock).toContain("- name: Verify production health");
     expect(validationBlock).toMatch(/- name: Verify worker/);
-    expect(validationBlock).toContain("- name: Verify DATEX source health rows when DATEX is enabled");
+    expect(validationBlock).toContain(
+      "- name: Verify DATEX source health rows when DATEX is enabled",
+    );
     expect(validationBlock).toContain("- name: Verify Entur source health");
     expect(validationBlock).toContain("- name: Verify source item query sanity");
 
     const alwaysStart = playbook.indexOf("always:", rescueStart);
-    const rescueBlock = playbook.slice(rescueStart, alwaysStart > rescueStart ? alwaysStart : undefined);
+    const rescueBlock = playbook.slice(
+      rescueStart,
+      alwaysStart > rescueStart ? alwaysStart : undefined,
+    );
     expect(rescueBlock).toContain("nytt-trondheim-api:previous");
     expect(rescueBlock).toContain("nytt-trondheim-api:latest");
     expect(rescueBlock).toContain("nytt-trondheim-worker:previous");
@@ -48,15 +53,22 @@ describe("deployment playbook Entur verification", () => {
     expect(migrationStart).toBeGreaterThan(-1);
     expect(canaryStart).toBeGreaterThan(-1);
     expect(migrationStart).toBeLessThan(canaryStart);
-    const deploymentDoc = readFileSync(new URL("../../../docs/DEPLOYMENT.md", import.meta.url), "utf8");
+    const deploymentDoc = readFileSync(
+      new URL("../../../docs/DEPLOYMENT.md", import.meta.url),
+      "utf8",
+    );
     expect(deploymentDoc).toMatch(/migrations run before canary against the production database/i);
     expect(deploymentDoc).toMatch(/expand\/contract-compatible with the previous release/i);
     expect(deploymentDoc).toMatch(/destructive schema changes must be split into a later deploy/i);
-    expect(deploymentDoc).not.toMatch(/failed backup, migration or canary does not leave the site offline/i);
+    expect(deploymentDoc).not.toMatch(
+      /failed backup, migration or canary does not leave the site offline/i,
+    );
   });
 
   it("requires DATEX source health rows to be ok and fresh", () => {
-    const taskStart = playbook.indexOf("- name: Verify DATEX source health rows when DATEX is enabled");
+    const taskStart = playbook.indexOf(
+      "- name: Verify DATEX source health rows when DATEX is enabled",
+    );
     const taskEnd = playbook.indexOf("- name: Verify Entur source health", taskStart);
     const task = playbook.slice(taskStart, taskEnd);
 

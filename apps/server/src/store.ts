@@ -299,7 +299,9 @@ function validTimestampMs(value: Date | string | null | undefined): number | und
   return Number.isFinite(timestampMs) ? timestampMs : undefined;
 }
 
-function firstValidTimestampMs(...values: Array<Date | string | null | undefined>): number | undefined {
+function firstValidTimestampMs(
+  ...values: Array<Date | string | null | undefined>
+): number | undefined {
   for (const value of values) {
     const timestampMs = validTimestampMs(value);
     if (timestampMs !== undefined) return timestampMs;

@@ -361,6 +361,7 @@ const articleUrl = safeExternalUrl(article.url);
 
 Render only when safe:
 
+<!-- prettier-ignore -->
 ```tsx
 {articleUrl ? (
   <a href={articleUrl} target="_blank" rel="noreferrer noopener">
@@ -526,7 +527,9 @@ it("rejects non-HTTPS DATEX situation endpoints", () => {
 
 it("rejects non-Vegvesen DATEX situation endpoints before credentials are sent", () => {
   expect(() =>
-    normalizeDatexSituationEndpoint("https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata"),
+    normalizeDatexSituationEndpoint(
+      "https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata",
+    ),
   ).toThrow(/must use an allowed Vegvesen host/);
 });
 ```
@@ -544,7 +547,10 @@ it("normalizes only allowed credentialed DATEX override endpoints", () => {
     ),
   ).toContain("atlas.vegvesen.no");
   expect(() =>
-    normalizeDatexCredentialedEndpoint("https://evil.example.test/datex", "DATEX_TRAVEL_TIME_DATA_ENDPOINT"),
+    normalizeDatexCredentialedEndpoint(
+      "https://evil.example.test/datex",
+      "DATEX_TRAVEL_TIME_DATA_ENDPOINT",
+    ),
   ).toThrow(/allowed Vegvesen host/);
 });
 ```
@@ -578,7 +584,10 @@ Add to `apps/worker/src/datex.ts`:
 ```ts
 const allowedDatexCredentialHosts = new Set(["datex-server-get-v3-1.atlas.vegvesen.no"]);
 
-export function normalizeDatexCredentialedEndpoint(endpoint: string, envName = "DATEX_ENDPOINT"): string {
+export function normalizeDatexCredentialedEndpoint(
+  endpoint: string,
+  envName = "DATEX_ENDPOINT",
+): string {
   const trimmed = endpoint.trim();
   let url: URL;
   try {
@@ -612,7 +621,8 @@ Where `datexTravelTimeLocationsEndpoint`, `datexTravelTimeDataEndpoint`, `datexW
 
 ```ts
 const datexTravelTimeLocationsEndpoint = normalizeDatexCredentialedEndpoint(
-  process.env.DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT?.trim() || defaultDatexTravelTimeLocationsEndpoint,
+  process.env.DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT?.trim() ||
+    defaultDatexTravelTimeLocationsEndpoint,
   "DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT",
 );
 ```
@@ -776,9 +786,9 @@ it("overlays DATEX travel time stale state from updated_at when measurementTo is
   });
   const repository = new WorkerRepository({ query } as unknown as pg.Pool);
 
-  await expect(
-    repository.datexTravelTimes(new Date("2026-05-28T10:00:00.000Z")),
-  ).resolves.toEqual([{ ...openEnded, state: "stale" }]);
+  await expect(repository.datexTravelTimes(new Date("2026-05-28T10:00:00.000Z"))).resolves.toEqual([
+    { ...openEnded, state: "stale" },
+  ]);
 
   expect(String(query.mock.calls[0]?.[0])).toContain("updated_at");
 });
@@ -871,7 +881,8 @@ function isStaleDatexTravelTime(
   return (
     isOldDatexMeasurementTo(measurementToColumn, staleBefore) ||
     isOldDatexMeasurementTo(corridor.measurementTo, staleBefore) ||
-    (!measurementToColumn && !corridor.measurementTo &&
+    (!measurementToColumn &&
+      !corridor.measurementTo &&
       (isOldDatexMeasurementTo(updatedAtColumn, staleBefore) ||
         isOldDatexMeasurementTo(corridor.updatedAt, staleBefore)))
   );
@@ -1167,12 +1178,17 @@ it("rolls back previous app and worker images when post-promotion validation fai
   expect(validationBlock).toContain("- name: Promote API and worker");
   expect(validationBlock).toContain("- name: Verify production health");
   expect(validationBlock).toMatch(/- name: Verify worker/);
-  expect(validationBlock).toContain("- name: Verify DATEX source health rows when DATEX is enabled");
+  expect(validationBlock).toContain(
+    "- name: Verify DATEX source health rows when DATEX is enabled",
+  );
   expect(validationBlock).toContain("- name: Verify Entur source health");
   expect(validationBlock).toContain("- name: Verify source item query sanity");
 
   const alwaysStart = playbook.indexOf("always:", rescueStart);
-  const rescueBlock = playbook.slice(rescueStart, alwaysStart > rescueStart ? alwaysStart : undefined);
+  const rescueBlock = playbook.slice(
+    rescueStart,
+    alwaysStart > rescueStart ? alwaysStart : undefined,
+  );
   expect(rescueBlock).toContain("nytt-trondheim-api:previous");
   expect(rescueBlock).toContain("nytt-trondheim-api:latest");
   expect(rescueBlock).toContain("nytt-trondheim-worker:previous");
@@ -1208,6 +1224,7 @@ Expected: FAIL because the playbook has no `Promote candidate and validate produ
 
 In `ansible-playbook.yml`, convert the promotion and post-promotion checks to a block:
 
+<!-- prettier-ignore -->
 ```yaml
     - name: Promote candidate and validate production
       block:
@@ -1300,9 +1317,14 @@ it("documents that migrations before canary must be expand-contract compatible",
   expect(playbook.indexOf("- name: Apply database migrations")).toBeLessThan(
     playbook.indexOf("- name: Start API canary with production database"),
   );
-  const deploymentDoc = readFileSync(new URL("../../../docs/DEPLOYMENT.md", import.meta.url), "utf8");
+  const deploymentDoc = readFileSync(
+    new URL("../../../docs/DEPLOYMENT.md", import.meta.url),
+    "utf8",
+  );
   expect(deploymentDoc).toMatch(/expand\/contract|backward-compatible schema/i);
-  expect(deploymentDoc).not.toMatch(/failed backup, migration or canary does not leave the site offline/i);
+  expect(deploymentDoc).not.toMatch(
+    /failed backup, migration or canary does not leave the site offline/i,
+  );
 });
 ```
 
@@ -1351,7 +1373,9 @@ In `apps/server/test/deployment-playbook.test.ts`:
 
 ```ts
 it("requires DATEX source health rows to be ok and fresh", () => {
-  const taskStart = playbook.indexOf("- name: Verify DATEX source health rows when DATEX is enabled");
+  const taskStart = playbook.indexOf(
+    "- name: Verify DATEX source health rows when DATEX is enabled",
+  );
   const taskEnd = playbook.indexOf("- name: Verify Entur source health", taskStart);
   const task = playbook.slice(taskStart, taskEnd);
 
@@ -1391,6 +1415,7 @@ Replace the existing `Verify worker container is running` task with a SQL/source
 
 Example Ansible task:
 
+<!-- prettier-ignore -->
 ```yaml
     - name: Verify worker source health freshness
       ansible.builtin.shell: |

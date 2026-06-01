@@ -122,7 +122,9 @@ describe("worker lifecycle helpers", () => {
 
   it("rejects non-Vegvesen DATEX situation endpoints before credentials are sent", () => {
     expect(() =>
-      normalizeDatexSituationEndpoint("https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata"),
+      normalizeDatexSituationEndpoint(
+        "https://attacker.example.test/datexapi/GetSituation/pullsnapshotdata",
+      ),
     ).toThrow(/must use an allowed Vegvesen host/);
   });
 
@@ -134,7 +136,10 @@ describe("worker lifecycle helpers", () => {
       ),
     ).toContain("atlas.vegvesen.no");
     expect(() =>
-      normalizeDatexCredentialedEndpoint("https://evil.example.test/datex", "DATEX_TRAVEL_TIME_DATA_ENDPOINT"),
+      normalizeDatexCredentialedEndpoint(
+        "https://evil.example.test/datex",
+        "DATEX_TRAVEL_TIME_DATA_ENDPOINT",
+      ),
     ).toThrow(/allowed Vegvesen host/);
     expect(() =>
       normalizeDatexCredentialedEndpoint(
@@ -306,8 +311,12 @@ describe("DATEX road context collection", () => {
     });
 
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls[0]?.[0]).toBe("https://datex-server-get-v3-1.atlas.vegvesen.no/weather-sites");
-    expect(fetcher.mock.calls[1]?.[0]).toBe("https://datex-server-get-v3-1.atlas.vegvesen.no/weather-measurements");
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-sites",
+    );
+    expect(fetcher.mock.calls[1]?.[0]).toBe(
+      "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-measurements",
+    );
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       headers: expect.objectContaining({
         "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",

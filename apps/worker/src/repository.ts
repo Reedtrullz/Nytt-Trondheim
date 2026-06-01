@@ -978,7 +978,9 @@ function isStaleDatexTravelTime(
   return measuredAt !== undefined && measuredAt < staleBefore;
 }
 
-function firstValidTimestamp(...values: Array<Date | string | null | undefined>): number | undefined {
+function firstValidTimestamp(
+  ...values: Array<Date | string | null | undefined>
+): number | undefined {
   for (const value of values) {
     const timestamp = timestampMs(value);
     if (timestamp !== undefined) return timestamp;

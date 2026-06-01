@@ -11,7 +11,10 @@ export const defaultDatexSituationEndpoint =
 
 const allowedDatexCredentialHosts = new Set(["datex-server-get-v3-1.atlas.vegvesen.no"]);
 
-export function normalizeDatexCredentialedEndpoint(endpoint: string, envName = "DATEX_ENDPOINT"): string {
+export function normalizeDatexCredentialedEndpoint(
+  endpoint: string,
+  envName = "DATEX_ENDPOINT",
+): string {
   const trimmed = endpoint.trim();
   let url: URL;
   try {

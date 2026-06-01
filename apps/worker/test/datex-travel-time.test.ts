@@ -57,7 +57,8 @@ const _trafficPulseCorridorTypeCheck = {
   measurementFrom: "2026-05-28T09:55:00.000Z",
   measurementTo: "2026-05-28T10:00:00.000Z",
   updatedAt: "2026-05-28T10:00:00.000Z",
-  sourceUrl: "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata",
+  sourceUrl:
+    "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetTravelTimeData/pullsnapshotdata",
 } satisfies TrafficPulseCorridor;
 
 const _sourceHealthTypeCheck = {

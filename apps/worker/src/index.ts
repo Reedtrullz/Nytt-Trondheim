@@ -432,7 +432,8 @@ async function fetchDatexText(
       Authorization: datexBasicAuthHeader(username, password),
     },
   });
-  if (!response.ok) throw new Error(`DATEX returned HTTP ${response.status} for ${normalizedEndpoint}`);
+  if (!response.ok)
+    throw new Error(`DATEX returned HTTP ${response.status} for ${normalizedEndpoint}`);
   return response.text();
 }
 
