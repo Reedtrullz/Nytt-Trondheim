@@ -182,6 +182,39 @@ describe("traffic view model", () => {
     expect(showAllIds).toContain("expired-medium");
   });
 
+  it("does not describe non-ok sources as simply current", () => {
+    const model = buildTrafficViewModel({
+      traffic: {
+        ...traffic,
+        sources: [
+          ...(traffic.sources ?? []),
+          {
+            source: "datex_weather",
+            label: "DATEX vær",
+            state: "awaiting_access",
+            detail: "Mangler tilgang",
+            lastCheckedAt: "2026-06-01T16:40:00.000Z",
+          },
+        ],
+      },
+      publicTransport: {
+        ...publicTransport,
+        sources: [
+          {
+            ...publicTransport.sources[0]!,
+            state: "disabled",
+            detail: "Slått av i kartlag",
+          },
+        ],
+      },
+      showAll: false,
+    });
+
+    expect(model.summaryCards.find((card) => card.id === "updated")?.detail).toBe(
+      "Sist hentet 18:42 · 2 kilder krever oppmerksomhet",
+    );
+  });
+
   it("keeps TravelTime as a delay card, not an incident row", () => {
     const model = buildTrafficViewModel({
       traffic: { ...traffic, events: [] },

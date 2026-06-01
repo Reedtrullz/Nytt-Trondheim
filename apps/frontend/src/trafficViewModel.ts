@@ -88,10 +88,10 @@ function sourceFreshness(sources: TrafficFreshnessSource[]): string {
     .map((source) => validTime(source.lastCheckedAt))
     .filter((value): value is string => Boolean(value))
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
-  const degradedCount = sources.filter((source) => source.state === "degraded").length;
+  const problemCount = sources.filter((source) => source.state !== "ok").length;
   const base = newest ? `Sist hentet ${formatClock(newest)}` : "Oppdatering ukjent";
-  if (degradedCount === 1) return `${base} · 1 kilde degradert`;
-  return degradedCount > 1 ? `${base} · ${degradedCount} kilder degradert` : base;
+  if (problemCount === 1) return `${base} · 1 kilde krever oppmerksomhet`;
+  return problemCount > 1 ? `${base} · ${problemCount} kilder krever oppmerksomhet` : base;
 }
 
 function eventScore(event: TrafficMapEvent): number {

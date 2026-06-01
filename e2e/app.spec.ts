@@ -180,6 +180,11 @@ test("traffic page shows summary cards semantic layers ranked list and detail dr
   await expect(summary.getByText("REISETID").first()).toBeVisible();
   await expect(summary.getByText("KOLLEKTIV").first()).toBeVisible();
   await expect(page.getByLabel("Trafikkart og kartlag")).toContainText("Estimerte nyhetssteder");
+  await openTrafficLayersIfHidden(page);
+  const estimatedNewsLayer = page.getByLabel("Estimerte nyhetssteder");
+  await expect(estimatedNewsLayer).toBeEnabled();
+  await estimatedNewsLayer.check();
+  await expect(estimatedNewsLayer).toBeChecked();
   await expect(page.getByRole("heading", { name: "Aktive trafikksituasjoner" })).toBeVisible();
   const rankedRows = page.locator(".traffic-event-list li");
   await expect(rankedRows.nth(0)).toContainText("E6 Omkjøring ved Sluppen");

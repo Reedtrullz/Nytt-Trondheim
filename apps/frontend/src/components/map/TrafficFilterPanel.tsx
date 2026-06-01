@@ -51,12 +51,7 @@ const layerControls: Array<{
   { key: "publicTransportDisruptions", label: "Kollektivavvik" },
   { key: "publicTransportVehicles", label: "Kjøretøyposisjoner" },
   { key: "weatherRisk", label: "Vær/risiko-kontekst" },
-  {
-    key: "estimatedNews",
-    label: "Estimerte nyhetssteder",
-    disabled: true,
-    helper: "Aktiveres når estimerte nyhetssteder tegnes i kartet.",
-  },
+  { key: "estimatedNews", label: "Estimerte nyhetssteder" },
   {
     key: "privateNotes",
     label: "Private notater/tegninger",

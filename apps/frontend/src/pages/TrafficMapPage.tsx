@@ -26,6 +26,7 @@ import { TrafficNowSummary } from "../components/map/TrafficNowSummary.js";
 import { fetchTravelPlan } from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
 import { compactTrafficEventRow } from "../trafficEventRows.js";
 import { buildTrafficViewModel, visibleByDefault } from "../trafficViewModel.js";
 
@@ -215,11 +216,14 @@ function TravelPlanCard({
                   ? ` · ${formatDistance(suggestion.distanceMeters)} fra ruten`
                   : ""}
               </span>
-              {suggestion.href ? (
-                <a href={suggestion.href} target="_blank" rel="noreferrer noopener">
-                  Åpne reiseplanlegger
-                </a>
-              ) : null}
+              {(() => {
+                const safeHref = safeExternalUrl(suggestion.href);
+                return safeHref ? (
+                  <a href={safeHref} target="_blank" rel="noreferrer noopener">
+                    Åpne reiseplanlegger
+                  </a>
+                ) : null;
+              })()}
             </li>
           ))}
         </ul>
