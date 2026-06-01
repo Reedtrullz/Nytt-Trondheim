@@ -68,9 +68,15 @@ export interface TrafficMapEventFilters {
   from?: string;
   to?: string;
   bounds?: { north: number; south: number; east: number; west: number };
+  limit?: number | null;
 }
 
 export type Bounds = TrafficMapEventFilters["bounds"];
+
+type LimitedBoundsFilter = {
+  bounds: NonNullable<Bounds>;
+  limit?: number | null;
+};
 
 export interface AttachmentRecord extends Attachment {
   storagePath: string;
@@ -91,14 +97,16 @@ export interface Store {
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
-  listPublicTransportVehicles(filters: {
-    modes?: PublicTransportVehicle["mode"][];
-    bounds: NonNullable<Bounds>;
-  }): Promise<PublicTransportVehicle[]>;
-  listPublicTransportServiceAlerts(filters: {
-    states?: PublicTransportServiceAlert["state"][];
-    bounds: NonNullable<Bounds>;
-  }): Promise<PublicTransportServiceAlert[]>;
+  listPublicTransportVehicles(
+    filters: LimitedBoundsFilter & {
+      modes?: PublicTransportVehicle["mode"][];
+    },
+  ): Promise<PublicTransportVehicle[]>;
+  listPublicTransportServiceAlerts(
+    filters: LimitedBoundsFilter & {
+      states?: PublicTransportServiceAlert["state"][];
+    },
+  ): Promise<PublicTransportServiceAlert[]>;
   listRoadWeatherObservations(bounds?: Bounds): Promise<RoadWeatherObservation[]>;
   listRoadCameras(bounds?: Bounds): Promise<RoadCamera[]>;
   listTrafficCounterSnapshots(bounds?: Bounds): Promise<TrafficCounterSnapshot[]>;
@@ -998,6 +1006,14 @@ export class PgStore implements Store {
       where.push(`COALESCE(valid_from, updated_at) <= $${params.length}`);
     }
 
+    const limitClause =
+      filters.limit === null
+        ? ""
+        : filters.limit === undefined
+          ? "LIMIT 1000"
+          : `LIMIT $${params.length + 1}`;
+    if (typeof filters.limit === "number") params.push(filters.limit);
+
     const result = await this.pool.query<{
       payload: TrafficMapEvent;
       state: TrafficMapEvent["state"];
@@ -1006,17 +1022,18 @@ export class PgStore implements Store {
        FROM traffic_map_events
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
        ORDER BY updated_at DESC
-       LIMIT 1000`,
+       ${limitClause}`,
       params,
     );
 
     return result.rows.map((row) => ({ ...row.payload, state: row.state }));
   }
 
-  async listPublicTransportVehicles(filters: {
-    modes?: PublicTransportVehicle["mode"][];
-    bounds: NonNullable<Bounds>;
-  }): Promise<PublicTransportVehicle[]> {
+  async listPublicTransportVehicles(
+    filters: LimitedBoundsFilter & {
+      modes?: PublicTransportVehicle["mode"][];
+    },
+  ): Promise<PublicTransportVehicle[]> {
     const params: unknown[] = [];
     const where = [
       "stale=false",
@@ -1041,6 +1058,14 @@ export class PgStore implements Store {
       `ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))`,
     );
 
+    const limitClause =
+      filters.limit === null
+        ? ""
+        : filters.limit === undefined
+          ? "LIMIT 1000"
+          : `LIMIT $${params.length + 1}`;
+    if (typeof filters.limit === "number") params.push(filters.limit);
+
     const result = await this.pool.query<{
       payload: PublicTransportVehicle;
       stale: boolean;
@@ -1049,16 +1074,17 @@ export class PgStore implements Store {
        FROM public_transport_vehicles
        WHERE ${where.join(" AND ")}
        ORDER BY last_updated DESC, vehicle_id ASC
-       LIMIT 1000`,
+       ${limitClause}`,
       params,
     );
     return result.rows.map((row) => ({ ...row.payload, stale: row.stale }));
   }
 
-  async listPublicTransportServiceAlerts(filters: {
-    states?: PublicTransportServiceAlert["state"][];
-    bounds: NonNullable<Bounds>;
-  }): Promise<PublicTransportServiceAlert[]> {
+  async listPublicTransportServiceAlerts(
+    filters: LimitedBoundsFilter & {
+      states?: PublicTransportServiceAlert["state"][];
+    },
+  ): Promise<PublicTransportServiceAlert[]> {
     const params: unknown[] = [];
     const where = [
       "(valid_to IS NULL OR valid_to >= now())",
@@ -1083,6 +1109,14 @@ export class PgStore implements Store {
       `(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326)))`,
     );
 
+    const limitClause =
+      filters.limit === null
+        ? ""
+        : filters.limit === undefined
+          ? "LIMIT 500"
+          : `LIMIT $${params.length + 1}`;
+    if (typeof filters.limit === "number") params.push(filters.limit);
+
     const result = await this.pool.query<{
       payload: PublicTransportServiceAlert;
       state: PublicTransportServiceAlert["state"];
@@ -1091,7 +1125,7 @@ export class PgStore implements Store {
        FROM public_transport_service_alerts
        WHERE ${where.join(" AND ")}
        ORDER BY updated_at DESC, situation_number ASC
-       LIMIT 500`,
+       ${limitClause}`,
       params,
     );
     return result.rows.map((row) => ({ ...row.payload, state: row.state }));

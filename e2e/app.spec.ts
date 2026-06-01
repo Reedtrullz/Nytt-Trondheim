@@ -28,6 +28,233 @@ test("reader opens the active situation and keeps private map controls distinct"
   ).toBeVisible();
 });
 
+test("traffic map travel planner shows route-specific traffic and public transport advice", async ({
+  page,
+}) => {
+  await page.route("**/api/map/travel-plan?**", async (route) => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get("from")).toBe("Munkegata");
+    expect(url.searchParams.get("to")).toBe("Leangen");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        origin: {
+          query: "Munkegata",
+          label: "Munkegata, Midtbyen",
+          coordinate: [10.3951, 63.4305],
+        },
+        destination: {
+          query: "Leangen",
+          label: "Leangen, Trondheim",
+          coordinate: [10.464, 63.433],
+        },
+        route: {
+          source: "osrm",
+          distanceMeters: 4850,
+          durationSeconds: 660,
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.3951, 63.4305],
+              [10.432, 63.432],
+              [10.464, 63.433],
+            ],
+          },
+          detail: "Rute beregnet med OSRM.",
+        },
+        trafficImpacts: [
+          {
+            event: {
+              id: "vegvesen-traffic-info:near-e6-roadwork",
+              source: "vegvesen_traffic_info",
+              sourceEventId: "near-e6-roadwork",
+              category: "roadworks",
+              severity: "high",
+              state: "active",
+              title: "Veiarbeid på E6 ved Leangen",
+              description: "Ett felt er stengt i retning sentrum.",
+              updatedAt: "2026-06-01T09:00:00.000Z",
+              geometry: { type: "Point", coordinates: [10.432, 63.432] },
+            },
+            distanceMeters: 80,
+            summary: "80 m fra foreslått rute",
+          },
+        ],
+        publicTransportSuggestions: [
+          {
+            id: "entur-vehicle:ATB:3-1",
+            kind: "vehicle",
+            title: "Buss 3 mot Lade",
+            detail: "Sist sett nær ruten. Sjekk avgangstid hos AtB/Entur.",
+            source: "Entur kjøretøyposisjoner",
+            distanceMeters: 90,
+          },
+          {
+            id: "entur-service-alert:ATB:line3",
+            kind: "alert",
+            title: "Forsinkelse på linje 3",
+            detail: "Beregn ekstra tid.",
+            source: "Entur avvik",
+            distanceMeters: 120,
+          },
+          {
+            id: "atb-entur-planner",
+            kind: "planning_link",
+            title: "Sjekk avganger hos AtB/Entur",
+            detail:
+              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+            source: "AtB/Entur",
+            href: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        sources: [],
+        generatedAt: "2026-06-01T09:05:00.000Z",
+      }),
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+
+  await expect(page.getByRole("heading", { name: "Reiseråd for ruten" })).toBeVisible();
+  await expect(page.getByText("Munkegata, Midtbyen → Leangen, Trondheim")).toBeVisible();
+  await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
+  await expect(page.getByText("Buss 3 mot Lade")).toBeVisible();
+  await expect(page.getByText("Forsinkelse på linje 3")).toBeVisible();
+  await expect(page.getByText("Sjekk avganger hos AtB/Entur")).toBeVisible();
+  await expect(
+    page.getByText(
+      "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
+    "href",
+    "https://www.atb.no/reiseplanlegger/",
+  );
+});
+
+test("traffic map clears a stale route when planner validation fails", async ({ page }) => {
+  await page.route("**/api/map/travel-plan?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        origin: {
+          query: "Munkegata",
+          label: "Munkegata, Midtbyen",
+          coordinate: [10.3951, 63.4305],
+        },
+        destination: {
+          query: "Leangen",
+          label: "Leangen, Trondheim",
+          coordinate: [10.464, 63.433],
+        },
+        route: {
+          source: "osrm",
+          distanceMeters: 4850,
+          durationSeconds: 660,
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.3951, 63.4305],
+              [10.464, 63.433],
+            ],
+          },
+          detail: "Rute beregnet med OSRM.",
+        },
+        trafficImpacts: [],
+        publicTransportSuggestions: [
+          {
+            id: "atb-entur-planner",
+            kind: "planning_link",
+            title: "Sjekk avganger hos AtB/Entur",
+            detail:
+              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+            source: "AtB/Entur",
+            href: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        sources: [],
+        generatedAt: "2026-06-01T09:05:00.000Z",
+      }),
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+  await expect(page.getByRole("heading", { name: "Reiseråd for ruten" })).toBeVisible();
+  await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(1);
+
+  await page.getByLabel("Hvor er du?").fill("");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+
+  await expect(page.getByRole("alert")).toContainText("Skriv inn både start og mål");
+  await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(0);
+});
+
+test("traffic map invalidates an in-flight route when inputs change", async ({ page }) => {
+  let fulfillRoute: (() => Promise<void>) | undefined;
+  await page.route("**/api/map/travel-plan?**", async (route) => {
+    await new Promise<void>((resolve) => {
+      fulfillRoute = async () => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            origin: {
+              query: "Munkegata",
+              label: "Munkegata, Midtbyen",
+              coordinate: [10.3951, 63.4305],
+            },
+            destination: {
+              query: "Leangen",
+              label: "Leangen, Trondheim",
+              coordinate: [10.464, 63.433],
+            },
+            route: {
+              source: "osrm",
+              distanceMeters: 4850,
+              durationSeconds: 660,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.464, 63.433],
+                ],
+              },
+              detail: "Rute beregnet med OSRM.",
+            },
+            trafficImpacts: [],
+            publicTransportSuggestions: [],
+            sources: [],
+            generatedAt: "2026-06-01T09:05:00.000Z",
+          }),
+        });
+        resolve();
+      };
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+  await expect(page.getByRole("button", { name: "Henter reiseråd ..." })).toBeDisabled();
+
+  await page.getByLabel("Hvor er du?").fill("");
+  await expect(page.getByRole("button", { name: "Finn reiseråd" })).toBeEnabled();
+  await fulfillRoute?.();
+  await page.waitForTimeout(100);
+
+  await expect(page.getByRole("heading", { name: "Reiseråd for ruten" })).toHaveCount(0);
+  await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(0);
+});
+
 test("traffic map can show Entur public transport context", async ({ page }) => {
   await page.route("**/api/map/public-transport**", async (route) => {
     await route.fulfill({

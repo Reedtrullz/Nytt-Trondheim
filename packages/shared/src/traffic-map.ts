@@ -1,4 +1,4 @@
-import type { Geometry, Point } from "geojson";
+import type { Geometry, LineString, Point } from "geojson";
 import type { TrafficPulseCorridor } from "./types.js";
 
 export type TrafficEventCategory =
@@ -144,7 +144,9 @@ export interface TrafficMapSourceStatus {
     | "datex_weather"
     | "datex_cctv"
     | "trafikkdata"
-    | "vegvesen_traffic_info";
+    | "vegvesen_traffic_info"
+    | "entur_vehicle_positions"
+    | "entur_service_alerts";
   label: string;
   state: "ok" | "degraded" | "disabled" | "awaiting_access";
   detail: string;
@@ -159,4 +161,47 @@ export interface TrafficMapPayload {
   cameras?: RoadCamera[];
   counters?: TrafficCounterSnapshot[];
   sources?: TrafficMapSourceStatus[];
+}
+
+export interface TravelPlanPlace {
+  query: string;
+  label: string;
+  coordinate: [number, number];
+}
+
+export interface TravelPlanRoute {
+  source: "osrm" | "direct";
+  geometry: LineString;
+  distanceMeters: number;
+  durationSeconds?: number;
+  detail: string;
+}
+
+export interface TravelPlanTrafficImpact {
+  event: TrafficMapEvent;
+  distanceMeters: number;
+  summary: string;
+}
+
+export interface TravelPlanTransitSuggestion {
+  id: string;
+  kind: "vehicle" | "alert" | "planning_link";
+  title: string;
+  detail: string;
+  source: "Entur kjøretøyposisjoner" | "Entur avvik" | "AtB/Entur";
+  distanceMeters?: number;
+  lineName?: string;
+  publicCode?: string;
+  mode?: string;
+  href?: string;
+}
+
+export interface TravelPlanPayload {
+  origin: TravelPlanPlace;
+  destination: TravelPlanPlace;
+  route: TravelPlanRoute;
+  trafficImpacts: TravelPlanTrafficImpact[];
+  publicTransportSuggestions: TravelPlanTransitSuggestion[];
+  sources: TrafficMapSourceStatus[];
+  generatedAt: string;
 }

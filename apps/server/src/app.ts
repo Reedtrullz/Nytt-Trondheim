@@ -19,7 +19,9 @@ import {
   situationQuerySchema,
   taskInputSchema,
   trafficMapQuerySchema,
+  travelPlanQuerySchema,
   type MapFeature,
+  type PublicTransportVehicle,
   type SourceHealth,
   type TrafficEventState,
   type TrafficMapEvent,
@@ -33,6 +35,11 @@ import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
+import {
+  buildTravelPlanPayload,
+  resolveTravelPlanPlacesAndRoute,
+  routeBounds,
+} from "./traffic/travel-plan.js";
 import { buildTrafficBrief } from "./traffic/traffic-brief.js";
 import { loadWeatherPreparedness } from "./weather/preparedness.js";
 
@@ -339,6 +346,63 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         cameras,
         counters,
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/map/travel-plan", async (req, res, next) => {
+    try {
+      const query = travelPlanQuerySchema.parse(req.query);
+      const login = currentLogin(req);
+      const { origin, destination, route } = await resolveTravelPlanPlacesAndRoute(
+        query.from,
+        query.to,
+      );
+      const bounds = routeBounds(route);
+      const publicTransportModes: PublicTransportVehicle["mode"][] = [
+        "bus",
+        "tram",
+        "rail",
+        "water",
+      ];
+      const [trafficInfoEvents, officialEvents, vehicles, alerts, sourceHealth] = await Promise.all(
+        [
+          store.listTrafficMapEvents(
+            {
+              sources: ["vegvesen_traffic_info"],
+              states: ["active", "planned"],
+              bounds,
+              limit: null,
+            },
+            login,
+          ),
+          store.listOfficialEvents({ source: "datex" }, login),
+          store.listPublicTransportVehicles({ modes: publicTransportModes, bounds, limit: null }),
+          store.listPublicTransportServiceAlerts({ states: ["active"], bounds, limit: null }),
+          store.listSourceHealth(),
+        ],
+      );
+      const eventsBySourceKey = new Map<string, TrafficMapEvent>();
+      const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
+      for (const event of trafficInfoEvents) eventsBySourceKey.set(sourceKey(event), event);
+      for (const event of officialEvents) {
+        const trafficEvent = officialEventToTrafficMapEvent(event);
+        if (trafficEvent && (trafficEvent.state === "active" || trafficEvent.state === "planned")) {
+          eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
+        }
+      }
+      res.json(
+        buildTravelPlanPayload({
+          origin,
+          destination,
+          route,
+          events: [...eventsBySourceKey.values()],
+          vehicles,
+          alerts,
+          sourceHealth,
+        }),
+      );
     } catch (error) {
       next(error);
     }
@@ -884,6 +948,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const status = errorStatus(error);
       if (status === 400) {
         res.status(400).json({ error: "Ugyldig forespørsel." });
+        return;
+      }
+      if (status === 502 || status === 503) {
+        res.status(status).json({ error: "Karttjenesten svarte ikke. Prøv igjen." });
         return;
       }
 

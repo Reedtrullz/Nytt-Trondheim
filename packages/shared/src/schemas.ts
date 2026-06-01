@@ -226,6 +226,13 @@ export const publicTransportMapQuerySchema = z
 
 export type PublicTransportMapQueryInput = z.infer<typeof publicTransportMapQuerySchema>;
 
+export const travelPlanQuerySchema = z.object({
+  from: z.string().trim().min(2).max(160),
+  to: z.string().trim().min(2).max(160),
+});
+
+export type TravelPlanQueryInput = z.infer<typeof travelPlanQuerySchema>;
+
 export const trafficMapQuerySchema = z
   .object({
     categories: csvListSchema(trafficEventCategorySchema),

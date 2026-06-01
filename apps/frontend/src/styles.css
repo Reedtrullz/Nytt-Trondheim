@@ -2355,6 +2355,8 @@ button {
 
 .traffic-map-controls {
   grid-area: controls;
+  display: grid;
+  gap: 16px;
 }
 
 .traffic-map-details {
@@ -2387,6 +2389,7 @@ button {
 
 .traffic-filter-panel,
 .traffic-brief-card,
+.travel-plan-card,
 .traffic-event-list-card,
 .public-transport-card,
 .corridor-impact-card {
@@ -2397,6 +2400,7 @@ button {
 
 .traffic-filter-panel h2,
 .traffic-brief-card h2,
+.travel-plan-card h2,
 .traffic-event-list-card h2,
 .public-transport-card h2,
 .corridor-impact-card h2 {
@@ -2405,6 +2409,7 @@ button {
 }
 
 .traffic-filter-panel h3,
+.travel-plan-card h3,
 .corridor-impact-card h3 {
   margin: 16px 0 8px;
   color: var(--muted);
@@ -2413,13 +2418,87 @@ button {
   text-transform: uppercase;
 }
 
-.traffic-filter-panel label {
+.traffic-filter-panel label,
+.route-planner-form label {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 8px 0;
   color: #39434b;
   font-size: 13px;
+}
+
+.route-planner-form {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: #fbfbf8;
+}
+
+.route-planner-form input {
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.route-planner-form button {
+  padding: 10px 12px;
+  color: #fff;
+  border: 0;
+  background: var(--blue);
+  cursor: pointer;
+}
+
+.route-planner-form button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.route-planner-status {
+  padding: 12px;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  background: #fbfbf8;
+}
+
+.route-planner-status.error {
+  color: var(--terracotta);
+  border-style: solid;
+  background: #fff8f3;
+}
+
+.travel-plan-card {
+  border-left: 5px solid var(--blue);
+}
+
+.travel-plan-card header small,
+.travel-plan-card li span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.travel-plan-card ul {
+  padding: 0;
+  margin: 10px 0 0;
+  list-style: none;
+}
+
+.travel-plan-card li {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.travel-plan-card a {
+  display: inline-flex;
+  margin-top: 6px;
+  color: var(--blue);
+  font-size: 12px;
+  text-decoration: none;
 }
 
 .public-transport-card header {
