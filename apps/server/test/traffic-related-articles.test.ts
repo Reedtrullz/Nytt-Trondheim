@@ -45,6 +45,7 @@ describe("relatedTrafficArticlesForEvent", () => {
       id: "article-1",
       title: "Kø på E6 ved Tiller",
       url: "https://example.test/articles/1",
+      location: { lat: 63.406, lng: 10.4, label: "Tiller" },
     });
     expect(related[0]?.distanceMeters).toBeLessThan(1_000);
   });

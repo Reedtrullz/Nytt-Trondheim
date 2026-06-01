@@ -19,6 +19,11 @@ export interface RelatedTrafficArticle {
   title: string;
   url: string;
   distanceMeters: number;
+  location?: {
+    lat: number;
+    lng: number;
+    label?: string;
+  };
 }
 
 export interface TrafficMapEvent {

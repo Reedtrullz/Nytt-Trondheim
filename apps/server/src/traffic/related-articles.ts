@@ -166,10 +166,16 @@ export function relatedTrafficArticlesForEvent(
   event: TrafficMapEvent,
   articles: Article[],
 ): RelatedTrafficArticle[] {
-  return findRelatedTrafficArticles(event, articles).map((match) => ({
-    id: match.article.id,
-    title: match.article.title,
-    url: match.article.url,
-    distanceMeters: Math.round(match.distance),
-  }));
+  return findRelatedTrafficArticles(event, articles).map((match) => {
+    const location = match.article.location;
+    return {
+      id: match.article.id,
+      title: match.article.title,
+      url: match.article.url,
+      distanceMeters: Math.round(match.distance),
+      ...(location
+        ? { location: { lat: location.lat, lng: location.lng, label: location.label } }
+        : {}),
+    };
+  });
 }
