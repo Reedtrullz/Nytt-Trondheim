@@ -240,6 +240,7 @@ export function TrafficMapPage() {
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
   const [visibleContextLayers, setVisibleContextLayers] =
     useState<TrafficLayerVisibility>(defaultTrafficLayers);
+  const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
   const [originInput, setOriginInput] = useState("");
   const [destinationInput, setDestinationInput] = useState("");
   const [travelPlan, setTravelPlan] = useState<TravelPlanPayload>();
@@ -454,7 +455,19 @@ export function TrafficMapPage() {
       <TrafficNowSummary cards={summaryCardsForDisplay} />
 
       <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
-        <div className="traffic-workspace-sidebar">
+        <button
+          type="button"
+          className="traffic-mobile-layers-button"
+          aria-expanded={mobileLayersOpen}
+          aria-controls="traffic-workspace-sidebar"
+          onClick={() => setMobileLayersOpen((open) => !open)}
+        >
+          Lag
+        </button>
+        <div
+          id="traffic-workspace-sidebar"
+          className={`traffic-workspace-sidebar${mobileLayersOpen ? " open" : ""}`}
+        >
           <TrafficFilterPanel
             selectedCategories={selectedCategories}
             selectedSeverities={selectedSeverities}

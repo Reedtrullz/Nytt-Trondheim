@@ -3098,6 +3098,10 @@ button {
   font-size: 10px;
 }
 
+.traffic-mobile-layers-button {
+  display: none;
+}
+
 @media (max-width: 1080px) {
   .masthead {
     gap: 22px;
@@ -3418,7 +3422,7 @@ button {
   }
 
   .traffic-page-shell {
-    padding: 18px;
+    padding: 16px;
     gap: 14px;
     overflow-x: hidden;
   }
@@ -3432,34 +3436,67 @@ button {
   }
 
   .traffic-now-cards {
-    grid-template-columns: 1fr;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(170px, 76%);
+    grid-template-columns: none;
+    overflow-x: auto;
+    padding-bottom: 6px;
   }
 
   .traffic-workspace {
+    grid-template-columns: 1fr;
     min-height: 0;
   }
 
+  .traffic-mobile-layers-button {
+    display: inline-flex;
+    justify-content: center;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    color: var(--blue);
+    font-weight: 700;
+  }
+
   .traffic-workspace-sidebar {
+    display: none;
     padding: 14px;
-  }
-
-  .traffic-bottom-panel {
-    gap: 12px;
-  }
-
-  .traffic-map-page {
-    grid-template-rows: auto 520px auto;
-    overflow-x: hidden;
-  }
-
-  .traffic-map-controls,
-  .traffic-map-details {
     border-right: 0;
-    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .traffic-workspace-sidebar.open {
+    display: grid;
   }
 
   .traffic-map {
     min-height: 520px;
+  }
+
+  .traffic-bottom-panel {
+    display: block;
+  }
+
+  .traffic-bottom-list {
+    position: relative;
+    z-index: 450;
+    margin-top: -38px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px 18px 0 0;
+    background: var(--paper);
+  }
+
+  .traffic-detail-drawer {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    top: auto;
+    max-height: 72vh;
+    border-radius: 18px 18px 0 0;
+    z-index: 800;
   }
 
   .drawing-tools input,
