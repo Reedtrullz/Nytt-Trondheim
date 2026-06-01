@@ -316,213 +316,251 @@
       retries: 12
       delay: 5
 
-    - name: Promote API and worker
-      ansible.builtin.command: docker compose --env-file .env.production up -d app worker
-      args:
-        chdir: "{{ app_dir }}"
-      changed_when: true
+    - name: Promote candidate and validate production
+      block:
+        - name: Promote API and worker
+          ansible.builtin.command: docker compose --env-file .env.production up -d app worker
+          args:
+            chdir: "{{ app_dir }}"
+          changed_when: true
 
-    - name: Remove healthy canary
-      community.docker.docker_container:
-        name: nytt-trondheim-canary
-        state: absent
+        - name: Remove healthy canary
+          community.docker.docker_container:
+            name: nytt-trondheim-canary
+            state: absent
 
-    - name: Configure Caddy reverse proxy
-      become: true
-      ansible.builtin.blockinfile:
-        path: /etc/caddy/Caddyfile
-        marker: "# {mark} ANSIBLE MANAGED - Nytt Trondheim"
-        block: |
-          nytt.reidar.tech {
-            reverse_proxy 127.0.0.1:{{ app_port }}
-          }
+        - name: Configure Caddy reverse proxy
+          become: true
+          ansible.builtin.blockinfile:
+            path: /etc/caddy/Caddyfile
+            marker: "# {mark} ANSIBLE MANAGED - Nytt Trondheim"
+            block: |
+              nytt.reidar.tech {
+                reverse_proxy 127.0.0.1:{{ app_port }}
+              }
 
-    - name: Validate Caddy configuration
-      become: true
-      ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile
-      changed_when: false
+        - name: Validate Caddy configuration
+          become: true
+          ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile
+          changed_when: false
 
-    - name: Reload validated Caddy
-      become: true
-      ansible.builtin.systemd:
-        name: caddy
-        state: reloaded
+        - name: Reload validated Caddy
+          become: true
+          ansible.builtin.systemd:
+            name: caddy
+            state: reloaded
 
-    - name: Install systemd backup units
-      become: true
-      ansible.builtin.copy:
-        dest: "/etc/systemd/system/{{ item.name }}"
-        mode: "0644"
-        content: "{{ item.content }}"
-      loop:
-        - name: nytt-backup.service
-          content: |
-            [Unit]
-            Description=Encrypted backup for Nytt Trondheim
-            [Service]
-            Type=oneshot
-            EnvironmentFile=/etc/nytt-backup.env
-            Environment=HOME=/var/lib/nytt-backup
-            Environment=BACKUP_APPLY_RETENTION=true
-            ExecStart=/usr/local/bin/nytt-backup
-        - name: nytt-backup.timer
-          content: |
-            [Unit]
-            Description=Nightly Nytt Trondheim backup
-            [Timer]
-            OnCalendar=*-*-* 03:15:00
-            Persistent=true
-            [Install]
-            WantedBy=timers.target
-        - name: nytt-restore-check.service
-          content: |
-            [Unit]
-            Description=Validate Nytt Trondheim backups
-            [Service]
-            Type=oneshot
-            EnvironmentFile=/etc/nytt-backup.env
-            Environment=HOME=/var/lib/nytt-backup
-            ExecStart=/usr/local/bin/nytt-restore-check
-        - name: nytt-restore-check.timer
-          content: |
-            [Unit]
-            Description=Weekly Nytt Trondheim restore verification
-            [Timer]
-            OnCalendar=Sun *-*-* 04:15:00
-            Persistent=true
-            [Install]
-            WantedBy=timers.target
+        - name: Install systemd backup units
+          become: true
+          ansible.builtin.copy:
+            dest: "/etc/systemd/system/{{ item.name }}"
+            mode: "0644"
+            content: "{{ item.content }}"
+          loop:
+            - name: nytt-backup.service
+              content: |
+                [Unit]
+                Description=Encrypted backup for Nytt Trondheim
+                [Service]
+                Type=oneshot
+                EnvironmentFile=/etc/nytt-backup.env
+                Environment=HOME=/var/lib/nytt-backup
+                Environment=BACKUP_APPLY_RETENTION=true
+                ExecStart=/usr/local/bin/nytt-backup
+            - name: nytt-backup.timer
+              content: |
+                [Unit]
+                Description=Nightly Nytt Trondheim backup
+                [Timer]
+                OnCalendar=*-*-* 03:15:00
+                Persistent=true
+                [Install]
+                WantedBy=timers.target
+            - name: nytt-restore-check.service
+              content: |
+                [Unit]
+                Description=Validate Nytt Trondheim backups
+                [Service]
+                Type=oneshot
+                EnvironmentFile=/etc/nytt-backup.env
+                Environment=HOME=/var/lib/nytt-backup
+                ExecStart=/usr/local/bin/nytt-restore-check
+            - name: nytt-restore-check.timer
+              content: |
+                [Unit]
+                Description=Weekly Nytt Trondheim restore verification
+                [Timer]
+                OnCalendar=Sun *-*-* 04:15:00
+                Persistent=true
+                [Install]
+                WantedBy=timers.target
 
-    - name: Enable backup timers
-      become: true
-      ansible.builtin.systemd:
-        name: "{{ item }}"
-        state: started
-        enabled: true
-        daemon_reload: true
-      loop:
-        - nytt-backup.timer
-        - nytt-restore-check.timer
+        - name: Enable backup timers
+          become: true
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+            daemon_reload: true
+          loop:
+            - nytt-backup.timer
+            - nytt-restore-check.timer
 
-    - name: Verify production health
-      ansible.builtin.uri:
-        url: "https://nytt.reidar.tech/health"
-        return_content: true
-      register: production_health
-      until: production_health.json.status == "ok"
-      retries: 6
-      delay: 5
+        - name: Verify production health
+          ansible.builtin.uri:
+            url: "https://nytt.reidar.tech/health"
+            return_content: true
+          register: production_health
+          until: production_health.json.status == "ok"
+          retries: 6
+          delay: 5
 
-    - name: Verify worker container is running
-      ansible.builtin.shell: |
-        set -euo pipefail
-        docker compose --env-file .env.production ps --services --filter status=running worker | grep -qx worker
-      args:
-        chdir: "{{ app_dir }}"
-        executable: /bin/bash
-      changed_when: false
+        - name: Verify worker container is running
+          ansible.builtin.shell: |
+            set -euo pipefail
+            docker compose --env-file .env.production ps --services --filter status=running worker | grep -qx worker
+          args:
+            chdir: "{{ app_dir }}"
+            executable: /bin/bash
+          changed_when: false
 
-    - name: Verify DATEX source health rows when DATEX is enabled
-      ansible.builtin.shell: |
-        set -euo pipefail
-        count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "SELECT count(*) FROM source_health WHERE source IN ('datex','datex_travel_time');")"
-        test "$count" -eq 2
-      args:
-        chdir: "{{ app_dir }}"
-        executable: /bin/bash
-      changed_when: false
-      when:
-        - lookup('env', 'NYTT_DATEX_USERNAME') | length > 0
-        - lookup('env', 'NYTT_DATEX_PASSWORD') | length > 0
+        - name: Verify DATEX source health rows when DATEX is enabled
+          ansible.builtin.shell: |
+            set -euo pipefail
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "SELECT count(*) FROM source_health WHERE source IN ('datex','datex_travel_time');")"
+            test "$count" -eq 2
+          args:
+            chdir: "{{ app_dir }}"
+            executable: /bin/bash
+          changed_when: false
+          when:
+            - lookup('env', 'NYTT_DATEX_USERNAME') | length > 0
+            - lookup('env', 'NYTT_DATEX_PASSWORD') | length > 0
 
-    - name: Verify Entur source health and provenance invariants when tables exist
-      ansible.builtin.shell: |
-        set -euo pipefail
-        docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 <<'SQL'
-        DO $$
-        DECLARE
-          entur_source_health_count integer;
-          accidental_vehicle_source_items integer;
-          accidental_official_events integer;
-          accidental_entur_situations integer;
-        BEGIN
-          IF to_regclass('public.public_transport_vehicles') IS NULL
-             OR to_regclass('public.public_transport_service_alerts') IS NULL THEN
-            RAISE NOTICE 'Skipping Entur verification because public transport tables do not exist yet.';
-            RETURN;
-          END IF;
+        - name: Verify Entur source health and provenance invariants when tables exist
+          ansible.builtin.shell: |
+            set -euo pipefail
+            docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 <<'SQL'
+            DO $$
+            DECLARE
+              entur_source_health_count integer;
+              accidental_vehicle_source_items integer;
+              accidental_official_events integer;
+              accidental_entur_situations integer;
+            BEGIN
+              IF to_regclass('public.public_transport_vehicles') IS NULL
+                 OR to_regclass('public.public_transport_service_alerts') IS NULL THEN
+                RAISE NOTICE 'Skipping Entur verification because public transport tables do not exist yet.';
+                RETURN;
+              END IF;
 
-          SELECT count(*) INTO entur_source_health_count
-          FROM source_health
-          WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
-            AND state='ok';
+              SELECT count(*) INTO entur_source_health_count
+              FROM source_health
+              WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
+                AND state='ok';
 
-          IF entur_source_health_count <> 2 THEN
-            RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;
-          END IF;
+              IF entur_source_health_count <> 2 THEN
+                RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;
+              END IF;
 
-          SELECT count(*) INTO accidental_vehicle_source_items
-          FROM source_items
-          WHERE provider='entur_vehicle_positions'
-             OR (
-               provider='entur'
-               AND (
-                 external_id LIKE 'entur-vehicle:%'
-                 OR normalized_payload->>'source' = 'entur_vehicle_positions'
-                 OR normalized_payload ? 'vehicleId'
-               )
-             );
+              SELECT count(*) INTO accidental_vehicle_source_items
+              FROM source_items
+              WHERE provider='entur_vehicle_positions'
+                 OR (
+                   provider='entur'
+                   AND (
+                     external_id LIKE 'entur-vehicle:%'
+                     OR normalized_payload->>'source' = 'entur_vehicle_positions'
+                     OR normalized_payload ? 'vehicleId'
+                   )
+                 );
 
-          IF accidental_vehicle_source_items <> 0 THEN
-            RAISE EXCEPTION 'Entur vehicle telemetry entered source_items: % rows', accidental_vehicle_source_items;
-          END IF;
+              IF accidental_vehicle_source_items <> 0 THEN
+                RAISE EXCEPTION 'Entur vehicle telemetry entered source_items: % rows', accidental_vehicle_source_items;
+              END IF;
 
-          SELECT count(*) INTO accidental_official_events
-          FROM official_events
-          WHERE source IN ('entur','entur_vehicle_positions','entur_service_alerts');
+              SELECT count(*) INTO accidental_official_events
+              FROM official_events
+              WHERE source IN ('entur','entur_vehicle_positions','entur_service_alerts');
 
-          IF accidental_official_events <> 0 THEN
-            RAISE EXCEPTION 'Entur sources entered official_events: % rows', accidental_official_events;
-          END IF;
+              IF accidental_official_events <> 0 THEN
+                RAISE EXCEPTION 'Entur sources entered official_events: % rows', accidental_official_events;
+              END IF;
 
-          SELECT count(*) INTO accidental_entur_situations
-          FROM situations
-          WHERE payload->>'officialSource' IN ('entur','entur_vehicle_positions','entur_service_alerts')
-             OR payload->'activationBasis'->'sourceIds' ?| array['entur','entur_vehicle_positions','entur_service_alerts']
-             OR EXISTS (
-               SELECT 1
-               FROM jsonb_array_elements(COALESCE(payload->'evidence', '[]'::jsonb)) evidence
-               WHERE evidence->>'source' IN ('entur','entur_vehicle_positions','entur_service_alerts')
-             );
+              SELECT count(*) INTO accidental_entur_situations
+              FROM situations
+              WHERE payload->>'officialSource' IN ('entur','entur_vehicle_positions','entur_service_alerts')
+                 OR payload->'activationBasis'->'sourceIds' ?| array['entur','entur_vehicle_positions','entur_service_alerts']
+                 OR EXISTS (
+                   SELECT 1
+                   FROM jsonb_array_elements(COALESCE(payload->'evidence', '[]'::jsonb)) evidence
+                   WHERE evidence->>'source' IN ('entur','entur_vehicle_positions','entur_service_alerts')
+                 );
 
-          IF accidental_entur_situations <> 0 THEN
-            RAISE EXCEPTION 'Entur sources activated situations: % rows', accidental_entur_situations;
-          END IF;
-        END $$;
-        SQL
-      args:
-        chdir: "{{ app_dir }}"
-        executable: /bin/bash
-      register: entur_verification
-      until: entur_verification.rc == 0
-      retries: 12
-      delay: 10
-      changed_when: false
+              IF accidental_entur_situations <> 0 THEN
+                RAISE EXCEPTION 'Entur sources activated situations: % rows', accidental_entur_situations;
+              END IF;
+            END $$;
+            SQL
+          args:
+            chdir: "{{ app_dir }}"
+            executable: /bin/bash
+          register: entur_verification
+          until: entur_verification.rc == 0
+          retries: 12
+          delay: 10
+          changed_when: false
 
-    - name: Verify source item query sanity
-      ansible.builtin.command: >-
-        docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt
-        -c "SELECT provider, kind, count(*) FROM source_items GROUP BY provider, kind ORDER BY provider, kind LIMIT 20;"
-      args:
-        chdir: "{{ app_dir }}"
-      changed_when: false
+        - name: Verify source item query sanity
+          ansible.builtin.command: >-
+            docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt
+            -c "SELECT provider, kind, count(*) FROM source_items GROUP BY provider, kind ORDER BY provider, kind LIMIT 20;"
+          args:
+            chdir: "{{ app_dir }}"
+          changed_when: false
 
-    - name: Verify TravelTime rows are excluded from source items
-      ansible.builtin.shell: |
-        set -euo pipefail
-        count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "SELECT count(*) FROM source_items WHERE provider='datex_travel_time' OR kind='travel_time';")"
-        test "$count" -eq 0
-      args:
-        chdir: "{{ app_dir }}"
-        executable: /bin/bash
-      changed_when: false
+        - name: Verify TravelTime rows are excluded from source items
+          ansible.builtin.shell: |
+            set -euo pipefail
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "SELECT count(*) FROM source_items WHERE provider='datex_travel_time' OR kind='travel_time';")"
+            test "$count" -eq 0
+          args:
+            chdir: "{{ app_dir }}"
+            executable: /bin/bash
+          changed_when: false
+
+      rescue:
+        - name: Restore previous API image after failed candidate validation
+          ansible.builtin.shell: docker image tag nytt-trondheim-api:previous nytt-trondheim-api:latest
+          changed_when: true
+          ignore_errors: true
+
+        - name: Restore previous worker image after failed candidate validation
+          ansible.builtin.shell: docker image tag nytt-trondheim-worker:previous nytt-trondheim-worker:latest
+          changed_when: true
+          ignore_errors: true
+
+        - name: Restart previous API and worker after failed candidate validation
+          ansible.builtin.command: docker compose --env-file .env.production up -d app worker
+          args:
+            chdir: "{{ app_dir }}"
+          changed_when: true
+
+        - name: Verify previous production health after rollback
+          ansible.builtin.uri:
+            url: "https://nytt.reidar.tech/health"
+            return_content: true
+          register: rollback_health
+          until: rollback_health.json.status == "ok"
+          retries: 6
+          delay: 5
+
+        - name: Fail deployment after rollback
+          ansible.builtin.fail:
+            msg: "Candidate validation failed; previous app/worker images were restored. Inspect logs for the failed candidate."
+
+      always:
+        - name: Remove canary container after deploy attempt
+          community.docker.docker_container:
+            name: nytt-trondheim-canary
+            state: absent

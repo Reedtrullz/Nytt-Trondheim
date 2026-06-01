@@ -17,4 +17,27 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toMatch(/retries:\s*\d+/);
     expect(task).toMatch(/delay:\s*\d+/);
   });
+
+  it("rolls back previous app and worker images when post-promotion validation fails", () => {
+    const blockStart = playbook.indexOf("- name: Promote candidate and validate production");
+    expect(blockStart).toBeGreaterThan(-1);
+    const rescueStart = playbook.indexOf("rescue:", blockStart);
+    expect(rescueStart).toBeGreaterThan(blockStart);
+
+    const validationBlock = playbook.slice(blockStart, rescueStart);
+    expect(validationBlock).toContain("- name: Promote API and worker");
+    expect(validationBlock).toContain("- name: Verify production health");
+    expect(validationBlock).toMatch(/- name: Verify worker/);
+    expect(validationBlock).toContain("- name: Verify DATEX source health rows when DATEX is enabled");
+    expect(validationBlock).toContain("- name: Verify Entur source health");
+    expect(validationBlock).toContain("- name: Verify source item query sanity");
+
+    const alwaysStart = playbook.indexOf("always:", rescueStart);
+    const rescueBlock = playbook.slice(rescueStart, alwaysStart > rescueStart ? alwaysStart : undefined);
+    expect(rescueBlock).toContain("nytt-trondheim-api:previous");
+    expect(rescueBlock).toContain("nytt-trondheim-api:latest");
+    expect(rescueBlock).toContain("nytt-trondheim-worker:previous");
+    expect(rescueBlock).toContain("nytt-trondheim-worker:latest");
+    expect(rescueBlock).toContain("docker compose --env-file .env.production up -d app worker");
+  });
 });
