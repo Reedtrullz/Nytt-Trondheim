@@ -34,6 +34,7 @@ import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
 import { buildTrafficBrief } from "./traffic/traffic-brief.js";
+import { loadWeatherPreparedness } from "./weather/preparedness.js";
 
 const EXPORT_ATTACHMENT_COUNT_LIMIT = 25;
 const EXPORT_ATTACHMENT_BYTE_LIMIT = 50 * 1024 * 1024;
@@ -51,6 +52,7 @@ const publicTransportSourceIdSet = new Set<string>([
   "entur_service_alerts",
 ]);
 const defaultPublicTransportBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
+const defaultWeatherBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
 
 function trafficMapSourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourceStatus[] {
   return sourceHealth
@@ -337,6 +339,20 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         cameras,
         counters,
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/weather/preparedness", async (req, res, next) => {
+    try {
+      const login = currentLogin(req);
+      const [officialEvents, roadWeather, sourceHealth] = await Promise.all([
+        store.listOfficialEvents({ states: ["active", "updated"] }, login),
+        store.listRoadWeatherObservations(defaultWeatherBounds),
+        store.listSourceHealth(),
+      ]);
+      res.json(await loadWeatherPreparedness({ officialEvents, roadWeather, sourceHealth }));
     } catch (error) {
       next(error);
     }

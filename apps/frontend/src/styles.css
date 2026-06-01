@@ -1247,7 +1247,6 @@ button {
 
 .weather-map-road,
 .rain-band,
-.warning-area,
 .station,
 .weather-map-label,
 .weather-map-legend {
@@ -1298,40 +1297,6 @@ button {
   right: -90px;
   bottom: 32px;
   background: linear-gradient(90deg, rgba(125, 206, 223, 0.1), #9bd7e7, #4da7db);
-}
-
-.warning-area {
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid #df9d1f;
-  background: rgba(238, 183, 57, 0.28);
-}
-
-.warning-area .weather-icon {
-  width: 36px;
-  height: 36px;
-  color: #9b3f22;
-  stroke-width: 1.8;
-}
-
-.warning-area-north {
-  width: 140px;
-  height: 82px;
-  right: 54px;
-  top: 42px;
-  clip-path: polygon(8% 30%, 62% 0, 100% 36%, 72% 100%, 0 78%);
-  transform: rotate(-11deg);
-}
-
-.warning-area-south {
-  width: 156px;
-  height: 86px;
-  left: 60px;
-  bottom: 40px;
-  clip-path: polygon(18% 9%, 92% 22%, 78% 100%, 0 78%);
-  transform: rotate(11deg);
 }
 
 .station {
@@ -1640,6 +1605,180 @@ button {
 
 .level-oransje {
   background: #dc6a28;
+}
+
+.level-rødt,
+.level-rodt {
+  background: #b5281e;
+}
+
+.weather-risk-strip {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.risk-card {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #96a0a6;
+  border-radius: 6px;
+  background: rgba(255, 254, 250, 0.78);
+}
+
+.risk-card.watch {
+  border-left-color: var(--blue);
+}
+
+.risk-card.warning {
+  border-left-color: var(--amber);
+}
+
+.risk-card.severe {
+  border-left-color: var(--terracotta);
+}
+
+.risk-card .weather-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--blue);
+}
+
+.risk-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.risk-card h3 {
+  margin: 0;
+  font: 20px/1.05 var(--serif);
+}
+
+.risk-card header span,
+.risk-card footer,
+.weather-layer-list small,
+.source-health-list span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.risk-card strong,
+.risk-card p,
+.risk-card footer {
+  grid-column: 2;
+}
+
+.risk-card strong {
+  font-size: 13px;
+}
+
+.risk-card p,
+.weather-layer-list p,
+.authority-card p,
+.source-health-list p {
+  margin: 0;
+  color: #364247;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.risk-card footer {
+  display: grid;
+  gap: 3px;
+}
+
+.weather-layer-list,
+.source-health-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.weather-layer-list article,
+.source-health-list article,
+.authority-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 254, 250, 0.72);
+}
+
+.weather-layer-list article {
+  display: grid;
+  gap: 5px;
+}
+
+.weather-layer-list article > span,
+.source-health-list article > span {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(42, 97, 135, 0.08);
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.authority-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.authority-card h3 {
+  margin: 0;
+  font: 22px/1.1 var(--serif);
+}
+
+.authority-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.authority-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.impact-card.normal .impact-icon {
+  background: #5b954a;
+}
+
+.impact-card.watch .impact-icon {
+  background: var(--blue);
+}
+
+.impact-card.warning .impact-icon {
+  background: var(--amber);
+}
+
+.impact-card.severe .impact-icon {
+  background: var(--terracotta);
+}
+
+.impact-card.normal strong {
+  color: var(--green);
+}
+
+.impact-card.watch strong {
+  color: var(--blue);
+}
+
+.impact-card.warning strong {
+  color: var(--amber);
+}
+
+.impact-card.severe strong {
+  color: var(--terracotta);
 }
 
 .weather-panel-link {

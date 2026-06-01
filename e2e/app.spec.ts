@@ -105,6 +105,207 @@ test("bootstrap 429 shows retryable error without stale loading", async ({ page 
   await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
 });
 
+test("weather page presents the preparedness desk with source-labeled official guidance", async ({
+  page,
+}) => {
+  await page.route("**/api/weather/preparedness", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: "2026-06-01T08:05:00.000Z",
+        current: {
+          summary: "MET Locationforecast: regnbyger nå",
+          updatedAt: "2026-06-01T08:00:00.000Z",
+          airTemperatureC: 7,
+          windSpeedMps: 8,
+          precipitationNextHourMm: 2.4,
+        },
+        risks: [
+          {
+            key: "precipitation",
+            label: "Nedbør",
+            status: "MET farevarsel: Gult regn",
+            level: "warning",
+            source: "MET Locationforecast + MET farevarsel",
+            confidence: "Høy",
+            nextChange: "Gjelder til tirsdag 09:00",
+            detail: "Lokalt overvann mulig.",
+          },
+          {
+            key: "wind",
+            label: "Vind",
+            status: "Frisk bris",
+            level: "watch",
+            source: "MET Locationforecast",
+            confidence: "Middels",
+            nextChange: "Neste time",
+            detail: "8 m/s fra sørvest.",
+          },
+          {
+            key: "floodLandslide",
+            label: "Flom/skred",
+            status: "NVE flomvarsel: Oransje",
+            level: "severe",
+            source: "NVE/Varsom",
+            confidence: "Høy",
+            nextChange: "Følg Varsom",
+            detail: "Økt vannføring.",
+          },
+          {
+            key: "roadConditions",
+            label: "Føre",
+            status: "Våte veger",
+            level: "watch",
+            source: "Statens vegvesen DATEX",
+            confidence: "Middels",
+            nextChange: "Oppdateres fra vegstasjoner",
+            detail: "Våt vegbane.",
+          },
+          {
+            key: "powerTelecom",
+            label: "Strøm/tele",
+            status: "Følg egenberedskap",
+            level: "watch",
+            source: "DSB egenberedskap",
+            confidence: "Råd",
+            nextChange: "Ved oransje/rødt varsel",
+            detail: "Forbered strøm, vann og mobilutfall ved forverring.",
+          },
+          {
+            key: "health",
+            label: "Helse",
+            status: "Ingen særskilt værhelserisiko",
+            level: "normal",
+            source: "MET/DSB",
+            confidence: "Middels",
+            nextChange: "Følg temperaturendringer",
+            detail: "Vurder sårbare grupper ved kulde/varme.",
+          },
+        ],
+        actions: [
+          {
+            id: "rain-drains",
+            level: "warning",
+            title: "Rens sluk og hold avrenning åpen",
+            detail: "Gult regnvarsel: fjern løv fra sluk og unngå utsatte underganger.",
+            source: "MET farevarsel + Trondheim klimatilpasning",
+          },
+          {
+            id: "neighbours",
+            level: "severe",
+            title: "Sjekk sårbare naboer og egenberedskap",
+            detail:
+              "Ved oransje/rødt: følg offisielle varsler og forbered bortfall av strøm, vann og mobilnett.",
+            source: "DSB egenberedskap",
+          },
+        ],
+        authority: {
+          emergencyAlertStatus:
+            "Nytt er ikke koblet til Nødvarsel. Følg Nødvarsel hvis du får det.",
+          civilDefenceDetail:
+            "Sivilforsvaret støtter politi, brann, helse og kommuner ved større hendelser.",
+          links: [
+            {
+              label: "Nødvarsel",
+              url: "https://www.nodvarsel.no/om-nodvarsel/",
+              source: "Nødvarsel",
+            },
+            {
+              label: "DSB egenberedskap",
+              url: "https://www.dsb.no/sikkerhverdag/egenberedskap/",
+              source: "DSB",
+            },
+          ],
+        },
+        impactGroups: [
+          {
+            group: "Innbyggere",
+            status: "Følg lokale råd",
+            level: "warning",
+            detail: "Hold sluk åpne.",
+            source: "DSB/Trondheim",
+          },
+          {
+            group: "Transport",
+            status: "Våte veger",
+            level: "watch",
+            detail: "Sjekk trafikkart.",
+            source: "Vegvesen DATEX",
+          },
+          {
+            group: "Helse",
+            status: "Normal",
+            level: "normal",
+            detail: "Ingen særskilt risiko.",
+            source: "MET",
+          },
+          {
+            group: "Skole/arrangement",
+            status: "Uteaktivitet påvirkes",
+            level: "watch",
+            detail: "Vurder eksponering.",
+            source: "MET",
+          },
+          {
+            group: "Beredskap",
+            status: "Følg offisielle varsler",
+            level: "warning",
+            detail: "Ingen Nødvarsel.",
+            source: "Nødvarsel/DSB",
+          },
+        ],
+        warnings: [
+          {
+            id: "met-rain",
+            sourceLabel: "MET farevarsel",
+            title: "Kraftig regn",
+            area: "Trøndelag",
+            level: "Gult",
+            validUntil: "2026-06-02T09:00:00.000Z",
+            url: "https://api.met.no/weatherapi/metalerts/2.0/current.rss",
+          },
+          {
+            id: "nve-flood",
+            sourceLabel: "NVE flomvarsel",
+            title: "Flomvarsel",
+            area: "Trondheim",
+            level: "Oransje",
+            validUntil: "2026-06-02T09:00:00.000Z",
+            url: "https://varsom.no",
+          },
+        ],
+        hourly: [],
+        roadWeather: [],
+        mapLayers: [
+          {
+            id: "met-warnings",
+            title: "MET warning polygons",
+            source: "MET",
+            status: "planned",
+            detail: "Vises når varselgeometri eksponeres i værkartet.",
+          },
+        ],
+        sources: [],
+      }),
+    });
+  });
+
+  await page.goto("/vaer");
+
+  await expect(page.getByRole("heading", { name: "Hva betyr været nå?" })).toBeVisible();
+  await expect(page.getByText("MET Locationforecast: regnbyger nå")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Nedbør" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Flom/skred" })).toBeVisible();
+  await expect(page.getByText("MET farevarsel + Trondheim klimatilpasning")).toBeVisible();
+  await expect(page.getByText("Nytt er ikke koblet til Nødvarsel")).toBeVisible();
+  await expect(page.getByText("Neste lag")).toBeVisible();
+  await expect(page.locator(".warning-area")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Hvem påvirkes?" })).toBeVisible();
+  await expect(page.getByText("Innbyggere")).toBeVisible();
+  await expect(page.getByText("Sivilforsvaret støtter politi, brann, helse")).toBeVisible();
+});
+
 test("searching from trafikk navigates home and shows filtered results", async ({ page }) => {
   await page.goto("/trafikk");
   await page.getByPlaceholder("Søk i saker").fill("bru");

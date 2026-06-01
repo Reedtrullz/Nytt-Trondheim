@@ -1,5 +1,14 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { MapContainer, TileLayer } from "react-leaflet";
+import type {
+  WeatherMapLayer,
+  WeatherPreparednessPayload,
+  WeatherRiskItem,
+  WeatherRiskLevel,
+} from "@nytt/shared";
+import { fetchWeatherPreparedness } from "../api/weatherPreparedness.js";
 import { ArrowIcon } from "../components/Icons.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
 
 type WeatherIconName =
   | "bus"
@@ -12,156 +21,6 @@ type WeatherIconName =
   | "water"
   | "wind";
 
-interface WeatherMetric {
-  icon: WeatherIconName;
-  label: string;
-  value: string;
-  detail: string;
-}
-
-interface HourlyForecast {
-  time: string;
-  icon: WeatherIconName;
-  temp: string;
-  precipitation: string;
-}
-
-interface ImpactItem {
-  icon: WeatherIconName;
-  title: string;
-  status: string;
-  severity: "low" | "medium" | "elevated";
-  description: string;
-  source: string;
-  action: string;
-}
-
-interface EventItem {
-  icon: WeatherIconName;
-  title: string;
-  description: string;
-  time: string;
-}
-
-interface WarningRow {
-  source: string;
-  type: string;
-  area: string;
-  level: "Grønt" | "Gult" | "Oransje";
-  validUntil: string;
-}
-
-const metrics: WeatherMetric[] = [
-  { icon: "wind", label: "Vind", value: "4 m/s", detail: "Sørvest" },
-  { icon: "drop", label: "Nedbør siste time", value: "1,1 mm", detail: "Lokale byger" },
-  { icon: "thermometer", label: "Lufttemperatur", value: "7°", detail: "Føles som 5°" },
-];
-
-const hourlyForecast: HourlyForecast[] = [
-  { time: "12:00", icon: "cloudRain", temp: "7°", precipitation: "1,1" },
-  { time: "13:00", icon: "cloudRain", temp: "7°", precipitation: "0,9" },
-  { time: "14:00", icon: "cloudRain", temp: "7°", precipitation: "0,7" },
-  { time: "15:00", icon: "cloudRain", temp: "8°", precipitation: "0,6" },
-  { time: "16:00", icon: "cloudRain", temp: "8°", precipitation: "0,5" },
-  { time: "17:00", icon: "sunCloud", temp: "7°", precipitation: "0,4" },
-];
-
-const impactItems: ImpactItem[] = [
-  {
-    icon: "car",
-    title: "Trafikk",
-    status: "Våte veger",
-    severity: "medium",
-    description: "Flere strekninger har redusert sikt og våt veibane.",
-    source: "Statens vegvesen",
-    action: "Se trafikkart",
-  },
-  {
-    icon: "bus",
-    title: "Kollektiv",
-    status: "Normal drift",
-    severity: "low",
-    description: "Noe lengre reisetid kan oppstå på utsatte ruter.",
-    source: "AtB",
-    action: "Se reiseinfo",
-  },
-  {
-    icon: "warning",
-    title: "Skoler og arrangement",
-    status: "Værforbehold",
-    severity: "medium",
-    description: "Flere uteaktiviteter kan bli berørt ved kraftige byger.",
-    source: "Trondheim kommune",
-    action: "Se oversikt",
-  },
-  {
-    icon: "water",
-    title: "Beredskap",
-    status: "Forhøyet beredskap",
-    severity: "elevated",
-    description: "Våte forhold og overvann kan gi lokale utfordringer.",
-    source: "Trondheim kommune",
-    action: "Se råd",
-  },
-];
-
-const weatherEvents: EventItem[] = [
-  {
-    icon: "cloudRain",
-    title: "Kraftige regnbyger over Fosen og Trondheim",
-    description: "Lokalt 15-20 mm siste 3 timer.",
-    time: "12:02",
-  },
-  {
-    icon: "water",
-    title: "Vannstand i Nidelva stiger",
-    description: "Nå på 62 cm og økende.",
-    time: "11:48",
-  },
-  {
-    icon: "wind",
-    title: "Frisk bris flere steder",
-    description: "Kast i vind opp mot 12 m/s på utsatte områder.",
-    time: "11:30",
-  },
-  {
-    icon: "warning",
-    title: "Gult farevarsel for regn gjelder",
-    description: "Frem til i morgen kl. 21:00.",
-    time: "10:45",
-  },
-];
-
-const warningRows: WarningRow[] = [
-  {
-    source: "MET",
-    type: "Kraftig regn",
-    area: "Trøndelag",
-    level: "Gult",
-    validUntil: "I morgen 21:00",
-  },
-  {
-    source: "NVE",
-    type: "Flomvarsel",
-    area: "Nidelva",
-    level: "Grønt",
-    validUntil: "I morgen 18:00",
-  },
-  {
-    source: "NVE",
-    type: "Jordskredfare",
-    area: "Trøndelag",
-    level: "Gult",
-    validUntil: "I morgen 18:00",
-  },
-  {
-    source: "Vegvesen",
-    type: "Førevarsel",
-    area: "Trøndelag",
-    level: "Gult",
-    validUntil: "I morgen 12:00",
-  },
-];
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
 
 function WeatherIcon({ name }: { name: WeatherIconName }) {
@@ -224,80 +83,193 @@ function WeatherIcon({ name }: { name: WeatherIconName }) {
   );
 }
 
-function SourceLink({ children }: { children: string }) {
-  return (
-    <a href="/" onClick={(event) => event.preventDefault()}>
+function riskIcon(risk: WeatherRiskItem): WeatherIconName {
+  switch (risk.key) {
+    case "precipitation":
+      return "cloudRain";
+    case "wind":
+      return "wind";
+    case "floodLandslide":
+      return "water";
+    case "roadConditions":
+      return "car";
+    case "powerTelecom":
+      return "warning";
+    case "health":
+      return "thermometer";
+  }
+}
+
+function levelText(level: WeatherRiskLevel): string {
+  switch (level) {
+    case "normal":
+      return "Normal";
+    case "watch":
+      return "Følg med";
+    case "warning":
+      return "Varsel";
+    case "severe":
+      return "Alvorlig";
+  }
+}
+
+function formatNumber(value: number | undefined, suffix: string): string {
+  return value === undefined ? "—" : `${Math.round(value * 10) / 10}${suffix}`;
+}
+
+function formatTime(value: string | undefined): string {
+  if (!value) return "Ikke oppgitt";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("nb-NO", {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  const safeHref = safeExternalUrl(href);
+  return safeHref ? (
+    <a href={safeHref} target="_blank" rel="noreferrer noopener">
       {children}
     </a>
-  );
+  ) : null;
+}
+
+function layerStatus(layer: WeatherMapLayer): string {
+  if (layer.status === "available") return "Aktiv i Nytt";
+  if (layer.status === "context") return "Kontekst";
+  return "Neste lag";
 }
 
 export function WeatherPage() {
+  const [payload, setPayload] = useState<WeatherPreparednessPayload>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(undefined);
+    fetchWeatherPreparedness({ signal: controller.signal })
+      .then(setPayload)
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setPayload(undefined);
+        setError(reason instanceof Error ? reason.message : "Kunne ikke hente værberedskap.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [attempt]);
+
+  const sourceLine = useMemo(() => {
+    if (!payload) return "Kilder: MET, NVE/Varsom, Statens vegvesen DATEX, DSB";
+    const sources = payload.sources.map((source) => source.label).slice(0, 4);
+    return sources.length
+      ? `Kilder: ${sources.join(", ")}`
+      : "Kilder: MET, NVE/Varsom, Statens vegvesen DATEX, DSB";
+  }, [payload]);
+
+  if (loading && !payload) {
+    return <main className="weather-page loading">Henter værberedskap...</main>;
+  }
+
+  if (error && !payload) {
+    return (
+      <main className="weather-page fatal-error" role="alert">
+        <p>{error}</p>
+        <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+          Prøv igjen
+        </button>
+      </main>
+    );
+  }
+
+  if (!payload) return null;
+
   return (
     <main className="weather-page">
       <header className="weather-hero">
         <div>
           <h1>Vær</h1>
           <p>
-            Oppdatert 12:08 · Kilder: <SourceLink>MET</SourceLink>, <SourceLink>NVE</SourceLink>,{" "}
-            <SourceLink>Statens vegvesen</SourceLink>
+            Weather preparedness desk · Oppdatert {formatTime(payload.generatedAt)} · {sourceLine}
           </p>
         </div>
       </header>
 
-      <section className="weather-impact-grid" aria-label="Værstatus">
+      <section className="weather-impact-grid" aria-label="Værberedskap">
         <article className="weather-current-panel">
           <div className="weather-panel-heading">
             <div>
-              <h2>Trondheim nå</h2>
-              <p>Torget</p>
+              <h2>Hva betyr været nå?</h2>
+              <p>Trondheim · kilde-merket vurdering, ikke nødvarsel</p>
             </div>
           </div>
           <div className="weather-now">
             <WeatherIcon name="cloudRain" />
-            <strong>7°</strong>
+            <strong>{formatNumber(payload.current.airTemperatureC, "°")}</strong>
             <div>
-              <h3>Regnbyger</h3>
-              <p>Føles som 5°</p>
+              <h3>{payload.current.summary}</h3>
+              <p>
+                Nedbør neste time {formatNumber(payload.current.precipitationNextHourMm, " mm")} ·
+                Vind {formatNumber(payload.current.windSpeedMps, " m/s")}
+              </p>
             </div>
           </div>
           <dl className="weather-metrics">
-            {metrics.map((metric) => (
-              <div key={metric.label}>
-                <WeatherIcon name={metric.icon} />
-                <dt>{metric.label}</dt>
-                <dd>{metric.value}</dd>
-                <small>{metric.detail}</small>
-              </div>
-            ))}
-          </dl>
-          <section className="hourly-strip" aria-label="Neste timer">
-            <h3>Neste timer</h3>
-            <div className="hourly-grid">
-              {hourlyForecast.map((hour) => (
-                <article key={hour.time}>
-                  <time>{hour.time}</time>
-                  <WeatherIcon name={hour.icon} />
-                  <strong>{hour.temp}</strong>
-                  <span>{hour.precipitation}</span>
-                </article>
-              ))}
+            <div>
+              <WeatherIcon name="drop" />
+              <dt>Nedbør</dt>
+              <dd>{formatNumber(payload.current.precipitationNextHourMm, " mm")}</dd>
+              <small>MET Locationforecast</small>
             </div>
-            <p>Nedbør (mm)</p>
+            <div>
+              <WeatherIcon name="wind" />
+              <dt>Vind</dt>
+              <dd>{formatNumber(payload.current.windSpeedMps, " m/s")}</dd>
+              <small>MET Locationforecast</small>
+            </div>
+            <div>
+              <WeatherIcon name="thermometer" />
+              <dt>Lufttemperatur</dt>
+              <dd>{formatNumber(payload.current.airTemperatureC, "°")}</dd>
+              <small>MET Locationforecast</small>
+            </div>
+          </dl>
+          <section className="weather-risk-strip" aria-label="Risikostrip">
+            {payload.risks.map((risk) => (
+              <article className={`risk-card ${risk.level}`} key={risk.key}>
+                <WeatherIcon name={riskIcon(risk)} />
+                <header>
+                  <h3>{risk.label}</h3>
+                  <span>{levelText(risk.level)}</span>
+                </header>
+                <strong>{risk.status}</strong>
+                <p>{risk.detail}</p>
+                <footer>
+                  <span>Kilde: {risk.source}</span>
+                  <small>
+                    {risk.confidence} · {risk.nextChange}
+                  </small>
+                </footer>
+              </article>
+            ))}
           </section>
         </article>
 
         <article className="weather-map-panel">
           <div className="weather-panel-heading">
             <div>
-              <h2>Dagens værbilde</h2>
-              <p>Radar, farevarsler og lokale målinger</p>
+              <h2>Varsel- og konsekvenskart</h2>
+              <p>Offisielle varselområder og lokale konsekvenslag</p>
             </div>
-            <a href="/" onClick={(event) => event.preventDefault()}>
-              Se fullskjerm <ArrowIcon />
-            </a>
           </div>
-          <div className="weather-map-visual" aria-label="Kart med radar og farevarsler">
+          <div className="weather-map-visual" aria-label="Kart med farevarsler og lokale målinger">
             <MapContainer
               center={[63.4305, 10.3951]}
               zoom={10}
@@ -316,115 +288,136 @@ export function WeatherPage() {
             <div className="weather-map-road weather-map-road-secondary" />
             <div className="rain-band rain-band-heavy" />
             <div className="rain-band rain-band-light" />
-            <div className="warning-area warning-area-north">
-              <WeatherIcon name="warning" />
-            </div>
-            <div className="warning-area warning-area-south">
-              <WeatherIcon name="warning" />
-            </div>
             <span className="station station-green station-one" />
             <span className="station station-yellow station-two" />
             <span className="station station-green station-three" />
             <span className="station station-blue station-four" />
-            <div className="weather-map-legend">
-              <span>Nedbør mm/t</span>
-              <i />
-              <small>0,1</small>
-              <small>1</small>
-              <small>5</small>
-              <small>20+</small>
-            </div>
           </div>
-          <div className="weather-brief">
-            <h3>Kort fortalt</h3>
-            <ul>
-              <li>Regn og byger fortsetter ut ettermiddagen. Mest nedbør i ytre strøk.</li>
-              <li>Temperaturen holder seg mellom 6 og 8 grader.</li>
-              <li>Frisk bris fra sørvest. Kast i vind opp mot 12 m/s utsatt til.</li>
-              <li>Lav risiko for flom i vassdrag. Våt bekk og overvann lokalt.</li>
-            </ul>
+          <div className="weather-layer-list">
+            {payload.mapLayers.map((layer) => (
+              <article key={layer.id}>
+                <strong>{layer.title}</strong>
+                <span>{layerStatus(layer)}</span>
+                <p>{layer.detail}</p>
+                <small>Kilde: {layer.source}</small>
+              </article>
+            ))}
           </div>
         </article>
 
-        <aside className="weather-impact-panel" aria-label="Hva påvirkes">
-          <h2>Hva påvirkes</h2>
+        <aside className="weather-impact-panel" aria-label="Tiltak og myndigheter">
+          <h2>Tiltak nå</h2>
           <div className="impact-list">
-            {impactItems.map((item) => (
-              <article className={`impact-card ${item.severity}`} key={item.title}>
+            {payload.actions.map((action) => (
+              <article className={`impact-card ${action.level}`} key={action.id}>
                 <div className="impact-icon">
-                  <WeatherIcon name={item.icon} />
+                  <WeatherIcon name={action.level === "severe" ? "warning" : "water"} />
                 </div>
                 <div>
                   <header>
-                    <h3>{item.title}</h3>
-                    <strong>{item.status}</strong>
+                    <h3>{action.title}</h3>
+                    <strong>{levelText(action.level)}</strong>
                   </header>
-                  <p>{item.description}</p>
+                  <p>{action.detail}</p>
                   <footer>
-                    <span>Kilde: {item.source}</span>
-                    <a href="/" onClick={(event) => event.preventDefault()}>
-                      {item.action} <ArrowIcon />
-                    </a>
+                    <span>Kilde: {action.source}</span>
                   </footer>
                 </div>
               </article>
             ))}
           </div>
+          <section className="authority-card">
+            <h3>Myndigheter og sivil beredskap</h3>
+            <p>{payload.authority.emergencyAlertStatus}</p>
+            <p>{payload.authority.civilDefenceDetail}</p>
+            <div className="authority-links">
+              {payload.authority.links.map((link) => (
+                <ExternalLink href={link.url} key={link.url}>
+                  {link.label} <ArrowIcon />
+                </ExternalLink>
+              ))}
+            </div>
+          </section>
         </aside>
       </section>
 
       <section className="weather-bottom-grid">
         <article className="weather-events-panel">
-          <h2>Siste værhendelser</h2>
-          <div className="weather-event-list">
-            {weatherEvents.map((item) => (
-              <a href="/" key={item.title} onClick={(event) => event.preventDefault()}>
-                <WeatherIcon name={item.icon} />
-                <span>
-                  <strong>{item.title}</strong>
-                  <small>{item.description}</small>
-                </span>
-                <time>{item.time}</time>
-                <ArrowIcon />
-              </a>
+          <h2>Hvem påvirkes?</h2>
+          <div className="impact-list">
+            {payload.impactGroups.map((group) => (
+              <article className={`impact-card ${group.level}`} key={group.group}>
+                <div className="impact-icon">
+                  <WeatherIcon
+                    name={
+                      group.group === "Transport"
+                        ? "bus"
+                        : group.group === "Helse"
+                          ? "thermometer"
+                          : "warning"
+                    }
+                  />
+                </div>
+                <div>
+                  <header>
+                    <h3>{group.group}</h3>
+                    <strong>{group.status}</strong>
+                  </header>
+                  <p>{group.detail}</p>
+                  <footer>
+                    <span>Kilde: {group.source}</span>
+                  </footer>
+                </div>
+              </article>
             ))}
           </div>
-          <a className="weather-panel-link" href="/" onClick={(event) => event.preventDefault()}>
-            Se alle hendelser <ArrowIcon />
-          </a>
         </article>
 
         <article className="weather-warning-panel">
-          <h2>Varsler og terskler</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Kilde</th>
-                <th>Type</th>
-                <th>Område</th>
-                <th>Nivå</th>
-                <th>Gyldig til</th>
-              </tr>
-            </thead>
-            <tbody>
-              {warningRows.map((row) => (
-                <tr key={`${row.source}-${row.type}`}>
-                  <td data-label="Kilde">{row.source}</td>
-                  <td data-label="Type">{row.type}</td>
-                  <td data-label="Område">{row.area}</td>
-                  <td data-label="Nivå">
-                    <span className={`warning-level level-${row.level.toLowerCase()}`}>
-                      {row.level}
-                    </span>
-                  </td>
-                  <td data-label="Gyldig til">{row.validUntil}</td>
+          <h2>Offisielle varsler og kilder</h2>
+          {payload.warnings.length ? (
+            <table>
+              <thead>
+                <tr>
+                  <th>Kilde</th>
+                  <th>Type</th>
+                  <th>Område</th>
+                  <th>Nivå</th>
+                  <th>Gyldig til</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <a className="weather-panel-link" href="/" onClick={(event) => event.preventDefault()}>
-            Se alle varsler og terskler <ArrowIcon />
-          </a>
+              </thead>
+              <tbody>
+                {payload.warnings.map((warning) => (
+                  <tr key={warning.id}>
+                    <td data-label="Kilde">{warning.sourceLabel}</td>
+                    <td data-label="Type">
+                      <ExternalLink href={warning.url}>{warning.title}</ExternalLink>
+                    </td>
+                    <td data-label="Område">{warning.area}</td>
+                    <td data-label="Nivå">
+                      <span
+                        className={`warning-level level-${warning.level.toLocaleLowerCase("nb")}`}
+                      >
+                        {warning.level}
+                      </span>
+                    </td>
+                    <td data-label="Gyldig til">{formatTime(warning.validUntil)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p>Ingen aktive MET farevarsler eller NVE/Varsom-varsler i Nytt akkurat nå.</p>
+          )}
+          <div className="source-health-list">
+            {payload.sources.map((source) => (
+              <article key={source.source}>
+                <strong>{source.label}</strong>
+                <span>{source.state}</span>
+                <p>{source.detail}</p>
+              </article>
+            ))}
+          </div>
         </article>
       </section>
     </main>
