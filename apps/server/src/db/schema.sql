@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS evidence_items (
   payload jsonb NOT NULL,
   extracted_at timestamptz NOT NULL
 );
+ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_no_telemetry_source_check;
+ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_telemetry_source_check
+  CHECK (source NOT IN (
+    'datex_travel_time',
+    'datex_weather',
+    'datex_cctv',
+    'trafikkdata',
+    'entur_vehicle_positions'
+  ));
 
 CREATE TABLE IF NOT EXISTS timeline_entries (
   id text PRIMARY KEY,
@@ -108,6 +117,9 @@ CREATE TABLE IF NOT EXISTS source_items (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (kind IN ('article', 'official_event', 'warning', 'reporter_note', 'reader_tip', 'media_asset'))
 );
+ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_entur_vehicle_positions_kind_check;
+ALTER TABLE source_items ADD CONSTRAINT source_items_entur_vehicle_positions_kind_check
+  CHECK (provider <> 'entur_vehicle_positions' OR kind <> 'official_event');
 
 CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_kind_external_id_unique
   ON source_items (provider, kind, external_id)
@@ -132,6 +144,33 @@ CREATE INDEX IF NOT EXISTS situation_source_items_source_item_idx
   ON situation_source_items (source_item_id);
 CREATE INDEX IF NOT EXISTS situation_source_items_situation_idx
   ON situation_source_items (situation_id);
+
+CREATE OR REPLACE FUNCTION enforce_situation_source_item_relationship()
+RETURNS trigger AS $$
+DECLARE
+  source_provider text;
+BEGIN
+  SELECT provider INTO source_provider FROM source_items WHERE id = NEW.source_item_id;
+  IF NEW.relationship = 'supports'
+    AND source_provider IN (
+      'datex_travel_time',
+      'datex_weather',
+      'datex_cctv',
+      'trafikkdata',
+      'entur_vehicle_positions'
+    )
+  THEN
+    RAISE EXCEPTION 'source item provider % must be linked as context, not supports', source_provider
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS situation_source_items_relationship_guard ON situation_source_items;
+CREATE TRIGGER situation_source_items_relationship_guard
+  BEFORE INSERT OR UPDATE OF relationship, source_item_id ON situation_source_items
+  FOR EACH ROW EXECUTE FUNCTION enforce_situation_source_item_relationship();
 
 -- Backfill existing articles into the source item ledger.
 INSERT INTO source_items (

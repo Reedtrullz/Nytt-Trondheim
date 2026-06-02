@@ -53,4 +53,23 @@ describe("source item schema", () => {
     expect(schema).not.toMatch(/INSERT INTO source_items[\s\S]*FROM datex_travel_times/);
     expect(schema).not.toContain("datex_travel_time', 'official_event'");
   });
+
+  it("enforces telemetry/context feeds as non-causal incident context", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    for (const provider of [
+      "datex_travel_time",
+      "datex_weather",
+      "datex_cctv",
+      "trafikkdata",
+      "entur_vehicle_positions",
+    ]) {
+      expect(schema).toContain(provider);
+    }
+    expect(schema).toContain("evidence_items_no_telemetry_source_check");
+    expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
+    expect(schema).toContain("enforce_situation_source_item_relationship");
+    expect(schema).toContain("relationship = 'supports'");
+    expect(schema).toContain("RAISE EXCEPTION");
+  });
 });

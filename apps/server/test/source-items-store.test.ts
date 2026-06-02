@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { sampleArticles, sampleSituation } from "@nytt/shared";
+import type { SourceItem } from "@nytt/shared";
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryStore, PgStore } from "../src/store.js";
@@ -174,6 +175,28 @@ describe("source item store", () => {
     ).resolves.toEqual([]);
   });
 
+  it("rejects support links for telemetry-only MemoryStore source items", async () => {
+    const store = new MemoryStore();
+    const sourceItems = (store as unknown as { sourceItems: Map<string, SourceItem> }).sourceItems;
+    sourceItems.set("telemetry:travel-time", {
+      id: "telemetry:travel-time",
+      provider: "datex_travel_time",
+      kind: "official_event",
+      externalId: "100141",
+      fetchedAt: "2026-06-02T10:00:00.000Z",
+      captureHash: "sha256:travel-time",
+      reliabilityTier: "official",
+      linkedSituationIds: [],
+    });
+
+    await expect(
+      store.linkSourceItem("skogbrann-bymarka", "telemetry:travel-time", "supports", "Reedtrullz"),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      store.linkSourceItem("skogbrann-bymarka", "telemetry:travel-time", "context", "Reedtrullz"),
+    ).resolves.toMatchObject({ relationship: "context" });
+  });
+
   it("uses idempotent PgStore SQL for source item links", async () => {
     const query = vi
       .fn()
@@ -193,6 +216,8 @@ describe("source item store", () => {
     expect(linked?.linkedSituationIds).toEqual(["skogbrann-bymarka"]);
     expect(query.mock.calls[0]?.[0]).toContain("INSERT INTO situation_source_items");
     expect(query.mock.calls[0]?.[0]).toContain("ON CONFLICT");
+    expect(query.mock.calls[0]?.[0]).toContain("guarded_source.provider IN");
+    expect(query.mock.calls[0]?.[0]).toContain("entur_vehicle_positions");
 
     await expect(
       store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz"),
