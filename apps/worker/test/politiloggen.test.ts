@@ -116,4 +116,27 @@ describe("Politiloggen ingestion", () => {
       official: true,
     });
   });
+
+  it("expires or de-emphasizes inactive Politiloggen events", () => {
+    const inactiveThread = { ...activeThread, isActive: false };
+
+    expect(politiloggenSituationsFromThreads([inactiveThread])).toEqual([]);
+
+    const existing = politiloggenSituationsFromThreads([activeThread])[0] as Situation;
+    const [resolved] = politiloggenSituationsFromThreads([inactiveThread], [existing]);
+
+    expect(resolved).toMatchObject({
+      id: existing.id,
+      status: "resolved",
+      incidentSignature: "politiloggen:265vq7",
+      officialSource: "politiloggen",
+      officialEventId: "265vq7",
+    });
+    expect(resolved?.activationBasis).toEqual(existing.activationBasis);
+    expect(resolved?.timeline.at(-1)).toMatchObject({
+      title: "Politiloggen-hendelsen er avsluttet",
+      detail: "Politiloggen markerer ikke lenger hendelsen som aktiv.",
+      official: true,
+    });
+  });
 });
