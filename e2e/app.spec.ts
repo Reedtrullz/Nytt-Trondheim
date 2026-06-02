@@ -11,7 +11,7 @@ async function openTrafficLayersIfHidden(page: Page): Promise<void> {
   }
 }
 
-test("reader opens the active situation and keeps private map controls distinct", async ({
+test("Situation Room explains provenance and keeps private map controls distinct", async ({
   page,
 }) => {
   await page.goto("/");
@@ -27,6 +27,8 @@ test("reader opens the active situation and keeps private map controls distinct"
     page.getByRole("heading", { name: "Skogbrann ved Bymarka", exact: true }),
   ).toBeVisible();
   await page.getByRole("link", { name: /Åpne situasjonsrom/ }).click();
+  await expect(page.getByRole("heading", { name: "Hvorfor vises dette?" })).toBeVisible();
+  await expect(page.getByText("Kun kontekst")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
   await expect(page.getByText("Mine markeringer")).toBeVisible();
   await expect(page.getByText("Viser ressurser i området – ikke aktiv innsats")).toBeVisible();
@@ -1245,6 +1247,9 @@ test("primary surfaces have no automatically detectable accessibility violations
   const home = await new AxeBuilder({ page }).analyze();
   expect(home.violations).toEqual([]);
   await page.goto("/situasjoner/skogbrann-bymarka");
+  await expect(
+    page.getByRole("heading", { name: "Skogbrann ved Bymarka", level: 1 }),
+  ).toBeVisible();
   const incident = await new AxeBuilder({ page }).analyze();
   expect(incident.violations).toEqual([]);
 });
@@ -1283,7 +1288,7 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(page.getByRole("link", { name: "Åpne oversikt" })).toBeVisible();
   await page.getByRole("link", { name: "Drift" }).click();
   await expect(page.getByRole("heading", { name: "Kilder og systemstatus" })).toBeVisible();
-  await expect(page.getByText("Sikkerhetskopi")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();
   await expect(page.getByText("Innhentede saker")).toBeVisible();
   await page.getByRole("link", { name: "Lagret" }).click();
   await expect(page.getByRole("heading", { name: "Lagret" })).toBeVisible();

@@ -45,9 +45,33 @@ describe("header freshness label", () => {
     ).toBe("Sist oppdatert 11:59");
   });
 
-  it("shows unknown when no source has a valid lastCheckedAt", () => {
+  it("shows degraded copy when any checked source is non-OK", () => {
+    expect(
+      headerFreshnessLabel(
+        [
+          {
+            source: "nrk",
+            label: "NRK",
+            state: "ok",
+            detail: "RSS",
+            lastCheckedAt: "2026-05-31T12:08:00+02:00",
+          },
+          {
+            source: "datex",
+            label: "DATEX",
+            state: "awaiting_access",
+            detail: "Mangler tilgang",
+            lastCheckedAt: "2026-05-31T12:07:00+02:00",
+          },
+        ],
+        now,
+      ),
+    ).toBe("Delvis oppdatert 12:08 · 1 kilde trenger tilsyn");
+  });
+
+  it("shows source-state warning when no non-OK source has a valid timestamp", () => {
     expect(
       headerFreshnessLabel([{ source: "nrk", label: "NRK", state: "disabled", detail: "Av" }], now),
-    ).toBe("Oppdatering ukjent");
+    ).toBe("Kildeavvik: 1 kilde trenger tilsyn");
   });
 });

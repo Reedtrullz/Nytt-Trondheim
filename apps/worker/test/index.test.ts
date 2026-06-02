@@ -16,6 +16,7 @@ import {
   collectTrafikkdataCounters,
   collectTrafficInfoForMap,
   createCollectionGuard,
+  buildWorkerCycleMetrics,
   normalizeDatexSituationEndpoint,
   shouldResolveMissingDatexSituations,
 } from "../src/index.js";
@@ -149,6 +150,53 @@ describe("worker lifecycle helpers", () => {
     ).toThrow(/must not include URL credentials/);
   });
 
+  it("summarizes worker cycle metrics from injected source timings", () => {
+    const metrics = buildWorkerCycleMetrics({
+      cycleStartedAt: new Date("2026-06-02T06:00:00.000Z"),
+      cycleCompletedAt: new Date("2026-06-02T06:00:02.500Z"),
+      sources: [
+        {
+          source: "nrk",
+          startedAtMs: 100,
+          completedAtMs: 450,
+          sourceItemCount: 3,
+          parseFailures: 0,
+        },
+        {
+          source: "datex",
+          startedAtMs: 450,
+          completedAtMs: 200,
+          sourceItemCount: 2,
+          parseFailures: 1,
+        },
+        {
+          source: "nrk",
+          startedAtMs: 600,
+          completedAtMs: 900,
+          sourceItemCount: 1,
+        },
+      ],
+    });
+
+    expect(metrics).toEqual({
+      cycleStartedAt: "2026-06-02T06:00:00.000Z",
+      cycleCompletedAt: "2026-06-02T06:00:02.500Z",
+      cycleDurationMs: 2500,
+      sourceDurationsMs: {
+        nrk: 650,
+        datex: 0,
+      },
+      sourceItemCounts: {
+        nrk: 4,
+        datex: 2,
+      },
+      parseFailures: {
+        nrk: 0,
+        datex: 1,
+      },
+    });
+  });
+
   it("resolves missing DATEX situations only after a fresh snapshot", () => {
     expect(shouldResolveMissingDatexSituations(true)).toBe(true);
     expect(shouldResolveMissingDatexSituations(false)).toBe(false);
@@ -193,7 +241,7 @@ describe("Trafikkdata counter collection", () => {
         now: () => new Date("2026-05-29T10:15:00.000Z"),
         collector,
       }),
-    ).resolves.toEqual({ skipped: true });
+    ).resolves.toEqual({ skipped: true, sourceItemCount: 0, parseFailures: 0 });
 
     expect(repository.collectorState).toHaveBeenCalledWith("trafikkdata:lastSuccessfulPollAt");
     expect(collector).not.toHaveBeenCalled();
@@ -225,7 +273,7 @@ describe("Trafikkdata counter collection", () => {
         fetcher,
         collector,
       }),
-    ).resolves.toEqual({ skipped: false });
+    ).resolves.toEqual({ skipped: false, sourceItemCount: 2, parseFailures: 0 });
 
     expect(collector).toHaveBeenCalledWith({
       endpoint: "https://trafikkdata.example.test/graphql",
@@ -262,7 +310,7 @@ describe("Trafikkdata counter collection", () => {
         now: () => new Date(checkedAt),
         collector,
       }),
-    ).resolves.toEqual({ skipped: false });
+    ).resolves.toEqual({ skipped: false, sourceItemCount: 0, parseFailures: 1 });
 
     expect(repository.setCollectorState).not.toHaveBeenCalled();
     expect(repository.setHealth).toHaveBeenCalledWith({
@@ -537,13 +585,15 @@ describe("TrafficInfo worker collection", () => {
       relevantMessages: 2,
     });
 
-    await collectTrafficInfoForMap({
-      repository: repository as never,
-      endpoint: "https://traffic-info.example.test/messages",
-      nextPollAt,
-      now: () => new Date(checkedAt),
-      collector,
-    });
+    await expect(
+      collectTrafficInfoForMap({
+        repository: repository as never,
+        endpoint: "https://traffic-info.example.test/messages",
+        nextPollAt,
+        now: () => new Date(checkedAt),
+        collector,
+      }),
+    ).resolves.toEqual({ sourceItemCount: 2, parseFailures: 0 });
 
     expect(collector).toHaveBeenCalledWith({
       endpoint: "https://traffic-info.example.test/messages",
@@ -613,13 +663,15 @@ describe("TrafficInfo worker collection", () => {
     const repository = fakeTrafficInfoRepository();
     const collector = vi.fn().mockRejectedValue(new Error("upstream unavailable"));
 
-    await collectTrafficInfoForMap({
-      repository: repository as never,
-      endpoint: "https://traffic-info.example.test/messages",
-      nextPollAt,
-      now: () => new Date(checkedAt),
-      collector,
-    });
+    await expect(
+      collectTrafficInfoForMap({
+        repository: repository as never,
+        endpoint: "https://traffic-info.example.test/messages",
+        nextPollAt,
+        now: () => new Date(checkedAt),
+        collector,
+      }),
+    ).resolves.toEqual({ sourceItemCount: 0, parseFailures: 1 });
 
     expect(repository.upsertTrafficMapEvents).not.toHaveBeenCalled();
     expect(repository.upsertTrafficInfoSourceItems).not.toHaveBeenCalled();

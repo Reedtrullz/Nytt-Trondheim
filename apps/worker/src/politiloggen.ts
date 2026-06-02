@@ -195,6 +195,7 @@ export async function collectPolitiloggen(
   return {
     threads,
     articles: threads.flatMap((thread) => {
+      if (!thread.isActive) return [];
       const article = articleForThread(thread);
       return article ? [article] : [];
     }),

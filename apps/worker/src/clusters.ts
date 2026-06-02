@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Article, EvidenceItem, MapFeature, OfficialEvent, Situation } from "@nytt/shared";
+import { canonicalPlaceName } from "./classify.js";
 
 interface CandidateGroup {
   key: string;
@@ -11,6 +12,11 @@ interface CandidateGroup {
 const clusterWindowMs = 12 * 60 * 60 * 1000;
 const continuationWindowMs = 72 * 60 * 60 * 1000;
 const genericPlaces = new Set(["trondheim", "trøndelag"]);
+const eventDescriptorRules: Array<{ descriptor: string; pattern: RegExp }> = [
+  { descriptor: "garasjebrann", pattern: /\b(?:garasjebrann|brann\s+i\s+garasje)\b/i },
+  { descriptor: "bodbrann", pattern: /\b(?:bodbrann|brann\s+i\s+bod)\b/i },
+  { descriptor: "bilbrann", pattern: /\b(?:bilbrann|brann\s+i\s+bil)\b/i },
+];
 
 function slug(value: string): string {
   return value
@@ -67,6 +73,20 @@ function orderedDatexGroup(events: OfficialEvent[]): OfficialEvent[] {
 
 function uniqueTexts(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function incidentEventDescriptor(article: Article): string | undefined {
+  const text = `${article.title} ${article.excerpt}`;
+  return eventDescriptorRules.find((rule) => rule.pattern.test(text))?.descriptor;
+}
+
+function incidentSignatureKey(type: Situation["type"], place: string, article: Article): string {
+  const descriptor = incidentEventDescriptor(article);
+  return descriptor ? `${type}:${slug(place)}:${descriptor}` : `${type}:${slug(place)}`;
+}
+
+function warningSourceLabel(event: OfficialEvent): string {
+  return event.source === "met" ? "MET farevarsel" : "NVE / Varsom";
 }
 
 export function officialTrafficSituationsFromEvents(
@@ -288,7 +308,7 @@ export function detectPreliminarySituations(
     const type = detectType(article);
     const place = specificPlace(article);
     if (!place || !type) continue;
-    const key = `${type}:${slug(place)}`;
+    const key = incidentSignatureKey(type, place, article);
     const group = groups.get(key) ?? { key, type, place, articles: [] };
     group.articles.push(article);
     groups.set(key, group);
@@ -380,20 +400,6 @@ export function detectPreliminarySituations(
       extractedAt: new Date().toISOString(),
       publishedAt: article.publishedAt,
     }));
-    const warningEvidence = contextualWarnings.map((event) => ({
-      id: createHash("sha1").update(`${id}:warning:${event.id}`).digest("hex").slice(0, 18),
-      situationId: id,
-      source: event.source,
-      sourceLabel: event.source === "met" ? "MET farevarsel" : "NVE / Varsom",
-      sourceUrl: event.sourceUrl,
-      supportingSnippet: event.detail,
-      claim: event.title,
-      claimType: "official_warning_context",
-      provenance: "official" as const,
-      confidence: 1,
-      extractedAt: new Date().toISOString(),
-      publishedAt: event.publishedAt,
-    }));
     return [
       {
         id,
@@ -419,7 +425,7 @@ export function detectPreliminarySituations(
           activatedAt: latest.publishedAt,
         },
         relatedArticleIds: currentReports.map((article) => article.id),
-        evidence: [...evidence, ...officialEvidence, ...warningEvidence],
+        evidence: [...evidence, ...officialEvidence],
         features,
         timeline: [
           ...currentReports.map((article) => ({
@@ -429,6 +435,7 @@ export function detectPreliminarySituations(
             title: article.title,
             detail: article.excerpt,
             sourceLabel: article.sourceLabel,
+            source: article.source,
             sourceUrl: article.url,
             official: article.source === "trondheim_kommune",
           })),
@@ -438,7 +445,8 @@ export function detectPreliminarySituations(
             timestamp: event.publishedAt,
             title: event.title,
             detail: event.detail,
-            sourceLabel: event.source === "met" ? "MET farevarsel" : "NVE / Varsom",
+            sourceLabel: warningSourceLabel(event),
+            source: event.source,
             sourceUrl: event.sourceUrl,
             official: true,
           })),
@@ -480,7 +488,8 @@ function warningFeature(id: string, event: OfficialEvent): MapFeature[] {
       properties: {
         label: event.title,
         provenance: "official",
-        sourceLabel: "MET farevarsel",
+        sourceLabel: warningSourceLabel(event),
+        source: event.source,
         sourceUrl: event.sourceUrl,
         updatedAt: event.publishedAt,
         layer: "warning",
@@ -541,11 +550,15 @@ function reportingFeatures(id: string, articles: Article[]): MapFeature[] {
 }
 
 function specificPlace(article: Article): string | undefined {
-  return article.places.find((place) => !genericPlaces.has(place.toLocaleLowerCase("nb")));
+  const place = article.places.find(
+    (candidate) => !genericPlaces.has(candidate.toLocaleLowerCase("nb")),
+  );
+  return place ? canonicalPlaceName(place) : undefined;
 }
 
 function detectType(article: Article): Situation["type"] | undefined {
   const text = `${article.title} ${article.excerpt}`.toLocaleLowerCase("nb");
+  if (incidentEventDescriptor(article)) return "fire";
   if (/\b(brann|skogbrann|røykutvikling)\b/.test(text)) return "fire";
   if (/\b(savnet|leteaksjon|forsvunnet)\b/.test(text)) return "missing_person";
   if (/\b(jordskred|ras)\b/.test(text)) return "landslide";

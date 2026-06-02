@@ -1,6 +1,8 @@
 import type { ArticleCategory, GeographicScope } from "@nytt/shared";
 
 const trondheimTerms = [
+  "kroppanbrua",
+  "kroppan bru",
   "midtbyen",
   "lade",
   "sluppen",
@@ -24,6 +26,11 @@ const trondheimTerms = [
 ];
 const regionalTerms = ["malvik", "stjørdal", "orkland", "melhus", "oppdal", "trøndelag"];
 
+const placeAliases = new Map<string, string>([
+  ["kroppanbrua", "Kroppan Bru"],
+  ["kroppan bru", "Kroppan Bru"],
+]);
+
 const categoryRules: Array<[ArticleCategory, string[]]> = [
   ["Hendelser", ["brann", "savnet", "ulykke", "redning", "evaku", "politi"]],
   ["Transport", ["vei", "trafikk", "buss", "bru", "sykkel", "tog", "e6"]],
@@ -39,6 +46,14 @@ function escapeRegex(value: string): string {
 
 function containsPlaceTerm(text: string, term: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(term)}(?![\\p{L}\\p{N}])`, "u").test(text);
+}
+
+function normalizePlaceAliasKey(place: string): string {
+  return place.trim().toLocaleLowerCase("nb").replaceAll(/\s+/g, " ");
+}
+
+export function canonicalPlaceName(place: string): string {
+  return placeAliases.get(normalizePlaceAliasKey(place)) ?? place.trim();
 }
 
 export function detectScope(text: string): GeographicScope | undefined {

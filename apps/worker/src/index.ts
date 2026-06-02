@@ -7,6 +7,7 @@ import type {
   PublicTransportServiceAlert,
   SourceItemInput,
   TrafficCounterSnapshot,
+  WorkerCycleMetrics,
 } from "@nytt/shared";
 import { collectMunicipality, collectRss, probeOfficialSources, rssSources } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
@@ -70,6 +71,55 @@ interface CollectionContext {
   once: boolean;
 }
 
+export interface WorkerSourceMetricInput {
+  source: string;
+  startedAtMs: number;
+  completedAtMs: number;
+  sourceItemCount?: number;
+  parseFailures?: number;
+}
+
+interface WorkerCollectorTelemetry {
+  sourceItemCount?: number;
+  parseFailures?: number;
+}
+
+export function buildWorkerCycleMetrics({
+  cycleStartedAt,
+  cycleCompletedAt,
+  sources,
+}: {
+  cycleStartedAt: Date;
+  cycleCompletedAt: Date;
+  sources: WorkerSourceMetricInput[];
+}): WorkerCycleMetrics {
+  const sourceDurationsMs: Record<string, number> = {};
+  const sourceItemCounts: Record<string, number> = {};
+  const parseFailures: Record<string, number> = {};
+
+  for (const source of sources) {
+    const durationMs = Math.max(0, Math.round(source.completedAtMs - source.startedAtMs));
+    sourceDurationsMs[source.source] = (sourceDurationsMs[source.source] ?? 0) + durationMs;
+    if (source.sourceItemCount !== undefined) {
+      sourceItemCounts[source.source] =
+        (sourceItemCounts[source.source] ?? 0) + Math.max(0, Math.round(source.sourceItemCount));
+    }
+    if (source.parseFailures !== undefined) {
+      parseFailures[source.source] =
+        (parseFailures[source.source] ?? 0) + Math.max(0, Math.round(source.parseFailures));
+    }
+  }
+
+  return {
+    cycleStartedAt: cycleStartedAt.toISOString(),
+    cycleCompletedAt: cycleCompletedAt.toISOString(),
+    cycleDurationMs: Math.max(0, Math.round(cycleCompletedAt.getTime() - cycleStartedAt.getTime())),
+    sourceDurationsMs,
+    sourceItemCounts,
+    parseFailures,
+  };
+}
+
 export function shouldResolveMissingDatexSituations(freshSnapshot: boolean): boolean {
   return freshSnapshot;
 }
@@ -106,7 +156,7 @@ export async function collectTrafficInfoForMap({
   nextPollAt: string;
   now?: () => Date;
   collector?: typeof collectTrafficInfoMessages;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   try {
     const checkedAt = now().toISOString();
     const fetchedAt = checkedAt;
@@ -142,6 +192,7 @@ export async function collectTrafficInfoForMap({
       nextPollAt,
       detail: `${result.relevantMessages} relevante av ${result.totalMessages} Vegvesen trafikkmeldinger hentet (${result.events.filter((event) => event.state === "active").length} aktive, ${result.events.filter((event) => event.state === "planned").length} planlagte, ${expiredCount} utløpt fra snapshot, ${staleExpiredCount} stale utløpt)`,
     });
+    return { sourceItemCount: result.events.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -153,6 +204,7 @@ export async function collectTrafficInfoForMap({
       nextPollAt,
       detail: `TrafficInfo-innhenting feilet: ${String(error)}`,
     });
+    return { sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
@@ -289,7 +341,7 @@ export async function collectEnturServiceAlerts({
   nextPollAt: string;
   now?: () => Date;
   collector?: EnturServiceAlertCollector;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   const checkedAt = now().toISOString();
   const allAlerts: PublicTransportServiceAlert[] = [];
   const activeSituationNumbersByCodespace = new Map<string, string[]>();
@@ -341,6 +393,7 @@ export async function collectEnturServiceAlerts({
       ? `${allAlerts.length} Entur trafikkavvik oppdatert fra ${activeSituationNumbersByCodespace.size}/${codespaceIds.length} codespaces (${expiredCount} utløpt fra snapshot). Feil: ${failures.join("; ")}`
       : `${allAlerts.length} Entur trafikkavvik oppdatert fra ${activeSituationNumbersByCodespace.size}/${codespaceIds.length} codespaces (${expiredCount} utløpt fra snapshot)`,
   });
+  return { sourceItemCount: allAlerts.length, parseFailures: failures.length };
 }
 
 const trafikkdataPollIntervalMs = 15 * 60 * 1000;
@@ -367,7 +420,7 @@ export async function collectTrafikkdataCounters({
   now?: () => Date;
   fetcher?: typeof fetch;
   collector?: TrafikkdataCollector;
-}): Promise<{ skipped: boolean }> {
+}): Promise<{ skipped: boolean } & WorkerCollectorTelemetry> {
   const checkedAtDate = now();
   const checkedAt = checkedAtDate.toISOString();
   const lastSuccessfulPollAt = await repository.collectorState(
@@ -376,7 +429,9 @@ export async function collectTrafikkdataCounters({
   const lastSuccessfulPollMs = lastSuccessfulPollAt ? Date.parse(lastSuccessfulPollAt) : Number.NaN;
   if (Number.isFinite(lastSuccessfulPollMs)) {
     const elapsedMs = checkedAtDate.getTime() - lastSuccessfulPollMs;
-    if (elapsedMs >= 0 && elapsedMs < trafikkdataPollIntervalMs) return { skipped: true };
+    if (elapsedMs >= 0 && elapsedMs < trafikkdataPollIntervalMs) {
+      return { skipped: true, sourceItemCount: 0, parseFailures: 0 };
+    }
   }
 
   try {
@@ -394,7 +449,7 @@ export async function collectTrafikkdataCounters({
       nextPollAt,
       detail: `${counters.length} Trafikkdata tellepunkter oppdatert (${volumeCount} med timesvolum). Neste poll tidligst ${nextPollAt}`,
     });
-    return { skipped: false };
+    return { skipped: false, sourceItemCount: counters.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -406,7 +461,7 @@ export async function collectTrafikkdataCounters({
       nextPollAt,
       detail: `Trafikkdata-innhenting feilet: ${String(error)}`,
     });
-    return { skipped: false };
+    return { skipped: false, sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
@@ -464,7 +519,7 @@ export async function collectDatexRoadWeatherContext({
   now?: () => Date;
   fetcher?: typeof fetch;
   parser?: RoadWeatherParser;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   const checkedAt = now().toISOString();
   const credentials = normalizedDatexCredentials(username, password);
   if (!credentials) {
@@ -476,7 +531,7 @@ export async function collectDatexRoadWeatherContext({
       nextPollAt,
       detail: "DATEX Basic Auth mangler for værstasjonsdata",
     });
-    return;
+    return { sourceItemCount: 0, parseFailures: 0 };
   }
 
   try {
@@ -506,6 +561,7 @@ export async function collectDatexRoadWeatherContext({
       nextPollAt,
       detail: `${observations.length} DATEX værstasjonsobservasjoner oppdatert`,
     });
+    return { sourceItemCount: observations.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -517,6 +573,7 @@ export async function collectDatexRoadWeatherContext({
       nextPollAt,
       detail: `DATEX værstasjonsinnhenting feilet: ${String(error)}`,
     });
+    return { sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
@@ -540,7 +597,7 @@ export async function collectDatexCctvContext({
   now?: () => Date;
   fetcher?: typeof fetch;
   parser?: CctvParser;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   const checkedAt = now().toISOString();
   const credentials = normalizedDatexCredentials(username, password);
   if (!credentials) {
@@ -552,7 +609,7 @@ export async function collectDatexCctvContext({
       nextPollAt,
       detail: "DATEX Basic Auth mangler for webkameradata",
     });
-    return;
+    return { sourceItemCount: 0, parseFailures: 0 };
   }
 
   try {
@@ -582,6 +639,7 @@ export async function collectDatexCctvContext({
       nextPollAt,
       detail: `${cameras.length} DATEX webkamera oppdatert`,
     });
+    return { sourceItemCount: cameras.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -593,16 +651,33 @@ export async function collectDatexCctvContext({
       nextPollAt,
       detail: `DATEX webkamerainnhenting feilet: ${String(error)}`,
     });
+    return { sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
 async function collectAll({ repository, analyzer, once }: CollectionContext): Promise<void> {
-  console.log(`[worker] collection started ${new Date().toISOString()}`);
+  const cycleStartedAt = new Date();
+  const sourceMetrics: WorkerSourceMetricInput[] = [];
+  const recordSourceMetric = (
+    source: string,
+    startedAtMs: number,
+    values: { sourceItemCount?: number; parseFailures?: number } = {},
+  ) => {
+    sourceMetrics.push({
+      source,
+      startedAtMs,
+      completedAtMs: Date.now(),
+      ...values,
+    });
+  };
+  console.log(`[worker] collection started ${cycleStartedAt.toISOString()}`);
   const nextPollAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const articleSets = await Promise.all(
     rssSources.map(async (source) => {
+      const sourceStartedAtMs = Date.now();
       try {
         const articles = await collectRss(source);
+        recordSourceMetric(source.id, sourceStartedAtMs, { sourceItemCount: articles.length });
         await repository.setHealth({
           source: source.id,
           label: source.label,
@@ -613,6 +688,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
         });
         return articles;
       } catch (error) {
+        recordSourceMetric(source.id, sourceStartedAtMs, { parseFailures: 1 });
         await repository.setHealth({
           source: source.id,
           label: source.label,
@@ -629,8 +705,12 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const articlesWithoutGeocoding: Article[] = [];
   if (once || Date.now() - lastMunicipalityCollection >= municipalityIntervalMs) {
     lastMunicipalityCollection = Date.now();
+    const sourceStartedAtMs = Date.now();
     try {
       const articles = await collectMunicipality();
+      recordSourceMetric("trondheim_kommune", sourceStartedAtMs, {
+        sourceItemCount: articles.length,
+      });
       articleSets.push(articles);
       await repository.setHealth({
         source: "trondheim_kommune",
@@ -641,6 +721,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
         detail: `${articles.length} kommunale oppslag hentet`,
       });
     } catch (error) {
+      recordSourceMetric("trondheim_kommune", sourceStartedAtMs, { parseFailures: 1 });
       await repository.setHealth({
         source: "trondheim_kommune",
         label: "Trondheim kommune",
@@ -654,8 +735,12 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   }
   let politiloggenThreads: PolitiloggenThread[] = [];
   if (isPolitiloggenEnabled()) {
+    const sourceStartedAtMs = Date.now();
     try {
       const collection = await collectPolitiloggen();
+      recordSourceMetric("politiloggen", sourceStartedAtMs, {
+        sourceItemCount: collection.articles.length,
+      });
       politiloggenThreads = collection.threads;
       const activeThreadIds = new Set(
         collection.threads
@@ -675,6 +760,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
         detail: `${collection.threads.length} Trondheim-tråder hentet fra Politiloggen API`,
       });
     } catch (error) {
+      recordSourceMetric("politiloggen", sourceStartedAtMs, { parseFailures: 1 });
       await repository.setHealth({
         source: "politiloggen",
         label: "Politiloggen",
@@ -701,30 +787,44 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     if (status.source === "politiloggen") continue;
     await repository.setHealth({ ...status, lastCheckedAt: new Date().toISOString(), nextPollAt });
   }
-  await collectTrafficInfoForMap({
+  const trafficInfoStartedAtMs = Date.now();
+  const trafficInfoMetrics = await collectTrafficInfoForMap({
     repository,
     endpoint: process.env.TRAFFIC_INFO_ENDPOINT?.trim() || defaultTrafficInfoEndpoint,
     nextPollAt,
   });
-  await collectTrafikkdataCounters({
+  recordSourceMetric("vegvesen_traffic_info", trafficInfoStartedAtMs, trafficInfoMetrics);
+  const trafikkdataStartedAtMs = Date.now();
+  const trafikkdataResult = await collectTrafikkdataCounters({
     repository,
     endpoint: process.env.TRAFIKKDATA_GRAPHQL_ENDPOINT?.trim() || defaultTrafikkdataGraphqlEndpoint,
     nextPollAt: new Date(Date.now() + trafikkdataPollIntervalMs).toISOString(),
   });
-  await collectEnturServiceAlerts({
+  recordSourceMetric("trafikkdata", trafikkdataStartedAtMs, trafikkdataResult);
+  const enturServiceAlertsStartedAtMs = Date.now();
+  const enturServiceAlertMetrics = await collectEnturServiceAlerts({
     repository,
     clientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",
     codespaceIds: enturCodespacesFromEnv(process.env.ENTUR_CODESPACES),
     nextPollAt,
   });
+  recordSourceMetric(
+    "entur_service_alerts",
+    enturServiceAlertsStartedAtMs,
+    enturServiceAlertMetrics,
+  );
   const officialEvents: OfficialEvent[] = [];
   for (const [source, collector] of [
     ["met", () => collectMetWarnings(fetch)],
     ["nve", collectNveWarnings],
   ] as const) {
+    const sourceStartedAtMs = Date.now();
     try {
-      officialEvents.push(...(await collector()));
+      const warnings = await collector();
+      officialEvents.push(...warnings);
+      recordSourceMetric(source, sourceStartedAtMs, { sourceItemCount: warnings.length });
     } catch (error) {
+      recordSourceMetric(source, sourceStartedAtMs, { parseFailures: 1 });
       await repository.setHealth({
         source,
         label: source === "met" ? "MET farevarsel" : "NVE Varsom",
@@ -756,6 +856,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   let pendingDatexLastModified: string | undefined;
 
   if (datexUsername && datexPassword) {
+    const datexStartedAtMs = Date.now();
     try {
       const datexEndpoint = normalizeDatexSituationEndpoint(
         process.env.DATEX_ENDPOINT?.trim() || defaultDatexSituationEndpoint,
@@ -772,6 +873,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
         freshDatexSnapshotEventIds = result.events.map((event) => event.id);
         pendingDatexLastModified = result.lastModified;
       }
+      recordSourceMetric("datex", datexStartedAtMs, { sourceItemCount: result.events.length });
       await repository.setHealth({
         source: "datex",
         label: "Vegvesen DATEX",
@@ -783,6 +885,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
           : `${result.events.length} relevante DATEX trafikkhendelser hentet`,
       });
     } catch (error) {
+      recordSourceMetric("datex", datexStartedAtMs, { parseFailures: 1 });
       await repository.setHealth({
         source: "datex",
         label: "Vegvesen DATEX",
@@ -794,6 +897,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       });
     }
 
+    const datexTravelTimeStartedAtMs = Date.now();
     try {
       const result = await collectDatexTravelTimePulse({
         locationsEndpoint: datexTravelTimeLocationsEndpoint,
@@ -805,6 +909,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       await repository.markMissingDatexTravelTimesStale(
         result.corridors.map((corridor) => corridor.id),
       );
+      recordSourceMetric("datex_travel_time", datexTravelTimeStartedAtMs, {
+        sourceItemCount: result.corridors.length,
+      });
       await repository.setHealth({
         source: "datex_travel_time",
         label: "Vegvesen reisetid",
@@ -814,6 +921,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
         detail: `${result.corridors.length} DATEX reisetidskorridorer oppdatert`,
       });
     } catch (error) {
+      recordSourceMetric("datex_travel_time", datexTravelTimeStartedAtMs, { parseFailures: 1 });
       await repository.setHealth({
         source: "datex_travel_time",
         label: "Vegvesen reisetid",
@@ -834,7 +942,8 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       detail: "DATEX Basic Auth mangler for reisetidsdata",
     });
   }
-  await collectDatexRoadWeatherContext({
+  const datexWeatherStartedAtMs = Date.now();
+  const datexWeatherMetrics = await collectDatexRoadWeatherContext({
     repository,
     sitesEndpoint: datexWeatherSitesEndpoint,
     measurementsEndpoint: datexWeatherMeasurementsEndpoint,
@@ -842,7 +951,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     password: datexPassword,
     nextPollAt,
   });
-  await collectDatexCctvContext({
+  recordSourceMetric("datex_weather", datexWeatherStartedAtMs, datexWeatherMetrics);
+  const datexCctvStartedAtMs = Date.now();
+  const datexCctvMetrics = await collectDatexCctvContext({
     repository,
     sitesEndpoint: datexCctvSitesEndpoint,
     statusEndpoint: datexCctvStatusEndpoint,
@@ -850,6 +961,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     password: datexPassword,
     nextPollAt,
   });
+  recordSourceMetric("datex_cctv", datexCctvStartedAtMs, datexCctvMetrics);
   await repository.upsertOfficialEvents(officialEvents);
   if (freshDatexSnapshotEventIds) {
     await repository.expireMissingOfficialEvents("datex", freshDatexSnapshotEventIds);
@@ -864,7 +976,11 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     (event) => event.source === "met" || event.source === "nve",
   );
   const currentDatexEvents = currentOfficialEvents.filter((event) => event.source === "datex");
+  const aiStartedAtMs = Date.now();
   const analysis = await analyzer.cluster(recentArticles);
+  recordSourceMetric("deepseek", aiStartedAtMs, {
+    parseFailures: analysis.run.status === "degraded" ? 1 : 0,
+  });
   await repository.saveAiRun(analysis.run);
   await repository.setHealth({
     source: "deepseek",
@@ -925,6 +1041,16 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   console.log(
     `[worker] stored ${articles.length} articles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen); AI identified ${analysis.result.clusters.length} validated candidates`,
   );
+  const workerMetrics = buildWorkerCycleMetrics({
+    cycleStartedAt,
+    cycleCompletedAt: new Date(),
+    sources: sourceMetrics,
+  });
+  try {
+    await repository.saveWorkerCycleMetrics(workerMetrics);
+  } catch (error) {
+    console.warn(`[worker] could not persist worker cycle metrics: ${String(error)}`);
+  }
 }
 
 export async function runWorker(): Promise<void> {
