@@ -53,4 +53,43 @@ describe("source item schema", () => {
     expect(schema).not.toMatch(/INSERT INTO source_items[\s\S]*FROM datex_travel_times/);
     expect(schema).not.toContain("datex_travel_time', 'official_event'");
   });
+
+  it("enforces telemetry/context feeds as non-causal incident context", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    for (const provider of [
+      "datex_travel_time",
+      "datex_weather",
+      "datex_cctv",
+      "trafikkdata",
+      "entur_vehicle_positions",
+      "entur_service_alerts",
+    ]) {
+      expect(schema).toContain(provider);
+    }
+    expect(schema).toContain("evidence_items_no_telemetry_source_check");
+    expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
+    expect(schema).toContain("source_items_entur_official_event_service_alert_check");
+    expect(schema).toContain(
+      "(normalized_payload->>'source') IS NOT DISTINCT FROM 'entur_service_alerts'",
+    );
+    expect(schema).toContain("Entur official_event source_items must be service alerts");
+    expect(schema).toContain("telemetry/context source_items are already linked as supports");
+    expect(schema).toContain("OR (source_provider = 'entur' AND source_kind = 'official_event')");
+    expect(schema).toContain("enforce_situation_source_item_relationship");
+    expect(schema).toContain("relationship = 'supports'");
+    expect(schema).toContain("RAISE EXCEPTION");
+  });
+
+  it("stores worker cycle metrics in an operational table outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS worker_cycle_metrics");
+    expect(schema).toContain("id text PRIMARY KEY CHECK (id = 'latest')");
+    expect(schema).toContain("cycle_duration_ms integer NOT NULL CHECK (cycle_duration_ms >= 0)");
+    expect(schema).toContain("payload jsonb NOT NULL");
+    expect(schema.indexOf("CREATE TABLE IF NOT EXISTS worker_cycle_metrics")).toBeGreaterThan(
+      schema.indexOf("CREATE TABLE IF NOT EXISTS collector_state"),
+    );
+  });
 });

@@ -14,6 +14,7 @@ import type {
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  WorkerCycleMetrics,
 } from "@nytt/shared";
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
@@ -210,6 +211,21 @@ export class WorkerRepository {
       `INSERT INTO collector_state (key, value) VALUES ($1,$2)
        ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
       [key, value],
+    );
+  }
+
+  async saveWorkerCycleMetrics(metrics: WorkerCycleMetrics): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO worker_cycle_metrics
+        (id, cycle_started_at, cycle_completed_at, cycle_duration_ms, payload)
+       VALUES ('latest', $1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET
+         cycle_started_at=EXCLUDED.cycle_started_at,
+         cycle_completed_at=EXCLUDED.cycle_completed_at,
+         cycle_duration_ms=EXCLUDED.cycle_duration_ms,
+         payload=EXCLUDED.payload,
+         updated_at=now()`,
+      [metrics.cycleStartedAt, metrics.cycleCompletedAt, metrics.cycleDurationMs, metrics],
     );
   }
 

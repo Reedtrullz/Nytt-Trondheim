@@ -74,6 +74,21 @@ describe("Politiloggen ingestion", () => {
     });
   });
 
+  it("does not expose inactive Politiloggen threads as activation articles", async () => {
+    const inactiveThread = { ...activeThread, isActive: false };
+
+    const result = await collectPolitiloggen(
+      async () =>
+        new Response(JSON.stringify({ messageThreads: [inactiveThread], count: 1 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    expect(result.threads).toEqual([inactiveThread]);
+    expect(result.articles).toEqual([]);
+  });
+
   it("promotes active Politiloggen threads to official situations", () => {
     const situations = politiloggenSituationsFromThreads([activeThread]);
 
@@ -113,6 +128,29 @@ describe("Politiloggen ingestion", () => {
     expect(situations[0]?.status).toBe("resolved");
     expect(situations[0]?.timeline.at(-1)).toMatchObject({
       title: "Politiloggen-hendelsen er avsluttet",
+      official: true,
+    });
+  });
+
+  it("expires or de-emphasizes inactive Politiloggen events", () => {
+    const inactiveThread = { ...activeThread, isActive: false };
+
+    expect(politiloggenSituationsFromThreads([inactiveThread])).toEqual([]);
+
+    const existing = politiloggenSituationsFromThreads([activeThread])[0] as Situation;
+    const [resolved] = politiloggenSituationsFromThreads([inactiveThread], [existing]);
+
+    expect(resolved).toMatchObject({
+      id: existing.id,
+      status: "resolved",
+      incidentSignature: "politiloggen:265vq7",
+      officialSource: "politiloggen",
+      officialEventId: "265vq7",
+    });
+    expect(resolved?.activationBasis).toEqual(existing.activationBasis);
+    expect(resolved?.timeline.at(-1)).toMatchObject({
+      title: "Politiloggen-hendelsen er avsluttet",
+      detail: "Politiloggen markerer ikke lenger hendelsen som aktiv.",
       official: true,
     });
   });

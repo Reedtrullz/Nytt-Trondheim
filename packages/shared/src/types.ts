@@ -106,6 +106,7 @@ export interface MapFeature extends Feature<Geometry> {
     label: string;
     provenance: Provenance;
     sourceLabel?: string;
+    source?: SourceId;
     sourceUrl?: string;
     updatedAt: string;
     note?: string;
@@ -146,6 +147,7 @@ export interface TimelineEntry {
   title: string;
   detail: string;
   sourceLabel: string;
+  source?: SourceId;
   sourceUrl: string;
   official: boolean;
 }
@@ -176,6 +178,7 @@ export interface SourceItem {
   geoHint?: MapFeature["geometry"];
   reliabilityTier: SourceReliabilityTier;
   linkedSituationIds: string[];
+  relationship?: SourceItemRelationship;
 }
 
 export interface SourceItemRecord extends SourceItem {
@@ -236,6 +239,16 @@ export interface Situation {
   features: MapFeature[];
   timeline: TimelineEntry[];
   saved?: boolean;
+}
+
+export interface SituationExplanation {
+  createdBecause: string[];
+  sourceRoles: Array<{
+    provider: SourceId;
+    role: "evidence" | "context" | "telemetry" | "private";
+  }>;
+  locationConfidence: "official" | "estimated" | "mixed" | "unknown";
+  dismissalReason?: Situation["dismissalReason"];
 }
 
 export type OfficialEventState = "active" | "updated" | "cancelled" | "expired";
@@ -322,6 +335,7 @@ export interface TrafficPulseCorridor {
 
 export interface SituationWorkspace {
   situation: Situation;
+  explanation?: SituationExplanation;
   relatedArticles: Article[];
   tasks: WorkspaceTask[];
   notes: WorkspaceNote[];
@@ -344,6 +358,15 @@ export interface SituationPage {
   nextCursor?: string;
 }
 
+export interface WorkerCycleMetrics {
+  cycleStartedAt: string;
+  cycleCompletedAt: string;
+  cycleDurationMs: number;
+  sourceDurationsMs: Record<string, number>;
+  sourceItemCounts: Record<string, number>;
+  parseFailures: Record<string, number>;
+}
+
 export interface OperationsStatus {
   sources: SourceHealth[];
   articleCount: number;
@@ -351,6 +374,7 @@ export interface OperationsStatus {
   latestAiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt" | "error">;
   latestCollectionAt?: string;
   trafficPulse?: TrafficPulseCorridor[];
+  workerCycleMetrics?: WorkerCycleMetrics;
   backup?: { status: "ok"; completedAt: string };
   restoreCheck?: { status: "ok"; completedAt: string };
 }

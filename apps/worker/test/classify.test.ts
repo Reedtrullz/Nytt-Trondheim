@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { categorize, detectScope, extractPlaces } from "../src/classify.js";
+import { canonicalPlaceName, categorize, detectScope, extractPlaces } from "../src/classify.js";
 import { detectPreliminarySituations } from "../src/clusters.js";
 import type { Article } from "@nytt/shared";
 import type { OfficialEvent } from "@nytt/shared";
+import { dismissedSituation, incidentArticle, warningEvent } from "./fixtures/incident-fixtures.js";
 
 describe("Trondheim relevance classification", () => {
   it("routes city stories to Trondheim", () => {
@@ -278,6 +279,213 @@ describe("Trondheim relevance classification", () => {
     expect(newCases[0]?.id).not.toBe(dismissed.id);
   });
 
+  it("does not merge different events only because they mention the same place", () => {
+    const situations = detectPreliminarySituations([
+      incidentArticle("garage-one", "nrk", "2026-06-02T08:00:00Z", {
+        title: "Garasjebrann på Tiller",
+        excerpt: "Nødetatene rykket ut til brann i garasje ved Tonstad.",
+        places: ["Tiller"],
+      }),
+      incidentArticle("garage-two", "adressa", "2026-06-02T08:05:00Z", {
+        title: "Garasjebrann på Tiller",
+        excerpt: "Brann i garasje ved Tonstad.",
+        places: ["Tiller"],
+      }),
+      incidentArticle("shed-one", "vg", "2026-06-02T08:10:00Z", {
+        title: "Bodbrann på Tiller",
+        excerpt: "Brannvesenet melder om separat brann i bod ved City Syd.",
+        places: ["Tiller"],
+      }),
+      incidentArticle("shed-two", "dagbladet", "2026-06-02T08:12:00Z", {
+        title: "Bodbrann på Tiller",
+        excerpt: "Politiet omtaler en annen brann i bod ved City Syd.",
+        places: ["Tiller"],
+      }),
+    ]);
+
+    expect(situations).toHaveLength(2);
+    expect(situations.map((situation) => situation.relatedArticleIds.join(",")).sort()).toEqual([
+      "garage-two,garage-one",
+      "shed-two,shed-one",
+    ]);
+  });
+
+  it("detects compound-only fire headlines and merges matching phrase variants", () => {
+    const situations = detectPreliminarySituations([
+      incidentArticle("car-fire-one", "nrk", "2026-06-02T09:00:00Z", {
+        title: "Bilbrann på Tiller",
+        excerpt: "Røyk fra kjøretøy ved City Syd.",
+        places: ["Tiller"],
+      }),
+      incidentArticle("car-fire-two", "adressa", "2026-06-02T09:05:00Z", {
+        title: "Brann i bil på Tiller",
+        excerpt: "Brannvesenet jobber ved City Syd.",
+        places: ["Tiller"],
+      }),
+    ]);
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]?.type).toBe("fire");
+    expect(situations[0]?.incidentSignature).toBe("fire:tiller:bilbrann");
+    expect(situations[0]?.relatedArticleIds).toEqual(["car-fire-two", "car-fire-one"]);
+  });
+
+  it("canonicalizes only explicitly listed local place aliases", () => {
+    expect(extractPlaces("Trafikkulykke på Kroppanbrua")).toEqual(["Kroppanbrua"]);
+    expect(extractPlaces("Kollisjon på Kroppan bru")).toEqual(["Kroppan bru"]);
+    expect(canonicalPlaceName("Kroppanbrua")).toBe("Kroppan Bru");
+    expect(canonicalPlaceName("Kroppan bru")).toBe("Kroppan Bru");
+    expect(canonicalPlaceName("Bymarka")).toBe("Bymarka");
+    expect(canonicalPlaceName("Trondheim")).toBe("Trondheim");
+  });
+
+  it("merges the same event when articles use canonical local place aliases", () => {
+    const situations = detectPreliminarySituations([
+      incidentArticle("kroppan-one", "nrk", "2026-06-02T10:00:00Z", {
+        title: "Trafikkulykke på Kroppanbrua",
+        excerpt: "En kollisjon gir kø ved Kroppanbrua.",
+        category: "Transport",
+        places: ["Kroppanbrua"],
+      }),
+      incidentArticle("kroppan-two", "adressa", "2026-06-02T10:05:00Z", {
+        title: "Kollisjon på Kroppan bru",
+        excerpt: "Ulykken omtales ved Kroppan bru.",
+        category: "Transport",
+        places: ["Kroppan bru"],
+      }),
+    ]);
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]?.incidentSignature).toBe("traffic:kroppan-bru");
+    expect(situations[0]?.locationLabel).toBe("Kroppan Bru");
+  });
+
+  it("does not activate from a broad Trondheim-only incident mention", () => {
+    const situations = detectPreliminarySituations([
+      incidentArticle("broad-one", "nrk", "2026-06-02T11:00:00Z", {
+        title: "Ulykke i Trondheim",
+        excerpt: "Politiet omtaler en ulykke i Trondheim uten mer presis stedfesting.",
+        places: ["Trondheim"],
+      }),
+      incidentArticle("broad-two", "adressa", "2026-06-02T11:03:00Z", {
+        title: "Ulykke i Trondheim",
+        excerpt: "Nødetatene er varslet om ulykke i Trondheim, men stedet er ikke oppgitt.",
+        places: ["Trondheim"],
+      }),
+    ]);
+
+    expect(situations).toEqual([]);
+  });
+
+  it("keeps MET and NVE warnings as context without article confirmation", () => {
+    const met = warningEvent("met-fire", { source: "met", eventType: "fire" });
+    const nve = warningEvent("nve-flood", {
+      source: "nve",
+      eventType: "flood",
+      title: "Flomvarsel for Trondheim",
+      areaLabel: "Trondheim kommune",
+    });
+
+    expect(detectPreliminarySituations([], [met, nve])).toEqual([]);
+  });
+
+  it("keeps a MET warning as context when attached to reported incidents", () => {
+    const situation = detectPreliminarySituations(
+      [
+        incidentArticle("smoke-one", "nrk", "2026-06-02T11:30:00Z", {
+          location: { lat: 63.41, lng: 10.26, label: "Bymarka" },
+        }),
+        incidentArticle("smoke-two", "adressa", "2026-06-02T11:35:00Z", {
+          location: { lat: 63.41, lng: 10.26, label: "Bymarka" },
+        }),
+      ],
+      [
+        warningEvent("met-fire", {
+          source: "met",
+          eventType: "fire",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [10.2, 63.35],
+                [10.35, 63.35],
+                [10.35, 63.45],
+                [10.2, 63.45],
+                [10.2, 63.35],
+              ],
+            ],
+          },
+        }),
+      ],
+    )[0]!;
+
+    expect(situation.activationBasis?.rule).toBe("two_independent_sources");
+    expect(situation.activationBasis?.sourceIds.sort()).toEqual(["adressa", "nrk"]);
+    expect(situation.verificationStatus).toBe("Foreløpig fra rapportering");
+    expect(situation.evidence.some((item) => item.source === "met")).toBe(false);
+    expect(
+      situation.features.find((feature) => feature.properties.layer === "warning"),
+    ).toMatchObject({
+      properties: { source: "met", sourceLabel: "MET farevarsel" },
+    });
+  });
+
+  it("labels attached NVE warning context with NVE provenance", () => {
+    const situation = detectPreliminarySituations(
+      [
+        incidentArticle("flood-one", "nrk", "2026-06-02T11:40:00Z", {
+          title: "Flom ved Nidelva",
+          excerpt: "Vannstanden stiger ved Nidelva.",
+          places: ["Nidelva"],
+        }),
+        incidentArticle("flood-two", "adressa", "2026-06-02T11:45:00Z", {
+          title: "Flom ved Nidelva",
+          excerpt: "Nødetatene følger flom ved Nidelva.",
+          places: ["Nidelva"],
+        }),
+      ],
+      [
+        warningEvent("nve-flood", {
+          source: "nve",
+          eventType: "flood",
+          title: "Flomvarsel for Trondheim",
+          areaLabel: "Trondheim kommune",
+        }),
+      ],
+    )[0]!;
+
+    expect(situation.activationBasis?.sourceIds.sort()).toEqual(["adressa", "nrk"]);
+    expect(situation.evidence.some((item) => item.source === "nve")).toBe(false);
+    expect(situation.features.some((feature) => feature.properties.source === "nve")).toBe(false);
+    expect(situation.timeline.find((entry) => entry.source === "nve")).toMatchObject({
+      sourceLabel: "NVE / Varsom",
+      official: true,
+    });
+  });
+
+  it("allows a later real event after an earlier false positive was dismissed", () => {
+    const dismissed = dismissedSituation(
+      detectPreliminarySituations([
+        incidentArticle("dismissed-one", "nrk", "2026-05-20T08:00:00Z"),
+        incidentArticle("dismissed-two", "adressa", "2026-05-20T08:10:00Z"),
+      ])[0]!,
+    );
+
+    const newCases = detectPreliminarySituations(
+      [
+        incidentArticle("fresh-one", "nrk", "2026-06-02T12:00:00Z"),
+        incidentArticle("fresh-two", "adressa", "2026-06-02T12:05:00Z"),
+      ],
+      [],
+      [dismissed],
+    );
+
+    expect(newCases).toHaveLength(1);
+    expect(newCases[0]?.id).not.toBe(dismissed.id);
+    expect(newCases[0]?.activationBasis?.articleIds).toEqual(["fresh-two", "fresh-one"]);
+    expect(newCases[0]?.relatedArticleIds).toEqual(["fresh-two", "fresh-one"]);
+  });
+
   it("uses a matching municipality report as official corroboration", () => {
     const reports: Article[] = [
       {
@@ -371,18 +579,3 @@ describe("Trondheim relevance classification", () => {
     );
   });
 });
-
-function incidentArticle(id: string, source: Article["source"], publishedAt: string): Article {
-  return {
-    id,
-    source,
-    sourceLabel: source === "nrk" ? "NRK" : "Adresseavisen",
-    title: "Brann i Bymarka",
-    excerpt: "Brann omtalt i Bymarka.",
-    url: `https://example.test/${id}`,
-    publishedAt,
-    scope: "trondheim",
-    category: "Hendelser",
-    places: ["Bymarka"],
-  };
-}

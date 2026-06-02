@@ -6,6 +6,7 @@ import {
   resolvedDuplicateOfficialTrafficSituationsForMergedDatex,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "../src/clusters.js";
+import { promotableDatexEvent } from "./fixtures/incident-fixtures.js";
 
 const datexEvent: OfficialEvent = {
   id: "datex-e6-tiller",
@@ -48,6 +49,28 @@ describe("official traffic situation promotion", () => {
       geometry: { type: "Point", coordinates: [10.376, 63.361] },
       properties: { provenance: "official", sourceLabel: "Statens vegvesen DATEX" },
     });
+  });
+
+  it("can promote high-impact official DATEX traffic without an article", () => {
+    const situations = officialTrafficSituationsFromEvents([
+      promotableDatexEvent("datex-high-impact"),
+    ]);
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]).toMatchObject({
+      status: "active",
+      type: "traffic",
+      verificationStatus: "Offentlig bekreftet",
+      officialSource: "datex",
+      officialEventId: "datex-high-impact",
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["datex"],
+        articleIds: [],
+      },
+    });
+    expect(situations[0]?.relatedArticleIds).toEqual([]);
+    expect(situations[0]?.evidence[0]?.source).toBe("datex");
   });
 
   it("deduplicates multiple DATEX records from the same upstream situation", () => {

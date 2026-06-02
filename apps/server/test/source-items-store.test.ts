@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { sampleArticles, sampleSituation } from "@nytt/shared";
+import type { SourceItem, WorkerCycleMetrics } from "@nytt/shared";
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryStore, PgStore } from "../src/store.js";
@@ -174,9 +175,62 @@ describe("source item store", () => {
     ).resolves.toEqual([]);
   });
 
+  it("rejects support links for telemetry and service-alert MemoryStore source items", async () => {
+    const store = new MemoryStore();
+    const sourceItems = (store as unknown as { sourceItems: Map<string, SourceItem> }).sourceItems;
+
+    for (const [provider, kind] of [
+      ["datex_travel_time", "official_event"],
+      ["datex_weather", "official_event"],
+      ["datex_cctv", "official_event"],
+      ["trafikkdata", "official_event"],
+      ["entur_vehicle_positions", "media_asset"],
+      ["entur_service_alerts", "official_event"],
+      ["entur", "official_event"],
+    ] as const) {
+      const sourceItemId = `context:${provider}`;
+      sourceItems.set(sourceItemId, {
+        id: sourceItemId,
+        provider,
+        kind,
+        externalId: provider,
+        fetchedAt: "2026-06-02T10:00:00.000Z",
+        captureHash: `sha256:${provider}`,
+        reliabilityTier: "official",
+        linkedSituationIds: [],
+      });
+
+      await expect(
+        store.linkSourceItem("skogbrann-bymarka", sourceItemId, "supports", "Reedtrullz"),
+      ).rejects.toMatchObject({ status: 400 });
+      await expect(
+        store.linkSourceItem("skogbrann-bymarka", sourceItemId, "context", "Reedtrullz"),
+      ).resolves.toMatchObject({ relationship: "context" });
+    }
+  });
+
+  it("rejects support links for telemetry and service-alert PgStore source items before writing", async () => {
+    for (const [provider, kind] of [
+      ["datex_weather", "official_event"],
+      ["entur_service_alerts", "official_event"],
+      ["entur", "official_event"],
+    ] as const) {
+      const query = vi.fn().mockResolvedValueOnce({
+        rows: [pgSourceItemRow({ provider, kind })],
+      });
+      const store = new PgStore({ query } as unknown as pg.Pool);
+
+      await expect(
+        store.linkSourceItem("skogbrann-bymarka", `source:${provider}`, "supports", "Reedtrullz"),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(query).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("uses idempotent PgStore SQL for source item links", async () => {
     const query = vi
       .fn()
+      .mockResolvedValueOnce({ rows: [pgSourceItemRow()] })
       .mockResolvedValueOnce({ rows: [{ id: "source:one" }] })
       .mockResolvedValueOnce({
         rows: [pgSourceItemRow({ linked_situation_ids: ["skogbrann-bymarka"] })],
@@ -191,13 +245,30 @@ describe("source item store", () => {
       "Reedtrullz",
     );
     expect(linked?.linkedSituationIds).toEqual(["skogbrann-bymarka"]);
-    expect(query.mock.calls[0]?.[0]).toContain("INSERT INTO situation_source_items");
-    expect(query.mock.calls[0]?.[0]).toContain("ON CONFLICT");
+    expect(query.mock.calls[1]?.[0]).toContain("INSERT INTO situation_source_items");
+    expect(query.mock.calls[1]?.[0]).toContain("ON CONFLICT");
 
     await expect(
       store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz"),
     ).resolves.toBe(true);
-    expect(query.mock.calls[2]?.[0]).toContain("DELETE FROM situation_source_items");
+    expect(query.mock.calls[3]?.[0]).toContain("DELETE FROM situation_source_items");
+  });
+
+  it("loads latest worker cycle metrics for Operations status", async () => {
+    const metrics: WorkerCycleMetrics = {
+      cycleStartedAt: "2026-06-02T06:00:00.000Z",
+      cycleCompletedAt: "2026-06-02T06:00:01.250Z",
+      cycleDurationMs: 1250,
+      sourceDurationsMs: { datex: 900 },
+      sourceItemCounts: { datex: 2 },
+      parseFailures: { datex: 1 },
+    };
+    const query = vi.fn().mockResolvedValue({ rows: [{ payload: metrics }] });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    await expect(store.getLatestWorkerCycleMetrics()).resolves.toEqual(metrics);
+    expect(query.mock.calls[0]?.[0]).toContain("FROM worker_cycle_metrics");
+    expect(query.mock.calls[0]?.[0]).not.toContain("source_items");
   });
 
   it("returns undefined when PgStore cannot link missing source items or situations", async () => {
@@ -210,7 +281,6 @@ describe("source item store", () => {
 
     expect(query).toHaveBeenCalledTimes(1);
     const sql = query.mock.calls[0]?.[0] as string;
-    expect(sql).toContain("WHERE EXISTS (SELECT 1 FROM situations");
-    expect(sql).toContain("EXISTS (SELECT 1 FROM source_items");
+    expect(sql).toContain("WHERE si.id = $1");
   });
 });

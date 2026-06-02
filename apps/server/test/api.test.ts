@@ -7,11 +7,12 @@ import { promisify } from "node:util";
 import request from "supertest";
 import type { Response as SuperAgentResponse } from "superagent";
 import { describe, expect, it, vi } from "vitest";
-import { createApp } from "../src/app.js";
+import { buildSituationExplanation, createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { loadConfig } from "../src/config.js";
 import { PgStore } from "../src/store.js";
+import { sampleSituation } from "@nytt/shared";
 import type {
   Article,
   OfficialEvent,
@@ -20,6 +21,7 @@ import type {
   RoadCamera,
   RoadWeatherObservation,
   SourceHealth,
+  SourceItem,
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
@@ -166,6 +168,149 @@ describe("private situation API", () => {
     await request(app).get("/api/bootstrap").expect(401);
   });
 
+  it("includes a provenance explanation for situation workspaces", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent.get("/api/situations/skogbrann-bymarka").expect(200);
+
+    expect(response.body.explanation).toMatchObject({
+      createdBecause: ["2 uavhengige kilder rapporterte samme hendelse."],
+      locationConfidence: "estimated",
+    });
+    expect(response.body.explanation.sourceRoles).toEqual(
+      expect.arrayContaining([
+        { provider: "nrk", role: "evidence" },
+        { provider: "adressa", role: "evidence" },
+        { provider: "met", role: "context" },
+      ]),
+    );
+    expect(response.body.explanation.sourceRoles).not.toContainEqual({
+      provider: "met",
+      role: "evidence",
+    });
+  });
+
+  it("keeps warning timeline sources visible as context without evidence leakage", () => {
+    const explanation = buildSituationExplanation({
+      ...sampleSituation,
+      evidence: sampleSituation.evidence.filter(
+        (item) => item.source !== "nve" && item.source !== "met",
+      ),
+      features: sampleSituation.features.filter(
+        (feature) => feature.properties.layer !== "warning",
+      ),
+      timeline: [
+        ...sampleSituation.timeline,
+        {
+          id: "timeline-nve-warning",
+          situationId: sampleSituation.id,
+          timestamp: "2026-06-02T12:00:00.000Z",
+          title: "Flomvarsel for Trondheim",
+          detail: "NVE-varsel brukes som kontekst, ikke hendelsesgrunnlag.",
+          sourceLabel: "NVE / Varsom",
+          source: "nve",
+          sourceUrl: "https://varsom.no/",
+          official: true,
+        },
+      ],
+    });
+
+    expect(explanation.sourceRoles).toContainEqual({ provider: "nve", role: "context" });
+    expect(explanation.sourceRoles).not.toContainEqual({ provider: "nve", role: "evidence" });
+  });
+
+  it("uses link relationships when explaining situation source items", async () => {
+    const { agent, csrf } = await ownerAgent();
+    const availableSourceItems = await agent
+      .get("/api/source-items?provider=vg&kind=article&q=Olavsfestdagene&limit=1")
+      .expect(200);
+    const contextSourceItem = availableSourceItems.body.items[0] as SourceItem | undefined;
+    expect(contextSourceItem).toMatchObject({ provider: "vg", kind: "article" });
+    const contextSourceItemId = String(contextSourceItem?.id);
+
+    const linkResponse = await agent
+      .post(
+        `/api/situations/skogbrann-bymarka/source-items/${encodeURIComponent(contextSourceItemId)}`,
+      )
+      .set("X-CSRF-Token", csrf)
+      .send({ relationship: "context" })
+      .expect(201);
+    expect(linkResponse.body).toMatchObject({
+      id: contextSourceItemId,
+      provider: "vg",
+      relationship: "context",
+    });
+
+    const sourceItems = await agent
+      .get("/api/situations/skogbrann-bymarka/source-items")
+      .expect(200);
+    expect(sourceItems.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: contextSourceItemId,
+          provider: "vg",
+          relationship: "context",
+        }),
+      ]),
+    );
+
+    const response = await agent.get("/api/situations/skogbrann-bymarka").expect(200);
+    expect(response.body.explanation.sourceRoles).toContainEqual({
+      provider: "vg",
+      role: "context",
+    });
+    expect(response.body.explanation.sourceRoles).not.toContainEqual({
+      provider: "vg",
+      role: "evidence",
+    });
+  });
+
+  it("keeps telemetry and context providers out of causal evidence roles", () => {
+    const telemetrySourceItem: SourceItem = {
+      id: "source:datex_travel_time:100141",
+      provider: "datex_travel_time",
+      kind: "official_event",
+      externalId: "100141",
+      originalUrl: "https://example.test/datex/travel-time",
+      title: "E6 Sluppen → Tiller",
+      summary: "Travel-time measurement used only as operational telemetry.",
+      fetchedAt: "2026-06-02T10:00:00.000Z",
+      captureHash: "sha256:telemetry",
+      reliabilityTier: "official",
+      linkedSituationIds: [sampleSituation.id],
+    };
+
+    const serviceAlertSourceItem: SourceItem = {
+      id: "source:entur:official_event:line3",
+      provider: "entur",
+      kind: "official_event",
+      externalId: "ATB:line3",
+      title: "Linje 3 innstilt",
+      summary: "Entur service alert is public-transport context, not causal incident evidence.",
+      fetchedAt: "2026-06-02T10:00:00.000Z",
+      captureHash: "sha256:entur-service-alert",
+      reliabilityTier: "official",
+      linkedSituationIds: [sampleSituation.id],
+    };
+
+    const explanation = buildSituationExplanation(sampleSituation, [
+      telemetrySourceItem,
+      serviceAlertSourceItem,
+    ]);
+
+    expect(explanation.sourceRoles).toContainEqual({
+      provider: "datex_travel_time",
+      role: "telemetry",
+    });
+    expect(explanation.sourceRoles).toContainEqual({ provider: "met", role: "context" });
+    expect(explanation.sourceRoles).toContainEqual({ provider: "entur", role: "context" });
+    expect(explanation.sourceRoles).not.toContainEqual({
+      provider: "datex_travel_time",
+      role: "evidence",
+    });
+    expect(explanation.sourceRoles).not.toContainEqual({ provider: "met", role: "evidence" });
+    expect(explanation.sourceRoles).not.toContainEqual({ provider: "entur", role: "evidence" });
+  });
+
   it("starts GitHub OAuth with a session-backed state nonce", async () => {
     const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
     const { app } = await createApp({
@@ -282,6 +427,12 @@ describe("private situation API", () => {
       .expect((response) => {
         expect(response.body.articleCount).toBeGreaterThan(0);
         expect(response.body.trafficPulse).toEqual([]);
+        expect(response.body.workerCycleMetrics).toMatchObject({
+          cycleDurationMs: 3250,
+          sourceDurationsMs: { datex: 920 },
+          sourceItemCounts: { nrk: 2 },
+          parseFailures: { datex: 0 },
+        });
       });
     await agent
       .get("/api/bootstrap")
@@ -1202,6 +1353,7 @@ describe("private situation API", () => {
           return { rows: [{ status: "active", count: "2" }] };
         }
         if (normalizedSql.includes("FROM ai_processing_runs")) return { rows: [] };
+        if (normalizedSql.includes("FROM worker_cycle_metrics")) return { rows: [] };
         if (normalizedSql.includes("FROM datex_travel_times")) {
           trafficPulseParams = params;
           expect(normalizedSql).toContain(

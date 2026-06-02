@@ -1,6 +1,8 @@
 import type { ArticleCategory, GeographicScope } from "@nytt/shared";
 
 const trondheimTerms = [
+  "kroppanbrua",
+  "kroppan bru",
   "bakklandet",
   "brattøra",
   "byåsen",
@@ -98,6 +100,11 @@ const displayLabels: Record<string, string> = {
   "trondheim s": "Trondheim S",
 };
 
+const placeAliases = new Map<string, string>([
+  ["kroppanbrua", "Kroppan Bru"],
+  ["kroppan bru", "Kroppan Bru"],
+]);
+
 const categoryRules: Array<[ArticleCategory, string[]]> = [
   [
     "Hendelser",
@@ -154,6 +161,14 @@ function containsPlaceTerm(text: string, term: string): boolean {
 
 function displayLabel(term: string): string {
   return displayLabels[term] ?? term.charAt(0).toLocaleUpperCase("nb") + term.slice(1);
+}
+
+function normalizePlaceAliasKey(place: string): string {
+  return place.trim().toLocaleLowerCase("nb").replaceAll(/\s+/g, " ");
+}
+
+export function canonicalPlaceName(place: string): string {
+  return placeAliases.get(normalizePlaceAliasKey(place)) ?? place.trim();
 }
 
 export function detectScope(text: string): GeographicScope | undefined {

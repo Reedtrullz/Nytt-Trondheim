@@ -24,6 +24,7 @@ import type {
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  WorkerCycleMetrics,
   WorkspaceNote,
   WorkspaceTask,
 } from "@nytt/shared";
@@ -77,6 +78,31 @@ type LimitedBoundsFilter = {
   bounds: NonNullable<Bounds>;
   limit?: number | null;
 };
+
+const nonSupportingSourceItemProviders = new Set<SourceItem["provider"]>([
+  "datex_travel_time",
+  "datex_weather",
+  "datex_cctv",
+  "trafikkdata",
+  "entur_vehicle_positions",
+  "entur_service_alerts",
+]);
+
+function sourceItemCanUseRelationship(
+  item: Pick<SourceItem, "provider" | "kind">,
+  relationship: SourceItemRelationship,
+): boolean {
+  if (relationship !== "supports") return true;
+  if (item.provider === "entur" && item.kind === "official_event") return false;
+  return !nonSupportingSourceItemProviders.has(item.provider);
+}
+
+function invalidSourceItemRelationshipError(): Error & { status: number } {
+  return Object.assign(
+    new Error("Kontekst- og telemetrikilder må kobles som kontekst, ikke som hendelsesgrunnlag."),
+    { status: 400 },
+  );
+}
 
 export interface AttachmentRecord extends Attachment {
   storagePath: string;
@@ -158,6 +184,7 @@ export interface Store {
   recordExport(record: ExportRecord): Promise<void>;
   getExport(id: string, situationId: string, login: string): Promise<ExportRecord | undefined>;
   listSourceHealth(): Promise<SourceHealth[]>;
+  getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined>;
   getOperationsStatus(): Promise<OperationsStatus>;
 }
 
@@ -269,6 +296,7 @@ interface SourceItemRow {
   geo_hint: SourceItem["geoHint"] | null;
   reliability_tier: SourceItem["reliabilityTier"];
   linked_situation_ids: string[] | null;
+  relationship?: SourceItemRelationship | null;
 }
 
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
@@ -287,6 +315,7 @@ function sourceItemFromRow(row: SourceItemRow): SourceItem {
     geoHint: row.geo_hint ?? undefined,
     reliabilityTier: row.reliability_tier,
     linkedSituationIds: row.linked_situation_ids ?? [],
+    ...(row.relationship ? { relationship: row.relationship } : {}),
   };
 }
 
@@ -509,6 +538,7 @@ export class MemoryStore implements Store {
         clone({
           ...item,
           linkedSituationIds: this.linkedSituationIdsForSourceItem(item.id),
+          relationship: link.relationship,
         }),
       ];
     });
@@ -522,6 +552,9 @@ export class MemoryStore implements Store {
   ): Promise<SourceItem | undefined> {
     const item = this.sourceItems.get(sourceItemId);
     if (!this.situations.has(situationId) || !item) return undefined;
+    if (!sourceItemCanUseRelationship(item, relationship)) {
+      throw invalidSourceItemRelationshipError();
+    }
     this.sourceLinks.set(`${situationId}:${sourceItemId}`, {
       situationId,
       sourceItemId,
@@ -532,6 +565,7 @@ export class MemoryStore implements Store {
     return clone({
       ...item,
       linkedSituationIds: this.linkedSituationIdsForSourceItem(sourceItemId),
+      relationship,
     });
   }
 
@@ -739,6 +773,26 @@ export class MemoryStore implements Store {
     return clone(sampleBootstrap.sourceHealth);
   }
 
+  async getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined> {
+    return clone({
+      cycleStartedAt: "2026-06-02T06:00:00.000Z",
+      cycleCompletedAt: "2026-06-02T06:00:03.250Z",
+      cycleDurationMs: 3250,
+      sourceDurationsMs: {
+        nrk: 240,
+        datex: 920,
+        deepseek: 1100,
+      },
+      sourceItemCounts: {
+        nrk: 2,
+        datex: 1,
+      },
+      parseFailures: {
+        datex: 0,
+      },
+    });
+  }
+
   async getOperationsStatus(): Promise<OperationsStatus> {
     return {
       sources: await this.listSourceHealth(),
@@ -750,6 +804,7 @@ export class MemoryStore implements Store {
         dismissed: 0,
       },
       trafficPulse: await this.listTrafficPulseCorridors(),
+      workerCycleMetrics: await this.getLatestWorkerCycleMetrics(),
     };
   }
 }
@@ -1187,7 +1242,7 @@ export class PgStore implements Store {
 
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
     const result = await this.pool.query<SourceItemRow>(
-      `SELECT ${sourceItemSelectColumns("si")}
+      `SELECT ${sourceItemSelectColumns("si")}, ssi.relationship AS relationship
        FROM situation_source_items ssi
        JOIN source_items si ON si.id = ssi.source_item_id
        LEFT JOIN LATERAL (
@@ -1207,11 +1262,15 @@ export class PgStore implements Store {
     relationship: SourceItemRelationship,
     login: string,
   ): Promise<SourceItem | undefined> {
+    const existingSourceItem = await this.getSourceItem(sourceItemId);
+    if (!existingSourceItem) return undefined;
+    if (!sourceItemCanUseRelationship(existingSourceItem, relationship)) {
+      throw invalidSourceItemRelationshipError();
+    }
     const result = await this.pool.query<{ id: string }>(
       `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
        SELECT $1, $2, $3, $4
        WHERE EXISTS (SELECT 1 FROM situations WHERE id = $1)
-         AND EXISTS (SELECT 1 FROM source_items WHERE id = $2)
        ON CONFLICT (situation_id, source_item_id) DO UPDATE SET
          relationship = EXCLUDED.relationship,
          linked_by = EXCLUDED.linked_by,
@@ -1220,7 +1279,8 @@ export class PgStore implements Store {
       [situationId, sourceItemId, relationship, login],
     );
     const linkedId = result.rows[0]?.id;
-    return linkedId ? this.getSourceItem(linkedId) : undefined;
+    const item = linkedId ? await this.getSourceItem(linkedId) : undefined;
+    return item ? { ...item, relationship } : undefined;
   }
 
   async unlinkSourceItem(situationId: string, sourceItemId: string): Promise<boolean> {
@@ -1636,6 +1696,13 @@ export class PgStore implements Store {
     );
   }
 
+  async getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined> {
+    const result = await this.pool.query<{ payload: WorkerCycleMetrics }>(
+      "SELECT payload FROM worker_cycle_metrics WHERE id = 'latest' LIMIT 1",
+    );
+    return result.rows[0]?.payload;
+  }
+
   async getOperationsStatus(): Promise<OperationsStatus> {
     const [sources, articleCount, situationCounts, latestAiRun, trafficPulse] = await Promise.all([
       this.listSourceHealth(),
@@ -1655,6 +1722,7 @@ export class PgStore implements Store {
       ),
       this.listTrafficPulseCorridors(30),
     ]);
+    const workerCycleMetrics = await this.getLatestWorkerCycleMetrics();
     const counts: OperationsStatus["situationCounts"] = {
       preliminary: 0,
       active: 0,
@@ -1668,6 +1736,7 @@ export class PgStore implements Store {
       situationCounts: counts,
       latestAiRun: latestAiRun.rows[0],
       trafficPulse,
+      workerCycleMetrics,
       latestCollectionAt: sources
         .map((source) => source.lastCheckedAt)
         .filter((value): value is string => Boolean(value))

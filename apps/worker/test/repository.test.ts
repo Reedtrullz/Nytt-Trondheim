@@ -13,6 +13,7 @@ import type {
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  WorkerCycleMetrics,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerRepository } from "../src/repository.js";
@@ -93,6 +94,31 @@ describe("WorkerRepository", () => {
     expect(query.mock.calls[1]?.[1]).toEqual([
       "datex:lastModified",
       "Thu, 28 May 2026 10:10:00 GMT",
+    ]);
+  });
+
+  it("stores latest worker cycle metrics outside the source item ledger", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const metrics: WorkerCycleMetrics = {
+      cycleStartedAt: "2026-06-02T06:00:00.000Z",
+      cycleCompletedAt: "2026-06-02T06:00:01.250Z",
+      cycleDurationMs: 1250,
+      sourceDurationsMs: { nrk: 100, datex: 900 },
+      sourceItemCounts: { nrk: 4, datex: 2 },
+      parseFailures: { datex: 1 },
+    };
+
+    await repository.saveWorkerCycleMetrics(metrics);
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("INSERT INTO worker_cycle_metrics");
+    expect(sql).not.toContain("source_items");
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      metrics.cycleStartedAt,
+      metrics.cycleCompletedAt,
+      metrics.cycleDurationMs,
+      metrics,
     ]);
   });
 
