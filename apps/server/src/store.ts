@@ -1236,25 +1236,15 @@ export class PgStore implements Store {
     relationship: SourceItemRelationship,
     login: string,
   ): Promise<SourceItem | undefined> {
+    const existingSourceItem = await this.getSourceItem(sourceItemId);
+    if (!existingSourceItem) return undefined;
+    if (!sourceItemCanUseRelationship(existingSourceItem, relationship)) {
+      throw invalidSourceItemRelationshipError();
+    }
     const result = await this.pool.query<{ id: string }>(
       `INSERT INTO situation_source_items (situation_id, source_item_id, relationship, linked_by)
        SELECT $1, $2, $3, $4
        WHERE EXISTS (SELECT 1 FROM situations WHERE id = $1)
-         AND EXISTS (SELECT 1 FROM source_items WHERE id = $2)
-         AND NOT (
-           $3 = 'supports'
-           AND EXISTS (
-             SELECT 1 FROM source_items guarded_source
-             WHERE guarded_source.id = $2
-               AND guarded_source.provider IN (
-                 'datex_travel_time',
-                 'datex_weather',
-                 'datex_cctv',
-                 'trafikkdata',
-                 'entur_vehicle_positions'
-               )
-           )
-         )
        ON CONFLICT (situation_id, source_item_id) DO UPDATE SET
          relationship = EXCLUDED.relationship,
          linked_by = EXCLUDED.linked_by,

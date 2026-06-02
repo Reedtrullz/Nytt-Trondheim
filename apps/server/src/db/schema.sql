@@ -62,6 +62,22 @@ CREATE TABLE IF NOT EXISTS evidence_items (
   payload jsonb NOT NULL,
   extracted_at timestamptz NOT NULL
 );
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM evidence_items
+    WHERE source IN (
+      'datex_travel_time',
+      'datex_weather',
+      'datex_cctv',
+      'trafikkdata',
+      'entur_vehicle_positions'
+    )
+  ) THEN
+    RAISE EXCEPTION 'telemetry-only sources already exist in evidence_items';
+  END IF;
+END;
+$$;
 ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_no_telemetry_source_check;
 ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_telemetry_source_check
   CHECK (source NOT IN (
@@ -118,8 +134,33 @@ CREATE TABLE IF NOT EXISTS source_items (
   CHECK (kind IN ('article', 'official_event', 'warning', 'reporter_note', 'reader_tip', 'media_asset'))
 );
 ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_entur_vehicle_positions_kind_check;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM source_items
+    WHERE provider = 'entur_vehicle_positions' AND kind = 'official_event'
+  ) THEN
+    RAISE EXCEPTION 'Entur vehicle-position telemetry already exists as source_items official_event';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM source_items
+    WHERE provider = 'entur'
+      AND kind = 'official_event'
+      AND normalized_payload->>'source' IS DISTINCT FROM 'entur_service_alerts'
+  ) THEN
+    RAISE EXCEPTION 'Entur official_event source_items must be service alerts';
+  END IF;
+END;
+$$;
 ALTER TABLE source_items ADD CONSTRAINT source_items_entur_vehicle_positions_kind_check
   CHECK (provider <> 'entur_vehicle_positions' OR kind <> 'official_event');
+ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_entur_official_event_service_alert_check;
+ALTER TABLE source_items ADD CONSTRAINT source_items_entur_official_event_service_alert_check
+  CHECK (
+    provider <> 'entur'
+    OR kind <> 'official_event'
+    OR normalized_payload->>'source' = 'entur_service_alerts'
+  );
 
 CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_kind_external_id_unique
   ON source_items (provider, kind, external_id)
@@ -144,6 +185,26 @@ CREATE INDEX IF NOT EXISTS situation_source_items_source_item_idx
   ON situation_source_items (source_item_id);
 CREATE INDEX IF NOT EXISTS situation_source_items_situation_idx
   ON situation_source_items (situation_id);
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM situation_source_items ssi
+    JOIN source_items si ON si.id = ssi.source_item_id
+    WHERE ssi.relationship = 'supports'
+      AND si.provider IN (
+        'datex_travel_time',
+        'datex_weather',
+        'datex_cctv',
+        'trafikkdata',
+        'entur_vehicle_positions'
+      )
+  ) THEN
+    RAISE EXCEPTION 'telemetry-only source_items are already linked as supports';
+  END IF;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION enforce_situation_source_item_relationship()
 RETURNS trigger AS $$
