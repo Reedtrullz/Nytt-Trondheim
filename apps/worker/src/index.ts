@@ -761,6 +761,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     codespaceIds: enturCodespacesFromEnv(process.env.ENTUR_CODESPACES),
     nextPollAt,
   });
+  await collectBaneNorRailContext({ repository, nextPollAt });
   const officialEvents: OfficialEvent[] = [];
   for (const [source, collector] of [
     ["met", () => collectMetWarnings(fetch)],
