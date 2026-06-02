@@ -69,6 +69,9 @@ describe("source item schema", () => {
     expect(schema).toContain("evidence_items_no_telemetry_source_check");
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
     expect(schema).toContain("source_items_entur_official_event_service_alert_check");
+    expect(schema).toContain(
+      "(normalized_payload->>'source') IS NOT DISTINCT FROM 'entur_service_alerts'",
+    );
     expect(schema).toContain("Entur official_event source_items must be service alerts");
     expect(schema).toContain("telemetry-only source_items are already linked as supports");
     expect(schema).toContain("enforce_situation_source_item_relationship");

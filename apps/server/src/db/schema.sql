@@ -159,7 +159,7 @@ ALTER TABLE source_items ADD CONSTRAINT source_items_entur_official_event_servic
   CHECK (
     provider <> 'entur'
     OR kind <> 'official_event'
-    OR normalized_payload->>'source' = 'entur_service_alerts'
+    OR (normalized_payload->>'source') IS NOT DISTINCT FROM 'entur_service_alerts'
   );
 
 CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_kind_external_id_unique
