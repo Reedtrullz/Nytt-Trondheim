@@ -3,6 +3,7 @@ import { categorize, detectScope, extractPlaces } from "../src/classify.js";
 import { detectPreliminarySituations } from "../src/clusters.js";
 import type { Article } from "@nytt/shared";
 import type { OfficialEvent } from "@nytt/shared";
+import { incidentArticle } from "./fixtures/incident-fixtures.js";
 
 describe("Trondheim relevance classification", () => {
   it("routes city stories to Trondheim", () => {
@@ -351,17 +352,4 @@ describe("Trondheim relevance classification", () => {
   });
 });
 
-function incidentArticle(id: string, source: Article["source"], publishedAt: string): Article {
-  return {
-    id,
-    source,
-    sourceLabel: source === "nrk" ? "NRK" : "Adresseavisen",
-    title: "Brann i Bymarka",
-    excerpt: "Brann omtalt i Bymarka.",
-    url: `https://example.test/${id}`,
-    publishedAt,
-    scope: "trondheim",
-    category: "Hendelser",
-    places: ["Bymarka"],
-  };
-}
+
