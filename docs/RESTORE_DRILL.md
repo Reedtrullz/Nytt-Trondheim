@@ -18,21 +18,35 @@ set -euo pipefail
 
 DRILL_ID="nytt-restore-$(date -u +%Y%m%dT%H%M%SZ)"
 SCRATCH_DIR="$(mktemp -d "/tmp/${DRILL_ID}.XXXXXX")"
+SCRATCH_DB_HOST="${DRILL_ID}-postgres"
 SCRATCH_DB_PASSWORD="$(openssl rand -hex 24)"
-SCRATCH_DB_URL="postgres://nytt:${SCRATCH_DB_PASSWORD}@${DRILL_ID}-postgres:5432/nytt_restore"
+SCRATCH_DB_URL="$(printf '%s%s%s%s\n' \
+  'postgres://nytt:' \
+  "$SCRATCH_DB_PASSWORD" \
+  "@${SCRATCH_DB_HOST}:5432/" \
+  'nytt_restore')"
 SCRATCH_APP_PORT="18090"
 
-printf 'restore drill id: %s\n' "$DRILL_ID"
-```
+if lsof -iTCP:"$SCRATCH_APP_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "localhost port $SCRATCH_APP_PORT is already in use; choose a different SCRATCH_APP_PORT" >&2
+  exit 1
+fi
 
-Cleanup is intentionally listed again at the end. For an interactive rehearsal, keep a second terminal ready with:
-
-```bash
-docker rm -f "${DRILL_ID}-app" "${DRILL_ID}-worker" "${DRILL_ID}-postgres" 2>/dev/null || true
+cat > "$SCRATCH_DIR/cleanup.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+docker rm -f "${DRILL_ID}-app" "${DRILL_ID}-worker" "${DRILL_ID}-migrate" "${DRILL_ID}-postgres" 2>/dev/null || true
 docker volume rm "${DRILL_ID}-pg" "${DRILL_ID}-uploads" 2>/dev/null || true
-docker network rm "${DRILL_ID}-db" "${DRILL_ID}-outbound" 2>/dev/null || true
+docker network rm "${DRILL_ID}-outbound" "${DRILL_ID}-db" 2>/dev/null || true
 rm -rf "$SCRATCH_DIR"
+EOF
+chmod 0750 "$SCRATCH_DIR/cleanup.sh"
+
+printf 'restore drill id: %s\n' "$DRILL_ID"
+printf 'emergency cleanup: %s\n' "bash $SCRATCH_DIR/cleanup.sh"
 ```
+
+Cleanup is intentionally listed again at the end. For an interactive rehearsal, keep the printed `bash .../cleanup.sh` command in a second terminal; it contains the concrete scratch resource names and does not depend on exported shell variables.
 
 ## 1. Retrieve latest restic snapshot
 
@@ -61,7 +75,7 @@ tar -tzf "$UPLOADS_ARCHIVE" >/dev/null
 Create a private scratch PostGIS container and restore the dump into a scratch database. Do not use `docker compose up postgres` for this drill; the compose file pins the production volume name `nytt_postgres_data`.
 
 ```bash
-docker network create "${DRILL_ID}-db"
+docker network create --internal "${DRILL_ID}-db"
 docker volume create "${DRILL_ID}-pg"
 
 docker run -d \
@@ -131,7 +145,7 @@ docker exec -i "${DRILL_ID}-postgres" \
 
 ## 5. Start app/worker against scratch
 
-Create a separate outbound network for external read calls and run app/worker with the scratch database and scratch upload volume. The app binds to localhost port `18090`, not the production `8090` route.
+Create a separate outbound network for external read calls and run app/worker with the scratch database and scratch upload volume. The app binds to localhost port `18090`, not the production `8090` route. The worker command uses `--once` and clears `DEEPSEEK_API_KEY` so the drill proves worker startup and one bounded collection pass without billing the AI provider; read-only public upstream collectors may still run once against the scratch database.
 
 ```bash
 docker network create "${DRILL_ID}-outbound"
@@ -156,7 +170,9 @@ docker run -d \
   --network "${DRILL_ID}-db" \
   --env-file .env.production \
   -e DATABASE_URL="$SCRATCH_DB_URL" \
-  nytt-trondheim-worker:latest
+  -e DEEPSEEK_API_KEY= \
+  nytt-trondheim-worker:latest \
+  node apps/worker/dist/index.js --once
 
 docker network connect "${DRILL_ID}-outbound" "${DRILL_ID}-worker"
 ```
@@ -215,11 +231,7 @@ Destroy the scratch app, worker, Postgres container, volumes, networks and tempo
 
 ```bash
 printf 'destroying scratch drill resources for %s\n' "$DRILL_ID"
-
-docker rm -f "${DRILL_ID}-app" "${DRILL_ID}-worker" "${DRILL_ID}-postgres" 2>/dev/null || true
-docker volume rm "${DRILL_ID}-pg" "${DRILL_ID}-uploads" 2>/dev/null || true
-docker network rm "${DRILL_ID}-outbound" "${DRILL_ID}-db" 2>/dev/null || true
-rm -rf "$SCRATCH_DIR"
+bash "$SCRATCH_DIR/cleanup.sh"
 ```
 
 Final safety check:
