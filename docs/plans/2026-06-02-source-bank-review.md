@@ -17,18 +17,18 @@ The useful new work is not “add everything.” It is to expand the source-cont
 
 ## What was already covered
 
-| Suggested source/theme | Nytt status |
-|---|---|
-| NRK Trøndelag | Already RSS core source. |
-| Adresseavisen | Already RSS core source; continue to keep excerpt/link-only retention. |
-| VG / Dagbladet national feeds | Already collected with Trondheim/Trøndelag relevance filtering. |
-| Trondheim kommune Aktuelt | Already HTML collector. |
-| MET MetAlerts | Already official warning context via RSS + CAP. Verified public endpoint returned HTTP 200. |
-| NVE/Varsom flood/landslide | Already official textual warning context for Trondheim/Trøndelag. Verified public endpoints returned HTTP 200. |
-| DATEX / Vegvesen | Already central traffic official/context stack. |
-| Entur/AtB | Already Entur vehicles and ATB service alerts. Entur vehicle endpoint correctly requires POST GraphQL; GET probe returned 405 as expected. |
-| Kartverket Stedsnavn | Already geocoding concept in docs; current official API is `https://api.kartverket.no/stedsnavn/v1`, with old `ws.geonorge.no` proxy still available. |
-| Politiloggen | Already public API adapter. Verified Trondheim message-thread probe returned HTTP 200. |
+| Suggested source/theme        | Nytt status                                                                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NRK Trøndelag                 | Already RSS core source.                                                                                                                              |
+| Adresseavisen                 | Already RSS core source; continue to keep excerpt/link-only retention.                                                                                |
+| VG / Dagbladet national feeds | Already collected with Trondheim/Trøndelag relevance filtering.                                                                                       |
+| Trondheim kommune Aktuelt     | Already HTML collector.                                                                                                                               |
+| MET MetAlerts                 | Already official warning context via RSS + CAP. Verified public endpoint returned HTTP 200.                                                           |
+| NVE/Varsom flood/landslide    | Already official textual warning context for Trondheim/Trøndelag. Verified public endpoints returned HTTP 200.                                        |
+| DATEX / Vegvesen              | Already central traffic official/context stack.                                                                                                       |
+| Entur/AtB                     | Already Entur vehicles and ATB service alerts. Entur vehicle endpoint correctly requires POST GraphQL; GET probe returned 405 as expected.            |
+| Kartverket Stedsnavn          | Already geocoding concept in docs; current official API is `https://api.kartverket.no/stedsnavn/v1`, with old `ws.geonorge.no` proxy still available. |
+| Politiloggen                  | Already public API adapter. Verified Trondheim message-thread probe returned HTTP 200.                                                                |
 
 ## Useful immediate code change implemented
 

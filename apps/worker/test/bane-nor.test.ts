@@ -239,8 +239,10 @@ describe("Bane NOR RSS", () => {
       { receivedAt: "2026-06-02T07:15:00.000Z" },
     );
     const message = result.messages[0]!;
-    const baseHash = baneNorSourceItemInput(message, { fetchedAt: message.receivedAt, rawItem: {} })
-      .captureHash;
+    const baseHash = baneNorSourceItemInput(message, {
+      fetchedAt: message.receivedAt,
+      rawItem: {},
+    }).captureHash;
     const titleHash = baneNorSourceItemInput(
       { ...message, title: "Trondheim S-Hell oppdatert" },
       { fetchedAt: message.receivedAt, rawItem: {} },

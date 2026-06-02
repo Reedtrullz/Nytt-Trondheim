@@ -109,7 +109,10 @@ function text(value: unknown): string | undefined {
 }
 
 function stripHtml(value: string): string {
-  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function canonicalUrl(rawUrl: string | undefined): string | undefined {
@@ -274,13 +277,16 @@ function inferValidityInterval(
       if (!validFrom || !validTo) return undefined;
       return { validFrom, validTo, fromTime: Date.parse(validFrom), toTime: Date.parse(validTo) };
     })
-    .filter((candidate): candidate is { validFrom: string; validTo: string; fromTime: number; toTime: number } =>
-      Boolean(
-        candidate &&
+    .filter(
+      (
+        candidate,
+      ): candidate is { validFrom: string; validTo: string; fromTime: number; toTime: number } =>
+        Boolean(
+          candidate &&
           Number.isFinite(candidate.fromTime) &&
           Number.isFinite(candidate.toTime) &&
           candidate.toTime >= candidate.fromTime,
-      ),
+        ),
     );
 
   const containing = candidates
@@ -296,10 +302,7 @@ function inferValidityInterval(
   return best ? { validFrom: best.validFrom, validTo: best.validTo } : {};
 }
 
-function parseValidityPhrase(
-  description: string,
-  receivedAt: string,
-): ParsedValidityPhrase {
+function parseValidityPhrase(description: string, receivedAt: string): ParsedValidityPhrase {
   const match =
     /\bFra\s+(?:[\p{L}.]+\s+)?(\d{1,2})\.\s*([\p{L}æøåÆØÅ]+)\s+(?:fra\s+)?kl\.\s*(\d{1,2}):(\d{2})\s+til\s+(?:(?:[\p{L}.]+\s+)?(\d{1,2})\.\s*([\p{L}æøåÆØÅ]+)\s+)?(?:fra\s+)?kl\.\s*(\d{1,2}):(\d{2})/iu.exec(
       description,
@@ -310,7 +313,9 @@ function parseValidityPhrase(
   const [, fromDay, fromMonthName, fromHour, fromMinute, toDay, toMonthName, toHour, toMinute] =
     match;
   const fromMonth = norwegianMonths.get(fromMonthName!.toLocaleLowerCase("nb"));
-  const toMonth = toMonthName ? norwegianMonths.get(toMonthName.toLocaleLowerCase("nb")) : fromMonth;
+  const toMonth = toMonthName
+    ? norwegianMonths.get(toMonthName.toLocaleLowerCase("nb"))
+    : fromMonth;
   if (!fromMonth || !toMonth) return { sawValidityPhrase: true };
 
   return {

@@ -13,7 +13,9 @@ function repositoryStub() {
     sourceItems,
     health,
     repository: {
-      upsertBaneNorSourceItems: vi.fn(async (items: SourceItemInput[]) => sourceItems.push(...items)),
+      upsertBaneNorSourceItems: vi.fn(async (items: SourceItemInput[]) =>
+        sourceItems.push(...items),
+      ),
       setHealth: vi.fn(async (item: SourceHealth) => health.push(item)),
     },
   };

@@ -86,6 +86,7 @@ Because no `ETag`/`Last-Modified` was observed, the first implementation should 
 **Objective:** Make the existing weather-preparedness tests deterministic so the full suite is green before adding new source work.
 
 **Files:**
+
 - Modify: `apps/server/test/weather-preparedness.test.ts:50-66`
 - Optional modify only if needed: `apps/server/src/weather/preparedness.ts:39-44`
 
@@ -161,6 +162,7 @@ git commit -m "test: stabilize weather preparedness fixtures"
 **Objective:** Give every future source adapter a concrete contract format before code is written.
 
 **Files:**
+
 - Create: `docs/source-contracts/README.md`
 
 **Step 1: Create the template file**
@@ -245,6 +247,7 @@ git commit -m "docs: add source contract template"
 **Objective:** Define exactly how Bane NOR RSS may be ingested before adapter code is added.
 
 **Files:**
+
 - Create: `docs/source-contracts/bane-nor-rss.md`
 
 **Step 1: Write the contract**
@@ -370,6 +373,7 @@ git commit -m "docs: add Bane NOR RSS source contract"
 **Objective:** Capture the high-value municipal service-disruption source without implementing a scraper prematurely.
 
 **Files:**
+
 - Create: `docs/source-contracts/trondheim-notify.md`
 
 **Step 1: Write the contract**
@@ -462,6 +466,7 @@ git commit -m "docs: add Trondheim Notify source contract"
 **Objective:** Capture Trøndelag fylkeskommune as planned-work/context source, not as a duplicate traffic authority.
 
 **Files:**
+
 - Create: `docs/source-contracts/trondelag-fylke.md`
 
 **Step 1: Write the contract**
@@ -555,6 +560,7 @@ git commit -m "docs: add Trøndelag fylke source contract"
 **Objective:** Make Bane NOR a valid provider in shared types and API filter schemas.
 
 **Files:**
+
 - Modify: `packages/shared/src/types.ts:3-22`
 - Modify: `packages/shared/src/schemas.ts:77-97`
 - Modify: `packages/shared/test/source-items.test.ts:10-25`
@@ -608,8 +614,8 @@ export type SourceId =
   | "bane_nor"
   | "met"
   | "nve"
-  | "datex"
-  // rest unchanged
+  | "datex";
+// rest unchanged
 ```
 
 Patch `packages/shared/src/schemas.ts`:
@@ -654,6 +660,7 @@ git commit -m "feat: add Bane NOR source identifier"
 **Objective:** Parse Bane NOR RSS into normalized rail-context records with stable identity and raw item retention.
 
 **Files:**
+
 - Create: `apps/worker/test/fixtures/bane-nor-rss.xml`
 - Create: `apps/worker/test/bane-nor.test.ts`
 - Create: `apps/worker/src/baneNor.ts`
@@ -814,7 +821,8 @@ function textValue(value: unknown): string {
 
 function canonicalUrl(rawUrl: string): string {
   const url = new URL(rawUrl);
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Invalid Bane NOR URL");
+  if (url.protocol !== "https:" && url.protocol !== "http:")
+    throw new Error("Invalid Bane NOR URL");
   url.hash = "";
   return url.toString();
 }
@@ -839,7 +847,13 @@ const monthIndex: Record<string, number> = {
   desember: 11,
 };
 
-function osloWallClockIso(year: number, monthName: string, day: string, hour: string, minute: string): string | undefined {
+function osloWallClockIso(
+  year: number,
+  monthName: string,
+  day: string,
+  hour: string,
+  minute: string,
+): string | undefined {
   const month = monthIndex[monthName.toLocaleLowerCase("nb")];
   if (month === undefined) return undefined;
   const wallClockUtc = Date.UTC(year, month, Number(day), Number(hour), Number(minute));
@@ -856,9 +870,15 @@ function osloWallClockIso(year: number, monthName: string, day: string, hour: st
   return new Date(wallClockUtc - offset * 60_000).toISOString();
 }
 
-function parseValidityWindow(text: string, receivedAt: string): { validFrom?: string; validTo?: string } {
+function parseValidityWindow(
+  text: string,
+  receivedAt: string,
+): { validFrom?: string; validTo?: string } {
   const year = new Date(receivedAt).getFullYear();
-  const match = /fra\s+\w+\s+(\d{1,2})\.\s+(\w+)\s+kl\.\s+(\d{2}):(\d{2})\s+til\s+\w+\s+(\d{1,2})\.\s+(\w+)\s+kl\.\s+(\d{2}):(\d{2})/i.exec(text);
+  const match =
+    /fra\s+\w+\s+(\d{1,2})\.\s+(\w+)\s+kl\.\s+(\d{2}):(\d{2})\s+til\s+\w+\s+(\d{1,2})\.\s+(\w+)\s+kl\.\s+(\d{2}):(\d{2})/i.exec(
+      text,
+    );
   if (!match) return {};
   const [, fromDay, fromMonth, fromHour, fromMinute, toDay, toMonth, toHour, toMinute] = match;
   return {
@@ -867,7 +887,12 @@ function parseValidityWindow(text: string, receivedAt: string): { validFrom?: st
   };
 }
 
-function stateFromValidity(text: string, receivedAt: string, validFrom?: string, validTo?: string): BaneNorRailMessage["state"] {
+function stateFromValidity(
+  text: string,
+  receivedAt: string,
+  validFrom?: string,
+  validTo?: string,
+): BaneNorRailMessage["state"] {
   const receivedMs = Date.parse(receivedAt);
   const fromMs = validFrom ? Date.parse(validFrom) : Number.NaN;
   const toMs = validTo ? Date.parse(validTo) : Number.NaN;
@@ -890,7 +915,10 @@ export function parseBaneNorRss(
 
   for (const item of asArray(feed.rss?.channel?.item)) {
     const title = textValue(item.title);
-    const description = textValue(item.description).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const description = textValue(item.description)
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     const guid = textValue(item.guid);
     const link = textValue(item.link);
     if (!title || !description || !guid || !link) continue;
@@ -916,7 +944,12 @@ export function parseBaneNorRss(
       url,
       publishedAt,
       receivedAt: options.receivedAt,
-      state: stateFromValidity(`${title} ${description}`, options.receivedAt, validity.validFrom, validity.validTo),
+      state: stateFromValidity(
+        `${title} ${description}`,
+        options.receivedAt,
+        validity.validFrom,
+        validity.validTo,
+      ),
       ...(validity.validFrom ? { validFrom: validity.validFrom } : {}),
       ...(validity.validTo ? { validTo: validity.validTo } : {}),
       matchedTerms: terms,
@@ -1002,6 +1035,7 @@ git commit -m "feat: parse Bane NOR rail context RSS"
 **Objective:** Let the worker persist Bane NOR ledger rows through a narrow repository method that rejects wrong providers/kinds.
 
 **Files:**
+
 - Modify: `apps/worker/src/repository.ts:141-167`
 - Modify: `apps/worker/test/repository.test.ts`
 
@@ -1105,6 +1139,7 @@ git commit -m "feat: persist Bane NOR source items"
 **Objective:** Add a narrow, injectable worker helper that fetches Bane NOR RSS, persists source items, and records source health without touching situations.
 
 **Files:**
+
 - Modify: `apps/worker/src/index.ts`
 - Modify: `apps/worker/test/index.test.ts` or create `apps/worker/test/bane-nor-collection.test.ts`
 
@@ -1124,7 +1159,9 @@ function repositoryStub() {
     sourceItems,
     health,
     repository: {
-      upsertBaneNorSourceItems: vi.fn(async (items: SourceItemInput[]) => sourceItems.push(...items)),
+      upsertBaneNorSourceItems: vi.fn(async (items: SourceItemInput[]) =>
+        sourceItems.push(...items),
+      ),
       setHealth: vi.fn(async (item: SourceHealth) => health.push(item)),
     },
   };
@@ -1272,6 +1309,7 @@ git commit -m "feat: collect Bane NOR rail source health"
 **Objective:** Make the worker call the Bane NOR helper once per collection cycle while preserving source-health visibility.
 
 **Files:**
+
 - Modify: `apps/worker/src/index.ts:599-720`
 - Modify: `apps/worker/test/index.test.ts` if it asserts worker source order/health.
 
@@ -1336,6 +1374,7 @@ git commit -m "feat: wire Bane NOR rail context collection"
 **Objective:** Prove Bane NOR RSS cannot silently enter `official_events`, `traffic_map_events`, or `situations` in this phase.
 
 **Files:**
+
 - Modify: `apps/worker/test/bane-nor-collection.test.ts`
 - Modify: `apps/worker/test/repository.test.ts` if Task 8 did not already include the SQL assertions.
 
@@ -1430,6 +1469,7 @@ git commit -m "test: keep Bane NOR out of incident promotion"
 **Objective:** Keep repo docs aligned with the new source contract and adapter boundary.
 
 **Files:**
+
 - Modify: `docs/SOURCES.md`
 - Modify: `docs/plans/2026-06-02-source-bank-review.md`
 - Optional modify: `README.md` if it lists source types.
@@ -1477,6 +1517,7 @@ If `README.md` was not changed, omit it from `git add`.
 **Objective:** Make Obsidian the project info bank for the implemented plan and source contracts.
 
 **Files:**
+
 - Modify: `/Users/reidar/Obsidian/Hvelvet/01_Projects/Nytt_Trondheim/15-Kildebank-og-kildekontrakter.md`
 - Modify: `/Users/reidar/Obsidian/Hvelvet/01_Projects/Nytt_Trondheim/03-Dataflyt-og-kilder.md`
 - Modify: `/Users/reidar/Obsidian/Hvelvet/01_Projects/Nytt_Trondheim/12-Anbefalt-roadmap.md`
@@ -1529,6 +1570,7 @@ The Obsidian vault is not currently a git repo. Do not claim a notes commit unle
 **Objective:** Prove the implementation is locally green and did not violate source/provenance boundaries.
 
 **Files:**
+
 - No code changes expected unless gates find a bug.
 
 **Step 1: Run full gates**

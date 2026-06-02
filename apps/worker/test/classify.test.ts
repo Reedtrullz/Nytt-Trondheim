@@ -23,13 +23,8 @@ describe("Trondheim relevance classification", () => {
 
   it("routes high-signal Trondheim institutions to Trondheim", () => {
     expect(detectScope("St. Olavs hospital melder om beredskap")).toBe("trondheim");
-    expect(detectScope("NTNU og SINTEF åpner nytt testsenter på Gløshaugen")).toBe(
-      "trondheim",
-    );
-    expect(extractPlaces("NTNU og St. Olavs omtales i saken")).toEqual([
-      "NTNU",
-      "St. Olavs",
-    ]);
+    expect(detectScope("NTNU og SINTEF åpner nytt testsenter på Gløshaugen")).toBe("trondheim");
+    expect(extractPlaces("NTNU og St. Olavs omtales i saken")).toEqual(["NTNU", "St. Olavs"]);
   });
 
   it("routes regional transport corridors and institutions to Trøndelag", () => {
