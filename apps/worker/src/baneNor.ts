@@ -143,7 +143,7 @@ function matchedRailTerms(value: string): string[] {
     .sort((left, right) => left.localeCompare(right, "nb"));
 }
 
-function osloOffsetMillis(date: Date): number | undefined {
+function osloParts(date: Date): Map<string, string> {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Oslo",
     year: "numeric",
@@ -154,7 +154,11 @@ function osloOffsetMillis(date: Date): number | undefined {
     second: "2-digit",
     hourCycle: "h23",
   }).formatToParts(date);
-  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return new Map(parts.map((part) => [part.type, part.value]));
+}
+
+function osloOffsetMillis(date: Date): number | undefined {
+  const values = osloParts(date);
   const year = Number(values.get("year"));
   const month = Number(values.get("month"));
   const day = Number(values.get("day"));
@@ -182,43 +186,149 @@ function osloWallTimeToIso(
   }
   const date = new Date(utc);
   if (Number.isNaN(date.getTime())) return undefined;
+  const values = osloParts(date);
+  if (
+    Number(values.get("year")) !== year ||
+    Number(values.get("month")) !== month ||
+    Number(values.get("day")) !== day ||
+    Number(values.get("hour")) !== hour ||
+    Number(values.get("minute")) !== minute
+  ) {
+    return undefined;
+  }
   return date.toISOString();
+}
+
+interface ValidityPhraseParts {
+  fromDay: number;
+  fromMonth: number;
+  fromHour: number;
+  fromMinute: number;
+  toDay: number;
+  toMonth: number;
+  toHour: number;
+  toMinute: number;
+}
+
+interface ParsedValidityPhrase {
+  validFrom?: string;
+  validTo?: string;
+  sawValidityPhrase: boolean;
+}
+
+function hasPotentialValidityPhrase(description: string): boolean {
+  return /\bFra\b.{0,160}\btil\b.{0,80}\bkl\./isu.test(description);
+}
+
+function isBeforeInCalendarOrder(
+  left: { month: number; day: number; hour: number; minute: number },
+  right: { month: number; day: number; hour: number; minute: number },
+): boolean {
+  const leftValues = [left.month, left.day, left.hour, left.minute];
+  const rightValues = [right.month, right.day, right.hour, right.minute];
+  for (let index = 0; index < leftValues.length; index += 1) {
+    if (leftValues[index]! < rightValues[index]!) return true;
+    if (leftValues[index]! > rightValues[index]!) return false;
+  }
+  return false;
+}
+
+function inferValidityInterval(
+  parts: ValidityPhraseParts,
+  receivedAt: string,
+): { validFrom?: string; validTo?: string } {
+  const received = Date.parse(receivedAt);
+  if (!Number.isFinite(received)) return {};
+  const receivedYear = new Date(received).getUTCFullYear();
+  const endBeforeStart = isBeforeInCalendarOrder(
+    {
+      month: parts.toMonth,
+      day: parts.toDay,
+      hour: parts.toHour,
+      minute: parts.toMinute,
+    },
+    {
+      month: parts.fromMonth,
+      day: parts.fromDay,
+      hour: parts.fromHour,
+      minute: parts.fromMinute,
+    },
+  );
+  const candidates = [receivedYear - 1, receivedYear, receivedYear + 1]
+    .map((fromYear) => {
+      const toYear = endBeforeStart ? fromYear + 1 : fromYear;
+      const validFrom = osloWallTimeToIso(
+        fromYear,
+        parts.fromMonth,
+        parts.fromDay,
+        parts.fromHour,
+        parts.fromMinute,
+      );
+      const validTo = osloWallTimeToIso(
+        toYear,
+        parts.toMonth,
+        parts.toDay,
+        parts.toHour,
+        parts.toMinute,
+      );
+      if (!validFrom || !validTo) return undefined;
+      return { validFrom, validTo, fromTime: Date.parse(validFrom), toTime: Date.parse(validTo) };
+    })
+    .filter((candidate): candidate is { validFrom: string; validTo: string; fromTime: number; toTime: number } =>
+      Boolean(
+        candidate &&
+          Number.isFinite(candidate.fromTime) &&
+          Number.isFinite(candidate.toTime) &&
+          candidate.toTime >= candidate.fromTime,
+      ),
+    );
+
+  const containing = candidates
+    .filter((candidate) => candidate.fromTime <= received && candidate.toTime >= received)
+    .sort((left, right) => left.fromTime - right.fromTime)[0];
+  const future = candidates
+    .filter((candidate) => candidate.fromTime > received)
+    .sort((left, right) => left.fromTime - right.fromTime)[0];
+  const past = candidates
+    .filter((candidate) => candidate.toTime < received)
+    .sort((left, right) => right.toTime - left.toTime)[0];
+  const best = containing ?? future ?? past;
+  return best ? { validFrom: best.validFrom, validTo: best.validTo } : {};
 }
 
 function parseValidityPhrase(
   description: string,
   receivedAt: string,
-): { validFrom?: string; validTo?: string } {
+): ParsedValidityPhrase {
   const match =
-    /Fra\s+[\p{L}.]+\s+(\d{1,2})\.\s*([\p{L}æøåÆØÅ]+)\s+kl\.\s*(\d{1,2}):(\d{2})\s+til\s+[\p{L}.]+\s+(\d{1,2})\.\s*([\p{L}æøåÆØÅ]+)\s+kl\.\s*(\d{1,2}):(\d{2})/iu.exec(
+    /\bFra\s+(?:[\p{L}.]+\s+)?(\d{1,2})\.\s*([\p{L}æøåÆØÅ]+)\s+(?:fra\s+)?kl\.\s*(\d{1,2}):(\d{2})\s+til\s+(?:(?:[\p{L}.]+\s+)?(\d{1,2})\.\s*([\p{L}æøåÆØÅ]+)\s+)?(?:fra\s+)?kl\.\s*(\d{1,2}):(\d{2})/iu.exec(
       description,
     );
-  if (!match) return {};
+  const sawValidityPhrase = hasPotentialValidityPhrase(description);
+  if (!match) return { sawValidityPhrase };
 
   const [, fromDay, fromMonthName, fromHour, fromMinute, toDay, toMonthName, toHour, toMinute] =
     match;
-  const receivedYear = new Date(receivedAt).getUTCFullYear();
   const fromMonth = norwegianMonths.get(fromMonthName!.toLocaleLowerCase("nb"));
-  const toMonth = norwegianMonths.get(toMonthName!.toLocaleLowerCase("nb"));
-  if (!fromMonth || !toMonth) return {};
+  const toMonth = toMonthName ? norwegianMonths.get(toMonthName.toLocaleLowerCase("nb")) : fromMonth;
+  if (!fromMonth || !toMonth) return { sawValidityPhrase: true };
 
-  const validFrom = osloWallTimeToIso(
-    receivedYear,
-    fromMonth,
-    Number(fromDay),
-    Number(fromHour),
-    Number(fromMinute),
-  );
-  const toYear = toMonth < fromMonth ? receivedYear + 1 : receivedYear;
-  const validTo = osloWallTimeToIso(
-    toYear,
-    toMonth,
-    Number(toDay),
-    Number(toHour),
-    Number(toMinute),
-  );
-
-  return { validFrom, validTo };
+  return {
+    ...inferValidityInterval(
+      {
+        fromDay: Number(fromDay),
+        fromMonth,
+        fromHour: Number(fromHour),
+        fromMinute: Number(fromMinute),
+        toDay: Number(toDay ?? fromDay),
+        toMonth,
+        toHour: Number(toHour),
+        toMinute: Number(toMinute),
+      },
+      receivedAt,
+    ),
+    sawValidityPhrase: true,
+  };
 }
 
 function hasClosureTerms(value: string): boolean {
@@ -231,11 +341,13 @@ function stateFromValidity({
   textValue,
   validFrom,
   validTo,
+  sawValidityPhrase,
   receivedAt,
 }: {
   textValue: string;
   validFrom?: string;
   validTo?: string;
+  sawValidityPhrase: boolean;
   receivedAt: string;
 }): BaneNorRailMessageState {
   const received = Date.parse(receivedAt);
@@ -244,6 +356,7 @@ function stateFromValidity({
 
   if (to !== undefined && Number.isFinite(to) && to < received) return "unknown";
   if (from !== undefined && Number.isFinite(from) && from > received) return "planned";
+  if (sawValidityPhrase && (!Number.isFinite(from) || !Number.isFinite(to))) return "unknown";
   if (hasClosureTerms(textValue)) return "active";
   if (from !== undefined && Number.isFinite(from)) return "planned";
   return "unknown";
@@ -270,7 +383,10 @@ export function parseBaneNorRss(rawXml: string, options: BaneNorParseOptions): B
     const matchedTerms = matchedRailTerms(haystack);
     if (matchedTerms.length === 0) continue;
 
-    const { validFrom, validTo } = parseValidityPhrase(description, options.receivedAt);
+    const { validFrom, validTo, sawValidityPhrase } = parseValidityPhrase(
+      description,
+      options.receivedAt,
+    );
     const url = canonicalUrl(text(item.link)) ?? baneNorRssEndpoint;
     const message: BaneNorRailMessage = {
       id: `bane-nor:${guid}`,
@@ -281,7 +397,13 @@ export function parseBaneNorRss(rawXml: string, options: BaneNorParseOptions): B
       url,
       publishedAt: publishedAt(item.pubDate, options.receivedAt),
       receivedAt: options.receivedAt,
-      state: stateFromValidity({ textValue: haystack, validFrom, validTo, receivedAt: options.receivedAt }),
+      state: stateFromValidity({
+        textValue: haystack,
+        validFrom,
+        validTo,
+        sawValidityPhrase,
+        receivedAt: options.receivedAt,
+      }),
       validFrom,
       validTo,
       matchedTerms,
