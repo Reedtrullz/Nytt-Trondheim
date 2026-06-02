@@ -32,6 +32,7 @@
 ## Product boundaries
 
 - May create `source_items`: yes, provider `bane_nor`, kind `official_event`, reliability `official`.
+- May update `source_health`: yes, source `bane_nor`, including degraded state on fetch/parse/persist failures when health persistence itself succeeds.
 - May create `official_events`: no in phase 1.
 - May create `traffic_map_events`: no in phase 1.
 - May create `situations`: no in phase 1.
