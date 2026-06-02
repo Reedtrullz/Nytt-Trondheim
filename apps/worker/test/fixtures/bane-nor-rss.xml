@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Trafikkmeldinger</title>
+    <item>
+      <title>Trondheim S-Hell</title>
+      <link>https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/</link>
+      <guid>04ef7d8f-f6cf-40b8-915c-e14c1fad3708</guid>
+      <pubDate>Tue, 02 Jun 2026 09:10:00 +0200</pubDate>
+      <description>Fra lørdag 20. juni kl. 04:20 til mandag 22. juni kl. 06:00 utfører vi arbeid mellom Trondheim S og Hell. Strekningen blir stengt for trafikk.</description>
+    </item>
+    <item>
+      <title>Egersund-Stavanger</title>
+      <link>https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/</link>
+      <guid>bb195bf8-cf29-405a-a7b0-c012c1a08a12</guid>
+      <pubDate>Tue, 02 Jun 2026 09:33:33 +0200</pubDate>
+      <description>Fra lørdag 5. september kl. 12:10 til lørdag 5. september kl. 22:00 utfører vi arbeid mellom Egersund og Stavanger.</description>
+    </item>
+  </channel>
+</rss>
