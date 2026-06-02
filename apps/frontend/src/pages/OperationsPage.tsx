@@ -54,12 +54,15 @@ function slowestSource(
   };
 }
 
-function parseFailureCount(metrics?: WorkerCycleMetrics) {
-  return Object.values(metrics?.parseFailures ?? {}).reduce((sum, count) => sum + count, 0);
+function parseFailureText(metrics?: WorkerCycleMetrics) {
+  if (!metrics) return "—";
+  return String(Object.values(metrics.parseFailures).reduce((sum, count) => sum + count, 0));
 }
 
-function sourceItemCount(metrics?: WorkerCycleMetrics) {
-  return Object.values(metrics?.sourceItemCounts ?? {}).reduce((sum, count) => sum + count, 0);
+function sourceItemCountText(metrics?: WorkerCycleMetrics) {
+  if (!metrics) return "Ingen fullført worker-syklus";
+  const count = Object.values(metrics.sourceItemCounts).reduce((sum, count) => sum + count, 0);
+  return `${count} operasjonelle objekter i siste syklus`;
 }
 
 function staleSourceCount(status: OperationsStatus) {
@@ -70,7 +73,8 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
   const trafficPulse = status.trafficPulse ?? [];
   const workerMetrics = status.workerCycleMetrics;
   const slowest = slowestSource(workerMetrics, status.sources);
-  const parseFailures = parseFailureCount(workerMetrics);
+  const parseFailures = parseFailureText(workerMetrics);
+  const sourceItems = sourceItemCountText(workerMetrics);
   const staleSources = staleSourceCount(status);
 
   return (
@@ -121,7 +125,7 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
           <article>
             <span>Parsefeil</span>
             <strong>{parseFailures}</strong>
-            <small>{sourceItemCount(workerMetrics)} kildeobjekter i siste syklus</small>
+            <small>{sourceItems}</small>
           </article>
           <article>
             <span>Kilder som trenger tilsyn</span>

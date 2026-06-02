@@ -79,6 +79,11 @@ export interface WorkerSourceMetricInput {
   parseFailures?: number;
 }
 
+interface WorkerCollectorTelemetry {
+  sourceItemCount?: number;
+  parseFailures?: number;
+}
+
 export function buildWorkerCycleMetrics({
   cycleStartedAt,
   cycleCompletedAt,
@@ -151,7 +156,7 @@ export async function collectTrafficInfoForMap({
   nextPollAt: string;
   now?: () => Date;
   collector?: typeof collectTrafficInfoMessages;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   try {
     const checkedAt = now().toISOString();
     const fetchedAt = checkedAt;
@@ -187,6 +192,7 @@ export async function collectTrafficInfoForMap({
       nextPollAt,
       detail: `${result.relevantMessages} relevante av ${result.totalMessages} Vegvesen trafikkmeldinger hentet (${result.events.filter((event) => event.state === "active").length} aktive, ${result.events.filter((event) => event.state === "planned").length} planlagte, ${expiredCount} utløpt fra snapshot, ${staleExpiredCount} stale utløpt)`,
     });
+    return { sourceItemCount: result.events.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -198,6 +204,7 @@ export async function collectTrafficInfoForMap({
       nextPollAt,
       detail: `TrafficInfo-innhenting feilet: ${String(error)}`,
     });
+    return { sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
@@ -334,7 +341,7 @@ export async function collectEnturServiceAlerts({
   nextPollAt: string;
   now?: () => Date;
   collector?: EnturServiceAlertCollector;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   const checkedAt = now().toISOString();
   const allAlerts: PublicTransportServiceAlert[] = [];
   const activeSituationNumbersByCodespace = new Map<string, string[]>();
@@ -386,6 +393,7 @@ export async function collectEnturServiceAlerts({
       ? `${allAlerts.length} Entur trafikkavvik oppdatert fra ${activeSituationNumbersByCodespace.size}/${codespaceIds.length} codespaces (${expiredCount} utløpt fra snapshot). Feil: ${failures.join("; ")}`
       : `${allAlerts.length} Entur trafikkavvik oppdatert fra ${activeSituationNumbersByCodespace.size}/${codespaceIds.length} codespaces (${expiredCount} utløpt fra snapshot)`,
   });
+  return { sourceItemCount: allAlerts.length, parseFailures: failures.length };
 }
 
 const trafikkdataPollIntervalMs = 15 * 60 * 1000;
@@ -412,7 +420,7 @@ export async function collectTrafikkdataCounters({
   now?: () => Date;
   fetcher?: typeof fetch;
   collector?: TrafikkdataCollector;
-}): Promise<{ skipped: boolean }> {
+}): Promise<{ skipped: boolean } & WorkerCollectorTelemetry> {
   const checkedAtDate = now();
   const checkedAt = checkedAtDate.toISOString();
   const lastSuccessfulPollAt = await repository.collectorState(
@@ -421,7 +429,9 @@ export async function collectTrafikkdataCounters({
   const lastSuccessfulPollMs = lastSuccessfulPollAt ? Date.parse(lastSuccessfulPollAt) : Number.NaN;
   if (Number.isFinite(lastSuccessfulPollMs)) {
     const elapsedMs = checkedAtDate.getTime() - lastSuccessfulPollMs;
-    if (elapsedMs >= 0 && elapsedMs < trafikkdataPollIntervalMs) return { skipped: true };
+    if (elapsedMs >= 0 && elapsedMs < trafikkdataPollIntervalMs) {
+      return { skipped: true, sourceItemCount: 0, parseFailures: 0 };
+    }
   }
 
   try {
@@ -439,7 +449,7 @@ export async function collectTrafikkdataCounters({
       nextPollAt,
       detail: `${counters.length} Trafikkdata tellepunkter oppdatert (${volumeCount} med timesvolum). Neste poll tidligst ${nextPollAt}`,
     });
-    return { skipped: false };
+    return { skipped: false, sourceItemCount: counters.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -451,7 +461,7 @@ export async function collectTrafikkdataCounters({
       nextPollAt,
       detail: `Trafikkdata-innhenting feilet: ${String(error)}`,
     });
-    return { skipped: false };
+    return { skipped: false, sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
@@ -509,7 +519,7 @@ export async function collectDatexRoadWeatherContext({
   now?: () => Date;
   fetcher?: typeof fetch;
   parser?: RoadWeatherParser;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   const checkedAt = now().toISOString();
   const credentials = normalizedDatexCredentials(username, password);
   if (!credentials) {
@@ -521,7 +531,7 @@ export async function collectDatexRoadWeatherContext({
       nextPollAt,
       detail: "DATEX Basic Auth mangler for værstasjonsdata",
     });
-    return;
+    return { sourceItemCount: 0, parseFailures: 0 };
   }
 
   try {
@@ -551,6 +561,7 @@ export async function collectDatexRoadWeatherContext({
       nextPollAt,
       detail: `${observations.length} DATEX værstasjonsobservasjoner oppdatert`,
     });
+    return { sourceItemCount: observations.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -562,6 +573,7 @@ export async function collectDatexRoadWeatherContext({
       nextPollAt,
       detail: `DATEX værstasjonsinnhenting feilet: ${String(error)}`,
     });
+    return { sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
@@ -585,7 +597,7 @@ export async function collectDatexCctvContext({
   now?: () => Date;
   fetcher?: typeof fetch;
   parser?: CctvParser;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   const checkedAt = now().toISOString();
   const credentials = normalizedDatexCredentials(username, password);
   if (!credentials) {
@@ -597,7 +609,7 @@ export async function collectDatexCctvContext({
       nextPollAt,
       detail: "DATEX Basic Auth mangler for webkameradata",
     });
-    return;
+    return { sourceItemCount: 0, parseFailures: 0 };
   }
 
   try {
@@ -627,6 +639,7 @@ export async function collectDatexCctvContext({
       nextPollAt,
       detail: `${cameras.length} DATEX webkamera oppdatert`,
     });
+    return { sourceItemCount: cameras.length, parseFailures: 0 };
   } catch (error) {
     const failureAt = now().toISOString();
     await repository.setHealth({
@@ -638,6 +651,7 @@ export async function collectDatexCctvContext({
       nextPollAt,
       detail: `DATEX webkamerainnhenting feilet: ${String(error)}`,
     });
+    return { sourceItemCount: 0, parseFailures: 1 };
   }
 }
 
@@ -774,29 +788,31 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     await repository.setHealth({ ...status, lastCheckedAt: new Date().toISOString(), nextPollAt });
   }
   const trafficInfoStartedAtMs = Date.now();
-  await collectTrafficInfoForMap({
+  const trafficInfoMetrics = await collectTrafficInfoForMap({
     repository,
     endpoint: process.env.TRAFFIC_INFO_ENDPOINT?.trim() || defaultTrafficInfoEndpoint,
     nextPollAt,
   });
-  recordSourceMetric("vegvesen_traffic_info", trafficInfoStartedAtMs);
+  recordSourceMetric("vegvesen_traffic_info", trafficInfoStartedAtMs, trafficInfoMetrics);
   const trafikkdataStartedAtMs = Date.now();
   const trafikkdataResult = await collectTrafikkdataCounters({
     repository,
     endpoint: process.env.TRAFIKKDATA_GRAPHQL_ENDPOINT?.trim() || defaultTrafikkdataGraphqlEndpoint,
     nextPollAt: new Date(Date.now() + trafikkdataPollIntervalMs).toISOString(),
   });
-  recordSourceMetric("trafikkdata", trafikkdataStartedAtMs, {
-    sourceItemCount: trafikkdataResult.skipped ? 0 : undefined,
-  });
+  recordSourceMetric("trafikkdata", trafikkdataStartedAtMs, trafikkdataResult);
   const enturServiceAlertsStartedAtMs = Date.now();
-  await collectEnturServiceAlerts({
+  const enturServiceAlertMetrics = await collectEnturServiceAlerts({
     repository,
     clientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",
     codespaceIds: enturCodespacesFromEnv(process.env.ENTUR_CODESPACES),
     nextPollAt,
   });
-  recordSourceMetric("entur_service_alerts", enturServiceAlertsStartedAtMs);
+  recordSourceMetric(
+    "entur_service_alerts",
+    enturServiceAlertsStartedAtMs,
+    enturServiceAlertMetrics,
+  );
   const officialEvents: OfficialEvent[] = [];
   for (const [source, collector] of [
     ["met", () => collectMetWarnings(fetch)],
@@ -927,7 +943,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     });
   }
   const datexWeatherStartedAtMs = Date.now();
-  await collectDatexRoadWeatherContext({
+  const datexWeatherMetrics = await collectDatexRoadWeatherContext({
     repository,
     sitesEndpoint: datexWeatherSitesEndpoint,
     measurementsEndpoint: datexWeatherMeasurementsEndpoint,
@@ -935,9 +951,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     password: datexPassword,
     nextPollAt,
   });
-  recordSourceMetric("datex_weather", datexWeatherStartedAtMs);
+  recordSourceMetric("datex_weather", datexWeatherStartedAtMs, datexWeatherMetrics);
   const datexCctvStartedAtMs = Date.now();
-  await collectDatexCctvContext({
+  const datexCctvMetrics = await collectDatexCctvContext({
     repository,
     sitesEndpoint: datexCctvSitesEndpoint,
     statusEndpoint: datexCctvStatusEndpoint,
@@ -945,7 +961,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     password: datexPassword,
     nextPollAt,
   });
-  recordSourceMetric("datex_cctv", datexCctvStartedAtMs);
+  recordSourceMetric("datex_cctv", datexCctvStartedAtMs, datexCctvMetrics);
   await repository.upsertOfficialEvents(officialEvents);
   if (freshDatexSnapshotEventIds) {
     await repository.expireMissingOfficialEvents("datex", freshDatexSnapshotEventIds);
@@ -963,7 +979,6 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const aiStartedAtMs = Date.now();
   const analysis = await analyzer.cluster(recentArticles);
   recordSourceMetric("deepseek", aiStartedAtMs, {
-    sourceItemCount: analysis.result.clusters.length,
     parseFailures: analysis.run.status === "degraded" ? 1 : 0,
   });
   await repository.saveAiRun(analysis.run);

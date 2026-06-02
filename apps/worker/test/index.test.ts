@@ -241,7 +241,7 @@ describe("Trafikkdata counter collection", () => {
         now: () => new Date("2026-05-29T10:15:00.000Z"),
         collector,
       }),
-    ).resolves.toEqual({ skipped: true });
+    ).resolves.toEqual({ skipped: true, sourceItemCount: 0, parseFailures: 0 });
 
     expect(repository.collectorState).toHaveBeenCalledWith("trafikkdata:lastSuccessfulPollAt");
     expect(collector).not.toHaveBeenCalled();
@@ -273,7 +273,7 @@ describe("Trafikkdata counter collection", () => {
         fetcher,
         collector,
       }),
-    ).resolves.toEqual({ skipped: false });
+    ).resolves.toEqual({ skipped: false, sourceItemCount: 2, parseFailures: 0 });
 
     expect(collector).toHaveBeenCalledWith({
       endpoint: "https://trafikkdata.example.test/graphql",
@@ -310,7 +310,7 @@ describe("Trafikkdata counter collection", () => {
         now: () => new Date(checkedAt),
         collector,
       }),
-    ).resolves.toEqual({ skipped: false });
+    ).resolves.toEqual({ skipped: false, sourceItemCount: 0, parseFailures: 1 });
 
     expect(repository.setCollectorState).not.toHaveBeenCalled();
     expect(repository.setHealth).toHaveBeenCalledWith({
@@ -585,13 +585,15 @@ describe("TrafficInfo worker collection", () => {
       relevantMessages: 2,
     });
 
-    await collectTrafficInfoForMap({
-      repository: repository as never,
-      endpoint: "https://traffic-info.example.test/messages",
-      nextPollAt,
-      now: () => new Date(checkedAt),
-      collector,
-    });
+    await expect(
+      collectTrafficInfoForMap({
+        repository: repository as never,
+        endpoint: "https://traffic-info.example.test/messages",
+        nextPollAt,
+        now: () => new Date(checkedAt),
+        collector,
+      }),
+    ).resolves.toEqual({ sourceItemCount: 2, parseFailures: 0 });
 
     expect(collector).toHaveBeenCalledWith({
       endpoint: "https://traffic-info.example.test/messages",
@@ -661,13 +663,15 @@ describe("TrafficInfo worker collection", () => {
     const repository = fakeTrafficInfoRepository();
     const collector = vi.fn().mockRejectedValue(new Error("upstream unavailable"));
 
-    await collectTrafficInfoForMap({
-      repository: repository as never,
-      endpoint: "https://traffic-info.example.test/messages",
-      nextPollAt,
-      now: () => new Date(checkedAt),
-      collector,
-    });
+    await expect(
+      collectTrafficInfoForMap({
+        repository: repository as never,
+        endpoint: "https://traffic-info.example.test/messages",
+        nextPollAt,
+        now: () => new Date(checkedAt),
+        collector,
+      }),
+    ).resolves.toEqual({ sourceItemCount: 0, parseFailures: 1 });
 
     expect(repository.upsertTrafficMapEvents).not.toHaveBeenCalled();
     expect(repository.upsertTrafficInfoSourceItems).not.toHaveBeenCalled();

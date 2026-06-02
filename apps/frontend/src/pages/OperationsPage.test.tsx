@@ -60,8 +60,17 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Vegvesen DATEX");
     expect(html).toContain("Parsefeil");
     expect(html).toContain("2");
-    expect(html).toContain("3 kildeobjekter");
+    expect(html).toContain("3 operasjonelle objekter");
     expect(html).toContain("Kilder som trenger tilsyn");
     expect(html).toContain("Gjenopprettingstest");
+  });
+
+  it("does not imply zero failures before worker metrics exist", () => {
+    const withoutMetrics: OperationsStatus = { ...status, workerCycleMetrics: undefined };
+    const html = renderToStaticMarkup(<OperationsDashboard status={withoutMetrics} />);
+
+    expect(html).toContain("Siste syklus");
+    expect(html).toContain("Ingen fullført worker-syklus");
+    expect(html).toContain("Ingen måling");
   });
 });
