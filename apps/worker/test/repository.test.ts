@@ -653,6 +653,44 @@ describe("WorkerRepository", () => {
     expect(query).not.toHaveBeenCalled();
   });
 
+  it("upserts Bane NOR source items without promoting them to official events or situations", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const valid: SourceItemInput = {
+      id: "source:bane-nor-test",
+      provider: "bane_nor",
+      kind: "official_event",
+      externalId: "guid-1",
+      originalUrl: "https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/",
+      title: "Trondheim S-Hell",
+      summary: "Stengt for trafikk.",
+      publishedAt: "2026-06-02T07:10:00.000Z",
+      fetchedAt: "2026-06-02T07:15:00.000Z",
+      rawPayload: { guid: "guid-1" },
+      normalizedPayload: { promotion: "none" },
+      captureHash: "bane-nor-capture-hash",
+      reliabilityTier: "official",
+    };
+
+    await repository.upsertBaneNorSourceItems([valid]);
+    const queryCountAfterValidInsert = query.mock.calls.length;
+    await expect(
+      repository.upsertBaneNorSourceItems([{ ...valid, provider: "entur" as const }]),
+    ).rejects.toThrow(/Bane NOR/);
+    await expect(
+      repository.upsertBaneNorSourceItems([{ ...valid, kind: "article" as const }]),
+    ).rejects.toThrow(/Bane NOR/);
+    expect(query).toHaveBeenCalledTimes(queryCountAfterValidInsert);
+
+    const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
+    const joinedSql = sqlCalls.join("\n");
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO source_items"))).toBe(true);
+    expect(joinedSql).not.toContain("INSERT INTO official_events");
+    expect(joinedSql).not.toContain("INSERT INTO traffic_map_events");
+    expect(joinedSql).not.toContain("INSERT INTO situations");
+    expect(joinedSql).not.toContain("INSERT INTO situation_source_items");
+  });
+
   it("upserts and lists traffic map events through the dedicated table", async () => {
     const event = trafficMapEvent();
     const updatedEvent = { ...event, title: "Oppdatert tittel" };
