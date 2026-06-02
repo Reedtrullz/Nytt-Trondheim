@@ -289,6 +289,26 @@ describe("Trondheim relevance classification", () => {
     ]);
   });
 
+  it("detects compound-only fire headlines and merges matching phrase variants", () => {
+    const situations = detectPreliminarySituations([
+      incidentArticle("car-fire-one", "nrk", "2026-06-02T09:00:00Z", {
+        title: "Bilbrann på Tiller",
+        excerpt: "Røyk fra kjøretøy ved City Syd.",
+        places: ["Tiller"],
+      }),
+      incidentArticle("car-fire-two", "adressa", "2026-06-02T09:05:00Z", {
+        title: "Brann i bil på Tiller",
+        excerpt: "Brannvesenet jobber ved City Syd.",
+        places: ["Tiller"],
+      }),
+    ]);
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]?.type).toBe("fire");
+    expect(situations[0]?.incidentSignature).toBe("fire:tiller:bilbrann");
+    expect(situations[0]?.relatedArticleIds).toEqual(["car-fire-two", "car-fire-one"]);
+  });
+
   it("canonicalizes only explicitly listed local place aliases", () => {
     expect(extractPlaces("Trafikkulykke på Kroppanbrua")).toEqual(["Kroppanbrua"]);
     expect(extractPlaces("Kollisjon på Kroppan bru")).toEqual(["Kroppan bru"]);
@@ -384,6 +404,53 @@ describe("Trondheim relevance classification", () => {
     expect(situation.evidence.find((item) => item.source === "met")?.claimType).toBe(
       "official_warning_context",
     );
+  });
+
+  it("labels attached NVE warning context with NVE provenance", () => {
+    const situation = detectPreliminarySituations(
+      [
+        incidentArticle("flood-one", "nrk", "2026-06-02T11:40:00Z", {
+          title: "Flom ved Nidelva",
+          excerpt: "Vannstanden stiger ved Nidelva.",
+          places: ["Nidelva"],
+        }),
+        incidentArticle("flood-two", "adressa", "2026-06-02T11:45:00Z", {
+          title: "Flom ved Nidelva",
+          excerpt: "Nødetatene følger flom ved Nidelva.",
+          places: ["Nidelva"],
+        }),
+      ],
+      [
+        warningEvent("nve-flood", {
+          source: "nve",
+          eventType: "flood",
+          title: "Flomvarsel for Trondheim",
+          areaLabel: "Trondheim kommune",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [10.2, 63.35],
+                [10.45, 63.35],
+                [10.45, 63.45],
+                [10.2, 63.45],
+                [10.2, 63.35],
+              ],
+            ],
+          },
+        }),
+      ],
+    )[0]!;
+
+    expect(situation.activationBasis?.sourceIds.sort()).toEqual(["adressa", "nrk"]);
+    expect(situation.evidence.find((item) => item.source === "nve")?.sourceLabel).toBe(
+      "NVE / Varsom",
+    );
+    expect(
+      situation.features.find((feature) => feature.properties.layer === "warning"),
+    ).toMatchObject({
+      properties: { sourceLabel: "NVE / Varsom" },
+    });
   });
 
   it("allows a later real event after an earlier false positive was dismissed", () => {

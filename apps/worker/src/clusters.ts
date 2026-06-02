@@ -13,9 +13,9 @@ const clusterWindowMs = 12 * 60 * 60 * 1000;
 const continuationWindowMs = 72 * 60 * 60 * 1000;
 const genericPlaces = new Set(["trondheim", "trøndelag"]);
 const eventDescriptorRules: Array<{ descriptor: string; pattern: RegExp }> = [
-  { descriptor: "garasjebrann", pattern: /\bgarasjebrann\b/i },
-  { descriptor: "bodbrann", pattern: /\bbodbrann\b/i },
-  { descriptor: "bilbrann", pattern: /\bbilbrann\b/i },
+  { descriptor: "garasjebrann", pattern: /\b(?:garasjebrann|brann\s+i\s+garasje)\b/i },
+  { descriptor: "bodbrann", pattern: /\b(?:bodbrann|brann\s+i\s+bod)\b/i },
+  { descriptor: "bilbrann", pattern: /\b(?:bilbrann|brann\s+i\s+bil)\b/i },
 ];
 
 function slug(value: string): string {
@@ -83,6 +83,10 @@ function incidentEventDescriptor(article: Article): string | undefined {
 function incidentSignatureKey(type: Situation["type"], place: string, article: Article): string {
   const descriptor = incidentEventDescriptor(article);
   return descriptor ? `${type}:${slug(place)}:${descriptor}` : `${type}:${slug(place)}`;
+}
+
+function warningSourceLabel(event: OfficialEvent): string {
+  return event.source === "met" ? "MET farevarsel" : "NVE / Varsom";
 }
 
 export function officialTrafficSituationsFromEvents(
@@ -400,7 +404,7 @@ export function detectPreliminarySituations(
       id: createHash("sha1").update(`${id}:warning:${event.id}`).digest("hex").slice(0, 18),
       situationId: id,
       source: event.source,
-      sourceLabel: event.source === "met" ? "MET farevarsel" : "NVE / Varsom",
+      sourceLabel: warningSourceLabel(event),
       sourceUrl: event.sourceUrl,
       supportingSnippet: event.detail,
       claim: event.title,
@@ -454,7 +458,7 @@ export function detectPreliminarySituations(
             timestamp: event.publishedAt,
             title: event.title,
             detail: event.detail,
-            sourceLabel: event.source === "met" ? "MET farevarsel" : "NVE / Varsom",
+            sourceLabel: warningSourceLabel(event),
             sourceUrl: event.sourceUrl,
             official: true,
           })),
@@ -496,7 +500,7 @@ function warningFeature(id: string, event: OfficialEvent): MapFeature[] {
       properties: {
         label: event.title,
         provenance: "official",
-        sourceLabel: "MET farevarsel",
+        sourceLabel: warningSourceLabel(event),
         sourceUrl: event.sourceUrl,
         updatedAt: event.publishedAt,
         layer: "warning",
@@ -565,6 +569,7 @@ function specificPlace(article: Article): string | undefined {
 
 function detectType(article: Article): Situation["type"] | undefined {
   const text = `${article.title} ${article.excerpt}`.toLocaleLowerCase("nb");
+  if (incidentEventDescriptor(article)) return "fire";
   if (/\b(brann|skogbrann|røykutvikling)\b/.test(text)) return "fire";
   if (/\b(savnet|leteaksjon|forsvunnet)\b/.test(text)) return "missing_person";
   if (/\b(jordskred|ras)\b/.test(text)) return "landslide";

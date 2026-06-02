@@ -74,6 +74,21 @@ describe("Politiloggen ingestion", () => {
     });
   });
 
+  it("does not expose inactive Politiloggen threads as activation articles", async () => {
+    const inactiveThread = { ...activeThread, isActive: false };
+
+    const result = await collectPolitiloggen(
+      async () =>
+        new Response(JSON.stringify({ messageThreads: [inactiveThread], count: 1 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    expect(result.threads).toEqual([inactiveThread]);
+    expect(result.articles).toEqual([]);
+  });
+
   it("promotes active Politiloggen threads to official situations", () => {
     const situations = politiloggenSituationsFromThreads([activeThread]);
 
