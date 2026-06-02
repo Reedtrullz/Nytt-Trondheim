@@ -1,5 +1,7 @@
 # Data Sources And Limits
 
+See also `docs/plans/2026-06-02-source-bank-review.md` for reviewed future source candidates, source-contract rules, and the implementation priority order.
+
 ## Collected News
 
 | Source            | Method                                         | Frequency | Data retained                     |

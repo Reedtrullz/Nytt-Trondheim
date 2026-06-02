@@ -21,6 +21,32 @@ describe("Trondheim relevance classification", () => {
     expect(extractPlaces(text)).toEqual([]);
   });
 
+  it("routes high-signal Trondheim institutions to Trondheim", () => {
+    expect(detectScope("St. Olavs hospital melder om beredskap")).toBe("trondheim");
+    expect(detectScope("NTNU og SINTEF åpner nytt testsenter på Gløshaugen")).toBe(
+      "trondheim",
+    );
+    expect(extractPlaces("NTNU og St. Olavs omtales i saken")).toEqual([
+      "NTNU",
+      "St. Olavs",
+    ]);
+  });
+
+  it("routes regional transport corridors and institutions to Trøndelag", () => {
+    expect(detectScope("Forsinkelser på Dovrebanen og Nordlandsbanen")).toBe("trondelag");
+    expect(detectScope("Flytrafikken ved Værnes påvirkes av uvær")).toBe("trondelag");
+    expect(extractPlaces("AtB varsler endringer på Trønderbanen via Værnes")).toEqual([
+      "AtB",
+      "Trønderbanen",
+      "Værnes",
+    ]);
+  });
+
+  it("does not keep national road-number stories without a local anchor", () => {
+    expect(detectScope("E6 stengt etter ulykke i Gudbrandsdalen")).toBeUndefined();
+    expect(categorize("E6 stengt etter ulykke i Gudbrandsdalen")).toBe("Hendelser");
+  });
+
   it("categorizes incident stories and extracts public place names", () => {
     expect(categorize("Skogbrann i Bymarka")).toBe("Hendelser");
     expect(extractPlaces("Skogbrann i Bymarka ved Granåsen")).toEqual(["Bymarka", "Granåsen"]);
