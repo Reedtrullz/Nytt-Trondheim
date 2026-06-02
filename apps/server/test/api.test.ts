@@ -7,11 +7,12 @@ import { promisify } from "node:util";
 import request from "supertest";
 import type { Response as SuperAgentResponse } from "superagent";
 import { describe, expect, it, vi } from "vitest";
-import { createApp } from "../src/app.js";
+import { buildSituationExplanation, createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { loadConfig } from "../src/config.js";
 import { PgStore } from "../src/store.js";
+import { sampleSituation } from "@nytt/shared";
 import type {
   Article,
   OfficialEvent,
@@ -20,6 +21,7 @@ import type {
   RoadCamera,
   RoadWeatherObservation,
   SourceHealth,
+  SourceItem,
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
@@ -164,6 +166,56 @@ describe("private situation API", () => {
       rateLimitEnabled: true,
     });
     await request(app).get("/api/bootstrap").expect(401);
+  });
+
+  it("includes a provenance explanation for situation workspaces", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent.get("/api/situations/skogbrann-bymarka").expect(200);
+
+    expect(response.body.explanation).toMatchObject({
+      createdBecause: ["2 uavhengige kilder rapporterte samme hendelse."],
+      locationConfidence: "mixed",
+    });
+    expect(response.body.explanation.sourceRoles).toEqual(
+      expect.arrayContaining([
+        { provider: "nrk", role: "evidence" },
+        { provider: "adressa", role: "evidence" },
+        { provider: "met", role: "context" },
+      ]),
+    );
+    expect(response.body.explanation.sourceRoles).not.toContainEqual({
+      provider: "met",
+      role: "evidence",
+    });
+  });
+
+  it("keeps telemetry and context providers out of causal evidence roles", () => {
+    const telemetrySourceItem: SourceItem = {
+      id: "source:datex_travel_time:100141",
+      provider: "datex_travel_time",
+      kind: "official_event",
+      externalId: "100141",
+      originalUrl: "https://example.test/datex/travel-time",
+      title: "E6 Sluppen → Tiller",
+      summary: "Travel-time measurement used only as operational telemetry.",
+      fetchedAt: "2026-06-02T10:00:00.000Z",
+      captureHash: "sha256:telemetry",
+      reliabilityTier: "official",
+      linkedSituationIds: [sampleSituation.id],
+    };
+
+    const explanation = buildSituationExplanation(sampleSituation, [telemetrySourceItem]);
+
+    expect(explanation.sourceRoles).toContainEqual({
+      provider: "datex_travel_time",
+      role: "telemetry",
+    });
+    expect(explanation.sourceRoles).toContainEqual({ provider: "met", role: "context" });
+    expect(explanation.sourceRoles).not.toContainEqual({
+      provider: "datex_travel_time",
+      role: "evidence",
+    });
+    expect(explanation.sourceRoles).not.toContainEqual({ provider: "met", role: "evidence" });
   });
 
   it("starts GitHub OAuth with a session-backed state nonce", async () => {

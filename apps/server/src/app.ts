@@ -22,7 +22,11 @@ import {
   travelPlanQuerySchema,
   type MapFeature,
   type PublicTransportVehicle,
+  type Situation,
+  type SituationExplanation,
   type SourceHealth,
+  type SourceId,
+  type SourceItem,
   type TrafficEventState,
   type TrafficMapEvent,
   type TrafficMapSourceStatus,
@@ -60,6 +64,88 @@ const publicTransportSourceIdSet = new Set<string>([
 ]);
 const defaultPublicTransportBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
 const defaultWeatherBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
+const telemetrySourceIds = new Set<SourceId>([
+  "datex_travel_time",
+  "datex_weather",
+  "datex_cctv",
+  "trafikkdata",
+  "entur_vehicle_positions",
+]);
+const contextSourceIds = new Set<SourceId>(["met", "nve", "entur_service_alerts"]);
+
+function sourceRole(
+  provider: SourceId,
+  kind?: SourceItem["kind"],
+): SituationExplanation["sourceRoles"][number]["role"] {
+  if (telemetrySourceIds.has(provider)) return "telemetry";
+  if (contextSourceIds.has(provider) || kind === "warning") return "context";
+  if (kind === "reporter_note" || kind === "reader_tip" || provider === "deepseek")
+    return "private";
+  return "evidence";
+}
+
+function addSourceRole(
+  roles: Map<SourceId, SituationExplanation["sourceRoles"][number]["role"]>,
+  provider: SourceId,
+  role: SituationExplanation["sourceRoles"][number]["role"],
+) {
+  const current = roles.get(provider);
+  if (current === "evidence") return;
+  if (current && role !== "evidence") return;
+  roles.set(provider, role);
+}
+
+function locationConfidenceForSituation(
+  situation: Situation,
+): SituationExplanation["locationConfidence"] {
+  const provenances = new Set(situation.features.map((feature) => feature.properties.provenance));
+  const hasOfficial = provenances.has("official");
+  const hasEstimated =
+    provenances.has("reporting_estimate") || provenances.has("private_annotation");
+  if (hasOfficial && hasEstimated) return "mixed";
+  if (hasOfficial) return "official";
+  if (hasEstimated) return "estimated";
+  return "unknown";
+}
+
+export function buildSituationExplanation(
+  situation: Situation,
+  sourceItems: SourceItem[] = [],
+): SituationExplanation {
+  const createdBecause: string[] = [];
+  if (situation.activationBasis?.rule === "two_independent_sources") {
+    createdBecause.push(
+      `${situation.activationBasis.sourceIds.length} uavhengige kilder rapporterte samme hendelse.`,
+    );
+  } else if (situation.activationBasis?.rule === "official_source") {
+    createdBecause.push("Opprettet fra en offentlig kilde uten krav om avisartikkel.");
+  } else {
+    createdBecause.push("Opprettet fra eksisterende kildegrunnlag i situasjonsrommet.");
+  }
+  if (situation.dismissalReason) createdBecause.push("Situasjonen er avvist som feilkobling.");
+
+  const roles = new Map<SourceId, SituationExplanation["sourceRoles"][number]["role"]>();
+  for (const provider of situation.activationBasis?.sourceIds ?? []) {
+    addSourceRole(roles, provider, sourceRole(provider));
+  }
+  for (const evidence of situation.evidence) {
+    const role =
+      evidence.claimType.includes("warning") || evidence.provenance === "preparedness_context"
+        ? "context"
+        : sourceRole(evidence.source);
+    addSourceRole(roles, evidence.source, role);
+  }
+  for (const item of sourceItems) {
+    addSourceRole(roles, item.provider, sourceRole(item.provider, item.kind));
+  }
+
+  return {
+    createdBecause,
+    sourceRoles: [...roles].map(([provider, role]) => ({ provider, role })),
+    locationConfidence: locationConfidenceForSituation(situation),
+    ...(situation.dismissalReason ? { dismissalReason: situation.dismissalReason } : {}),
+  };
+}
 
 function trafficMapSourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourceStatus[] {
   return sourceHealth
@@ -510,7 +596,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         res.status(404).json({ error: "Situasjonen finnes ikke." });
         return;
       }
-      res.json(workspace);
+      const sourceItems = await store.listSituationSourceItems(req.params.id, currentLogin(req));
+      res.json({
+        ...workspace,
+        explanation: buildSituationExplanation(workspace.situation, sourceItems),
+      });
     } catch (error) {
       next(error);
     }

@@ -11,7 +11,7 @@ async function openTrafficLayersIfHidden(page: Page): Promise<void> {
   }
 }
 
-test("reader opens the active situation and keeps private map controls distinct", async ({
+test("Situation Room explains provenance and keeps private map controls distinct", async ({
   page,
 }) => {
   await page.goto("/");
@@ -27,6 +27,8 @@ test("reader opens the active situation and keeps private map controls distinct"
     page.getByRole("heading", { name: "Skogbrann ved Bymarka", exact: true }),
   ).toBeVisible();
   await page.getByRole("link", { name: /Åpne situasjonsrom/ }).click();
+  await expect(page.getByRole("heading", { name: "Hvorfor vises dette?" })).toBeVisible();
+  await expect(page.getByText("Kontekst-only")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
   await expect(page.getByText("Mine markeringer")).toBeVisible();
   await expect(page.getByText("Viser ressurser i området – ikke aktiv innsats")).toBeVisible();

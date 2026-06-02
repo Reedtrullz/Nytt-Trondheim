@@ -4,6 +4,7 @@ import type { PrivateMapFeatureInput, SituationWorkspace, SourceItem } from "@ny
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
+import { SituationExplanationPanel } from "../components/situations/SituationExplanation.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { formatSituationTimestamp } from "../situationTime.js";
 
@@ -386,6 +387,7 @@ export function SituationPage() {
           ) : null}
         </div>
       </header>
+      <SituationExplanationPanel explanation={workspace.explanation} />
       <div className="situation-layout">
         <SituationMap
           situation={situation}

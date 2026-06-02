@@ -237,6 +237,16 @@ export interface Situation {
   saved?: boolean;
 }
 
+export interface SituationExplanation {
+  createdBecause: string[];
+  sourceRoles: Array<{
+    provider: SourceId;
+    role: "evidence" | "context" | "telemetry" | "private";
+  }>;
+  locationConfidence: "official" | "estimated" | "mixed" | "unknown";
+  dismissalReason?: Situation["dismissalReason"];
+}
+
 export type OfficialEventState = "active" | "updated" | "cancelled" | "expired";
 
 export interface OfficialEvent {
@@ -321,6 +331,7 @@ export interface TrafficPulseCorridor {
 
 export interface SituationWorkspace {
   situation: Situation;
+  explanation?: SituationExplanation;
   relatedArticles: Article[];
   tasks: WorkspaceTask[];
   notes: WorkspaceNote[];
