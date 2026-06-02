@@ -78,7 +78,13 @@ function sourceRole(
   kind?: SourceItem["kind"],
 ): SituationExplanation["sourceRoles"][number]["role"] {
   if (telemetrySourceIds.has(provider)) return "telemetry";
-  if (contextSourceIds.has(provider) || kind === "warning") return "context";
+  if (
+    contextSourceIds.has(provider) ||
+    kind === "warning" ||
+    (provider === "entur" && kind === "official_event")
+  ) {
+    return "context";
+  }
   if (kind === "reporter_note" || kind === "reader_tip" || provider === "deepseek")
     return "private";
   return "evidence";
@@ -154,6 +160,16 @@ export function buildSituationExplanation(
         ? "context"
         : sourceRole(evidence.source);
     addSourceRole(roles, evidence.source, role);
+  }
+  for (const feature of situation.features) {
+    if (feature.properties.layer === "warning" && feature.properties.source) {
+      addSourceRole(roles, feature.properties.source, "context");
+    }
+  }
+  for (const entry of situation.timeline) {
+    if (entry.source && contextSourceIds.has(entry.source)) {
+      addSourceRole(roles, entry.source, "context");
+    }
   }
   for (const item of sourceItems) {
     addSourceRole(roles, item.provider, linkedSourceItemRole(item));

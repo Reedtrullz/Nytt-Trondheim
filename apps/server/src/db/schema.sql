@@ -193,15 +193,19 @@ BEGIN
     FROM situation_source_items ssi
     JOIN source_items si ON si.id = ssi.source_item_id
     WHERE ssi.relationship = 'supports'
-      AND si.provider IN (
-        'datex_travel_time',
-        'datex_weather',
-        'datex_cctv',
-        'trafikkdata',
-        'entur_vehicle_positions'
+      AND (
+        si.provider IN (
+          'datex_travel_time',
+          'datex_weather',
+          'datex_cctv',
+          'trafikkdata',
+          'entur_vehicle_positions',
+          'entur_service_alerts'
+        )
+        OR (si.provider = 'entur' AND si.kind = 'official_event')
       )
   ) THEN
-    RAISE EXCEPTION 'telemetry-only source_items are already linked as supports';
+    RAISE EXCEPTION 'telemetry/context source_items are already linked as supports';
   END IF;
 END;
 $$;
@@ -210,15 +214,20 @@ CREATE OR REPLACE FUNCTION enforce_situation_source_item_relationship()
 RETURNS trigger AS $$
 DECLARE
   source_provider text;
+  source_kind text;
 BEGIN
-  SELECT provider INTO source_provider FROM source_items WHERE id = NEW.source_item_id;
+  SELECT provider, kind INTO source_provider, source_kind FROM source_items WHERE id = NEW.source_item_id;
   IF NEW.relationship = 'supports'
-    AND source_provider IN (
-      'datex_travel_time',
-      'datex_weather',
-      'datex_cctv',
-      'trafikkdata',
-      'entur_vehicle_positions'
+    AND (
+      source_provider IN (
+        'datex_travel_time',
+        'datex_weather',
+        'datex_cctv',
+        'trafikkdata',
+        'entur_vehicle_positions',
+        'entur_service_alerts'
+      )
+      OR (source_provider = 'entur' AND source_kind = 'official_event')
     )
   THEN
     RAISE EXCEPTION 'source item provider % must be linked as context, not supports', source_provider

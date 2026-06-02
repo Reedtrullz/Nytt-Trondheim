@@ -85,13 +85,16 @@ const nonSupportingSourceItemProviders = new Set<SourceItem["provider"]>([
   "datex_cctv",
   "trafikkdata",
   "entur_vehicle_positions",
+  "entur_service_alerts",
 ]);
 
 function sourceItemCanUseRelationship(
-  item: Pick<SourceItem, "provider">,
+  item: Pick<SourceItem, "provider" | "kind">,
   relationship: SourceItemRelationship,
 ): boolean {
-  return relationship !== "supports" || !nonSupportingSourceItemProviders.has(item.provider);
+  if (relationship !== "supports") return true;
+  if (item.provider === "entur" && item.kind === "official_event") return false;
+  return !nonSupportingSourceItemProviders.has(item.provider);
 }
 
 function invalidSourceItemRelationshipError(): Error & { status: number } {

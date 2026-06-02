@@ -400,20 +400,6 @@ export function detectPreliminarySituations(
       extractedAt: new Date().toISOString(),
       publishedAt: article.publishedAt,
     }));
-    const warningEvidence = contextualWarnings.map((event) => ({
-      id: createHash("sha1").update(`${id}:warning:${event.id}`).digest("hex").slice(0, 18),
-      situationId: id,
-      source: event.source,
-      sourceLabel: warningSourceLabel(event),
-      sourceUrl: event.sourceUrl,
-      supportingSnippet: event.detail,
-      claim: event.title,
-      claimType: "official_warning_context",
-      provenance: "official" as const,
-      confidence: 1,
-      extractedAt: new Date().toISOString(),
-      publishedAt: event.publishedAt,
-    }));
     return [
       {
         id,
@@ -439,7 +425,7 @@ export function detectPreliminarySituations(
           activatedAt: latest.publishedAt,
         },
         relatedArticleIds: currentReports.map((article) => article.id),
-        evidence: [...evidence, ...officialEvidence, ...warningEvidence],
+        evidence: [...evidence, ...officialEvidence],
         features,
         timeline: [
           ...currentReports.map((article) => ({
@@ -449,6 +435,7 @@ export function detectPreliminarySituations(
             title: article.title,
             detail: article.excerpt,
             sourceLabel: article.sourceLabel,
+            source: article.source,
             sourceUrl: article.url,
             official: article.source === "trondheim_kommune",
           })),
@@ -459,6 +446,7 @@ export function detectPreliminarySituations(
             title: event.title,
             detail: event.detail,
             sourceLabel: warningSourceLabel(event),
+            source: event.source,
             sourceUrl: event.sourceUrl,
             official: true,
           })),
@@ -501,6 +489,7 @@ function warningFeature(id: string, event: OfficialEvent): MapFeature[] {
         label: event.title,
         provenance: "official",
         sourceLabel: warningSourceLabel(event),
+        source: event.source,
         sourceUrl: event.sourceUrl,
         updatedAt: event.publishedAt,
         layer: "warning",

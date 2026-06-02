@@ -189,6 +189,35 @@ describe("private situation API", () => {
     });
   });
 
+  it("keeps warning timeline sources visible as context without evidence leakage", () => {
+    const explanation = buildSituationExplanation({
+      ...sampleSituation,
+      evidence: sampleSituation.evidence.filter(
+        (item) => item.source !== "nve" && item.source !== "met",
+      ),
+      features: sampleSituation.features.filter(
+        (feature) => feature.properties.layer !== "warning",
+      ),
+      timeline: [
+        ...sampleSituation.timeline,
+        {
+          id: "timeline-nve-warning",
+          situationId: sampleSituation.id,
+          timestamp: "2026-06-02T12:00:00.000Z",
+          title: "Flomvarsel for Trondheim",
+          detail: "NVE-varsel brukes som kontekst, ikke hendelsesgrunnlag.",
+          sourceLabel: "NVE / Varsom",
+          source: "nve",
+          sourceUrl: "https://varsom.no/",
+          official: true,
+        },
+      ],
+    });
+
+    expect(explanation.sourceRoles).toContainEqual({ provider: "nve", role: "context" });
+    expect(explanation.sourceRoles).not.toContainEqual({ provider: "nve", role: "evidence" });
+  });
+
   it("uses link relationships when explaining situation source items", async () => {
     const { agent, csrf } = await ownerAgent();
     const availableSourceItems = await agent
@@ -250,18 +279,36 @@ describe("private situation API", () => {
       linkedSituationIds: [sampleSituation.id],
     };
 
-    const explanation = buildSituationExplanation(sampleSituation, [telemetrySourceItem]);
+    const serviceAlertSourceItem: SourceItem = {
+      id: "source:entur:official_event:line3",
+      provider: "entur",
+      kind: "official_event",
+      externalId: "ATB:line3",
+      title: "Linje 3 innstilt",
+      summary: "Entur service alert is public-transport context, not causal incident evidence.",
+      fetchedAt: "2026-06-02T10:00:00.000Z",
+      captureHash: "sha256:entur-service-alert",
+      reliabilityTier: "official",
+      linkedSituationIds: [sampleSituation.id],
+    };
+
+    const explanation = buildSituationExplanation(sampleSituation, [
+      telemetrySourceItem,
+      serviceAlertSourceItem,
+    ]);
 
     expect(explanation.sourceRoles).toContainEqual({
       provider: "datex_travel_time",
       role: "telemetry",
     });
     expect(explanation.sourceRoles).toContainEqual({ provider: "met", role: "context" });
+    expect(explanation.sourceRoles).toContainEqual({ provider: "entur", role: "context" });
     expect(explanation.sourceRoles).not.toContainEqual({
       provider: "datex_travel_time",
       role: "evidence",
     });
     expect(explanation.sourceRoles).not.toContainEqual({ provider: "met", role: "evidence" });
+    expect(explanation.sourceRoles).not.toContainEqual({ provider: "entur", role: "evidence" });
   });
 
   it("starts GitHub OAuth with a session-backed state nonce", async () => {

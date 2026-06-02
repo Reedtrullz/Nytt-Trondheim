@@ -105,6 +105,7 @@ export interface MapFeature extends Feature<Geometry> {
     label: string;
     provenance: Provenance;
     sourceLabel?: string;
+    source?: SourceId;
     sourceUrl?: string;
     updatedAt: string;
     note?: string;
@@ -145,6 +146,7 @@ export interface TimelineEntry {
   title: string;
   detail: string;
   sourceLabel: string;
+  source?: SourceId;
   sourceUrl: string;
   official: boolean;
 }

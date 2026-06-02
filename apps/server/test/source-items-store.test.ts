@@ -175,22 +175,24 @@ describe("source item store", () => {
     ).resolves.toEqual([]);
   });
 
-  it("rejects support links for telemetry-only MemoryStore source items", async () => {
+  it("rejects support links for telemetry and service-alert MemoryStore source items", async () => {
     const store = new MemoryStore();
     const sourceItems = (store as unknown as { sourceItems: Map<string, SourceItem> }).sourceItems;
 
-    for (const provider of [
-      "datex_travel_time",
-      "datex_weather",
-      "datex_cctv",
-      "trafikkdata",
-      "entur_vehicle_positions",
+    for (const [provider, kind] of [
+      ["datex_travel_time", "official_event"],
+      ["datex_weather", "official_event"],
+      ["datex_cctv", "official_event"],
+      ["trafikkdata", "official_event"],
+      ["entur_vehicle_positions", "media_asset"],
+      ["entur_service_alerts", "official_event"],
+      ["entur", "official_event"],
     ] as const) {
-      const sourceItemId = `telemetry:${provider}`;
+      const sourceItemId = `context:${provider}`;
       sourceItems.set(sourceItemId, {
         id: sourceItemId,
         provider,
-        kind: provider === "entur_vehicle_positions" ? "media_asset" : "official_event",
+        kind,
         externalId: provider,
         fetchedAt: "2026-06-02T10:00:00.000Z",
         captureHash: `sha256:${provider}`,
@@ -207,16 +209,22 @@ describe("source item store", () => {
     }
   });
 
-  it("rejects support links for telemetry-only PgStore source items before writing", async () => {
-    const query = vi.fn().mockResolvedValueOnce({
-      rows: [pgSourceItemRow({ provider: "datex_weather", kind: "official_event" })],
-    });
-    const store = new PgStore({ query } as unknown as pg.Pool);
+  it("rejects support links for telemetry and service-alert PgStore source items before writing", async () => {
+    for (const [provider, kind] of [
+      ["datex_weather", "official_event"],
+      ["entur_service_alerts", "official_event"],
+      ["entur", "official_event"],
+    ] as const) {
+      const query = vi.fn().mockResolvedValueOnce({
+        rows: [pgSourceItemRow({ provider, kind })],
+      });
+      const store = new PgStore({ query } as unknown as pg.Pool);
 
-    await expect(
-      store.linkSourceItem("skogbrann-bymarka", "source:weather", "supports", "Reedtrullz"),
-    ).rejects.toMatchObject({ status: 400 });
-    expect(query).toHaveBeenCalledTimes(1);
+      await expect(
+        store.linkSourceItem("skogbrann-bymarka", `source:${provider}`, "supports", "Reedtrullz"),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(query).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("uses idempotent PgStore SQL for source item links", async () => {

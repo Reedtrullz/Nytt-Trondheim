@@ -401,9 +401,12 @@ describe("Trondheim relevance classification", () => {
     expect(situation.activationBasis?.rule).toBe("two_independent_sources");
     expect(situation.activationBasis?.sourceIds.sort()).toEqual(["adressa", "nrk"]);
     expect(situation.verificationStatus).toBe("Foreløpig fra rapportering");
-    expect(situation.evidence.find((item) => item.source === "met")?.claimType).toBe(
-      "official_warning_context",
-    );
+    expect(situation.evidence.some((item) => item.source === "met")).toBe(false);
+    expect(
+      situation.features.find((feature) => feature.properties.layer === "warning"),
+    ).toMatchObject({
+      properties: { source: "met", sourceLabel: "MET farevarsel" },
+    });
   });
 
   it("labels attached NVE warning context with NVE provenance", () => {
@@ -426,30 +429,16 @@ describe("Trondheim relevance classification", () => {
           eventType: "flood",
           title: "Flomvarsel for Trondheim",
           areaLabel: "Trondheim kommune",
-          geometry: {
-            type: "Polygon",
-            coordinates: [
-              [
-                [10.2, 63.35],
-                [10.45, 63.35],
-                [10.45, 63.45],
-                [10.2, 63.45],
-                [10.2, 63.35],
-              ],
-            ],
-          },
         }),
       ],
     )[0]!;
 
     expect(situation.activationBasis?.sourceIds.sort()).toEqual(["adressa", "nrk"]);
-    expect(situation.evidence.find((item) => item.source === "nve")?.sourceLabel).toBe(
-      "NVE / Varsom",
-    );
-    expect(
-      situation.features.find((feature) => feature.properties.layer === "warning"),
-    ).toMatchObject({
-      properties: { sourceLabel: "NVE / Varsom" },
+    expect(situation.evidence.some((item) => item.source === "nve")).toBe(false);
+    expect(situation.features.some((feature) => feature.properties.source === "nve")).toBe(false);
+    expect(situation.timeline.find((entry) => entry.source === "nve")).toMatchObject({
+      sourceLabel: "NVE / Varsom",
+      official: true,
     });
   });
 

@@ -63,6 +63,7 @@ describe("source item schema", () => {
       "datex_cctv",
       "trafikkdata",
       "entur_vehicle_positions",
+      "entur_service_alerts",
     ]) {
       expect(schema).toContain(provider);
     }
@@ -73,7 +74,8 @@ describe("source item schema", () => {
       "(normalized_payload->>'source') IS NOT DISTINCT FROM 'entur_service_alerts'",
     );
     expect(schema).toContain("Entur official_event source_items must be service alerts");
-    expect(schema).toContain("telemetry-only source_items are already linked as supports");
+    expect(schema).toContain("telemetry/context source_items are already linked as supports");
+    expect(schema).toContain("OR (source_provider = 'entur' AND source_kind = 'official_event')");
     expect(schema).toContain("enforce_situation_source_item_relationship");
     expect(schema).toContain("relationship = 'supports'");
     expect(schema).toContain("RAISE EXCEPTION");

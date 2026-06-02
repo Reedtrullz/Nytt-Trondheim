@@ -1247,6 +1247,9 @@ test("primary surfaces have no automatically detectable accessibility violations
   const home = await new AxeBuilder({ page }).analyze();
   expect(home.violations).toEqual([]);
   await page.goto("/situasjoner/skogbrann-bymarka");
+  await expect(
+    page.getByRole("heading", { name: "Skogbrann ved Bymarka", level: 1 }),
+  ).toBeVisible();
   const incident = await new AxeBuilder({ page }).analyze();
   expect(incident.violations).toEqual([]);
 });
@@ -1285,7 +1288,7 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(page.getByRole("link", { name: "Åpne oversikt" })).toBeVisible();
   await page.getByRole("link", { name: "Drift" }).click();
   await expect(page.getByRole("heading", { name: "Kilder og systemstatus" })).toBeVisible();
-  await expect(page.getByText("Sikkerhetskopi")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();
   await expect(page.getByText("Innhentede saker")).toBeVisible();
   await page.getByRole("link", { name: "Lagret" }).click();
   await expect(page.getByRole("heading", { name: "Lagret" })).toBeVisible();
