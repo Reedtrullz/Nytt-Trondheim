@@ -58,6 +58,7 @@ import {
   defaultTrafficInfoEndpoint,
   trafficInfoSourceItemInput,
 } from "./vegvesenTrafficInfo.js";
+import { baneNorSourceItemInput, fetchBaneNorRailMessages } from "./baneNor.js";
 
 const municipalityIntervalMs = 60 * 60 * 1000;
 let lastMunicipalityCollection = 0;
@@ -592,6 +593,49 @@ export async function collectDatexCctvContext({
       lastFailureAt: failureAt,
       nextPollAt,
       detail: `DATEX webkamerainnhenting feilet: ${String(error)}`,
+    });
+  }
+}
+
+export async function collectBaneNorRailContext({
+  repository,
+  nextPollAt,
+  now = () => new Date(),
+  collector = fetchBaneNorRailMessages,
+}: {
+  repository: Pick<WorkerRepository, "upsertBaneNorSourceItems" | "setHealth">;
+  nextPollAt: string;
+  now?: () => Date;
+  collector?: typeof fetchBaneNorRailMessages;
+}): Promise<void> {
+  const checkedAt = now().toISOString();
+  try {
+    const result = await collector({ receivedAt: checkedAt });
+    const items = result.messages.map((message) =>
+      baneNorSourceItemInput(message, {
+        fetchedAt: checkedAt,
+        rawItem: result.rawItemsByGuid.get(message.guid) ?? message,
+      }),
+    );
+    await repository.upsertBaneNorSourceItems(items);
+    await repository.setHealth({
+      source: "bane_nor",
+      label: "Bane NOR trafikkmeldinger",
+      state: "ok",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: `${items.length} relevante Bane NOR trafikkmeldinger hentet`,
+    });
+  } catch (error) {
+    const failedAt = now().toISOString();
+    await repository.setHealth({
+      source: "bane_nor",
+      label: "Bane NOR trafikkmeldinger",
+      state: "degraded",
+      lastCheckedAt: failedAt,
+      lastFailureAt: failedAt,
+      nextPollAt,
+      detail: `Bane NOR RSS feilet: ${String(error)}`,
     });
   }
 }
