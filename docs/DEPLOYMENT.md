@@ -29,6 +29,8 @@ Ansible installs a nightly `nytt-backup.timer` and weekly `nytt-restore-check.ti
 
 If Google Drive still reports `rateLimitExceeded` while backups recover after retries, the remaining cause is usually the shared default rclone Google API project rather than Nytt Trondheim traffic volume. Create a dedicated Google Cloud OAuth client for this backup remote, reauthorize the rclone Drive config with its `client_id` and `client_secret`, then update the `NYTT_RCLONE_CONFIG` GitHub secret.
 
+The weekly restore check validates archive readability only. Run [Full Restore Rehearsal Drill](./RESTORE_DRILL.md) when backup confidence must include a complete scratch restore: retrieve the latest restic snapshot, restore the Postgres dump and uploads archive into scratch Docker resources, run migrations, start app/worker against the scratch database and verify `/health`, source-health rows and `/trafikk` read paths. The drill must never write to the production database or production volumes.
+
 ## First Deployment Prerequisites
 
 - Create a GitHub App with callback `https://nytt.reidar.tech/auth/github/callback`, generate a Client Secret, and configure its Client ID and Client Secret as `NYTT_GITHUB_CLIENT_ID` and `NYTT_GITHUB_CLIENT_SECRET`. The App ID and downloaded private key are not required for the user-login flow.
