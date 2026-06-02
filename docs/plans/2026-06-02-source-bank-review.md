@@ -85,6 +85,8 @@ Candidate URLs:
 
 Raw RSS probe returned HTTP 200 `application/rss+xml`.
 
+Implementation status: planned in `docs/plans/2026-06-02-source-contracts-and-rail-context.md`; first implementation is source-items/source-health only.
+
 Why useful:
 
 - Dovrebanen, Nordlandsbanen, Meråkerbanen, Trønderbanen and Trondheim S closures have high practical value for Trondheim users.

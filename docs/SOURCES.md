@@ -33,6 +33,7 @@ Articles and official MET/NVE/DATEX/Politiloggen situation events are mirrored i
 - Trafikkdata.no GraphQL (`https://trafikkdata-api.atlas.vegvesen.no/`) supplies bounded low-frequency traffic-counter context for Trøndelag/Trondheim. It is not a situation source.
 - Entur Vehicle Positions GraphQL (`https://api.entur.io/realtime/v2/vehicles/graphql`) supplies ATB vehicle positions in the Trondheim-region bounds. It is operations-only telemetry, stored in `public_transport_vehicles`, visible as a map layer, and never mirrored to `source_items`, `official_events` or `situations`.
 - Entur Journey Planner v3 `situations(codespaces:["ATB"])` supplies official public-transport service alerts. These alerts are stored in `public_transport_service_alerts` and mirrored to `source_items` provider `entur`, kind `official_event`; they are not automatic situation activators in this release.
+- Bane NOR RSS `https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/?rss=true` is collected as official rail/mobility context after its source contract. It is mirrored to `source_items` provider `bane_nor`, kind `official_event`, but does not create `official_events`, `traffic_map_events`, or `situations` in this phase.
 
 ## Politiloggen
 
