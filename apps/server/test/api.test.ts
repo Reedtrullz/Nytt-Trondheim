@@ -174,7 +174,7 @@ describe("private situation API", () => {
 
     expect(response.body.explanation).toMatchObject({
       createdBecause: ["2 uavhengige kilder rapporterte samme hendelse."],
-      locationConfidence: "mixed",
+      locationConfidence: "estimated",
     });
     expect(response.body.explanation.sourceRoles).toEqual(
       expect.arrayContaining([
@@ -185,6 +185,52 @@ describe("private situation API", () => {
     );
     expect(response.body.explanation.sourceRoles).not.toContainEqual({
       provider: "met",
+      role: "evidence",
+    });
+  });
+
+  it("uses link relationships when explaining situation source items", async () => {
+    const { agent, csrf } = await ownerAgent();
+    const availableSourceItems = await agent
+      .get("/api/source-items?provider=vg&kind=article&q=Olavsfestdagene&limit=1")
+      .expect(200);
+    const contextSourceItem = availableSourceItems.body.items[0] as SourceItem | undefined;
+    expect(contextSourceItem).toMatchObject({ provider: "vg", kind: "article" });
+    const contextSourceItemId = String(contextSourceItem?.id);
+
+    const linkResponse = await agent
+      .post(
+        `/api/situations/skogbrann-bymarka/source-items/${encodeURIComponent(contextSourceItemId)}`,
+      )
+      .set("X-CSRF-Token", csrf)
+      .send({ relationship: "context" })
+      .expect(201);
+    expect(linkResponse.body).toMatchObject({
+      id: contextSourceItemId,
+      provider: "vg",
+      relationship: "context",
+    });
+
+    const sourceItems = await agent
+      .get("/api/situations/skogbrann-bymarka/source-items")
+      .expect(200);
+    expect(sourceItems.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: contextSourceItemId,
+          provider: "vg",
+          relationship: "context",
+        }),
+      ]),
+    );
+
+    const response = await agent.get("/api/situations/skogbrann-bymarka").expect(200);
+    expect(response.body.explanation.sourceRoles).toContainEqual({
+      provider: "vg",
+      role: "context",
+    });
+    expect(response.body.explanation.sourceRoles).not.toContainEqual({
+      provider: "vg",
       role: "evidence",
     });
   });

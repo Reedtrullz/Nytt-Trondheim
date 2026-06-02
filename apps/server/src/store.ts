@@ -269,6 +269,7 @@ interface SourceItemRow {
   geo_hint: SourceItem["geoHint"] | null;
   reliability_tier: SourceItem["reliabilityTier"];
   linked_situation_ids: string[] | null;
+  relationship?: SourceItemRelationship | null;
 }
 
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
@@ -287,6 +288,7 @@ function sourceItemFromRow(row: SourceItemRow): SourceItem {
     geoHint: row.geo_hint ?? undefined,
     reliabilityTier: row.reliability_tier,
     linkedSituationIds: row.linked_situation_ids ?? [],
+    ...(row.relationship ? { relationship: row.relationship } : {}),
   };
 }
 
@@ -509,6 +511,7 @@ export class MemoryStore implements Store {
         clone({
           ...item,
           linkedSituationIds: this.linkedSituationIdsForSourceItem(item.id),
+          relationship: link.relationship,
         }),
       ];
     });
@@ -532,6 +535,7 @@ export class MemoryStore implements Store {
     return clone({
       ...item,
       linkedSituationIds: this.linkedSituationIdsForSourceItem(sourceItemId),
+      relationship,
     });
   }
 
@@ -1187,7 +1191,7 @@ export class PgStore implements Store {
 
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
     const result = await this.pool.query<SourceItemRow>(
-      `SELECT ${sourceItemSelectColumns("si")}
+      `SELECT ${sourceItemSelectColumns("si")}, ssi.relationship AS relationship
        FROM situation_source_items ssi
        JOIN source_items si ON si.id = ssi.source_item_id
        LEFT JOIN LATERAL (
@@ -1220,7 +1224,8 @@ export class PgStore implements Store {
       [situationId, sourceItemId, relationship, login],
     );
     const linkedId = result.rows[0]?.id;
-    return linkedId ? this.getSourceItem(linkedId) : undefined;
+    const item = linkedId ? await this.getSourceItem(linkedId) : undefined;
+    return item ? { ...item, relationship } : undefined;
   }
 
   async unlinkSourceItem(situationId: string, sourceItemId: string): Promise<boolean> {

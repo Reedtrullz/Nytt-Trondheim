@@ -84,6 +84,19 @@ function sourceRole(
   return "evidence";
 }
 
+function linkedSourceItemRole(
+  item: SourceItem,
+): SituationExplanation["sourceRoles"][number]["role"] {
+  if (
+    item.relationship === "context" ||
+    item.relationship === "contradicts" ||
+    item.relationship === "duplicate"
+  ) {
+    return "context";
+  }
+  return sourceRole(item.provider, item.kind);
+}
+
 function addSourceRole(
   roles: Map<SourceId, SituationExplanation["sourceRoles"][number]["role"]>,
   provider: SourceId,
@@ -98,7 +111,14 @@ function addSourceRole(
 function locationConfidenceForSituation(
   situation: Situation,
 ): SituationExplanation["locationConfidence"] {
-  const provenances = new Set(situation.features.map((feature) => feature.properties.provenance));
+  const incidentLocationFeatures = situation.features.filter(
+    (feature) =>
+      feature.properties.provenance !== "preparedness_context" &&
+      feature.properties.layer !== "warning",
+  );
+  const provenances = new Set(
+    incidentLocationFeatures.map((feature) => feature.properties.provenance),
+  );
   const hasOfficial = provenances.has("official");
   const hasEstimated =
     provenances.has("reporting_estimate") || provenances.has("private_annotation");
@@ -136,7 +156,7 @@ export function buildSituationExplanation(
     addSourceRole(roles, evidence.source, role);
   }
   for (const item of sourceItems) {
-    addSourceRole(roles, item.provider, sourceRole(item.provider, item.kind));
+    addSourceRole(roles, item.provider, linkedSourceItemRole(item));
   }
 
   return {

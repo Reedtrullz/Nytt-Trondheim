@@ -28,7 +28,7 @@ test("Situation Room explains provenance and keeps private map controls distinct
   ).toBeVisible();
   await page.getByRole("link", { name: /Åpne situasjonsrom/ }).click();
   await expect(page.getByRole("heading", { name: "Hvorfor vises dette?" })).toBeVisible();
-  await expect(page.getByText("Kontekst-only")).toBeVisible();
+  await expect(page.getByText("Kun kontekst")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
   await expect(page.getByText("Mine markeringer")).toBeVisible();
   await expect(page.getByText("Viser ressurser i området – ikke aktiv innsats")).toBeVisible();

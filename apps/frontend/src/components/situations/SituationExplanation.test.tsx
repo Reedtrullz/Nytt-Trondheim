@@ -22,14 +22,14 @@ describe("SituationExplanationPanel", () => {
     expect(html).toContain("Hvorfor vises dette?");
     expect(html).toContain("Opprettet fordi");
     expect(html).toContain("2 uavhengige kilder");
-    expect(html).toContain("nrk");
+    expect(html).toContain("NRK");
     expect(html).toContain("Hendelsesgrunnlag");
-    expect(html).toContain("met");
+    expect(html).toContain("MET");
     expect(html).toContain("Kontekst, ikke årsak");
-    expect(html).toContain("datex_travel_time");
+    expect(html).toContain("DATEX reisetid");
     expect(html).toContain("Telemetri, ikke årsak");
     expect(html).toContain("Blandet offisiell og estimert plassering");
-    expect(html).toContain("Kontekst-only");
+    expect(html).toContain("Kun kontekst");
     expect(html).toContain("feilkobling");
   });
 

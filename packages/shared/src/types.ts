@@ -175,6 +175,7 @@ export interface SourceItem {
   geoHint?: MapFeature["geometry"];
   reliabilityTier: SourceReliabilityTier;
   linkedSituationIds: string[];
+  relationship?: SourceItemRelationship;
 }
 
 export interface SourceItemRecord extends SourceItem {
