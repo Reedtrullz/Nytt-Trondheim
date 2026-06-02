@@ -80,6 +80,7 @@ export const sourceIdSchema = z.enum([
   "vg",
   "dagbladet",
   "trondheim_kommune",
+  "bane_nor",
   "met",
   "nve",
   "datex",

@@ -6,6 +6,7 @@ export type SourceId =
   | "vg"
   | "dagbladet"
   | "trondheim_kommune"
+  | "bane_nor"
   | "met"
   | "nve"
   | "datex"
