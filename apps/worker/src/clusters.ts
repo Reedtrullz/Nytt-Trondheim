@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Article, EvidenceItem, MapFeature, OfficialEvent, Situation } from "@nytt/shared";
+import { canonicalPlaceName } from "./classify.js";
 
 interface CandidateGroup {
   key: string;
@@ -11,6 +12,11 @@ interface CandidateGroup {
 const clusterWindowMs = 12 * 60 * 60 * 1000;
 const continuationWindowMs = 72 * 60 * 60 * 1000;
 const genericPlaces = new Set(["trondheim", "trøndelag"]);
+const eventDescriptorRules: Array<{ descriptor: string; pattern: RegExp }> = [
+  { descriptor: "garasjebrann", pattern: /\bgarasjebrann\b/i },
+  { descriptor: "bodbrann", pattern: /\bbodbrann\b/i },
+  { descriptor: "bilbrann", pattern: /\bbilbrann\b/i },
+];
 
 function slug(value: string): string {
   return value
@@ -67,6 +73,16 @@ function orderedDatexGroup(events: OfficialEvent[]): OfficialEvent[] {
 
 function uniqueTexts(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function incidentEventDescriptor(article: Article): string | undefined {
+  const text = `${article.title} ${article.excerpt}`;
+  return eventDescriptorRules.find((rule) => rule.pattern.test(text))?.descriptor;
+}
+
+function incidentSignatureKey(type: Situation["type"], place: string, article: Article): string {
+  const descriptor = incidentEventDescriptor(article);
+  return descriptor ? `${type}:${slug(place)}:${descriptor}` : `${type}:${slug(place)}`;
 }
 
 export function officialTrafficSituationsFromEvents(
@@ -288,7 +304,7 @@ export function detectPreliminarySituations(
     const type = detectType(article);
     const place = specificPlace(article);
     if (!place || !type) continue;
-    const key = `${type}:${slug(place)}`;
+    const key = incidentSignatureKey(type, place, article);
     const group = groups.get(key) ?? { key, type, place, articles: [] };
     group.articles.push(article);
     groups.set(key, group);
@@ -541,7 +557,8 @@ function reportingFeatures(id: string, articles: Article[]): MapFeature[] {
 }
 
 function specificPlace(article: Article): string | undefined {
-  return article.places.find((place) => !genericPlaces.has(place.toLocaleLowerCase("nb")));
+  const place = article.places.find((candidate) => !genericPlaces.has(candidate.toLocaleLowerCase("nb")));
+  return place ? canonicalPlaceName(place) : undefined;
 }
 
 function detectType(article: Article): Situation["type"] | undefined {
