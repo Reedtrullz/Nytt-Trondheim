@@ -283,11 +283,10 @@ describe("Trondheim relevance classification", () => {
     ]);
 
     expect(situations).toHaveLength(2);
-    expect(
-      situations
-        .map((situation) => situation.relatedArticleIds.join(","))
-        .sort(),
-    ).toEqual(["garage-two,garage-one", "shed-two,shed-one"]);
+    expect(situations.map((situation) => situation.relatedArticleIds.join(",")).sort()).toEqual([
+      "garage-two,garage-one",
+      "shed-two,shed-one",
+    ]);
   });
 
   it("canonicalizes only explicitly listed local place aliases", () => {
@@ -503,5 +502,3 @@ describe("Trondheim relevance classification", () => {
     );
   });
 });
-
-

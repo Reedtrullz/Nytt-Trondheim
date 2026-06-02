@@ -131,7 +131,10 @@ export function warningEvent(id: string, overrides: Partial<OfficialEvent> = {})
   };
 }
 
-export function promotableDatexEvent(id: string, overrides: Partial<OfficialEvent> = {}): OfficialEvent {
+export function promotableDatexEvent(
+  id: string,
+  overrides: Partial<OfficialEvent> = {},
+): OfficialEvent {
   return {
     id,
     source: "datex",
@@ -234,11 +237,10 @@ it("does not merge different events only because they mention the same place", (
   ]);
 
   expect(situations).toHaveLength(2);
-  expect(
-    situations
-      .map((situation) => situation.relatedArticleIds.join(","))
-      .sort(),
-  ).toEqual(["garage-two,garage-one", "shed-two,shed-one"]);
+  expect(situations.map((situation) => situation.relatedArticleIds.join(",")).sort()).toEqual([
+    "garage-two,garage-one",
+    "shed-two,shed-one",
+  ]);
 });
 ```
 
@@ -413,7 +415,9 @@ In `apps/worker/src/clusters.ts`, import it and canonicalize `specificPlace`:
 import { canonicalPlaceName } from "./classify.js";
 
 function specificPlace(article: Article): string | undefined {
-  const place = article.places.find((candidate) => !genericPlaces.has(candidate.toLocaleLowerCase("nb")));
+  const place = article.places.find(
+    (candidate) => !genericPlaces.has(candidate.toLocaleLowerCase("nb")),
+  );
   return place ? canonicalPlaceName(place) : undefined;
 }
 ```
@@ -573,7 +577,9 @@ import { promotableDatexEvent } from "./fixtures/incident-fixtures.js";
 
 ```ts
 it("can promote high-impact official DATEX traffic without an article", () => {
-  const situations = officialTrafficSituationsFromEvents([promotableDatexEvent("datex-high-impact")]);
+  const situations = officialTrafficSituationsFromEvents([
+    promotableDatexEvent("datex-high-impact"),
+  ]);
 
   expect(situations).toHaveLength(1);
   expect(situations[0]).toMatchObject({
@@ -781,7 +787,10 @@ it("keeps operations-only telemetry out of source-item and situation support lin
   await repository.upsertRoadWeatherObservations([minimalRoadWeatherObservation()]);
   await repository.upsertRoadCameras([minimalRoadCamera()]);
   await repository.upsertTrafficCounterSnapshots([minimalTrafficCounterSnapshot()]);
-  await repository.upsertPublicTransportVehicles([minimalPublicTransportVehicle()], "2026-06-02T12:00:00.000Z");
+  await repository.upsertPublicTransportVehicles(
+    [minimalPublicTransportVehicle()],
+    "2026-06-02T12:00:00.000Z",
+  );
 
   const sql = query.mock.calls.map(([statement]) => String(statement)).join("\n");
   expect(sql).not.toContain("INSERT INTO source_items");

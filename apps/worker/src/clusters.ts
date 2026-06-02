@@ -557,7 +557,9 @@ function reportingFeatures(id: string, articles: Article[]): MapFeature[] {
 }
 
 function specificPlace(article: Article): string | undefined {
-  const place = article.places.find((candidate) => !genericPlaces.has(candidate.toLocaleLowerCase("nb")));
+  const place = article.places.find(
+    (candidate) => !genericPlaces.has(candidate.toLocaleLowerCase("nb")),
+  );
   return place ? canonicalPlaceName(place) : undefined;
 }
 

@@ -41,7 +41,10 @@ export function warningEvent(id: string, overrides: Partial<OfficialEvent> = {})
   };
 }
 
-export function promotableDatexEvent(id: string, overrides: Partial<OfficialEvent> = {}): OfficialEvent {
+export function promotableDatexEvent(
+  id: string,
+  overrides: Partial<OfficialEvent> = {},
+): OfficialEvent {
   return {
     id,
     source: "datex",

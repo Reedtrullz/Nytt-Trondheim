@@ -7,6 +7,7 @@ This is the repo-local Task 17 execution split. The goal is to prove the highest
 ## 17A — clusters/classify adversarial fixtures
 
 Scope:
+
 - `apps/worker/test/fixtures/incident-fixtures.ts`
 - `apps/worker/test/classify.test.ts`
 - `apps/worker/test/clusters.test.ts`
@@ -14,6 +15,7 @@ Scope:
 - `apps/worker/src/clusters.ts`
 
 Fixtures covered:
+
 - Same place, different event must not merge.
 - Same event with explicit local place aliases must merge.
 - Broad Trondheim-only mentions must not activate a situation.
@@ -24,6 +26,7 @@ Fixtures covered:
 - Later real event after dismissed false positive must open a fresh case.
 
 Verification:
+
 ```bash
 source ~/.nvm/nvm.sh && nvm use 22 >/dev/null
 npm test -- apps/worker/test/classify.test.ts apps/worker/test/clusters.test.ts
@@ -32,21 +35,25 @@ npm run typecheck
 ```
 
 Commit:
+
 - `7aa0826 test: add incident correctness fixture builders`
 - `7e6ac8b test: harden situation activation adversarial fixtures`
 
 ## 17B — Politiloggen active/inactive lifecycle
 
 Scope:
+
 - `apps/worker/test/politiloggen.test.ts`
 - `apps/worker/src/politiloggen.ts` only if the lifecycle fixture fails.
 
 Fixture covered:
+
 - Inactive Politiloggen threads without an existing situation do not create new active situations.
 - Existing Politiloggen situations become resolved when the upstream thread becomes inactive.
 - Resolution remains traceable through official timeline evidence.
 
 Verification:
+
 ```bash
 source ~/.nvm/nvm.sh && nvm use 22 >/dev/null
 npm test -- apps/worker/test/politiloggen.test.ts
@@ -54,6 +61,7 @@ npm run typecheck
 ```
 
 Commit:
+
 - `d28798d test: cover politiloggen inactive lifecycle`
 
 ## Final gate for Task 17
