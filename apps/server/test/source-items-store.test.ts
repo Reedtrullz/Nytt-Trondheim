@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { sampleArticles, sampleSituation } from "@nytt/shared";
-import type { SourceItem } from "@nytt/shared";
+import type { SourceItem, WorkerCycleMetrics } from "@nytt/shared";
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryStore, PgStore } from "../src/store.js";
@@ -244,6 +244,23 @@ describe("source item store", () => {
       store.unlinkSourceItem("skogbrann-bymarka", "source:one", "Reedtrullz"),
     ).resolves.toBe(true);
     expect(query.mock.calls[3]?.[0]).toContain("DELETE FROM situation_source_items");
+  });
+
+  it("loads latest worker cycle metrics for Operations status", async () => {
+    const metrics: WorkerCycleMetrics = {
+      cycleStartedAt: "2026-06-02T06:00:00.000Z",
+      cycleCompletedAt: "2026-06-02T06:00:01.250Z",
+      cycleDurationMs: 1250,
+      sourceDurationsMs: { datex: 900 },
+      sourceItemCounts: { datex: 2 },
+      parseFailures: { datex: 1 },
+    };
+    const query = vi.fn().mockResolvedValue({ rows: [{ payload: metrics }] });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    await expect(store.getLatestWorkerCycleMetrics()).resolves.toEqual(metrics);
+    expect(query.mock.calls[0]?.[0]).toContain("FROM worker_cycle_metrics");
+    expect(query.mock.calls[0]?.[0]).not.toContain("source_items");
   });
 
   it("returns undefined when PgStore cannot link missing source items or situations", async () => {

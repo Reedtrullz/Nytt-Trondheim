@@ -380,6 +380,12 @@ describe("private situation API", () => {
       .expect((response) => {
         expect(response.body.articleCount).toBeGreaterThan(0);
         expect(response.body.trafficPulse).toEqual([]);
+        expect(response.body.workerCycleMetrics).toMatchObject({
+          cycleDurationMs: 3250,
+          sourceDurationsMs: { datex: 920 },
+          sourceItemCounts: { nrk: 2 },
+          parseFailures: { datex: 0 },
+        });
       });
     await agent
       .get("/api/bootstrap")
@@ -1300,6 +1306,7 @@ describe("private situation API", () => {
           return { rows: [{ status: "active", count: "2" }] };
         }
         if (normalizedSql.includes("FROM ai_processing_runs")) return { rows: [] };
+        if (normalizedSql.includes("FROM worker_cycle_metrics")) return { rows: [] };
         if (normalizedSql.includes("FROM datex_travel_times")) {
           trafficPulseParams = params;
           expect(normalizedSql).toContain(

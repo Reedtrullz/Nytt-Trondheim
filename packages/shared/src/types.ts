@@ -355,6 +355,15 @@ export interface SituationPage {
   nextCursor?: string;
 }
 
+export interface WorkerCycleMetrics {
+  cycleStartedAt: string;
+  cycleCompletedAt: string;
+  cycleDurationMs: number;
+  sourceDurationsMs: Record<string, number>;
+  sourceItemCounts: Record<string, number>;
+  parseFailures: Record<string, number>;
+}
+
 export interface OperationsStatus {
   sources: SourceHealth[];
   articleCount: number;
@@ -362,6 +371,7 @@ export interface OperationsStatus {
   latestAiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt" | "error">;
   latestCollectionAt?: string;
   trafficPulse?: TrafficPulseCorridor[];
+  workerCycleMetrics?: WorkerCycleMetrics;
   backup?: { status: "ok"; completedAt: string };
   restoreCheck?: { status: "ok"; completedAt: string };
 }

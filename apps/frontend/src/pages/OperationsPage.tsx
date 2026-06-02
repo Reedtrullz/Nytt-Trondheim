@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { OperationsStatus, TrafficPulseCorridor } from "@nytt/shared";
+import type { OperationsStatus, TrafficPulseCorridor, WorkerCycleMetrics } from "@nytt/shared";
 import { api } from "../api.js";
 
 function time(value?: string) {
@@ -13,6 +13,12 @@ function time(value?: string) {
 function minutes(seconds?: number) {
   if (seconds === undefined) return "—";
   return `${Math.round(seconds / 60)} min`;
+}
+
+function milliseconds(value?: number) {
+  if (value === undefined) return "—";
+  if (value < 1000) return `${Math.round(value)} ms`;
+  return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} sek`;
 }
 
 function delayText(delaySeconds?: number) {
@@ -32,21 +38,40 @@ function trafficStateLabel(state: TrafficPulseCorridor["state"]) {
   return labels[state];
 }
 
-export function OperationsPage() {
-  const [status, setStatus] = useState<OperationsStatus>();
-  const [error, setError] = useState<string>();
+function slowestSource(
+  metrics: WorkerCycleMetrics | undefined,
+  sources: OperationsStatus["sources"],
+) {
+  if (!metrics) return undefined;
+  const [source, durationMs] = Object.entries(metrics.sourceDurationsMs).sort(
+    ([, left], [, right]) => right - left,
+  )[0] ?? [undefined, undefined];
+  if (!source || durationMs === undefined) return undefined;
+  return {
+    source,
+    label: sources.find((candidate) => candidate.source === source)?.label ?? source,
+    durationMs,
+  };
+}
 
-  useEffect(() => {
-    void api
-      .operations()
-      .then(setStatus)
-      .catch((reason: Error) => setError(reason.message));
-  }, []);
+function parseFailureCount(metrics?: WorkerCycleMetrics) {
+  return Object.values(metrics?.parseFailures ?? {}).reduce((sum, count) => sum + count, 0);
+}
 
-  if (error) return <main className="operations-page">Kunne ikke hente driftstatus: {error}</main>;
-  if (!status) return <main className="operations-page">Henter driftstatus...</main>;
+function sourceItemCount(metrics?: WorkerCycleMetrics) {
+  return Object.values(metrics?.sourceItemCounts ?? {}).reduce((sum, count) => sum + count, 0);
+}
 
+function staleSourceCount(status: OperationsStatus) {
+  return status.sources.filter((source) => source.state !== "ok").length;
+}
+
+export function OperationsDashboard({ status }: { status: OperationsStatus }) {
   const trafficPulse = status.trafficPulse ?? [];
+  const workerMetrics = status.workerCycleMetrics;
+  const slowest = slowestSource(workerMetrics, status.sources);
+  const parseFailures = parseFailureCount(workerMetrics);
+  const staleSources = staleSourceCount(status);
 
   return (
     <main className="operations-page">
@@ -73,6 +98,48 @@ export function OperationsPage() {
           <span>DeepSeek · {time(status.latestAiRun?.completedAt)}</span>
         </article>
       </div>
+      <section className="worker-metrics-panel" aria-labelledby="worker-metrics-heading">
+        <div>
+          <p className="label">Operasjonell telemetri</p>
+          <h2 id="worker-metrics-heading">Worker-syklus</h2>
+          <p>
+            Rå driftstall fra siste fullførte innhenting. Dette er ikke hendelsesbevis og legges
+            ikke i kildeledgeren.
+          </p>
+        </div>
+        <div className="worker-metrics-grid">
+          <article>
+            <span>Siste syklus</span>
+            <strong>{milliseconds(workerMetrics?.cycleDurationMs)}</strong>
+            <small>{time(workerMetrics?.cycleCompletedAt)}</small>
+          </article>
+          <article>
+            <span>Tregeste kilde</span>
+            <strong>{slowest ? slowest.label : "—"}</strong>
+            <small>{slowest ? milliseconds(slowest.durationMs) : "Ingen måling"}</small>
+          </article>
+          <article>
+            <span>Parsefeil</span>
+            <strong>{parseFailures}</strong>
+            <small>{sourceItemCount(workerMetrics)} kildeobjekter i siste syklus</small>
+          </article>
+          <article>
+            <span>Kilder som trenger tilsyn</span>
+            <strong>{staleSources}</strong>
+            <small>Ikke-OK i kildelisten</small>
+          </article>
+          <article>
+            <span>Sikkerhetskopi</span>
+            <strong>{status.backup?.status ?? "Ukjent"}</strong>
+            <small>{time(status.backup?.completedAt)}</small>
+          </article>
+          <article>
+            <span>Gjenopprettingstest</span>
+            <strong>{status.restoreCheck?.status ?? "Ukjent"}</strong>
+            <small>{time(status.restoreCheck?.completedAt)}</small>
+          </article>
+        </div>
+      </section>
       <section className="traffic-pulse-panel" aria-labelledby="traffic-pulse-heading">
         <div className="traffic-pulse-heading">
           <h2 id="traffic-pulse-heading">Trafikkpuls fra Vegvesen</h2>
@@ -135,4 +202,21 @@ export function OperationsPage() {
       </section>
     </main>
   );
+}
+
+export function OperationsPage() {
+  const [status, setStatus] = useState<OperationsStatus>();
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    void api
+      .operations()
+      .then(setStatus)
+      .catch((reason: Error) => setError(reason.message));
+  }, []);
+
+  if (error) return <main className="operations-page">Kunne ikke hente driftstatus: {error}</main>;
+  if (!status) return <main className="operations-page">Henter driftstatus...</main>;
+
+  return <OperationsDashboard status={status} />;
 }

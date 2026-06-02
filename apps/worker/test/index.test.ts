@@ -16,6 +16,7 @@ import {
   collectTrafikkdataCounters,
   collectTrafficInfoForMap,
   createCollectionGuard,
+  buildWorkerCycleMetrics,
   normalizeDatexSituationEndpoint,
   shouldResolveMissingDatexSituations,
 } from "../src/index.js";
@@ -147,6 +148,53 @@ describe("worker lifecycle helpers", () => {
         "DATEX_TRAVEL_TIME_DATA_ENDPOINT",
       ),
     ).toThrow(/must not include URL credentials/);
+  });
+
+  it("summarizes worker cycle metrics from injected source timings", () => {
+    const metrics = buildWorkerCycleMetrics({
+      cycleStartedAt: new Date("2026-06-02T06:00:00.000Z"),
+      cycleCompletedAt: new Date("2026-06-02T06:00:02.500Z"),
+      sources: [
+        {
+          source: "nrk",
+          startedAtMs: 100,
+          completedAtMs: 450,
+          sourceItemCount: 3,
+          parseFailures: 0,
+        },
+        {
+          source: "datex",
+          startedAtMs: 450,
+          completedAtMs: 200,
+          sourceItemCount: 2,
+          parseFailures: 1,
+        },
+        {
+          source: "nrk",
+          startedAtMs: 600,
+          completedAtMs: 900,
+          sourceItemCount: 1,
+        },
+      ],
+    });
+
+    expect(metrics).toEqual({
+      cycleStartedAt: "2026-06-02T06:00:00.000Z",
+      cycleCompletedAt: "2026-06-02T06:00:02.500Z",
+      cycleDurationMs: 2500,
+      sourceDurationsMs: {
+        nrk: 650,
+        datex: 0,
+      },
+      sourceItemCounts: {
+        nrk: 4,
+        datex: 2,
+      },
+      parseFailures: {
+        nrk: 0,
+        datex: 1,
+      },
+    });
   });
 
   it("resolves missing DATEX situations only after a fresh snapshot", () => {

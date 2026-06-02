@@ -24,6 +24,7 @@ import type {
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  WorkerCycleMetrics,
   WorkspaceNote,
   WorkspaceTask,
 } from "@nytt/shared";
@@ -180,6 +181,7 @@ export interface Store {
   recordExport(record: ExportRecord): Promise<void>;
   getExport(id: string, situationId: string, login: string): Promise<ExportRecord | undefined>;
   listSourceHealth(): Promise<SourceHealth[]>;
+  getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined>;
   getOperationsStatus(): Promise<OperationsStatus>;
 }
 
@@ -768,6 +770,26 @@ export class MemoryStore implements Store {
     return clone(sampleBootstrap.sourceHealth);
   }
 
+  async getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined> {
+    return clone({
+      cycleStartedAt: "2026-06-02T06:00:00.000Z",
+      cycleCompletedAt: "2026-06-02T06:00:03.250Z",
+      cycleDurationMs: 3250,
+      sourceDurationsMs: {
+        nrk: 240,
+        datex: 920,
+        deepseek: 1100,
+      },
+      sourceItemCounts: {
+        nrk: 2,
+        datex: 1,
+      },
+      parseFailures: {
+        datex: 0,
+      },
+    });
+  }
+
   async getOperationsStatus(): Promise<OperationsStatus> {
     return {
       sources: await this.listSourceHealth(),
@@ -779,6 +801,7 @@ export class MemoryStore implements Store {
         dismissed: 0,
       },
       trafficPulse: await this.listTrafficPulseCorridors(),
+      workerCycleMetrics: await this.getLatestWorkerCycleMetrics(),
     };
   }
 }
@@ -1670,6 +1693,13 @@ export class PgStore implements Store {
     );
   }
 
+  async getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined> {
+    const result = await this.pool.query<{ payload: WorkerCycleMetrics }>(
+      "SELECT payload FROM worker_cycle_metrics WHERE id = 'latest' LIMIT 1",
+    );
+    return result.rows[0]?.payload;
+  }
+
   async getOperationsStatus(): Promise<OperationsStatus> {
     const [sources, articleCount, situationCounts, latestAiRun, trafficPulse] = await Promise.all([
       this.listSourceHealth(),
@@ -1689,6 +1719,7 @@ export class PgStore implements Store {
       ),
       this.listTrafficPulseCorridors(30),
     ]);
+    const workerCycleMetrics = await this.getLatestWorkerCycleMetrics();
     const counts: OperationsStatus["situationCounts"] = {
       preliminary: 0,
       active: 0,
@@ -1702,6 +1733,7 @@ export class PgStore implements Store {
       situationCounts: counts,
       latestAiRun: latestAiRun.rows[0],
       trafficPulse,
+      workerCycleMetrics,
       latestCollectionAt: sources
         .map((source) => source.lastCheckedAt)
         .filter((value): value is string => Boolean(value))

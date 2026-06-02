@@ -78,4 +78,16 @@ describe("source item schema", () => {
     expect(schema).toContain("relationship = 'supports'");
     expect(schema).toContain("RAISE EXCEPTION");
   });
+
+  it("stores worker cycle metrics in an operational table outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS worker_cycle_metrics");
+    expect(schema).toContain("id text PRIMARY KEY CHECK (id = 'latest')");
+    expect(schema).toContain("cycle_duration_ms integer NOT NULL CHECK (cycle_duration_ms >= 0)");
+    expect(schema).toContain("payload jsonb NOT NULL");
+    expect(schema.indexOf("CREATE TABLE IF NOT EXISTS worker_cycle_metrics")).toBeGreaterThan(
+      schema.indexOf("CREATE TABLE IF NOT EXISTS collector_state"),
+    );
+  });
 });

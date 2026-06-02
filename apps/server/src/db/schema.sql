@@ -625,6 +625,15 @@ CREATE TABLE IF NOT EXISTS collector_state (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS worker_cycle_metrics (
+  id text PRIMARY KEY CHECK (id = 'latest'),
+  cycle_started_at timestamptz NOT NULL,
+  cycle_completed_at timestamptz NOT NULL,
+  cycle_duration_ms integer NOT NULL CHECK (cycle_duration_ms >= 0),
+  payload jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "sid" varchar NOT NULL PRIMARY KEY,
   "sess" json NOT NULL,
@@ -639,3 +648,4 @@ INSERT INTO schema_migrations (version) VALUES ('004_traffic_map_events') ON CON
 INSERT INTO schema_migrations (version) VALUES ('005_road_context') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('006_trafikkdata_counters') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('007_entur_public_transport') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('008_worker_cycle_metrics') ON CONFLICT DO NOTHING;
