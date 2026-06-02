@@ -60,7 +60,7 @@ function officialEvent(overrides: Partial<OfficialEvent>): OfficialEvent {
     severity: "yellow",
     publishedAt: "2026-06-01T06:00:00.000Z",
     validFrom: "2026-06-01T07:00:00.000Z",
-    validTo: "2026-06-02T09:00:00.000Z",
+    validTo: "2099-06-02T09:00:00.000Z",
     raw: {},
     ...overrides,
   };
