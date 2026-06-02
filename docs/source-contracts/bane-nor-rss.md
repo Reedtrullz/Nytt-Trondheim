@@ -20,7 +20,7 @@
 - Version marker: first implementation uses `pubDate`, normalized title, normalized description, and parsed validity window in `captureHash`. Bane NOR did not expose revision metadata in the observed RSS.
 - Duplicate snapshot behavior: same GUID/content hash is idempotent.
 - Disappearance behavior: do not expire solely on RSS disappearance in the first implementation, because completeness/window semantics are not proven.
-- Open-ended/stale policy: derive active/planned/expired from parsed date phrases when possible; otherwise keep as context and rely on `publishedAt`/source health.
+- Open-ended/stale policy: derive active/planned from parsed date phrases when possible. Past or unparseable validity windows remain context with `unknown` state in phase 1; do not expire solely on RSS disappearance because completeness/window semantics are not proven.
 
 ## Retention
 
