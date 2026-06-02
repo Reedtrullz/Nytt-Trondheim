@@ -59,9 +59,9 @@ npm run typecheck
 
 Full `npm test` was also run and failed in pre-existing/unrelated `apps/server/test/weather-preparedness.test.ts` assertions about MET/NVE risk aggregation. The classifier suite itself passed and the failures are not caused by this source-bank change.
 
-## High-value source candidates to add next
+## Source status and next candidates
 
-### 1. Trondheim resident/service notifications (`trondheimvarsling` / Gemini Notify)
+### 1. Trondheim resident/service notifications (`trondheimvarsling` / Gemini Notify) — next candidate
 
 Candidate URL:
 
@@ -76,16 +76,16 @@ Recommended handling:
 - First implementation should be a live probe and parser spike, not production ingestion.
 - Promotion rule: water outage / boil-water / service disruption can create official event or service-disruption context, but should not become emergency/situation feed noise unless severity and geography are clear.
 
-### 2. Bane NOR traffic messages
+### 2. Bane NOR traffic messages — delivered phase-1 rail context
 
-Candidate URLs:
+Source URLs:
 
 - `https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/`
 - `https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/?rss=true`
 
 Raw RSS probe returned HTTP 200 `application/rss+xml`.
 
-Implementation status: planned in `docs/plans/2026-06-02-source-contracts-and-rail-context.md`; first implementation is source-items/source-health only.
+Implementation status: delivered and production-verified by `docs/plans/2026-06-02-source-contracts-and-rail-context.md`. Phase 1 is source-items/source-health only: production on 2026-06-02 showed `source_health.bane_nor=ok`, 11 `bane_nor | official_event` source items with raw payloads, and zero Bane NOR rows in `official_events`, `traffic_map_events` or `situations`.
 
 Why useful:
 
@@ -93,12 +93,12 @@ Why useful:
 
 Recommended handling:
 
-- Add `bane_nor` as a rail context source if source contract passes.
-- Store in `source_items` and/or a future transport-context table.
-- Do not auto-activate situations by default; show as mobility/traffic context and route impact.
+- Keep `bane_nor` as a rail context source under the existing source contract.
+- Store in `source_items` and `source_health`; a future transport-context table or map layer needs a separate plan.
+- Do not auto-activate situations by default; future UI should show Bane NOR as mobility/traffic context and route impact only after a promotion/display plan is written.
 - Prefer line/station matching: Trondheim S, Leangen, Støren, Hell, Steinkjer, Storlien, Dombås, Levanger, Åsen, Ronglan.
 
-### 3. Trøndelag fylkeskommune
+### 3. Trøndelag fylkeskommune — next candidate
 
 Candidate page:
 
@@ -180,8 +180,8 @@ Before adding a source, write a short source contract with:
 
 1. Keep trust-hardening first: incident correctness fixtures, DB/source invariants, observability, restore drill.
 2. Land the relevance-filter expansion from this review.
-3. Create source-contract files for Bane NOR RSS, Trondheim Notify, and Trøndelag fylkeskommune before writing ingestion code.
-4. Spike Bane NOR RSS as route/rail context because it has a simple verified RSS endpoint.
+3. Treat Bane NOR RSS as completed phase-1 rail context: no map layer or situation activation without a new explicit source-contract/promotion plan.
+4. Create/maintain source contracts before any additional adapters; Trondheim Notify and Trøndelag fylkeskommune remain contract/spike candidates.
 5. Spike Trondheim Notify only after inspecting the real HTML/API shape and terms.
 6. Add institutional/thematic feeds only after the core trust model is boringly green.
 

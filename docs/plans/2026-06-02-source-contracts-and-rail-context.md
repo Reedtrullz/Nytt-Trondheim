@@ -1669,6 +1669,70 @@ Expected for phase 1:
 
 ---
 
+## Execution and production verification ledger
+
+This plan was implemented and then promoted after the original local-only scope. Keep the evidence here so later source-contract work has a concrete precedent for local gates, CI/deploy evidence and production invariants.
+
+### Final implementation commits
+
+- `4d1fa67` test: stabilize weather preparedness fixtures
+- `85ea36e` docs: add source contract template
+- `a8705b4` docs: add Bane NOR RSS source contract
+- `c5cdcf1` docs: add Trondheim Notify source contract
+- `84a2fd1` docs: add Trøndelag fylke source contract
+- `cfd0018` feat: add Bane NOR source identifier
+- `f4a5c5f` feat: parse Bane NOR rail context RSS
+- `8757d5e` fix: harden Bane NOR validity parsing
+- `bafddd0` feat: persist Bane NOR source items
+- `b2e82f5` feat: collect Bane NOR rail source health
+- `03c0744` feat: wire Bane NOR rail context collection
+- `bbe2383` test: keep Bane NOR out of incident promotion
+- `d4243ef` docs: document Bane NOR source boundary
+- `c74981c` style: format Bane NOR source-contract work
+- `5a7ba7f` docs: align Bane NOR validity contract
+- `b418e28` merge: integrate main into Nytt source bank branch
+- `6a2a793` docs: state Bane NOR source health boundary
+
+### Local verification after merging `origin/main`
+
+- `npm run lint`: passed.
+- `npm run typecheck`: passed.
+- `npm test`: passed, 58 test files and 340 tests.
+- `npm run format:check`: passed.
+- Bane NOR boundary check passed: parser code does not write `official_events`, `traffic_map_events` or `situations`, and shared types include `"bane_nor"`.
+- Spec-compliance review: PASS.
+- Code-quality review: APPROVED.
+
+### GitHub and production evidence
+
+- Final promoted SHA: `6a2a79331900d38bbcf9d6d9c30de03074a451ee`.
+- `origin/main` and `origin/review/nytt-source-bank` both resolved to that SHA after promotion.
+- Main `CI` run `26835662258`: `status=completed`, `conclusion=success`, `event=push`, `headSha=6a2a79331900d38bbcf9d6d9c30de03074a451ee`.
+- `Deploy to VPS` run `26835764423`: `status=completed`, `conclusion=success`, `event=workflow_run`, `headSha=6a2a79331900d38bbcf9d6d9c30de03074a451ee`.
+- Public `https://nytt.reidar.tech/health` returned `{"status":"ok","storage":"postgres"}`.
+- Public `https://nytt.reidar.tech/trafikk` returned `200 text/html`.
+- VPS checkout `/home/deploy/nytt-trondheim` matched the final SHA; `app` and `postgres` were healthy and `worker` was running.
+- Deploy-time runtime status files showed `backup.json` and `restore-check.json` with `status="ok"`.
+- The worker completed a post-deploy collection cycle after promotion.
+
+### Production source-boundary evidence
+
+Post-deploy source-health and invariants on 2026-06-02 showed:
+
+- `source_health | bane_nor | ok | 11 relevante Bane NOR trafikkmeldinger hentet`.
+- `source_items | bane_nor | official_event | 11`.
+- `raw_payload_non_null | 11` for Bane NOR source items.
+- Bane NOR normalized state counts: `active | 4`, `planned | 7`.
+- Sample Bane NOR row: provider `bane_nor`, kind `official_event`, reliability `official`, promotion `none`, raw payload present.
+- `official_events WHERE source='bane_nor'`: `0`.
+- `traffic_map_events WHERE source='bane_nor'`: `0`.
+- `situations WHERE payload->>'officialSource'='bane_nor'`: `0`.
+- Broader source-boundary checks also confirmed no Entur vehicle telemetry or context telemetry leaked into `source_items`, and no Bane NOR/Entur/context telemetry source accidentally activated situations.
+
+Frontend caveat: this release does not expose Bane NOR as a public UI feature. The built frontend bundle does not need the literal string `Bane NOR`; the verified phase-1 contract is source-health/source-items ingestion plus non-promotion.
+
+---
+
 ## Plan review checklist
 
 - [x] Architecture docs read: `docs/ARCHITECTURE.md`, `docs/SOURCES.md`.

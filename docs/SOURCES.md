@@ -15,7 +15,7 @@ See also `docs/plans/2026-06-02-source-bank-review.md` for reviewed future sourc
 Articles link to the publisher; this application does not republish complete articles. Nidaros is excluded until a suitable permitted collection route is confirmed.
 Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, including daylight-saving transitions. When a still-visible collected article is fetched again, corrected public classification and geocoding metadata are refreshed without removing an established situation link.
 
-Articles and official MET/NVE/DATEX/Politiloggen situation events are mirrored into the internal `source_items` ledger. DATEX TravelTime is explicitly excluded from the editorial source stream and remains `datex_travel_times` plus `source_health` only.
+Articles and official MET/NVE/DATEX/Politiloggen situation events, Entur service alerts, Bane NOR rail/mobility messages and Vegvesen TrafficInfo records are mirrored into the internal `source_items` ledger when their source contracts permit it. DATEX TravelTime, DATEX Weather, DATEX CCTV, Trafikkdata counters and Entur vehicle positions are explicitly excluded from the editorial source stream and remain telemetry/context tables plus `source_health` only.
 
 ## Official And Geographic Layers
 
@@ -33,7 +33,7 @@ Articles and official MET/NVE/DATEX/Politiloggen situation events are mirrored i
 - Trafikkdata.no GraphQL (`https://trafikkdata-api.atlas.vegvesen.no/`) supplies bounded low-frequency traffic-counter context for Trøndelag/Trondheim. It is not a situation source.
 - Entur Vehicle Positions GraphQL (`https://api.entur.io/realtime/v2/vehicles/graphql`) supplies ATB vehicle positions in the Trondheim-region bounds. It is operations-only telemetry, stored in `public_transport_vehicles`, visible as a map layer, and never mirrored to `source_items`, `official_events` or `situations`.
 - Entur Journey Planner v3 `situations(codespaces:["ATB"])` supplies official public-transport service alerts. These alerts are stored in `public_transport_service_alerts` and mirrored to `source_items` provider `entur`, kind `official_event`; they are not automatic situation activators in this release.
-- Bane NOR RSS `https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/?rss=true` is collected as official rail/mobility context after its source contract. It is mirrored to `source_items` provider `bane_nor`, kind `official_event`, but does not create `official_events`, `traffic_map_events`, or `situations` in this phase.
+- Bane NOR RSS `https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/?rss=true` is collected as official rail/mobility context after its source contract. It is mirrored to `source_items` provider `bane_nor`, kind `official_event`, and updates `source_health` source `bane_nor`, but does not create `official_events`, `traffic_map_events`, or `situations` in this phase. Production verification on 2026-06-02 observed `source_health.state='ok'`, 11 `bane_nor` source items, preserved raw RSS payloads for all 11, and zero Bane NOR rows in `official_events`, `traffic_map_events` or `situations`.
 
 ## Politiloggen
 

@@ -143,6 +143,52 @@ Expected results:
 - `official_events` for Entur sources must be zero in this plan.
 - `accidental_entur_situations` must be zero; this checks `officialSource`, `activationBasis.sourceIds`, and embedded evidence sources, not just one field.
 
+## Bane NOR Verification
+
+Bane NOR RSS is deployed as phase-1 rail/mobility context only. After a CI-verified SHA deploys, verify fresh source health, source-item retention and no accidental promotion:
+
+```bash
+curl -fsS https://nytt.reidar.tech/health
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && git rev-parse HEAD"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production ps app worker postgres"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production logs --tail=120 worker"
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -P pager=off -F ' | ' -At" <<'SQL'
+SELECT source, state, detail, last_checked_at, next_poll_at
+FROM source_health
+WHERE source='bane_nor';
+SELECT provider, kind, count(*)
+FROM source_items
+WHERE provider='bane_nor'
+GROUP BY provider, kind;
+SELECT count(*) AS raw_payload_non_null
+FROM source_items
+WHERE provider='bane_nor' AND raw_payload IS NOT NULL;
+SELECT normalized_payload->>'state', count(*)
+FROM source_items
+WHERE provider='bane_nor'
+GROUP BY normalized_payload->>'state'
+ORDER BY normalized_payload->>'state';
+SELECT count(*) FROM official_events WHERE source='bane_nor';
+SELECT count(*) FROM traffic_map_events WHERE source='bane_nor';
+SELECT count(*) AS accidental_bane_situations
+FROM situations
+WHERE payload->>'officialSource'='bane_nor'
+   OR payload->'activationBasis'->'sourceIds' ? 'bane_nor'
+   OR EXISTS (
+     SELECT 1
+     FROM jsonb_array_elements(COALESCE(payload->'evidence', '[]'::jsonb)) evidence
+     WHERE evidence->>'source'='bane_nor'
+   );
+SQL
+```
+
+Expected phase-1 results:
+
+- `source_health.source='bane_nor'` exists and is fresh; it may be `ok` or honestly `degraded`, but it must not be silently absent after the worker has run.
+- `source_items WHERE provider='bane_nor'` may be non-zero and must use `kind='official_event'` with raw RSS payloads retained.
+- `official_events`, `traffic_map_events`, and `situations` counts for Bane NOR must be zero until a separate promotion/map-layer plan is written.
+- The public frontend bundle does not need to contain the literal string `Bane NOR`; this phase is ingestion/source-health/provenance only, not a UI feature.
+
 ## Traffic Map Production Verification
 
 Do not call the traffic map deployed from CI alone. Verify the same pushed SHA through both workflows, then prove the live VPS has traffic/context data and that map-only/context-only telemetry stayed out of editorial incident promotion.
@@ -214,3 +260,4 @@ The application is live at `https://nytt.reidar.tech`; `/health` returns healthy
 - The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.
 - Encrypted Google Drive/restic backups and restore verification are active. Runtime status files expose only successful completion timestamps to the owner-only operations view.
 - Persisted false-positive situations have been dismissed with retained audit history; new automatic incidents require explicit event type and a specific matching place, except for high-impact official DATEX traffic records.
+- The source-contract/Bane NOR release was verified on 2026-06-02 at SHA `6a2a79331900d38bbcf9d6d9c30de03074a451ee`: `CI` run `26835662258` and `Deploy to VPS` run `26835764423` were both `completed/success`; `/health` returned Postgres-backed `ok`; the VPS checkout matched the SHA; `source_health.bane_nor` was `ok`; 11 Bane NOR source items were present with raw payloads; and Bane NOR had zero rows in `official_events`, `traffic_map_events`, and `situations`.
