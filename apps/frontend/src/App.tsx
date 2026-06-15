@@ -6,7 +6,9 @@ import { headerFreshnessLabel } from "./freshness.js";
 import { buildHomeSearch, parseHomeFilters } from "./homeFilters.js";
 import { HomePage } from "./pages/HomePage.js";
 import { OperationsPage } from "./pages/OperationsPage.js";
+import { OperationsTimelinePage } from "./pages/OperationsTimelinePage.js";
 import { SavedPage } from "./pages/SavedPage.js";
+import { SourceAuditPage } from "./pages/SourceAuditPage.js";
 import { SituationPage } from "./pages/SituationPage.js";
 import { SituationsPage } from "./pages/SituationsPage.js";
 import { TrafficMapPage } from "./pages/TrafficMapPage.js";
@@ -124,6 +126,8 @@ export function App() {
           <Route path="/vaer" element={<WeatherPage />} />
           <Route path="/lagret" element={<SavedPage />} />
           <Route path="/drift" element={<OperationsPage />} />
+          <Route path="/drift/kilder" element={<SourceAuditPage />} />
+          <Route path="/drift/tidslinje" element={<OperationsTimelinePage />} />
         </Routes>
       ) : null}
     </>

@@ -50,7 +50,7 @@ const layerControls: Array<{
   { key: "travelTime", label: "Reisetidskorridorer" },
   { key: "publicTransportDisruptions", label: "Kollektivavvik" },
   { key: "publicTransportVehicles", label: "Kjøretøyposisjoner" },
-  { key: "weatherRisk", label: "Vær/risiko-kontekst" },
+  { key: "weatherRisk", label: "Vær, kamera og tellepunkter" },
   { key: "estimatedNews", label: "Estimerte nyhetssteder" },
   {
     key: "privateNotes",
@@ -58,7 +58,7 @@ const layerControls: Array<{
     disabled: true,
     helper: "Ikke aktivt på /trafikk ennå",
   },
-  { key: "showAll", label: "Vis alle mindre/stale meldinger" },
+  { key: "showAll", label: "Vis alle mindre eller utdaterte meldinger" },
 ];
 
 interface TrafficFilterPanelProps {

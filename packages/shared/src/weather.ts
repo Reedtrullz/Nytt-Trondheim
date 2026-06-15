@@ -1,4 +1,4 @@
-import type { SourceHealth } from "./types.js";
+import type { MapFeature, SourceHealth } from "./types.js";
 import type { RoadWeatherObservation } from "./traffic-map.js";
 
 export type WeatherRiskLevel = "normal" | "watch" | "warning" | "severe";
@@ -70,12 +70,14 @@ export interface WeatherImpactGroup {
 
 export interface WeatherWarningSummary {
   id: string;
+  source: "met" | "nve";
   sourceLabel: string;
   title: string;
   area: string;
   level: string;
   validUntil: string;
   url: string;
+  geometry?: MapFeature["geometry"];
 }
 
 export interface WeatherMapLayer {

@@ -20,6 +20,7 @@ import type {
   PublicTransportVehicle,
   RoadCamera,
   RoadWeatherObservation,
+  Situation,
   SourceHealth,
   SourceItem,
   TrafficCounterSnapshot,
@@ -311,6 +312,243 @@ describe("private situation API", () => {
     expect(explanation.sourceRoles).not.toContainEqual({ provider: "entur", role: "evidence" });
   });
 
+  it("shows telemetry stale warnings as operations context, not evidence", async () => {
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listSituations").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "datex_travel_time",
+        label: "DATEX reisetid",
+        state: "degraded",
+        lastCheckedAt: "2026-06-15T06:00:00.000Z",
+        lastFailureAt: "2026-06-15T06:00:00.000Z",
+        detail: "Mangler fersk reisetid",
+      },
+    ] satisfies SourceHealth[]);
+    vi.spyOn(store, "listCollectorRuns").mockResolvedValue([]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get("/api/operations/timeline?sources=datex_travel_time")
+      .expect(200);
+
+    expect(response.body.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "stale_warning",
+          source: "datex_travel_time",
+          role: "telemetry",
+          provenance: "preparedness_context",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(response.body.events)).not.toContain('"relationship":"supports"');
+    expect(JSON.stringify(response.body.events)).not.toContain('"relationship":"activation"');
+  });
+
+  it("classifies status, severity, merge and split decisions on the operations timeline", async () => {
+    const { app, store } = await testApp();
+    const situation = {
+      ...sampleSituation,
+      importance: "normal",
+      timeline: [
+        {
+          id: "decision-status",
+          situationId: sampleSituation.id,
+          timestamp: "2026-06-15T07:00:00.000Z",
+          kind: "status_change",
+          title: "Status satt til aktiv",
+          detail: "Redaksjonen flyttet saken fra foreløpig til aktiv.",
+          sourceLabel: "Redaksjon",
+          sourceUrl: "",
+          official: false,
+        },
+        {
+          id: "decision-severity",
+          situationId: sampleSituation.id,
+          timestamp: "2026-06-15T07:05:00.000Z",
+          kind: "severity_change",
+          title: "Alvorlighet satt til høy",
+          detail: "Vaktleder prioriterte saken for videre oppfølging.",
+          sourceLabel: "Redaksjon",
+          sourceUrl: "",
+          official: false,
+        },
+        {
+          id: "decision-merge",
+          situationId: sampleSituation.id,
+          timestamp: "2026-06-15T07:10:00.000Z",
+          kind: "merge_decision",
+          title: "Flettet med duplikat",
+          detail: "To parallelle meldinger ble samlet i samme situasjon.",
+          sourceLabel: "Redaksjon",
+          sourceUrl: "",
+          official: false,
+        },
+        {
+          id: "decision-split",
+          situationId: sampleSituation.id,
+          timestamp: "2026-06-15T07:15:00.000Z",
+          kind: "split_decision",
+          title: "Delt ut separat hendelse",
+          detail: "Et sidespor ble flyttet til egen operasjonell oppfølging.",
+          sourceLabel: "Redaksjon",
+          sourceUrl: "",
+          official: false,
+        },
+      ],
+    } satisfies Situation;
+    vi.spyOn(store, "listSituations").mockResolvedValue({ items: [situation] });
+    vi.spyOn(store, "getWorkspace").mockResolvedValue({
+      situation,
+      relatedArticles: [],
+      tasks: [],
+      notes: [],
+      attachments: [],
+    });
+    vi.spyOn(store, "listSituationSourceItems").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([]);
+    vi.spyOn(store, "listCollectorRuns").mockResolvedValue([]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get(
+        "/api/operations/timeline?kinds=status_change,severity_change,merge_decision,split_decision&sort=asc",
+      )
+      .expect(200);
+
+    expect(response.body.events.map((event: { kind: string }) => event.kind)).toEqual([
+      "status_change",
+      "severity_change",
+      "merge_decision",
+      "split_decision",
+    ]);
+    expect(response.body.summary.reviewerActions).toBe(4);
+  });
+
+  it("returns a map-first situation workspace with source-filtered timeline", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent
+      .get("/api/situations/workspace-map?sources=nrk&provenances=reporting_estimate")
+      .expect(200);
+
+    expect(response.body.mapState.layers).toEqual(
+      expect.arrayContaining(["situations", "evidence", "private_annotations"]),
+    );
+    expect(response.body.situations).toHaveLength(1);
+    expect(response.body.situations[0]).toMatchObject({
+      id: "skogbrann-bymarka",
+      title: "Skogbrann ved Bymarka",
+      sourceConfidence: {
+        level: "likely",
+        label: "Sannsynlig",
+      },
+    });
+    expect(response.body.situations[0].provenanceSummary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provenance: "reporting_estimate",
+          label: "Anslag fra rapportering",
+        }),
+      ]),
+    );
+    expect(response.body.timeline).toEqual([
+      expect.objectContaining({
+        id: "t1",
+        source: "nrk",
+        title: "Første melding om røyk",
+      }),
+    ]);
+  });
+
+  it("projects private annotations in the map workspace without making them evidence", async () => {
+    const { agent, csrf } = await ownerAgent();
+    const created = await agent
+      .post("/api/situations/skogbrann-bymarka/features")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        geometry: { type: "Point", coordinates: [10.31, 63.405] },
+        properties: {
+          label: "Privat observasjonspunkt",
+          provenance: "official",
+          analysisType: "hotspot",
+          confidence: "reported_unverified",
+          scenario: "fire",
+        },
+      })
+      .expect(201);
+
+    const response = await agent.get("/api/situations/workspace-map").expect(200);
+    expect(response.body.privateAnnotations).toEqual([
+      expect.objectContaining({
+        id: created.body.id,
+        properties: expect.objectContaining({
+          label: "Privat observasjonspunkt",
+          provenance: "private_annotation",
+        }),
+      }),
+    ]);
+    expect(response.body.situations[0].provenanceSummary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provenance: "private_annotation",
+          label: "Privat markering",
+        }),
+      ]),
+    );
+    expect(response.body.situations[0].timelinePreview).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ provenance: "private_annotation" })]),
+    );
+
+    const hidden = await agent
+      .get("/api/situations/workspace-map?includePrivateAnnotations=false")
+      .expect(200);
+    expect(hidden.body.privateAnnotations).toEqual([]);
+    expect(hidden.body.situations[0].features).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ id: created.body.id })]),
+    );
+  });
+
+  it("honors includeTelemetry when filtering the workspace map", async () => {
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listSituationSourceItems").mockResolvedValue([
+      {
+        id: "source:datex_travel_time:100141",
+        provider: "datex_travel_time",
+        kind: "official_event",
+        externalId: "100141",
+        originalUrl: "https://example.test/datex/travel-time",
+        title: "E6 Sluppen → Tiller",
+        summary: "Travel-time measurement used only as operational telemetry.",
+        fetchedAt: "2026-06-02T10:00:00.000Z",
+        captureHash: "sha256:telemetry-map",
+        reliabilityTier: "official",
+        linkedSituationIds: [sampleSituation.id],
+      },
+    ] satisfies SourceItem[]);
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    await agent
+      .get("/api/situations/workspace-map?sources=datex_travel_time")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.situations).toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: sampleSituation.id })]),
+        );
+      });
+
+    await agent
+      .get("/api/situations/workspace-map?sources=datex_travel_time&includeTelemetry=false")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.situations).toEqual([]);
+        expect(response.body.timeline).toEqual([]);
+      });
+  });
+
   it("starts GitHub OAuth with a session-backed state nonce", async () => {
     const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
     const { app } = await createApp({
@@ -372,18 +610,24 @@ describe("private situation API", () => {
     const patched = await agent
       .patch(`/api/situations/skogbrann-bymarka/features/${response.body.id as string}`)
       .set("X-CSRF-Token", csrf)
-      .send({ label: "Oppdatert punkt" })
+      .send({
+        label: "Oppdatert punkt",
+        confidence: "observed_by_owner",
+        measurement: { radiusMeters: 750 },
+        styleKey: "hotspot",
+        sourceItemIds: [sourceItemId],
+      })
       .expect(200);
     expect(patched.body.properties).toMatchObject({
       label: "Oppdatert punkt",
       provenance: "private_annotation",
       analysisType: "last_known_position",
-      confidence: "reported_unverified",
+      confidence: "observed_by_owner",
       scenario: "sar",
-      styleKey: "last-seen",
+      styleKey: "hotspot",
       sourceItemIds: [sourceItemId],
     });
-    expect(patched.body.properties.measurement).toEqual({ radiusMeters: 500 });
+    expect(patched.body.properties.measurement).toEqual({ radiusMeters: 750 });
   });
 
   it("rejects private feature provenance links that are not attached to the situation", async () => {
@@ -401,6 +645,27 @@ describe("private situation API", () => {
           sourceItemIds: ["source:not-linked"],
         },
       })
+      .expect(400)
+      .expect((response) => {
+        expect(response.body.error).toMatch(/Kildeelementer må være koblet/);
+      });
+    const created = await agent
+      .post("/api/situations/skogbrann-bymarka/features")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        geometry: { type: "Point", coordinates: [10.3, 63.4] },
+        properties: {
+          label: "Gyldig privat punkt",
+          analysisType: "last_known_position",
+          confidence: "reported_unverified",
+          scenario: "sar",
+        },
+      })
+      .expect(201);
+    await agent
+      .patch(`/api/situations/skogbrann-bymarka/features/${created.body.id as string}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ sourceItemIds: ["source:not-linked"] })
       .expect(400)
       .expect((response) => {
         expect(response.body.error).toMatch(/Kildeelementer må være koblet/);
@@ -433,6 +698,131 @@ describe("private situation API", () => {
           sourceItemCounts: { nrk: 2 },
           parseFailures: { datex: 0 },
         });
+      });
+    await agent
+      .get(
+        "/api/operations/source-audit?sources=datex,nrk,trondheim_kommune,private_annotations&includeDiagnostics=true",
+      )
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.sources).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              source: "datex",
+              label: "Vegvesen DATEX",
+              contractStatus: expect.any(String),
+            }),
+            expect.objectContaining({ source: "nrk", label: "NRK Trøndelag" }),
+            expect.objectContaining({
+              source: "trondheim_kommune",
+              label: "Trondheim kommune",
+              contractStatus: "pass",
+            }),
+            expect.objectContaining({ source: "private_annotations" }),
+          ]),
+        );
+        expect(response.body.collectorRuns).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              source: "datex",
+              collector: "datex",
+              status: "succeeded",
+            }),
+          ]),
+        );
+        expect(response.body.contractChecks).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ source: "datex", kind: "secret_hygiene", status: "pass" }),
+            expect.objectContaining({
+              source: "trondheim_kommune",
+              kind: "source_contract",
+              status: "pass",
+              contractPath: "docs/source-contracts/trondheim-kommune-aktuelt.md",
+            }),
+          ]),
+        );
+        expect(JSON.stringify(response.body)).not.toContain("trondheim-notify.md");
+        expect(response.body.traceability).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              situationId: "skogbrann-bymarka",
+              links: expect.arrayContaining([expect.objectContaining({ source: "nrk" })]),
+            }),
+          ]),
+        );
+        expect(JSON.stringify(response.body)).not.toContain("rawPayload");
+        expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
+      });
+    await agent
+      .get(
+        "/api/operations/source-audit?sources=datex&from=2026-06-02T06:00:00.000Z&to=2026-06-02T06:00:04.000Z",
+      )
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.sources).toEqual([
+          expect.objectContaining({ source: "datex", latestRun: expect.any(Object) }),
+        ]);
+        expect(response.body.collectorRuns).toEqual([expect.objectContaining({ source: "datex" })]);
+      });
+    await agent
+      .get(
+        "/api/operations/source-audit?sources=datex&from=2026-06-03T06:00:00.000Z&to=2026-06-03T06:00:04.000Z",
+      )
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.sources).toEqual([expect.objectContaining({ source: "datex" })]);
+        expect(response.body.sources[0]).not.toHaveProperty("latestRun");
+        expect(response.body.collectorRuns).toEqual([]);
+      });
+    const firstAuditPage = await agent.get("/api/operations/source-audit?limit=1").expect(200);
+    expect(firstAuditPage.body.sources).toHaveLength(1);
+    expect(firstAuditPage.body.nextCursor).toBe(firstAuditPage.body.sources[0].source);
+    await agent
+      .get(`/api/operations/source-audit?limit=1&cursor=${firstAuditPage.body.nextCursor}`)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.sources).toHaveLength(1);
+        expect(response.body.sources[0].source > firstAuditPage.body.sources[0].source).toBe(true);
+      });
+    await agent
+      .get("/api/operations/timeline?kinds=source_update,collector_run,review_action&sort=desc")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.summary.total).toBeGreaterThan(0);
+        const timestamps = response.body.events.map(
+          (event: { timestamp: string }) => event.timestamp,
+        );
+        expect(timestamps).toEqual([...timestamps].sort().reverse());
+        expect(response.body.events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: "collector_run",
+              source: "datex",
+              role: "incident",
+            }),
+            expect.objectContaining({
+              kind: "source_update",
+              situationId: "skogbrann-bymarka",
+              source: "nrk",
+            }),
+            expect.objectContaining({
+              kind: "review_action",
+              title: expect.stringMatching(/Privat/),
+              private: true,
+            }),
+          ]),
+        );
+        expect(JSON.stringify(response.body)).not.toContain("rawPayload");
+        expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
+        expect(JSON.stringify(response.body)).not.toContain("Følg nye offentlige oppdateringer");
+      });
+    await agent
+      .get("/api/operations/timeline?includePrivateAnnotations=false")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.events).toEqual(
+          expect.not.arrayContaining([expect.objectContaining({ private: true })]),
+        );
       });
     await agent
       .get("/api/bootstrap")

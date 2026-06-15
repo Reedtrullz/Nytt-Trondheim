@@ -127,7 +127,22 @@ describe("weather preparedness API", () => {
 
     const { app, store } = await testApp();
     const listOfficialEvents = vi.spyOn(store, "listOfficialEvents").mockResolvedValue([
-      officialEvent({ source: "met", title: "MET farevarsel: Kraftig regn", severity: "yellow" }),
+      officialEvent({
+        source: "met",
+        title: "MET farevarsel: Kraftig regn",
+        severity: "yellow",
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [10.2, 63.3],
+              [10.6, 63.3],
+              [10.6, 63.5],
+              [10.2, 63.3],
+            ],
+          ],
+        },
+      }),
       officialEvent({
         id: "nve-flood",
         source: "nve",
@@ -193,19 +208,29 @@ describe("weather preparedness API", () => {
     ]);
     expect(response.body.warnings).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ sourceLabel: "MET farevarsel" }),
-        expect.objectContaining({ sourceLabel: "NVE flomvarsel" }),
+        expect.objectContaining({
+          source: "met",
+          sourceLabel: "MET farevarsel",
+          geometry: expect.objectContaining({ type: "Polygon" }),
+        }),
+        expect.objectContaining({
+          source: "nve",
+          sourceLabel: "NVE flomvarsel",
+        }),
       ]),
     );
+    expect(
+      response.body.warnings.find((warning: { id: string }) => warning.id === "nve-flood"),
+    ).not.toHaveProperty("geometry");
     expect(response.body.mapLayers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          title: "MET warning polygons",
+          title: "MET farevarselgeometri",
           source: "MET",
-          status: "planned",
+          status: "available",
         }),
         expect.objectContaining({
-          title: "Vegvesen road-weather stations",
+          title: "Vegvesen værstasjoner langs vei",
           source: "Statens vegvesen DATEX",
         }),
       ]),

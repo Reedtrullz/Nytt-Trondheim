@@ -643,6 +643,27 @@ CREATE TABLE IF NOT EXISTS worker_cycle_metrics (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS collector_runs (
+  id text PRIMARY KEY,
+  source text NOT NULL,
+  collector text NOT NULL,
+  status text NOT NULL CHECK (status IN ('succeeded', 'partial', 'failed', 'skipped', 'running')),
+  started_at timestamptz NOT NULL,
+  completed_at timestamptz,
+  duration_ms integer CHECK (duration_ms IS NULL OR duration_ms >= 0),
+  records_seen integer NOT NULL DEFAULT 0 CHECK (records_seen >= 0),
+  records_accepted integer NOT NULL DEFAULT 0 CHECK (records_accepted >= 0),
+  records_rejected integer NOT NULL DEFAULT 0 CHECK (records_rejected >= 0),
+  error_code text,
+  error_message text,
+  diagnostics jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS collector_runs_source_started_idx
+  ON collector_runs (source, started_at DESC);
+CREATE INDEX IF NOT EXISTS collector_runs_started_idx
+  ON collector_runs (started_at DESC);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "sid" varchar NOT NULL PRIMARY KEY,
   "sess" json NOT NULL,
@@ -658,3 +679,4 @@ INSERT INTO schema_migrations (version) VALUES ('005_road_context') ON CONFLICT 
 INSERT INTO schema_migrations (version) VALUES ('006_trafikkdata_counters') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('007_entur_public_transport') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('008_worker_cycle_metrics') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('009_collector_runs') ON CONFLICT DO NOTHING;

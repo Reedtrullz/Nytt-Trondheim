@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { MapContainer, TileLayer } from "react-leaflet";
+import type { GeoJsonObject } from "geojson";
+import type { PathOptions } from "leaflet";
+import { GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
 import type {
   WeatherMapLayer,
   WeatherPreparednessPayload,
@@ -8,7 +10,17 @@ import type {
 } from "@nytt/shared";
 import { fetchWeatherPreparedness } from "../api/weatherPreparedness.js";
 import { ArrowIcon } from "../components/Icons.js";
+import { MapAccessibility } from "../components/map/MapAccessibility.js";
+import { RoadContextLayer } from "../components/map/RoadContextLayer.js";
+import type { LeafletBounds } from "../mapCoordinates.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
+import {
+  groupWeatherMapLayers,
+  visibleWeatherImpacts,
+  visibleWeatherWarnings,
+  weatherMapBounds,
+  weatherRoadStations,
+} from "../weatherMapModel.js";
 
 type WeatherIconName =
   | "bus"
@@ -22,6 +34,14 @@ type WeatherIconName =
   | "wind";
 
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
+const trondheimCenter: [number, number] = [63.4305, 10.3951];
+
+interface WeatherMapVisibility {
+  roadWeather: boolean;
+  warnings: boolean;
+  consequences: boolean;
+  planned: boolean;
+}
 
 function WeatherIcon({ name }: { name: WeatherIconName }) {
   return (
@@ -125,6 +145,7 @@ function formatTime(value: string | undefined): string {
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Oslo",
   }).format(date);
 }
 
@@ -141,6 +162,290 @@ function layerStatus(layer: WeatherMapLayer): string {
   if (layer.status === "available") return "Aktiv i Nytt";
   if (layer.status === "context") return "Kontekst";
   return "Neste lag";
+}
+
+function warningLevelClass(level: string): string {
+  const normalized = level.toLocaleLowerCase("nb");
+  if (normalized.includes("rød")) return "severe";
+  if (normalized.includes("oransje")) return "warning";
+  if (normalized.includes("gult")) return "watch";
+  return "normal";
+}
+
+function warningGeometryStyle(level: string): PathOptions {
+  const tone = warningLevelClass(level);
+  if (tone === "severe") {
+    return {
+      className: "weather-warning-area weather-warning-area-severe",
+      color: "#b5281e",
+      fillColor: "#dc3f31",
+      fillOpacity: 0.24,
+      weight: 2,
+    };
+  }
+  if (tone === "warning") {
+    return {
+      className: "weather-warning-area weather-warning-area-warning",
+      color: "#c65f22",
+      fillColor: "#f2842b",
+      fillOpacity: 0.2,
+      weight: 2,
+    };
+  }
+  if (tone === "watch") {
+    return {
+      className: "weather-warning-area weather-warning-area-watch",
+      color: "#b98d20",
+      fillColor: "#e0b431",
+      fillOpacity: 0.18,
+      weight: 2,
+    };
+  }
+  return {
+    className: "weather-warning-area weather-warning-area-normal",
+    color: "#3b7f4c",
+    fillColor: "#6ca85b",
+    fillOpacity: 0.14,
+    weight: 2,
+  };
+}
+
+function WeatherMapFit({ bounds }: { bounds?: LeafletBounds }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!bounds) {
+      map.setView(trondheimCenter, 10, { animate: false });
+      return;
+    }
+    if (bounds[0][0] === bounds[1][0] && bounds[0][1] === bounds[1][1]) {
+      map.setView(bounds[0], Math.max(map.getZoom(), 11), { animate: false });
+      return;
+    }
+    map.fitBounds(bounds, { padding: [34, 34], maxZoom: 12, animate: false });
+  }, [bounds?.[0][0], bounds?.[0][1], bounds?.[1][0], bounds?.[1][1], map]);
+
+  return null;
+}
+
+function WeatherLayerToggle({
+  checked,
+  count,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  count: number;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="weather-map-toggle">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>{label}</span>
+      <strong>{count}</strong>
+    </label>
+  );
+}
+
+export function WeatherPreparednessMap({ payload }: { payload: WeatherPreparednessPayload }) {
+  const [visible, setVisible] = useState<WeatherMapVisibility>({
+    roadWeather: true,
+    warnings: true,
+    consequences: true,
+    planned: false,
+  });
+  const stations = useMemo(() => weatherRoadStations(payload.roadWeather), [payload.roadWeather]);
+  const layerGroups = useMemo(() => groupWeatherMapLayers(payload.mapLayers), [payload.mapLayers]);
+  const warnings = useMemo(() => visibleWeatherWarnings(payload.warnings), [payload.warnings]);
+  const warningGeometries = useMemo(
+    () => warnings.filter((warning) => warning.geometry),
+    [warnings],
+  );
+  const mapBounds = useMemo(
+    () =>
+      weatherMapBounds({
+        warnings: visible.warnings ? warningGeometries : [],
+        roadWeather: visible.roadWeather ? stations.map((station) => station.observation) : [],
+      }),
+    [stations, visible.roadWeather, visible.warnings, warningGeometries],
+  );
+  const impacts = useMemo(
+    () => visibleWeatherImpacts(payload.impactGroups),
+    [payload.impactGroups],
+  );
+
+  return (
+    <article className="weather-map-panel">
+      <div className="weather-panel-heading">
+        <div>
+          <h2>Værkart for Trondheim</h2>
+          <p>Sanntidsnære vegværstasjoner, offisielle varsler og konsekvenser med kildemerking</p>
+        </div>
+      </div>
+      <div className="weather-map-toolbar" aria-label="Kartlag for værkart">
+        <WeatherLayerToggle
+          checked={visible.roadWeather}
+          count={stations.length}
+          label="Vegværstasjoner"
+          onChange={(roadWeather) => setVisible((current) => ({ ...current, roadWeather }))}
+        />
+        <WeatherLayerToggle
+          checked={visible.warnings}
+          count={warnings.length}
+          label="Offisielle varsler"
+          onChange={(warningsVisible) =>
+            setVisible((current) => ({ ...current, warnings: warningsVisible }))
+          }
+        />
+        <WeatherLayerToggle
+          checked={visible.consequences}
+          count={impacts.length}
+          label="Konsekvenser"
+          onChange={(consequences) => setVisible((current) => ({ ...current, consequences }))}
+        />
+        <WeatherLayerToggle
+          checked={visible.planned}
+          count={layerGroups.planned.length}
+          label="Planlagte kartlag"
+          onChange={(planned) => setVisible((current) => ({ ...current, planned }))}
+        />
+      </div>
+      <div className="weather-map-workspace">
+        <div className="weather-map-visual" aria-label="Værkart med lokale målinger">
+          <MapContainer
+            center={trondheimCenter}
+            zoom={10}
+            className="weather-leaflet-map"
+            scrollWheelZoom={false}
+          >
+            <TileLayer attribution="© Kartverket" url={tiles} />
+            <MapAccessibility label="Værkart for Trondheim" />
+            <WeatherMapFit bounds={mapBounds} />
+            {visible.warnings
+              ? warningGeometries.map((warning) => (
+                  <GeoJSON
+                    key={warning.id}
+                    data={warning.geometry as GeoJsonObject}
+                    style={() => warningGeometryStyle(warning.level)}
+                  />
+                ))
+              : null}
+            {visible.roadWeather ? (
+              <RoadContextLayer weather={stations.map((station) => station.observation)} />
+            ) : null}
+          </MapContainer>
+          {visible.roadWeather && stations.length === 0 ? (
+            <p className="weather-map-empty">
+              Ingen vegværstasjoner med gyldig posisjon akkurat nå.
+            </p>
+          ) : null}
+          <div className="weather-map-source-pill">Aktivt kartlag: DATEX vegvær · Kartverket</div>
+        </div>
+        <aside className="weather-map-inspector" aria-label="Varsler og konsekvenser i kartet">
+          {visible.warnings ? (
+            <section>
+              <h3>Offisielle varsler</h3>
+              {warnings.length ? (
+                <ul className="weather-map-warning-list">
+                  {warnings.map((warning) => (
+                    <li key={warning.id}>
+                      <strong>{warning.title}</strong>
+                      <span>{warning.area}</span>
+                      <small>
+                        {warning.sourceLabel} · {warning.level} · til{" "}
+                        {formatTime(warning.validUntil)}
+                      </small>
+                      <em>{warning.geometry ? "Tegnes i kart" : "Uten geometri i kilden"}</em>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Ingen aktive MET- eller NVE-varsler i payloaden.</p>
+              )}
+            </section>
+          ) : null}
+          {visible.roadWeather ? (
+            <section>
+              <h3>Vegvær</h3>
+              {stations.length ? (
+                <ul className="weather-map-station-list">
+                  {stations.map((station) => (
+                    <li className={station.level} key={station.observation.id}>
+                      <strong>{station.observation.stationName}</strong>
+                      <span>{station.status}</span>
+                      <small>
+                        Vei {formatNumber(station.observation.roadSurfaceTemperatureC, "°")} ·
+                        Nedbør {formatNumber(station.observation.precipitationMm, " mm")}
+                      </small>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Venter på gyldige DATEX-posisjoner for vegvær.</p>
+              )}
+            </section>
+          ) : null}
+          {visible.consequences ? (
+            <section>
+              <h3>Konsekvenser</h3>
+              <ul className="weather-map-impact-list">
+                {impacts.map((group) => (
+                  <li className={group.level} key={group.group}>
+                    <strong>{group.group}</strong>
+                    <span>{group.status}</span>
+                    <small>{group.source}</small>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {visible.planned ? (
+            <section>
+              <h3>Planlagte kartlag</h3>
+              <ul className="weather-map-layer-status">
+                {layerGroups.planned.map((layer) => (
+                  <li key={layer.id}>
+                    <strong>{layer.title}</strong>
+                    <span>{layerStatus(layer)}</span>
+                    <small>{layer.detail}</small>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </aside>
+      </div>
+      <div className="weather-map-legend">
+        <span>
+          <i className="normal" /> Normal
+        </span>
+        <span>
+          <i className="watch" /> Følg med
+        </span>
+        <span>
+          <i className="warning" /> Varsel
+        </span>
+        <span>
+          <i className="severe" /> Alvorlig
+        </span>
+      </div>
+      <div className="weather-layer-list">
+        {[...layerGroups.available, ...layerGroups.context].map((layer) => (
+          <article key={layer.id}>
+            <strong>{layer.title}</strong>
+            <span>{layerStatus(layer)}</span>
+            <p>{layer.detail}</p>
+            <small>Kilde: {layer.source}</small>
+          </article>
+        ))}
+      </div>
+    </article>
+  );
 }
 
 export function WeatherPage() {
@@ -197,7 +502,7 @@ export function WeatherPage() {
         <div>
           <h1>Vær</h1>
           <p>
-            Weather preparedness desk · Oppdatert {formatTime(payload.generatedAt)} · {sourceLine}
+            Værberedskap · Oppdatert {formatTime(payload.generatedAt)} · {sourceLine}
           </p>
         </div>
       </header>
@@ -262,48 +567,7 @@ export function WeatherPage() {
           </section>
         </article>
 
-        <article className="weather-map-panel">
-          <div className="weather-panel-heading">
-            <div>
-              <h2>Varsel- og konsekvenskart</h2>
-              <p>Offisielle varselområder og lokale konsekvenslag</p>
-            </div>
-          </div>
-          <div className="weather-map-visual" aria-label="Kart med farevarsler og lokale målinger">
-            <MapContainer
-              center={[63.4305, 10.3951]}
-              zoom={10}
-              className="weather-leaflet-map"
-              zoomControl={false}
-              scrollWheelZoom={false}
-              dragging={false}
-              attributionControl={false}
-            >
-              <TileLayer attribution="© Kartverket" url={tiles} />
-            </MapContainer>
-            <div className="weather-map-label weather-map-label-trondheim">Trondheim</div>
-            <div className="weather-map-label weather-map-label-orkanger">Orkanger</div>
-            <div className="weather-map-label weather-map-label-malvik">Malvik</div>
-            <div className="weather-map-road weather-map-road-main" />
-            <div className="weather-map-road weather-map-road-secondary" />
-            <div className="rain-band rain-band-heavy" />
-            <div className="rain-band rain-band-light" />
-            <span className="station station-green station-one" />
-            <span className="station station-yellow station-two" />
-            <span className="station station-green station-three" />
-            <span className="station station-blue station-four" />
-          </div>
-          <div className="weather-layer-list">
-            {payload.mapLayers.map((layer) => (
-              <article key={layer.id}>
-                <strong>{layer.title}</strong>
-                <span>{layerStatus(layer)}</span>
-                <p>{layer.detail}</p>
-                <small>Kilde: {layer.source}</small>
-              </article>
-            ))}
-          </div>
-        </article>
+        <WeatherPreparednessMap payload={payload} />
 
         <aside className="weather-impact-panel" aria-label="Tiltak og myndigheter">
           <h2>Tiltak nå</h2>

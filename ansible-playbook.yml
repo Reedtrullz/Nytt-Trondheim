@@ -433,22 +433,26 @@
           delay: 5
           changed_when: false
 
-        - name: Verify worker source health freshness
+        - name: Verify traffic collector runs after candidate promotion
           ansible.builtin.shell: |
             set -euo pipefail
-            docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -Atqc "
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -Atqc "
               SELECT count(*)
-              FROM source_health
-              WHERE state='ok'
-                AND last_checked_at > now() - interval '20 minutes'
-                AND last_checked_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz
-                AND source IN ('datex','datex_travel_time','entur_vehicle_positions','entur_service_alerts','vegvesen_traffic_info','trafikkdata');
-            " | grep -Eq '^[1-9][0-9]*$'
+              FROM (
+                SELECT DISTINCT ON (source) source, status, started_at
+                FROM collector_runs
+                WHERE source IN ('vegvesen_traffic_info','trafikkdata')
+                  AND started_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz
+                ORDER BY source, started_at DESC
+              ) recent
+              WHERE status IN ('succeeded','partial','skipped');
+            ")"
+            test "$count" -eq 2
           args:
             chdir: "{{ app_dir }}"
             executable: /bin/bash
-          register: worker_freshness
-          until: worker_freshness.rc == 0
+          register: traffic_collector_runs
+          until: traffic_collector_runs.rc == 0
           retries: 12
           delay: 10
           changed_when: false
@@ -497,7 +501,9 @@
               SELECT count(*) INTO entur_source_health_count
               FROM source_health
               WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
-                AND state='ok';
+                AND state='ok'
+                AND last_checked_at > now() - interval '20 minutes'
+                AND last_checked_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz;
 
               IF entur_source_health_count <> 2 THEN
                 RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;

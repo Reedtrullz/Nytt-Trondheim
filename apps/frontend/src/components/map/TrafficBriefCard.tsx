@@ -13,6 +13,7 @@ function formatGeneratedAt(value: string) {
   if (!Number.isFinite(date.getTime())) return "ukjent tid";
   return new Intl.DateTimeFormat("nb-NO", {
     timeStyle: "short",
+    timeZone: "Europe/Oslo",
   }).format(date);
 }
 

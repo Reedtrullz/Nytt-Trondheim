@@ -5,6 +5,7 @@ import type {
   Article,
   OfficialEvent,
   PublicTransportServiceAlert,
+  SourceCollectorRun,
   SourceItemInput,
   TrafficCounterSnapshot,
   WorkerCycleMetrics,
@@ -78,11 +79,13 @@ export interface WorkerSourceMetricInput {
   completedAtMs: number;
   sourceItemCount?: number;
   parseFailures?: number;
+  skipped?: boolean;
 }
 
 interface WorkerCollectorTelemetry {
   sourceItemCount?: number;
   parseFailures?: number;
+  skipped?: boolean;
 }
 
 export function buildWorkerCycleMetrics({
@@ -118,6 +121,39 @@ export function buildWorkerCycleMetrics({
     sourceDurationsMs,
     sourceItemCounts,
     parseFailures,
+  };
+}
+
+export function collectorRunFromMetric(metric: WorkerSourceMetricInput): SourceCollectorRun {
+  const startedAt = new Date(metric.startedAtMs);
+  const completedAt = new Date(metric.completedAtMs);
+  const parseFailures = Math.max(0, Math.round(metric.parseFailures ?? 0));
+  const accepted = Math.max(0, Math.round(metric.sourceItemCount ?? 0));
+  const status = metric.skipped
+    ? "skipped"
+    : parseFailures > 0
+      ? accepted > 0
+        ? "partial"
+        : "failed"
+      : "succeeded";
+
+  return {
+    id: `${metric.source}:${startedAt.toISOString()}:${completedAt.getTime()}`,
+    source: metric.source as SourceCollectorRun["source"],
+    collector: metric.source,
+    status,
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    durationMs: Math.max(0, Math.round(metric.completedAtMs - metric.startedAtMs)),
+    recordsSeen: accepted + parseFailures,
+    recordsAccepted: accepted,
+    recordsRejected: parseFailures,
+    ...(parseFailures > 0
+      ? {
+          errorCode: "parse_or_collection_failure",
+          errorMessage: `${parseFailures} parse- eller innhentingsfeil i siste kjøring`,
+        }
+      : {}),
   };
 }
 
@@ -253,8 +289,8 @@ export async function collectEnturVehiclesForMap({
   nextPollAt: string;
   now?: () => Date;
   collector?: EnturVehicleCollector;
-}): Promise<void> {
-  await collectEnturVehiclesForMapCodespaces({
+}): Promise<WorkerCollectorTelemetry> {
+  return collectEnturVehiclesForMapCodespaces({
     repository,
     clientName,
     codespaceIds: [codespaceId],
@@ -281,7 +317,7 @@ export async function collectEnturVehiclesForMapCodespaces({
   nextPollAt: string;
   now?: () => Date;
   collector?: EnturVehicleCollector;
-}): Promise<void> {
+}): Promise<WorkerCollectorTelemetry> {
   const checkedAt = now().toISOString();
   let vehicleCount = 0;
   let staleCount = 0;
@@ -316,6 +352,7 @@ export async function collectEnturVehiclesForMapCodespaces({
       ? `${vehicleCount} kjøretøy oppdatert fra ${successfulCodespaces}/${codespaceIds.length} codespaces (${staleCount} markert stale). Feil: ${failures.join("; ")}`
       : `${vehicleCount} kjøretøy oppdatert fra ${successfulCodespaces} codespaces (${staleCount} markert stale)`,
   });
+  return { sourceItemCount: vehicleCount, parseFailures: failures.length };
 }
 
 type EnturServiceAlertRepository = Pick<
@@ -707,7 +744,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const recordSourceMetric = (
     source: string,
     startedAtMs: number,
-    values: { sourceItemCount?: number; parseFailures?: number } = {},
+    values: WorkerCollectorTelemetry = {},
   ) => {
     sourceMetrics.push({
       source,
@@ -1096,6 +1133,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     sources: sourceMetrics,
   });
   try {
+    await Promise.all(
+      sourceMetrics.map((metric) => repository.recordCollectorRun(collectorRunFromMetric(metric))),
+    );
     await repository.saveWorkerCycleMetrics(workerMetrics);
   } catch (error) {
     console.warn(`[worker] could not persist worker cycle metrics: ${String(error)}`);
@@ -1116,14 +1156,29 @@ export async function runWorker(): Promise<void> {
   const enturVehicleBounds = enturBoundsFromEnv(process.env.ENTUR_VEHICLE_BOUNDS);
   const enturVehicleIntervalMs = 60 * 1000;
   const guardedEnturVehicles = createCollectionGuard(
-    () =>
-      collectEnturVehiclesForMapCodespaces({
+    async () => {
+      const startedAtMs = Date.now();
+      const telemetry = await collectEnturVehiclesForMapCodespaces({
         repository,
         clientName: enturClientName,
         codespaceIds: enturCodespaceIds,
         bounds: enturVehicleBounds,
         nextPollAt: new Date(Date.now() + enturVehicleIntervalMs).toISOString(),
-      }),
+      });
+      const completedAtMs = Date.now();
+      try {
+        await repository.recordCollectorRun(
+          collectorRunFromMetric({
+            source: "entur_vehicle_positions",
+            startedAtMs,
+            completedAtMs,
+            ...telemetry,
+          }),
+        );
+      } catch (error) {
+        console.warn(`[worker] could not persist Entur vehicle collector run: ${String(error)}`);
+      }
+    },
     () => console.warn("[worker] skipping Entur vehicle tick; previous cycle still running"),
   );
 

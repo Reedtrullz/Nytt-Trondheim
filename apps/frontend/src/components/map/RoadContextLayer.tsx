@@ -1,5 +1,7 @@
 import type { RoadCamera, RoadWeatherObservation, TrafficCounterSnapshot } from "@nytt/shared";
 import { CircleMarker, Popup } from "react-leaflet";
+import type { Point } from "geojson";
+import { latLngFromPoint } from "../../mapCoordinates.js";
 import { safeExternalUrl } from "../../safeExternalUrl.js";
 
 interface RoadContextLayerProps {
@@ -14,9 +16,8 @@ const allowedCameraPreviewHosts = new Set([
   "www.vegvesen.no",
 ]);
 
-function pointCenter(geometry: { coordinates: number[] }): [number, number] {
-  const [lng, lat] = geometry.coordinates;
-  return [lat ?? 0, lng ?? 0];
+function pointCenter(geometry: Point): [number, number] | undefined {
+  return latLngFromPoint(geometry);
 }
 
 function formatTime(value?: string): string | undefined {
@@ -26,6 +27,7 @@ function formatTime(value?: string): string | undefined {
   return new Intl.DateTimeFormat("nb-NO", {
     dateStyle: "short",
     timeStyle: "short",
+    timeZone: "Europe/Oslo",
   }).format(date);
 }
 
@@ -161,51 +163,63 @@ export function RoadContextLayer({
 }: RoadContextLayerProps) {
   return (
     <>
-      {weather.map((observation) => (
-        <CircleMarker
-          key={observation.id}
-          center={pointCenter(observation.geometry)}
-          radius={5}
-          pathOptions={{
-            className: "road-context-marker road-context-marker-weather",
-            opacity: 0.9,
-            fillOpacity: 0.75,
-            weight: 2,
-          }}
-        >
-          <WeatherPopup observation={observation} />
-        </CircleMarker>
-      ))}
-      {cameras.map((camera) => (
-        <CircleMarker
-          key={camera.id}
-          center={pointCenter(camera.geometry)}
-          radius={6}
-          pathOptions={{
-            className: "road-context-marker road-context-marker-camera",
-            opacity: camera.status === "ok" ? 0.9 : 0.55,
-            fillOpacity: camera.status === "ok" ? 0.75 : 0.45,
-            weight: 2,
-          }}
-        >
-          <CameraPopup camera={camera} />
-        </CircleMarker>
-      ))}
-      {counters.map((counter) => (
-        <CircleMarker
-          key={counter.id}
-          center={pointCenter(counter.geometry)}
-          radius={typeof counter.volumeLastHour === "number" ? 7 : 5}
-          pathOptions={{
-            className: "road-context-marker road-context-marker-counter",
-            opacity: 0.9,
-            fillOpacity: 0.7,
-            weight: 2,
-          }}
-        >
-          <CounterPopup counter={counter} />
-        </CircleMarker>
-      ))}
+      {weather.flatMap((observation) => {
+        const center = pointCenter(observation.geometry);
+        if (!center) return [];
+        return [
+          <CircleMarker
+            key={observation.id}
+            center={center}
+            radius={5}
+            pathOptions={{
+              className: "road-context-marker road-context-marker-weather",
+              opacity: 0.9,
+              fillOpacity: 0.75,
+              weight: 2,
+            }}
+          >
+            <WeatherPopup observation={observation} />
+          </CircleMarker>,
+        ];
+      })}
+      {cameras.flatMap((camera) => {
+        const center = pointCenter(camera.geometry);
+        if (!center) return [];
+        return [
+          <CircleMarker
+            key={camera.id}
+            center={center}
+            radius={6}
+            pathOptions={{
+              className: "road-context-marker road-context-marker-camera",
+              opacity: camera.status === "ok" ? 0.9 : 0.55,
+              fillOpacity: camera.status === "ok" ? 0.75 : 0.45,
+              weight: 2,
+            }}
+          >
+            <CameraPopup camera={camera} />
+          </CircleMarker>,
+        ];
+      })}
+      {counters.flatMap((counter) => {
+        const center = pointCenter(counter.geometry);
+        if (!center) return [];
+        return [
+          <CircleMarker
+            key={counter.id}
+            center={center}
+            radius={typeof counter.volumeLastHour === "number" ? 7 : 5}
+            pathOptions={{
+              className: "road-context-marker road-context-marker-counter",
+              opacity: 0.9,
+              fillOpacity: 0.7,
+              weight: 2,
+            }}
+          >
+            <CounterPopup counter={counter} />
+          </CircleMarker>,
+        ];
+      })}
     </>
   );
 }

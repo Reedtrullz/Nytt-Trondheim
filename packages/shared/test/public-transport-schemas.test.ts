@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { privateMapFeatureInputSchema, publicTransportMapQuerySchema } from "../src/schemas.js";
+import {
+  privateAnnotationUpdateRequestSchema,
+  privateMapFeatureInputSchema,
+  publicTransportMapQuerySchema,
+  workspaceMapQuerySchema,
+} from "../src/schemas.js";
 
 describe("public transport and map tool schemas", () => {
   it("requires complete public transport bounds when any bound is provided", () => {
@@ -51,5 +56,35 @@ describe("public transport and map tool schemas", () => {
       measurement: { radiusMeters: 500 },
     });
     expect(parsed.properties).not.toHaveProperty("provenance");
+  });
+
+  it("validates workspace map filters and private annotation updates", () => {
+    expect(
+      workspaceMapQuerySchema.parse({
+        statuses: "active,preliminary",
+        sources: "nrk,adressa",
+        provenances: "official,reporting_estimate",
+        confidenceLevels: "confirmed,likely",
+        includePrivateAnnotations: "false",
+        north: "63.5",
+        south: "63.3",
+        east: "10.6",
+        west: "10.2",
+      }),
+    ).toMatchObject({
+      statuses: ["active", "preliminary"],
+      sources: ["nrk", "adressa"],
+      provenances: ["official", "reporting_estimate"],
+      confidenceLevels: ["confirmed", "likely"],
+      includePrivateAnnotations: false,
+      north: 63.5,
+    });
+    expect(() => workspaceMapQuerySchema.parse({ north: "63.5" })).toThrow(
+      /north, south, east og west/,
+    );
+    expect(() => privateAnnotationUpdateRequestSchema.parse({})).toThrow(/minst ett felt/);
+    expect(privateAnnotationUpdateRequestSchema.parse({ label: "Ny etikett" })).toEqual({
+      label: "Ny etikett",
+    });
   });
 });

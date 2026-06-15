@@ -3,12 +3,18 @@ import type {
   ArticlePage,
   BootstrapPayload,
   MapFeature,
+  OperationsTimelineQuery,
+  OperationsTimelineResponse,
   OperationsStatus,
+  PrivateAnnotationUpdateRequest,
   PrivateMapFeatureInput,
   SessionPayload,
   Situation,
+  SituationMapWorkspace,
   SituationPage,
   SituationWorkspace,
+  SourceAuditFilterQuery,
+  SourceAuditWorkspaceResponse,
   SourceItem,
   SourceItemFilters,
   SourceItemPage,
@@ -89,6 +95,38 @@ export const api = {
     }
     return request<SourceItemPage>(`/api/source-items?${parameters.toString()}`);
   },
+  sourceAudit: (query: SourceAuditFilterQuery = {}) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (Array.isArray(value) && value.length > 0) {
+        parameters.set(key, value.join(","));
+      } else if (typeof value === "boolean" || typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<SourceAuditWorkspaceResponse>(
+      `/api/operations/source-audit${search ? `?${search}` : ""}`,
+    );
+  },
+  operationsTimeline: (query: OperationsTimelineQuery = {}) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (Array.isArray(value) && value.length > 0) {
+        parameters.set(key, value.join(","));
+      } else if (typeof value === "boolean" || typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<OperationsTimelineResponse>(
+      `/api/operations/timeline${search ? `?${search}` : ""}`,
+    );
+  },
   situationSourceItems: (id: string) => request<SourceItem[]>(`${situationPath(id)}/source-items`),
   linkSourceItem: (
     id: string,
@@ -117,6 +155,32 @@ export const api = {
     }
     return request<SituationPage>(`/api/situations?${parameters.toString()}`);
   },
+  situationMapWorkspace: (
+    query: {
+      statuses?: Situation["status"][];
+      sources?: string[];
+      provenances?: string[];
+      confidenceLevels?: string[];
+      includePrivateAnnotations?: boolean;
+      q?: string;
+    } = {},
+  ) => {
+    const parameters = new URLSearchParams();
+    if (query.statuses?.length) parameters.set("statuses", query.statuses.join(","));
+    if (query.sources?.length) parameters.set("sources", query.sources.join(","));
+    if (query.provenances?.length) parameters.set("provenances", query.provenances.join(","));
+    if (query.confidenceLevels?.length) {
+      parameters.set("confidenceLevels", query.confidenceLevels.join(","));
+    }
+    if (query.includePrivateAnnotations !== undefined) {
+      parameters.set("includePrivateAnnotations", String(query.includePrivateAnnotations));
+    }
+    if (query.q) parameters.set("q", query.q);
+    const search = parameters.toString();
+    return request<SituationMapWorkspace>(
+      `/api/situations/workspace-map${search ? `?${search}` : ""}`,
+    );
+  },
   savedArticles: () => request<ArticlePage["items"]>("/api/saved/articles"),
   operations: () => request<OperationsStatus>("/api/operations/status"),
   workspace: (id: string) => request<SituationWorkspace>(situationPath(id)),
@@ -138,10 +202,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ geometry: feature.geometry, properties: feature.properties }),
     }),
-  updateFeature: (id: string, featureId: string, label: string) =>
+  updateFeature: (id: string, featureId: string, update: string | PrivateAnnotationUpdateRequest) =>
     request<MapFeature>(`${situationPath(id)}/features/${featureId}`, {
       method: "PATCH",
-      body: JSON.stringify({ label }),
+      body: JSON.stringify(typeof update === "string" ? { label: update } : update),
     }),
   deleteFeature: (id: string, featureId: string) =>
     request<void>(`${situationPath(id)}/features/${featureId}`, { method: "DELETE" }),

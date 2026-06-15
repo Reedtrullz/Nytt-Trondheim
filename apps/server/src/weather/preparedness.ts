@@ -257,12 +257,14 @@ function roadWeatherStatus(roadWeather: RoadWeatherObservation[]): WeatherRiskIt
 function buildWarnings(events: OfficialEvent[]): WeatherWarningSummary[] {
   return events.map((event) => ({
     id: event.id,
+    source: event.source === "met" ? "met" : "nve",
     sourceLabel: warningSourceLabel(event),
     title: event.title,
     area: event.areaLabel,
     level: officialLevelLabel(event.severity),
     validUntil: event.validTo,
     url: event.sourceUrl,
+    ...(event.geometry ? { geometry: event.geometry } : {}),
   }));
 }
 
@@ -495,45 +497,49 @@ function buildImpactGroups(risks: WeatherRiskItem[]): WeatherImpactGroup[] {
   ];
 }
 
-const mapLayers: WeatherMapLayer[] = [
-  {
-    id: "met-warnings",
-    title: "MET warning polygons",
-    source: "MET",
-    status: "planned",
-    detail:
-      "MetAlerts-varsel er kildegrunnlag; polygonlaget markeres først aktivt når varselgeometri tegnes i værkartet.",
-  },
-  {
-    id: "nve-warning-areas",
-    title: "NVE flood/landslide warning areas",
-    source: "NVE/Varsom",
-    status: "planned",
-    detail: "Flom- og skredvarsel bør vises komplett og kilde-merket fra Varsom.",
-  },
-  {
-    id: "trondheim-overvann",
-    title: "Trondheim flood paths / overvann",
-    source: "Trondheim kommune",
-    status: "planned",
-    detail:
-      "Kommunale flomveier og overvannstema legges som kontekst når åpne lag er tilgjengelige.",
-  },
-  {
-    id: "datex-road-weather",
-    title: "Vegvesen road-weather stations",
-    source: "Statens vegvesen DATEX",
-    status: "available",
-    detail: "Værstasjoner langs veg brukes for føre, sikt og våt/isete veibane.",
-  },
-  {
-    id: "traffic-public-transport",
-    title: "Traffic and public transport disruptions",
-    source: "Nytt trafikkart/Entur/Vegvesen",
-    status: "available",
-    detail: "Eksisterende trafikk- og kollektivdata gir konsekvenskontekst.",
-  },
-];
+function buildMapLayers(warnings: WeatherWarningSummary[]): WeatherMapLayer[] {
+  const hasMetGeometry = warnings.some((warning) => warning.source === "met" && warning.geometry);
+  return [
+    {
+      id: "met-warnings",
+      title: "MET farevarselgeometri",
+      source: "MET",
+      status: hasMetGeometry ? "available" : "planned",
+      detail: hasMetGeometry
+        ? "MetAlerts-varsel tegnes med kildegeometri når MET leverer polygon."
+        : "MetAlerts-varsel er kildegrunnlag; polygonlaget aktiveres når MET leverer geometri.",
+    },
+    {
+      id: "nve-warning-areas",
+      title: "NVE flom- og skredområder",
+      source: "NVE/Varsom",
+      status: "planned",
+      detail: "Flom- og skredvarsel bør vises komplett og kilde-merket fra Varsom.",
+    },
+    {
+      id: "trondheim-overvann",
+      title: "Trondheim flomveier og overvann",
+      source: "Trondheim kommune",
+      status: "planned",
+      detail:
+        "Kommunale flomveier og overvannstema legges som kontekst når åpne lag er tilgjengelige.",
+    },
+    {
+      id: "datex-road-weather",
+      title: "Vegvesen værstasjoner langs vei",
+      source: "Statens vegvesen DATEX",
+      status: "available",
+      detail: "Værstasjoner langs veg brukes for føre, sikt og våt/isete veibane.",
+    },
+    {
+      id: "traffic-public-transport",
+      title: "Trafikk- og kollektivkonsekvenser",
+      source: "Nytt trafikkart/Entur/Vegvesen",
+      status: "available",
+      detail: "Eksisterende trafikk- og kollektivdata gir konsekvenskontekst.",
+    },
+  ];
+}
 
 export async function buildWeatherPreparednessPayload(input: {
   officialEvents: OfficialEvent[];
@@ -593,7 +599,7 @@ export async function buildWeatherPreparednessPayload(input: {
     impactGroups: buildImpactGroups(risks),
     warnings,
     roadWeather: input.roadWeather.slice(0, 10),
-    mapLayers,
+    mapLayers: buildMapLayers(warnings),
     sources: input.sourceHealth.filter((source) =>
       [
         "met",

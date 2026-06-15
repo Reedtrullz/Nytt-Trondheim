@@ -49,11 +49,15 @@ describe("WorkerRepository", () => {
       String(sql).includes("INSERT INTO source_items"),
     );
     expect(sourceItemCall).toBeTruthy();
-    expect(String(sourceItemCall?.[0])).toContain("ON CONFLICT (provider, kind, external_id)");
-    expect(String(sourceItemCall?.[0])).toContain("WHERE external_id IS NOT NULL");
+    expect(String(sourceItemCall?.[0])).toContain("ON CONFLICT DO NOTHING");
     expect(sourceItemCall?.[1]).toEqual(
       expect.arrayContaining([article.source, "article", article.id, article.url, article.title]),
     );
+    const sourceItemRefreshCall = query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE source_items"),
+    );
+    expect(String(sourceItemRefreshCall?.[0])).toContain("WHERE capture_hash=$13");
+    expect(String(sourceItemRefreshCall?.[0])).toContain("provider=$2 AND kind=$3");
   });
 
   it("serializes AI processing arrays and results for jsonb columns", async () => {
@@ -119,6 +123,45 @@ describe("WorkerRepository", () => {
       metrics.cycleCompletedAt,
       metrics.cycleDurationMs,
       metrics,
+    ]);
+  });
+
+  it("stores collector run history outside the source item ledger", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.recordCollectorRun({
+      id: "datex:2026-06-02T06:00:00.000Z",
+      source: "datex",
+      collector: "datex",
+      status: "partial",
+      startedAt: "2026-06-02T06:00:00.000Z",
+      completedAt: "2026-06-02T06:00:01.000Z",
+      durationMs: 1000,
+      recordsSeen: 3,
+      recordsAccepted: 2,
+      recordsRejected: 1,
+      errorCode: "parse_or_collection_failure",
+      errorMessage: "1 parsefeil",
+    });
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("INSERT INTO collector_runs");
+    expect(sql).not.toContain("source_items");
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      "datex:2026-06-02T06:00:00.000Z",
+      "datex",
+      "datex",
+      "partial",
+      "2026-06-02T06:00:00.000Z",
+      "2026-06-02T06:00:01.000Z",
+      1000,
+      3,
+      2,
+      1,
+      "parse_or_collection_failure",
+      "1 parsefeil",
+      null,
     ]);
   });
 
@@ -255,7 +298,7 @@ describe("WorkerRepository", () => {
 
     const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
 
-    expect(sqlCalls).toHaveLength(6);
+    expect(sqlCalls).toHaveLength(7);
     expect(sqlCalls[0]).toBe("BEGIN");
     expect(sqlCalls[1]).toContain("INSERT INTO official_events");
     expect(sqlCalls[2]).toContain("UPDATE official_events");
@@ -264,7 +307,9 @@ describe("WorkerRepository", () => {
     expect(sqlCalls[3]).toContain("normalized_payload=jsonb_set");
     expect(sqlCalls[3]).toContain("raw_payload=CASE");
     expect(sqlCalls[4]).toContain("INSERT INTO source_items");
-    expect(sqlCalls[5]).toBe("COMMIT");
+    expect(sqlCalls[5]).toContain("UPDATE source_items");
+    expect(sqlCalls[5]).toContain("WHERE id = COALESCE");
+    expect(sqlCalls[6]).toBe("COMMIT");
     expect(query.mock.calls[2]?.[1]).toEqual([["old-event"]]);
     expect(query.mock.calls[3]?.[1]).toEqual(["datex", ["old-event"], "cancelled"]);
     expect(query.mock.calls[4]?.[1]).toEqual(
@@ -625,6 +670,7 @@ describe("WorkerRepository", () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [] });
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);
     const event = trafficMapEvent();
@@ -638,7 +684,9 @@ describe("WorkerRepository", () => {
 
     const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
     expect(sqlCalls[0]).toContain("INSERT INTO source_items");
-    expect(sqlCalls[0]).toContain("ON CONFLICT (provider, kind, external_id)");
+    expect(sqlCalls[0]).toContain("ON CONFLICT DO NOTHING");
+    expect(sqlCalls[1]).toContain("UPDATE source_items");
+    expect(sqlCalls[1]).toContain("WHERE id = COALESCE");
     expect(query.mock.calls[0]?.[1]).toEqual(
       expect.arrayContaining([
         "vegvesen_traffic_info",
@@ -648,7 +696,7 @@ describe("WorkerRepository", () => {
         event.title,
       ]),
     );
-    expect(sqlCalls[1]).toContain("SELECT payload FROM official_events");
+    expect(sqlCalls[2]).toContain("SELECT payload FROM official_events");
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO official_events"))).toBe(false);
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situations"))).toBe(false);
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situation_source_items"))).toBe(false);

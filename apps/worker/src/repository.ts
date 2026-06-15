@@ -11,6 +11,7 @@ import type {
   Situation,
   SourceItemInput,
   SourceHealth,
+  SourceCollectorRun,
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
@@ -97,6 +98,23 @@ export class WorkerRepository {
     item: SourceItemInput,
     client: Queryable = this.pool,
   ): Promise<void> {
+    const values = [
+      item.id,
+      item.provider,
+      item.kind,
+      item.externalId ?? null,
+      item.originalUrl ?? null,
+      item.title ?? null,
+      item.summary ?? null,
+      item.author ?? null,
+      item.publishedAt ?? null,
+      item.fetchedAt,
+      item.rawPayload,
+      item.normalizedPayload,
+      item.captureHash,
+      item.geoHint ? JSON.stringify(item.geoHint) : null,
+      item.reliabilityTier,
+    ];
     await client.query(
       `INSERT INTO source_items
         (id, provider, kind, external_id, original_url, title, summary, author, published_at,
@@ -105,37 +123,29 @@ export class WorkerRepository {
         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
          CASE WHEN $14::text IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($14),4326) END,
          $15)
-       ON CONFLICT (provider, kind, external_id) WHERE external_id IS NOT NULL
-       DO UPDATE SET
-         original_url=EXCLUDED.original_url,
-         title=EXCLUDED.title,
-         summary=EXCLUDED.summary,
-         author=EXCLUDED.author,
-         published_at=EXCLUDED.published_at,
-         fetched_at=EXCLUDED.fetched_at,
-         raw_payload=EXCLUDED.raw_payload,
-         normalized_payload=EXCLUDED.normalized_payload,
-         capture_hash=EXCLUDED.capture_hash,
-         geo_hint=EXCLUDED.geo_hint,
-         reliability_tier=EXCLUDED.reliability_tier,
-         updated_at=now()`,
-      [
-        item.id,
-        item.provider,
-        item.kind,
-        item.externalId ?? null,
-        item.originalUrl ?? null,
-        item.title ?? null,
-        item.summary ?? null,
-        item.author ?? null,
-        item.publishedAt ?? null,
-        item.fetchedAt,
-        item.rawPayload,
-        item.normalizedPayload,
-        item.captureHash,
-        item.geoHint ? JSON.stringify(item.geoHint) : null,
-        item.reliabilityTier,
-      ],
+       ON CONFLICT DO NOTHING`,
+      values,
+    );
+    await client.query(
+      `UPDATE source_items
+       SET
+         original_url=$5,
+         title=$6,
+         summary=$7,
+         author=$8,
+         published_at=$9,
+         fetched_at=$10,
+         raw_payload=$11,
+         normalized_payload=$12,
+         capture_hash=$13,
+         geo_hint=CASE WHEN $14::text IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($14),4326) END,
+         reliability_tier=$15,
+         updated_at=now()
+       WHERE id = COALESCE(
+         (SELECT id FROM source_items WHERE capture_hash=$13),
+         (SELECT id FROM source_items WHERE $4::text IS NOT NULL AND provider=$2 AND kind=$3 AND external_id=$4)
+       )`,
+      values,
     );
   }
 
@@ -226,6 +236,31 @@ export class WorkerRepository {
          payload=EXCLUDED.payload,
          updated_at=now()`,
       [metrics.cycleStartedAt, metrics.cycleCompletedAt, metrics.cycleDurationMs, metrics],
+    );
+  }
+
+  async recordCollectorRun(run: SourceCollectorRun): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO collector_runs
+        (id, source, collector, status, started_at, completed_at, duration_ms,
+         records_seen, records_accepted, records_rejected, error_code, error_message, diagnostics)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        run.id,
+        run.source,
+        run.collector,
+        run.status,
+        run.startedAt,
+        run.completedAt ?? null,
+        run.durationMs ?? null,
+        run.recordsSeen,
+        run.recordsAccepted,
+        run.recordsRejected,
+        run.errorCode ?? null,
+        run.errorMessage ?? null,
+        run.diagnostics ? JSON.stringify(run.diagnostics) : null,
+      ],
     );
   }
 

@@ -42,6 +42,7 @@ function formatTime(value?: string) {
   return new Intl.DateTimeFormat("nb-NO", {
     dateStyle: "short",
     timeStyle: "short",
+    timeZone: "Europe/Oslo",
   }).format(date);
 }
 

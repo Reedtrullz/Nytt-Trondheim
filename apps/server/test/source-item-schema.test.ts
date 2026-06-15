@@ -92,4 +92,16 @@ describe("source item schema", () => {
       schema.indexOf("CREATE TABLE IF NOT EXISTS collector_state"),
     );
   });
+
+  it("stores append-only collector run history outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS collector_runs");
+    expect(schema).toContain("status text NOT NULL CHECK");
+    expect(schema).toContain("records_accepted integer NOT NULL DEFAULT 0");
+    expect(schema).toContain("diagnostics jsonb");
+    expect(schema).toContain("collector_runs_source_started_idx");
+    expect(schema).toContain("009_collector_runs");
+    expect(schema).not.toMatch(/CREATE TABLE IF NOT EXISTS collector_runs[\s\S]*raw_payload/);
+  });
 });

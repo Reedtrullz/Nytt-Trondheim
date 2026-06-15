@@ -63,6 +63,8 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("3 operasjonelle objekter");
     expect(html).toContain("Kilder som trenger tilsyn");
     expect(html).toContain("Gjenopprettingstest");
+    expect(html).toContain("/drift/tidslinje");
+    expect(html).toContain("Åpne tidslinje");
   });
 
   it("does not imply zero failures before worker metrics exist", () => {

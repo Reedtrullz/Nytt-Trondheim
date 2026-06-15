@@ -26,6 +26,99 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests the map-first situation workspace with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        situations: [],
+        mapState: { layers: ["situations"], sourceFilters: {} },
+        timeline: [],
+        privateAnnotations: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.situationMapWorkspace({
+      statuses: ["preliminary", "active"],
+      sources: ["nrk", "adressa"],
+      provenances: ["official", "reporting_estimate"],
+      confidenceLevels: ["confirmed"],
+      includePrivateAnnotations: false,
+      q: "Bymarka",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/situations/workspace-map?statuses=preliminary%2Cactive&sources=nrk%2Cadressa&provenances=official%2Creporting_estimate&confidenceLevels=confirmed&includePrivateAnnotations=false&q=Bymarka",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests the source audit workspace with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        generatedAt: "2026-06-15T08:00:00.000Z",
+        filters: {},
+        sources: [],
+        collectorRuns: [],
+        alerts: [],
+        contractChecks: [],
+        traceability: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.sourceAudit({
+      sources: ["datex", "entur"],
+      groups: ["datex"],
+      roles: ["telemetry_source"],
+      healthStates: ["ok", "degraded"],
+      freshnessStates: ["fresh", "stale"],
+      contractStatuses: ["pass", "warn"],
+      staleOnly: true,
+      includeDiagnostics: true,
+      q: "DATEX",
+      limit: 25,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/source-audit?sources=datex%2Centur&groups=datex&roles=telemetry_source&healthStates=ok%2Cdegraded&freshnessStates=fresh%2Cstale&contractStatuses=pass%2Cwarn&staleOnly=true&includeDiagnostics=true&q=DATEX&limit=25",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests the operations timeline with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        generatedAt: "2026-06-15T08:00:00.000Z",
+        filters: {},
+        events: [],
+        summary: {
+          total: 0,
+          activeSituations: 0,
+          staleWarnings: 0,
+          collectorRuns: 0,
+          reviewerActions: 0,
+          privateEvents: 0,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.operationsTimeline({
+      sources: ["nrk", "datex_travel_time"],
+      kinds: ["source_update", "stale_warning"],
+      roles: ["incident", "telemetry"],
+      includePrivateAnnotations: false,
+      q: "Bymarka",
+      sort: "asc",
+      limit: 25,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/timeline?sources=nrk%2Cdatex_travel_time&kinds=source_update%2Cstale_warning&roles=incident%2Ctelemetry&includePrivateAnnotations=false&q=Bymarka&sort=asc&limit=25",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("encodes reserved characters in situation source item paths", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse([]));
     vi.stubGlobal("fetch", fetchMock);

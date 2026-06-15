@@ -66,6 +66,7 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
   const [error, setError] = useState<string | undefined>();
   const requestIdRef = useRef(0);
   const abortRef = useRef<AbortController | undefined>(undefined);
+  const settledQueryKeyRef = useRef("");
 
   const categoriesKey = options.categories.join(",");
   const severitiesKey = options.severities.join(",");
@@ -73,6 +74,9 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
   const fromKey = options.from ?? "";
   const toKey = options.to ?? "";
   const currentBoundsKey = boundsKey(options.bounds);
+  const queryKey = [categoriesKey, severitiesKey, statesKey, fromKey, toKey, currentBoundsKey].join(
+    "|",
+  );
 
   const reload = useCallback(async () => {
     requestIdRef.current += 1;
@@ -80,9 +84,12 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const queryChanged =
+      settledQueryKeyRef.current !== "" && settledQueryKeyRef.current !== queryKey;
 
     setLoading(true);
     setError(undefined);
+    if (queryChanged) setData(undefined);
     try {
       const payload = await fetchTrafficMap(
         {
@@ -95,10 +102,14 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
         },
         { signal: controller.signal },
       );
-      if (requestId === requestIdRef.current) setData(payload);
+      if (requestId === requestIdRef.current) {
+        setData(payload);
+        settledQueryKeyRef.current = queryKey;
+      }
     } catch (err) {
       if (isAbortError(err)) return;
       if (requestId === requestIdRef.current) {
+        if (queryChanged) setData(undefined);
         setError(err instanceof Error ? err.message : "Ukjent feil ved henting av trafikkdata.");
       }
     } finally {
@@ -107,7 +118,7 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
         abortRef.current = undefined;
       }
     }
-  }, [categoriesKey, currentBoundsKey, fromKey, severitiesKey, statesKey, toKey]);
+  }, [categoriesKey, currentBoundsKey, fromKey, queryKey, severitiesKey, statesKey, toKey]);
 
   useEffect(() => {
     void reload();

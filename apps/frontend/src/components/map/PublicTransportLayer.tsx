@@ -1,32 +1,19 @@
-import type { Point } from "geojson";
 import type {
   PublicTransportMapPayload,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
 } from "@nytt/shared";
 import { CircleMarker, Popup } from "react-leaflet";
-
-function validLatLng(lon: unknown, lat: unknown): [number, number] | undefined {
-  if (typeof lon !== "number" || typeof lat !== "number") return undefined;
-  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return undefined;
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return undefined;
-  return [lat, lon];
-}
-
-function pointToLatLng(point: Point): [number, number] | undefined {
-  const [lon, lat] = point.coordinates;
-  return validLatLng(lon, lat);
-}
+import { latLngFromGeoJsonPosition, latLngFromPoint } from "../../mapCoordinates.js";
 
 function alertPositions(alert: PublicTransportServiceAlert): Array<[number, number]> {
   if (!alert.geometry) return [];
   if (alert.geometry.type === "Point") {
-    const [lon, lat] = alert.geometry.coordinates;
-    const center = validLatLng(lon, lat);
+    const center = latLngFromPoint(alert.geometry);
     return center ? [center] : [];
   }
-  return alert.geometry.coordinates.flatMap(([lon, lat]) => {
-    const center = validLatLng(lon, lat);
+  return alert.geometry.coordinates.flatMap((position) => {
+    const center = latLngFromGeoJsonPosition(position);
     return center ? [center] : [];
   });
 }
@@ -42,7 +29,11 @@ function formatTime(value?: string): string {
   if (!value) return "ukjent";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "ukjent";
-  return date.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Oslo",
+  });
 }
 
 export function PublicTransportLayer({
@@ -58,7 +49,7 @@ export function PublicTransportLayer({
   return (
     <>
       {payload.vehicles.flatMap((vehicle) => {
-        const center = pointToLatLng(vehicle.geometry);
+        const center = latLngFromPoint(vehicle.geometry);
         if (!center) return [];
         return [
           <CircleMarker

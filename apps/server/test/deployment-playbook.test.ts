@@ -84,15 +84,33 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toMatch(/retries:\s*\d+/);
   });
 
-  it("verifies promoted worker container state and candidate source freshness", () => {
+  it("verifies promoted worker container state and traffic collector runs", () => {
     const workerTaskStart = playbook.indexOf("- name: Verify worker");
     const workerTaskEnd = playbook.indexOf("- name: Verify DATEX source health", workerTaskStart);
     const task = playbook.slice(workerTaskStart, workerTaskEnd);
 
     expect(workerTaskStart).toBeGreaterThan(-1);
     expect(task).toContain("ps --services --filter status=running worker | grep -qx worker");
-    expect(task).toMatch(/source_health|runtime-status|last_checked_at/);
+    expect(task).toContain("- name: Verify traffic collector runs after candidate promotion");
+    expect(task).toContain("FROM collector_runs");
+    expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
+    expect(task).toContain("status IN ('succeeded','partial','skipped')");
+    expect(task).toContain('test "$count" -eq 2');
     expect(task).toContain("candidate_promoted_at.stdout");
+    expect(task).toMatch(
+      /started_at\s*>=\s*'\{\{ candidate_promoted_at\.stdout \}\}'::timestamptz/,
+    );
+  });
+
+  it("requires fresh Entur source health rows after candidate promotion", () => {
+    const taskStart = playbook.indexOf(
+      "- name: Verify Entur source health and provenance invariants when tables exist",
+    );
+    const taskEnd = playbook.indexOf("- name: Verify source item query sanity", taskStart);
+    const task = playbook.slice(taskStart, taskEnd);
+
+    expect(taskStart).toBeGreaterThan(-1);
+    expect(task).toContain("last_checked_at > now() - interval '20 minutes'");
     expect(task).toMatch(
       /last_checked_at\s*>=\s*'\{\{ candidate_promoted_at\.stdout \}\}'::timestamptz/,
     );

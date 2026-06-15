@@ -12,13 +12,17 @@ import {
   type ArticleCategoryFilter,
   type HomeFilters,
 } from "../homeFilters.js";
+import { groupHomeArticles, type HomeArticleGroup } from "../homeArticleGroups.js";
+import { nearbyStoryItems, nearbyStorySummary, type NearbyStoryItem } from "../homeNearby.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
 function formatTime(date: string) {
-  return new Intl.DateTimeFormat("nb-NO", { hour: "2-digit", minute: "2-digit" }).format(
-    new Date(date),
-  );
+  return new Intl.DateTimeFormat("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Oslo",
+  }).format(new Date(date));
 }
 
 function SaveButton({
@@ -93,15 +97,59 @@ function SituationBanner({
   );
 }
 
+function sourceClusterLabel(group: HomeArticleGroup): string {
+  if (group.sourceLabels.length > 1) return `${group.sourceLabels.length} kilder dekker samme sak`;
+  return `${group.articles.length} oppdateringer samlet`;
+}
+
+function SourceCluster({ group }: { group: HomeArticleGroup }) {
+  if (group.articles.length < 2) return null;
+  const label = sourceClusterLabel(group);
+  return (
+    <div className="source-cluster" aria-label={label}>
+      <span>{label}</span>
+      <div className="source-cluster-list">
+        {group.articles.map((article) => {
+          const articleUrl = safeExternalUrl(article.url);
+          const sourceLabel = `${article.sourceLabel} · ${formatTime(article.publishedAt)}`;
+          const title = article.id === group.primary.id ? "Hovedsak" : article.title;
+          const content = (
+            <>
+              <b>{sourceLabel}</b>
+              <small>{title}</small>
+            </>
+          );
+          return articleUrl ? (
+            <a
+              className="source-cluster-item"
+              href={articleUrl}
+              key={article.id}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              {content}
+            </a>
+          ) : (
+            <span className="source-cluster-item" key={article.id}>
+              {content}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function LeadStory({
-  article,
+  group,
   saving,
   onSave,
 }: {
-  article: Article;
+  group: HomeArticleGroup;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
 }) {
+  const article = group.primary;
   const articleUrl = safeExternalUrl(article.url);
   return (
     <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
@@ -113,6 +161,7 @@ function LeadStory({
         <SaveButton article={article} saving={saving} onUpdate={onSave} />
         <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
+        <SourceCluster group={group} />
         <div className="lead-footer">
           <span className={`topic ${article.category.toLowerCase()}`}>{article.category}</span>
           {articleUrl ? (
@@ -127,14 +176,15 @@ function LeadStory({
 }
 
 function NewsRow({
-  article,
+  group,
   saving,
   onSave,
 }: {
-  article: Article;
+  group: HomeArticleGroup;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
 }) {
+  const article = group.primary;
   const articleUrl = safeExternalUrl(article.url);
   return (
     <article className="news-row">
@@ -150,6 +200,7 @@ function NewsRow({
           <span className="headline">{article.title}</span>
         )}
         <p className="excerpt">{article.excerpt}</p>
+        <SourceCluster group={group} />
       </div>
       <span className={`topic ${article.category.toLowerCase()}`}>{article.category}</span>
       <SaveButton article={article} saving={saving} onUpdate={onSave} />
@@ -157,31 +208,106 @@ function NewsRow({
   );
 }
 
+function nearbyMapTarget(item: NearbyStoryItem | undefined): { label: string; to: string } {
+  if (item?.article.situationId) {
+    return { label: "Åpne situasjon", to: `/situasjoner/${item.article.situationId}` };
+  }
+  if (item?.category === "Transport") return { label: "Åpne trafikkart", to: "/trafikk" };
+  if (item?.category === "Vær") return { label: "Åpne værkart", to: "/vaer" };
+  return { label: "Åpne situasjonskart", to: "/situasjoner" };
+}
+
 function NearbyRail({ articles, data }: { articles: Article[]; data: BootstrapPayload }) {
-  const located = articles.filter((article) => article.location).slice(0, 3);
+  const allNearby = useMemo(
+    () => nearbyStoryItems(articles, { limit: Number.MAX_SAFE_INTEGER }),
+    [articles],
+  );
+  const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
+  const [selectedNearbyId, setSelectedNearbyId] = useState<string>();
+  const nearbyIds = nearby.map((item) => item.id).join("|");
+  const selectedNearby = nearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
+  const selectedTarget = nearbyMapTarget(selectedNearby);
+  const selectedArticleUrl = selectedNearby
+    ? safeExternalUrl(selectedNearby.article.url)
+    : undefined;
   const municipalityArchiveUrl = safeExternalUrl(
     "https://www.trondheim.kommune.no/aktuelt/nyheter/",
   );
   const civic = articles.filter((article) => article.source === "trondheim_kommune").slice(0, 2);
+
+  useEffect(() => {
+    setSelectedNearbyId((current) =>
+      current && nearby.some((item) => item.id === current) ? current : nearby[0]?.id,
+    );
+  }, [nearby, nearbyIds]);
+
   return (
     <aside className="home-rail">
-      <section>
+      <section className="nearby-module" aria-labelledby="nearby-heading">
         <div className="rail-title">
-          <h2>I nærheten</h2>
-          <a href="#map">
-            Se alle på kart <ArrowIcon />
-          </a>
+          <div>
+            <h2 id="nearby-heading">I nærheten</h2>
+            <p>{nearbyStorySummary(nearby, allNearby.length)}</p>
+          </div>
+          <Link to="/situasjoner">
+            Åpne situasjonskart <ArrowIcon />
+          </Link>
         </div>
-        <NewsMap articles={located} />
-        <ol className="nearby-list">
-          {located.map((article, index) => (
-            <li key={article.id}>
-              <strong>{index + 1}</strong>
-              <span>{article.title}</span>
-              <small>{article.location?.label}</small>
-            </li>
-          ))}
-        </ol>
+        <NewsMap items={nearby} selectedId={selectedNearby?.id} onSelect={setSelectedNearbyId} />
+        {nearby.length > 0 ? (
+          <>
+            <ol className="nearby-list">
+              {nearby.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={`nearby-story-row nearby-story-row-${item.kind}`}
+                    aria-current={selectedNearby?.id === item.id ? "true" : undefined}
+                    onClick={() => setSelectedNearbyId(item.id)}
+                    onFocus={() => setSelectedNearbyId(item.id)}
+                    onMouseEnter={() => setSelectedNearbyId(item.id)}
+                  >
+                    <strong>{item.markerLabel}</strong>
+                    <span>
+                      <b>{item.title}</b>
+                      <small>
+                        {item.locationLabel} · {item.sourceLabel}
+                      </small>
+                    </span>
+                    <em className={`nearby-kind nearby-kind-${item.kind}`}>
+                      {item.relevanceLabel}
+                    </em>
+                  </button>
+                </li>
+              ))}
+            </ol>
+            <article className="nearby-detail" aria-live="polite">
+              <p className="metadata compact">
+                {selectedNearby?.sourceLabel.toUpperCase()} ·{" "}
+                {selectedNearby ? formatTime(selectedNearby.publishedAt) : ""}
+              </p>
+              <h3>{selectedNearby?.title}</h3>
+              <p>{selectedNearby?.relevanceDetail}</p>
+              <div className="nearby-detail-actions">
+                <Link to={selectedTarget.to}>
+                  {selectedTarget.label} <ArrowIcon />
+                </Link>
+                {selectedArticleUrl ? (
+                  <a href={selectedArticleUrl} target="_blank" rel="noreferrer noopener">
+                    Les saken <ArrowIcon />
+                  </a>
+                ) : null}
+              </div>
+            </article>
+          </>
+        ) : (
+          <div className="nearby-empty">
+            <strong>Ingen kartfestede saker i dette utvalget ennå.</strong>
+            <Link to="/situasjoner">
+              Se situasjonskartet <ArrowIcon />
+            </Link>
+          </div>
+        )}
       </section>
       <section className="municipality">
         <div className="rail-title">
@@ -238,6 +364,13 @@ function searchParamsFor(filters: HomeFilters) {
   return buildHomeSearch(filters).replace(/^\?/, "");
 }
 
+interface SavedOverride {
+  expiresAt: number;
+  saved: boolean;
+}
+
+const savedOverrideTtlMs = 60_000;
+
 export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
@@ -250,7 +383,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [feedError, setFeedError] = useState<string>();
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
-  const articleSavedOverridesRef = useRef<Map<string, boolean>>(new Map());
+  const articleSavedOverridesRef = useRef<Map<string, SavedOverride>>(new Map());
   const feedKey = `${scope}\u0000${category}\u0000${query}`;
   const feedKeyRef = useRef(feedKey);
   const loadMoreRequestIdRef = useRef(0);
@@ -275,13 +408,21 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
           .then((page) => {
             if (!cancelled) {
               setArticles(() => {
-                const pendingSavedById = articleSavedOverridesRef.current;
-                if (pendingSavedById.size === 0) return page.items;
-                return page.items.map((item) =>
-                  pendingSavedById.has(item.id)
-                    ? { ...item, saved: pendingSavedById.get(item.id) ?? item.saved }
-                    : item,
-                );
+                const savedOverrides = articleSavedOverridesRef.current;
+                if (savedOverrides.size === 0) return page.items;
+                const now = Date.now();
+                const nextOverrides = new Map(savedOverrides);
+                const nextItems = page.items.map((item) => {
+                  const override = nextOverrides.get(item.id);
+                  if (!override) return item;
+                  if (override.expiresAt <= now || item.saved === override.saved) {
+                    nextOverrides.delete(item.id);
+                    return item;
+                  }
+                  return { ...item, saved: override.saved };
+                });
+                articleSavedOverridesRef.current = nextOverrides;
+                return nextItems;
               });
               setNextCursor(page.nextCursor);
             }
@@ -311,8 +452,13 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const filtered = useMemo(() => articles, [articles]);
   const isTextSearch = query.trim().length > 0;
 
-  const lead = filtered[0];
-  const secondary = filtered.filter((article) => article.id !== lead?.id);
+  const groupedArticles = useMemo(() => groupHomeArticles(filtered), [filtered]);
+  const leadGroup = groupedArticles[0];
+  const secondaryGroups = groupedArticles.slice(1);
+  const nearbyArticles = useMemo(
+    () => groupedArticles.map((group) => group.primary),
+    [groupedArticles],
+  );
 
   async function updateSaved(id: string, saved: boolean) {
     if (savingArticleIdsRef.current.has(id)) return;
@@ -320,16 +466,23 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
     setSaveError(undefined);
     const pending = new Set(savingArticleIdsRef.current).add(id);
     savingArticleIdsRef.current = pending;
-    articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(id, saved);
+    articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(id, {
+      saved,
+      expiresAt: Date.now() + savedOverrideTtlMs,
+    });
     setSavingArticleIds(pending);
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
     try {
       await api.saveArticle(id, saved);
+      articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(id, {
+        saved,
+        expiresAt: Date.now() + savedOverrideTtlMs,
+      });
     } catch (reason) {
-      articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(
-        id,
-        previous,
-      );
+      articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(id, {
+        saved: previous,
+        expiresAt: Date.now() + savedOverrideTtlMs,
+      });
       setArticles((items) =>
         items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
       );
@@ -413,18 +566,22 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
             </p>
           ) : null}
           {loading ? <p className="feed-state">Oppdaterer saker...</p> : null}
-          {lead ? (
-            <LeadStory article={lead} saving={savingArticleIds.has(lead.id)} onSave={updateSaved} />
+          {leadGroup ? (
+            <LeadStory
+              group={leadGroup}
+              saving={savingArticleIds.has(leadGroup.primary.id)}
+              onSave={updateSaved}
+            />
           ) : null}
-          {!loading && !lead ? (
+          {!loading && !leadGroup ? (
             <p className="feed-state">Ingen saker samsvarer med {searchSummary(filters)}.</p>
           ) : null}
           <div className="news-list">
-            {secondary.map((article) => (
+            {secondaryGroups.map((group) => (
               <NewsRow
-                key={article.id}
-                article={article}
-                saving={savingArticleIds.has(article.id)}
+                key={group.id}
+                group={group}
+                saving={savingArticleIds.has(group.primary.id)}
                 onSave={updateSaved}
               />
             ))}
@@ -435,7 +592,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
             </button>
           ) : null}
         </section>
-        <NearbyRail articles={filtered} data={initialData} />
+        <NearbyRail articles={nearbyArticles} data={initialData} />
       </div>
     </main>
   );

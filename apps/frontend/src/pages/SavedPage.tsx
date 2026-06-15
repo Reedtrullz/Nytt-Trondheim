@@ -6,9 +6,11 @@ import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
 function time(value: string) {
-  return new Intl.DateTimeFormat("nb-NO", { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(value),
-  );
+  return new Intl.DateTimeFormat("nb-NO", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Europe/Oslo",
+  }).format(new Date(value));
 }
 
 export function SavedPage() {
@@ -16,8 +18,11 @@ export function SavedPage() {
   const [situations, setSituations] = useState<Situation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    setError(undefined);
+    setLoading(true);
     void Promise.all([api.savedArticles(), api.situations({ saved: true })])
       .then(([savedArticles, savedSituations]) => {
         setArticles(savedArticles);
@@ -25,7 +30,7 @@ export function SavedPage() {
       })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [attempt]);
 
   return (
     <main className="saved-page">
@@ -35,7 +40,14 @@ export function SavedPage() {
         <p>Saker og situasjoner du har merket for oppfølging.</p>
       </header>
       {loading ? <p className="feed-state">Henter lagrede elementer...</p> : null}
-      {error ? <p className="feed-state error">Kunne ikke hente lagret: {error}</p> : null}
+      {error ? (
+        <div className="feed-state error" role="alert">
+          <p>Kunne ikke hente lagret: {error}</p>
+          <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+            Prøv igjen
+          </button>
+        </div>
+      ) : null}
       {!loading && !error && articles.length === 0 && situations.length === 0 ? (
         <p className="empty-panel">Du har ingen lagrede saker eller situasjoner.</p>
       ) : null}

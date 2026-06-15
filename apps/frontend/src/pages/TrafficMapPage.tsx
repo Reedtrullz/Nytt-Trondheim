@@ -1,9 +1,10 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from "react-leaflet";
+import { useSearchParams } from "react-router-dom";
+import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import type {
   TrafficEventCategory,
-  TrafficEventSeverity,
   TrafficEventState,
+  TrafficMapEvent,
   TravelPlanPayload,
 } from "@nytt/shared";
 import { CorridorImpactCard } from "../components/map/CorridorImpactCard.js";
@@ -12,6 +13,7 @@ import {
   PublicTransportLayer,
   PublicTransportSummary,
 } from "../components/map/PublicTransportLayer.js";
+import { MapAccessibility } from "../components/map/MapAccessibility.js";
 import { RoadContextLayer } from "../components/map/RoadContextLayer.js";
 import { TrafficDetailDrawer } from "../components/map/TrafficDetailDrawer.js";
 import { TrafficEventList } from "../components/map/TrafficEventList.js";
@@ -26,8 +28,20 @@ import { TrafficNowSummary } from "../components/map/TrafficNowSummary.js";
 import { fetchTravelPlan } from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
+import {
+  boundsFromGeometry,
+  boundsFromLatLngs,
+  latLngFromGeoJsonPosition,
+  latLngsFromLineString,
+} from "../mapCoordinates.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { compactTrafficEventRow } from "../trafficEventRows.js";
+import {
+  buildTrafficMapSearch,
+  parseTrafficMapFilters,
+  trafficFiltersForPreset,
+  type TrafficMapFilters,
+} from "../trafficMapFilters.js";
 import { buildTrafficViewModel, visibleByDefault } from "../trafficViewModel.js";
 
 interface MapBounds {
@@ -45,34 +59,12 @@ interface TrafficTimeWindow {
 
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
-const allCategories: TrafficEventCategory[] = [
-  "roadworks",
-  "accident",
-  "closure",
-  "congestion",
-  "weather",
-  "restriction",
-  "obstruction",
-  "other",
-];
-const allSeverities: TrafficEventSeverity[] = ["low", "medium", "high", "critical"];
-const defaultTrafficLayers: TrafficLayerVisibility = {
-  incidents: true,
-  roadworks: true,
-  travelTime: true,
-  publicTransportDisruptions: true,
-  publicTransportVehicles: false,
-  weatherRisk: false,
-  estimatedNews: false,
-  privateNotes: false,
-  showAll: false,
-};
 
 function addHours(date: Date, hours: number): Date {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
 
-function timeWindowForPreset(preset: TrafficMapPreset): TrafficTimeWindow {
+export function timeWindowForPreset(preset: TrafficMapPreset): TrafficTimeWindow {
   const now = new Date();
   switch (preset) {
     case "next24h":
@@ -95,7 +87,7 @@ function timeWindowForPreset(preset: TrafficMapPreset): TrafficTimeWindow {
       return { states: ["active", "planned"] };
     case "now":
     default:
-      return { states: ["active", "planned"] };
+      return { states: ["active"] };
   }
 }
 
@@ -113,42 +105,82 @@ function formatDuration(seconds?: number): string | undefined {
   return remainder ? `${hours} t ${remainder} min` : `${hours} t`;
 }
 
-function routePositions(plan: TravelPlanPayload): [number, number][] {
-  return plan.route.geometry.coordinates
-    .map((coordinate): [number, number] | undefined => {
-      const [lng, lat] = coordinate;
-      if (typeof lat !== "number" || typeof lng !== "number") return undefined;
-      return [lat, lng];
-    })
-    .filter((position): position is [number, number] => Boolean(position));
+export function routePositions(plan: TravelPlanPayload): [number, number][] {
+  return latLngsFromLineString(plan.route.geometry);
 }
 
 function TravelPlanLayer({ plan }: { plan?: TravelPlanPayload }) {
   if (!plan) return null;
   const positions = routePositions(plan);
-  const [originLat, originLng] = [plan.origin.coordinate[1], plan.origin.coordinate[0]];
-  const [destinationLat, destinationLng] = [
-    plan.destination.coordinate[1],
-    plan.destination.coordinate[0],
-  ];
+  const origin = latLngFromGeoJsonPosition(plan.origin.coordinate);
+  const destination = latLngFromGeoJsonPosition(plan.destination.coordinate);
   return (
     <>
-      <Polyline
-        positions={positions}
-        pathOptions={{ color: "#2563eb", weight: 5, opacity: 0.8, dashArray: "8 8" }}
-      />
-      <CircleMarker center={[originLat, originLng]} radius={7} pathOptions={{ color: "#16a34a" }}>
-        <Popup>{plan.origin.label}</Popup>
-      </CircleMarker>
-      <CircleMarker
-        center={[destinationLat, destinationLng]}
-        radius={7}
-        pathOptions={{ color: "#dc2626" }}
-      >
-        <Popup>{plan.destination.label}</Popup>
-      </CircleMarker>
+      {positions.length >= 2 ? (
+        <Polyline
+          positions={positions}
+          pathOptions={{ color: "#2563eb", weight: 5, opacity: 0.8, dashArray: "8 8" }}
+        />
+      ) : null}
+      {origin ? (
+        <CircleMarker center={origin} radius={7} pathOptions={{ color: "#16a34a" }}>
+          <Popup>{plan.origin.label}</Popup>
+        </CircleMarker>
+      ) : null}
+      {destination ? (
+        <CircleMarker center={destination} radius={7} pathOptions={{ color: "#dc2626" }}>
+          <Popup>{plan.destination.label}</Popup>
+        </CircleMarker>
+      ) : null}
     </>
   );
+}
+
+function TrafficMapFocus({
+  selectedEvent,
+  travelPlan,
+}: {
+  selectedEvent?: TrafficMapEvent;
+  travelPlan?: TravelPlanPayload;
+}) {
+  const map = useMap();
+  const selectedEventFocusKey = selectedEvent?.id;
+  const selectedEventGeometryKey = selectedEvent ? JSON.stringify(selectedEvent.geometry) : "";
+  const selectedEventBounds = useMemo(
+    () => (selectedEvent ? boundsFromGeometry(selectedEvent.geometry) : undefined),
+    [selectedEventFocusKey, selectedEventGeometryKey],
+  );
+  const travelPlanFocusKey = travelPlan
+    ? `${travelPlan.generatedAt}:${travelPlan.origin.label}:${travelPlan.destination.label}`
+    : undefined;
+  const travelPlanRouteKey = travelPlan
+    ? routePositions(travelPlan)
+        .map((position) => position.join(","))
+        .join("|")
+    : "";
+  const travelPlanBounds = useMemo(
+    () => (travelPlan ? boundsFromLatLngs(routePositions(travelPlan)) : undefined),
+    [travelPlanFocusKey, travelPlanRouteKey],
+  );
+
+  useEffect(() => {
+    if (selectedEventBounds) {
+      if (
+        selectedEventBounds[0][0] === selectedEventBounds[1][0] &&
+        selectedEventBounds[0][1] === selectedEventBounds[1][1]
+      ) {
+        map.flyTo(selectedEventBounds[0], Math.max(map.getZoom(), 13), { duration: 0.35 });
+      } else {
+        map.fitBounds(selectedEventBounds, { padding: [32, 32], maxZoom: 15 });
+      }
+      return;
+    }
+    if (travelPlanBounds) {
+      map.fitBounds(travelPlanBounds, { padding: [32, 32], maxZoom: 14 });
+    }
+  }, [map, selectedEventBounds, selectedEventFocusKey, travelPlanBounds, travelPlanFocusKey]);
+
+  return null;
 }
 
 function TravelPlanCard({
@@ -233,17 +265,22 @@ function TravelPlanCard({
 }
 
 export function TrafficMapPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const trafficSearch = searchParams.toString();
+  const trafficFilters = useMemo(() => parseTrafficMapFilters(trafficSearch), [trafficSearch]);
   const [bounds, setBounds] = useState<MapBounds>();
-  const [selectedPreset, setSelectedPreset] = useState<TrafficMapPreset>("now");
-  const [timeWindow, setTimeWindow] = useState<TrafficTimeWindow>(() => timeWindowForPreset("now"));
-  const [selectedCategories, setSelectedCategories] =
-    useState<TrafficEventCategory[]>(allCategories);
-  const [selectedSeverities, setSelectedSeverities] =
-    useState<TrafficEventSeverity[]>(allSeverities);
+  const [selectedPreset, setSelectedPreset] = useState<TrafficMapPreset>(
+    () => trafficFilters.preset,
+  );
+  const [selectedCategories, setSelectedCategories] = useState<TrafficEventCategory[]>(
+    trafficFilters.categories,
+  );
+  const [selectedSeverities, setSelectedSeverities] = useState(() => trafficFilters.severities);
   const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>();
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
-  const [visibleContextLayers, setVisibleContextLayers] =
-    useState<TrafficLayerVisibility>(defaultTrafficLayers);
+  const [visibleContextLayers, setVisibleContextLayers] = useState<TrafficLayerVisibility>(
+    trafficFilters.layers,
+  );
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
   const [originInput, setOriginInput] = useState("");
   const [destinationInput, setDestinationInput] = useState("");
@@ -254,6 +291,15 @@ export function TrafficMapPage() {
   const travelPlanAbortRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => () => travelPlanAbortRef.current?.abort(), []);
+
+  useEffect(() => {
+    setSelectedPreset(trafficFilters.preset);
+    setSelectedCategories(trafficFilters.categories);
+    setSelectedSeverities(trafficFilters.severities);
+    setVisibleContextLayers(trafficFilters.layers);
+    setSelectedCorridorId(undefined);
+    setSelectedEventId(undefined);
+  }, [trafficFilters]);
 
   function invalidateTravelPlan(): number {
     const requestId = travelPlanRequestIdRef.current + 1;
@@ -277,6 +323,7 @@ export function TrafficMapPage() {
     () => bounds,
     [bounds?.east, bounds?.north, bounds?.south, bounds?.west],
   );
+  const timeWindow = useMemo(() => timeWindowForPreset(selectedPreset), [selectedPreset]);
   const requestedTrafficStates: TrafficEventState[] = visibleContextLayers.showAll
     ? ["active", "planned", "expired", "cancelled"]
     : timeWindow.states;
@@ -392,38 +439,75 @@ export function TrafficMapPage() {
     setBounds(nextBounds);
   }, []);
 
-  const applyPreset = useCallback((preset: Exclude<TrafficMapPreset, "custom">) => {
-    setSelectedPreset(preset);
-    setTimeWindow(timeWindowForPreset(preset));
-    setSelectedCorridorId(undefined);
-    setSelectedEventId(undefined);
-    if (preset === "planned") {
-      setSelectedCategories(["roadworks"]);
-      setSelectedSeverities(allSeverities);
-      return;
-    }
-    if (preset === "severe") {
-      setSelectedCategories(allCategories);
-      setSelectedSeverities(["high", "critical"]);
-      return;
-    }
-    setSelectedCategories(allCategories);
-    setSelectedSeverities(allSeverities);
-  }, []);
+  const applyTrafficFilters = useCallback(
+    (filters: TrafficMapFilters) => {
+      setSelectedPreset(filters.preset);
+      setSelectedCategories(filters.categories);
+      setSelectedSeverities(filters.severities);
+      setVisibleContextLayers(filters.layers);
+      setSearchParams(buildTrafficMapSearch(filters), { replace: true });
+      setSelectedCorridorId(undefined);
+      setSelectedEventId(undefined);
+    },
+    [setSearchParams],
+  );
 
-  const handleCategoriesChange = useCallback((categories: TrafficEventCategory[]) => {
-    setSelectedPreset("custom");
-    setSelectedCorridorId(undefined);
-    setSelectedEventId(undefined);
-    setSelectedCategories(categories);
-  }, []);
+  const applyPreset = useCallback(
+    (preset: Exclude<TrafficMapPreset, "custom">) => {
+      applyTrafficFilters(trafficFiltersForPreset(preset, visibleContextLayers));
+    },
+    [applyTrafficFilters, visibleContextLayers],
+  );
 
-  const handleSeveritiesChange = useCallback((severities: TrafficEventSeverity[]) => {
-    setSelectedPreset("custom");
-    setSelectedCorridorId(undefined);
-    setSelectedEventId(undefined);
-    setSelectedSeverities(severities);
-  }, []);
+  const handleCategoriesChange = useCallback(
+    (categories: TrafficEventCategory[]) => {
+      applyTrafficFilters({
+        preset: "custom",
+        categories,
+        severities: selectedSeverities,
+        layers: visibleContextLayers,
+      });
+    },
+    [applyTrafficFilters, selectedSeverities, visibleContextLayers],
+  );
+
+  const handleSeveritiesChange = useCallback(
+    (severities: TrafficMapFilters["severities"]) => {
+      applyTrafficFilters({
+        preset: "custom",
+        categories: selectedCategories,
+        severities,
+        layers: visibleContextLayers,
+      });
+    },
+    [applyTrafficFilters, selectedCategories, visibleContextLayers],
+  );
+
+  const handleContextLayersChange = useCallback(
+    (layers: TrafficLayerVisibility) => {
+      applyTrafficFilters({
+        preset: selectedPreset,
+        categories: selectedCategories,
+        severities: selectedSeverities,
+        layers,
+      });
+    },
+    [applyTrafficFilters, selectedCategories, selectedPreset, selectedSeverities],
+  );
+
+  const handleShowAllChange = useCallback(
+    (showAll: boolean) => {
+      handleContextLayersChange({ ...visibleContextLayers, showAll });
+    },
+    [handleContextLayersChange, visibleContextLayers],
+  );
+
+  const showPublicTransportDisruptions = useCallback(() => {
+    handleContextLayersChange({
+      ...visibleContextLayers,
+      publicTransportDisruptions: true,
+    });
+  }, [handleContextLayersChange, visibleContextLayers]);
 
   async function handleTravelPlanSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -444,7 +528,7 @@ export function TrafficMapPage() {
       const payload = await fetchTravelPlan({ from, to }, { signal: controller.signal });
       if (travelPlanRequestIdRef.current !== requestId) return;
       setTravelPlan(payload);
-      setVisibleContextLayers((current) => ({ ...current, publicTransportDisruptions: true }));
+      showPublicTransportDisruptions();
     } catch (reason) {
       if (travelPlanRequestIdRef.current === requestId) {
         setTravelPlanError(reason instanceof Error ? reason.message : "Kunne ikke hente reiseråd.");
@@ -483,7 +567,7 @@ export function TrafficMapPage() {
             onCategoriesChange={handleCategoriesChange}
             onSeveritiesChange={handleSeveritiesChange}
             onPresetChange={applyPreset}
-            onContextLayersChange={setVisibleContextLayers}
+            onContextLayersChange={handleContextLayersChange}
           />
           <TrafficLegend />
           <form
@@ -526,7 +610,9 @@ export function TrafficMapPage() {
         </div>
         <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
           <TileLayer attribution="© Kartverket" url={tiles} />
+          <MapAccessibility label="Trafikkart for Trondheim" />
           <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
+          <TrafficMapFocus selectedEvent={selectedEvent} travelPlan={travelPlan} />
           {data?.events ? (
             <TrafficLayer
               events={visibleTrafficEvents}
@@ -538,8 +624,8 @@ export function TrafficMapPage() {
           {data ? (
             <RoadContextLayer
               weather={visibleContextLayers.weatherRisk ? data.weather : []}
-              cameras={[]}
-              counters={[]}
+              cameras={visibleContextLayers.weatherRisk ? data.cameras : []}
+              counters={visibleContextLayers.weatherRisk ? data.counters : []}
             />
           ) : null}
           <PublicTransportLayer
@@ -577,9 +663,7 @@ export function TrafficMapPage() {
               rankedEvents={rankedEventsForList}
               selectedEventId={selectedEventId}
               showAll={visibleContextLayers.showAll}
-              onShowAllChange={(showAll) =>
-                setVisibleContextLayers((current) => ({ ...current, showAll }))
-              }
+              onShowAllChange={handleShowAllChange}
               onSelectEvent={setSelectedEventId}
             />
           )}

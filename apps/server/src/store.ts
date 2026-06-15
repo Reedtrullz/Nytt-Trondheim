@@ -7,7 +7,12 @@ import type {
   EvidenceItem,
   MapFeature,
   OfficialEvent,
+  OperationsTimelineEvent,
+  OperationsTimelineQuery,
+  OperationsTimelineResponse,
   OperationsStatus,
+  PrivateAnnotationUpdateRequest,
+  Provenance,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
   RoadCamera,
@@ -15,11 +20,25 @@ import type {
   Situation,
   SituationPage,
   SituationWorkspace,
+  SourceAuditFilterQuery,
+  SourceAuditProviderGroup,
+  SourceAuditRole,
+  SourceAuditSourceSummary,
+  SourceAuditWorkspaceResponse,
+  SourceCollectorRun,
+  SourceContractCheckStatus,
+  SourceContractComplianceCheck,
+  SourceFreshness,
+  IncidentSourceTraceabilitySummary,
+  SourceNonSecretDiagnostic,
+  SourceReliabilityIndicator,
+  SourceStaleDataAlert,
   SourceItem,
   SourceItemFilters,
   SourceItemPage,
   SourceItemRelationship,
   SourceHealth,
+  SourceId,
   TimelineEntry,
   TrafficCounterSnapshot,
   TrafficMapEvent,
@@ -159,8 +178,7 @@ export interface Store {
   updatePrivateFeature(
     situationId: string,
     featureId: string,
-    label: string,
-    note?: string,
+    patch: PrivateAnnotationUpdateRequest,
   ): Promise<MapFeature | undefined>;
   deletePrivateFeature(situationId: string, featureId: string): Promise<boolean>;
   addTask(situationId: string, text: string): Promise<WorkspaceTask>;
@@ -184,7 +202,16 @@ export interface Store {
   recordExport(record: ExportRecord): Promise<void>;
   getExport(id: string, situationId: string, login: string): Promise<ExportRecord | undefined>;
   listSourceHealth(): Promise<SourceHealth[]>;
+  listCollectorRuns(filters?: { source?: SourceId; limit?: number }): Promise<SourceCollectorRun[]>;
   getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined>;
+  getSourceAuditWorkspace(
+    filters: SourceAuditFilterQuery,
+    login: string,
+  ): Promise<SourceAuditWorkspaceResponse>;
+  getOperationsTimeline(
+    filters: OperationsTimelineQuery,
+    login: string,
+  ): Promise<OperationsTimelineResponse>;
   getOperationsStatus(): Promise<OperationsStatus>;
 }
 
@@ -326,6 +353,1145 @@ function sourceItemSelectColumns(alias = "si"): string {
        ${alias}.capture_hash,
        ST_AsGeoJSON(${alias}.geo_hint)::json AS geo_hint, ${alias}.reliability_tier,
        links.linked_situation_ids`;
+}
+
+const sourceAuditRequiredSources: SourceId[] = [
+  "nrk",
+  "adressa",
+  "vg",
+  "dagbladet",
+  "trondheim_kommune",
+  "bane_nor",
+  "met",
+  "nve",
+  "datex",
+  "datex_travel_time",
+  "datex_weather",
+  "datex_cctv",
+  "trafikkdata",
+  "vegvesen_traffic_info",
+  "entur",
+  "entur_vehicle_positions",
+  "entur_service_alerts",
+  "politiloggen",
+  "internal",
+  "deepseek",
+  "private_annotations",
+];
+
+const sourceAuditLabelFallbacks: Record<SourceId, string> = {
+  nrk: "NRK Trøndelag",
+  adressa: "Adresseavisen",
+  vg: "VG",
+  dagbladet: "Dagbladet",
+  trondheim_kommune: "Trondheim kommune",
+  bane_nor: "Bane NOR",
+  met: "MET farevarsel",
+  nve: "NVE Varsom",
+  datex: "Vegvesen DATEX",
+  datex_travel_time: "Vegvesen reisetid",
+  datex_weather: "Vegvesen værstasjoner",
+  datex_cctv: "Vegvesen kamera",
+  trafikkdata: "Vegvesen Trafikkdata",
+  vegvesen_traffic_info: "Vegvesen TrafficInfo",
+  entur: "Entur",
+  entur_vehicle_positions: "Entur kjøretøyposisjoner",
+  entur_service_alerts: "Entur trafikkavvik",
+  dsb: "DSB",
+  politiloggen: "Politiloggen",
+  internal: "Interne vurderinger",
+  private_annotations: "Private annotasjoner",
+  deepseek: "AI-analyse",
+};
+
+const sourceAuditContractPaths: Partial<Record<SourceId, string>> = {
+  nrk: "docs/source-contracts/media-rss.md",
+  adressa: "docs/source-contracts/media-rss.md",
+  vg: "docs/source-contracts/media-rss.md",
+  dagbladet: "docs/source-contracts/media-rss.md",
+  bane_nor: "docs/source-contracts/bane-nor-rss.md",
+  datex: "docs/source-contracts/datex-suite.md",
+  datex_travel_time: "docs/source-contracts/datex-suite.md",
+  datex_weather: "docs/source-contracts/datex-suite.md",
+  datex_cctv: "docs/source-contracts/datex-suite.md",
+  entur: "docs/source-contracts/entur.md",
+  entur_vehicle_positions: "docs/source-contracts/entur.md",
+  entur_service_alerts: "docs/source-contracts/entur.md",
+  met: "docs/source-contracts/met-nve.md",
+  nve: "docs/source-contracts/met-nve.md",
+  politiloggen: "docs/source-contracts/politiloggen.md",
+  trafikkdata: "docs/source-contracts/trafikkdata.md",
+  trondheim_kommune: "docs/source-contracts/trondheim-kommune-aktuelt.md",
+  vegvesen_traffic_info: "docs/source-contracts/vegvesen-trafficinfo.md",
+};
+
+const sourceAuditPolicy: Partial<
+  Record<SourceId, { role: SourceAuditRole; provenance: Provenance }>
+> = {
+  bane_nor: { role: "context_source", provenance: "official" },
+  trondheim_kommune: { role: "context_source", provenance: "official" },
+  vegvesen_traffic_info: { role: "context_source", provenance: "official" },
+};
+
+function sourceAuditGroup(source: SourceId): SourceAuditProviderGroup {
+  if (source.startsWith("datex") || source === "trafikkdata" || source === "vegvesen_traffic_info")
+    return "datex";
+  if (source.startsWith("entur")) return "entur";
+  if (source === "politiloggen") return "politiloggen";
+  if (source === "internal" || source === "deepseek") return "internal";
+  if (source === "private_annotations") return "private_annotation";
+  if (["nrk", "adressa", "vg", "dagbladet"].includes(source)) return "media";
+  return "other";
+}
+
+function sourceAuditRole(source: SourceId): SourceAuditRole {
+  const policy = sourceAuditPolicy[source];
+  if (policy) return policy.role;
+  if (
+    source === "datex_travel_time" ||
+    source === "datex_weather" ||
+    source === "datex_cctv" ||
+    source === "trafikkdata" ||
+    source === "entur_vehicle_positions"
+  ) {
+    return "telemetry_source";
+  }
+  if (source === "internal" || source === "deepseek") return "internal_analysis";
+  if (source === "private_annotations") return "private_annotation";
+  if (source === "met" || source === "nve" || source === "entur_service_alerts") {
+    return "context_source";
+  }
+  return "incident_source";
+}
+
+function sourceAuditProvenance(source: SourceId): Provenance {
+  const policy = sourceAuditPolicy[source];
+  if (policy) return policy.provenance;
+  const role = sourceAuditRole(source);
+  if (role === "telemetry_source" || role === "context_source") return "preparedness_context";
+  if (role === "private_annotation" || role === "internal_analysis") return "private_annotation";
+  if (source === "datex" || source === "politiloggen") return "official";
+  return "reporting_estimate";
+}
+
+function sourceAuditTimestampInRange(
+  value: string | undefined,
+  filters: Pick<SourceAuditFilterQuery, "from" | "to">,
+): boolean {
+  if (!filters.from && !filters.to) return true;
+  if (!value) return false;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return false;
+  if (filters.from && timestamp < Date.parse(filters.from)) return false;
+  if (filters.to && timestamp > Date.parse(filters.to)) return false;
+  return true;
+}
+
+function sourceAuditRunInRange(
+  run: SourceCollectorRun,
+  filters: Pick<SourceAuditFilterQuery, "from" | "to">,
+): boolean {
+  return sourceAuditTimestampInRange(run.completedAt ?? run.startedAt, filters);
+}
+
+function sourceAuditItemInRange(
+  item: SourceItem,
+  filters: Pick<SourceAuditFilterQuery, "from" | "to">,
+): boolean {
+  return sourceAuditTimestampInRange(item.publishedAt ?? item.fetchedAt, filters);
+}
+
+function traceabilityInRange(
+  trace: IncidentSourceTraceabilitySummary,
+  filters: Pick<SourceAuditFilterQuery, "from" | "to">,
+): boolean {
+  if (!filters.from && !filters.to) return true;
+  return (
+    sourceAuditTimestampInRange(trace.updatedAt, filters) ||
+    trace.links.some((link) =>
+      sourceAuditTimestampInRange(link.publishedAt ?? link.fetchedAt, filters),
+    )
+  );
+}
+
+function latestRunBySource(runs: SourceCollectorRun[]): Map<SourceId, SourceCollectorRun> {
+  const latest = new Map<SourceId, SourceCollectorRun>();
+  for (const run of runs) {
+    const current = latest.get(run.source);
+    if (!current || run.startedAt > current.startedAt) latest.set(run.source, run);
+  }
+  return latest;
+}
+
+function sourceFreshness(
+  health: SourceHealth | undefined,
+  latestRun: SourceCollectorRun | undefined,
+  generatedAt: string,
+): SourceFreshness {
+  const expectedIntervalSeconds = 2 * 60 * 60;
+  const staleAfterSeconds = 6 * 60 * 60;
+  const lastObservedAt = latestRun?.completedAt ?? health?.lastCheckedAt;
+  const ageSeconds = lastObservedAt
+    ? Math.max(0, Math.round((Date.parse(generatedAt) - Date.parse(lastObservedAt)) / 1000))
+    : undefined;
+  const state =
+    health?.state === "disabled" || health?.state === "awaiting_access" || ageSeconds === undefined
+      ? "unknown"
+      : ageSeconds > staleAfterSeconds
+        ? "stale"
+        : ageSeconds > expectedIntervalSeconds
+          ? "lagging"
+          : "fresh";
+
+  return {
+    state,
+    checkedAt: health?.lastCheckedAt ?? generatedAt,
+    ...(lastObservedAt ? { lastObservedAt } : {}),
+    ...(health?.lastCheckedAt ? { lastFetchedAt: health.lastCheckedAt } : {}),
+    ...(latestRun?.completedAt ? { lastSuccessfulRunAt: latestRun.completedAt } : {}),
+    ...(health?.nextPollAt ? { nextPollAt: health.nextPollAt } : {}),
+    expectedIntervalSeconds,
+    staleAfterSeconds,
+    ...(ageSeconds !== undefined ? { ageSeconds } : {}),
+    detail: health?.detail ?? "Ingen kildehelse registrert ennå.",
+  };
+}
+
+function sourceReliability(
+  source: SourceId,
+  health: SourceHealth | undefined,
+  latestRun: SourceCollectorRun | undefined,
+  generatedAt: string,
+): SourceReliabilityIndicator[] {
+  const failures = latestRun?.recordsRejected ?? 0;
+  const state = health?.state;
+  const level =
+    state === "degraded" || failures > 0
+      ? failures > 2
+        ? "poor"
+        : "watch"
+      : state === "ok"
+        ? "good"
+        : "unknown";
+  const score =
+    level === "good" ? 0.95 : level === "watch" ? 0.68 : level === "poor" ? 0.35 : undefined;
+  return [
+    {
+      id: `${source}:health-reliability`,
+      source,
+      label: "Driftssignal",
+      level,
+      ...(score !== undefined ? { score } : {}),
+      sampleSize: latestRun?.recordsSeen ?? 0,
+      updatedAt: health?.lastCheckedAt ?? latestRun?.completedAt ?? generatedAt,
+      detail:
+        failures > 0
+          ? `${failures} avvik i siste registrerte innhenting.`
+          : (health?.detail ?? "Basert på kildehelse og siste worker-metrikk."),
+    },
+  ];
+}
+
+function sourceDiagnostics(
+  source: SourceId,
+  health: SourceHealth | undefined,
+  latestRun: SourceCollectorRun | undefined,
+  generatedAt: string,
+): SourceNonSecretDiagnostic[] {
+  const observedAt = health?.lastCheckedAt ?? latestRun?.completedAt ?? generatedAt;
+  return [
+    {
+      key: `${source}:health_state`,
+      label: "Kildestatus",
+      kind: "scheduler",
+      severity: health?.state === "ok" ? "info" : health?.state === "degraded" ? "warning" : "info",
+      safeForDisplay: true,
+      value: health?.state ?? "unknown",
+      unit: "status",
+      observedAt,
+      detail: health?.detail ?? "Ingen operasjonell kildestatus registrert.",
+    },
+    ...(latestRun
+      ? [
+          {
+            key: `${source}:latest_duration_ms`,
+            label: "Siste innhentingstid",
+            kind: "latency" as const,
+            severity: latestRun.status === "failed" ? ("error" as const) : ("info" as const),
+            safeForDisplay: true as const,
+            value: latestRun.durationMs ?? 0,
+            unit: "ms" as const,
+            observedAt: latestRun.completedAt ?? latestRun.startedAt,
+            detail: `${latestRun.recordsAccepted} akseptert, ${latestRun.recordsRejected} avvist.`,
+          },
+        ]
+      : []),
+  ];
+}
+
+function sourceContractChecks(
+  source: SourceId,
+  health: SourceHealth | undefined,
+  generatedAt: string,
+): SourceContractComplianceCheck[] {
+  const role = sourceAuditRole(source);
+  const checks: SourceContractComplianceCheck[] = [];
+  const contractPath = sourceAuditContractPaths[source];
+  checks.push({
+    id: `${source}:source-contract`,
+    source,
+    kind: "source_contract",
+    status: contractPath ? "pass" : role === "incident_source" ? "warn" : "not_applicable",
+    label: "Kildekontrakt",
+    checkedAt: generatedAt,
+    detail: contractPath
+      ? "Kilden har eksplisitt kontrakt før adapterbruk."
+      : role === "incident_source"
+        ? "Ingen egen kildekontrakt registrert for denne etablerte kilden."
+        : "Intern eller operasjonell kontekst uten ny ekstern adapter.",
+    ...(contractPath ? { contractPath } : {}),
+  });
+  checks.push({
+    id: `${source}:secret-hygiene`,
+    source,
+    kind: "secret_hygiene",
+    status: "pass",
+    label: "Hemmeligheter",
+    checkedAt: generatedAt,
+    detail:
+      source.startsWith("datex") && health?.state === "awaiting_access"
+        ? "Tilgang mangler, men ingen credential-verdier eksponeres."
+        : "Auditflaten viser bare status, tider og tellinger.",
+  });
+  checks.push({
+    id: `${source}:activation-policy`,
+    source,
+    kind: "activation_policy",
+    status: role === "telemetry_source" ? "pass" : "not_applicable",
+    label: "Aktiveringsregel",
+    checkedAt: generatedAt,
+    detail:
+      role === "telemetry_source"
+        ? "Telemetrikilden brukes som kontekst og skal ikke aktivere situasjoner alene."
+        : "Ikke en telemetrikilde med særskilt aktiveringsvern.",
+  });
+  return checks;
+}
+
+function worstContractStatus(checks: SourceContractComplianceCheck[]): SourceContractCheckStatus {
+  if (checks.some((check) => check.status === "fail")) return "fail";
+  if (checks.some((check) => check.status === "warn")) return "warn";
+  if (checks.some((check) => check.status === "pass")) return "pass";
+  return "not_applicable";
+}
+
+function staleAlertForSource(
+  source: SourceId,
+  label: string,
+  health: SourceHealth | undefined,
+  freshness: SourceFreshness,
+  generatedAt: string,
+): SourceStaleDataAlert | undefined {
+  const healthAlert = health && health.state !== "ok";
+  const staleAlert = freshness.state === "stale" || freshness.state === "lagging";
+  if (!healthAlert && !staleAlert) return undefined;
+  const severity =
+    health?.state === "degraded" || freshness.state === "stale"
+      ? "critical"
+      : health?.state === "awaiting_access"
+        ? "warning"
+        : "watch";
+  return {
+    id: `${source}:freshness`,
+    source,
+    severity,
+    status: "open",
+    firstSeenAt: health?.lastFailureAt ?? freshness.lastObservedAt ?? generatedAt,
+    lastSeenAt: generatedAt,
+    ...(freshness.lastObservedAt ? { lastFreshAt: freshness.lastObservedAt } : {}),
+    expectedFreshnessSeconds: freshness.staleAfterSeconds ?? 6 * 60 * 60,
+    ageSeconds: freshness.ageSeconds ?? 0,
+    message:
+      health?.state === "awaiting_access"
+        ? `${label} venter på tilgang.`
+        : freshness.state === "stale"
+          ? `${label} har ikke ferske data innen forventet vindu.`
+          : (health?.detail ?? `${label} trenger tilsyn.`),
+  };
+}
+
+function traceabilityForSituation(
+  workspace: SituationWorkspace,
+  sourceItems: SourceItem[],
+): IncidentSourceTraceabilitySummary {
+  const { situation } = workspace;
+  const links: IncidentSourceTraceabilitySummary["links"] = [];
+  for (const source of situation.activationBasis?.sourceIds ?? []) {
+    links.push({
+      source,
+      provenance: sourceAuditProvenance(source),
+      relationship: "activation",
+      publishedAt: situation.activationBasis?.activatedAt,
+    });
+  }
+  for (const evidence of situation.evidence) {
+    links.push({
+      source: evidence.source,
+      provenance: evidence.provenance,
+      relationship: "supports",
+      evidenceId: evidence.id,
+      confidence: evidence.confidenceSummary,
+      publishedAt: evidence.publishedAt,
+    });
+  }
+  for (const item of sourceItems) {
+    links.push({
+      source: item.provider,
+      provenance: sourceAuditProvenance(item.provider),
+      relationship: item.relationship ?? "context",
+      sourceItemId: item.id,
+      confidence: item.confidence,
+      publishedAt: item.publishedAt,
+      fetchedAt: item.fetchedAt,
+    });
+  }
+  for (const entry of situation.timeline) {
+    if (!entry.source) continue;
+    links.push({
+      source: entry.source,
+      provenance: entry.provenance ?? sourceAuditProvenance(entry.source),
+      relationship: "timeline",
+      confidence: entry.confidence,
+      publishedAt: entry.timestamp,
+    });
+  }
+  for (const feature of situation.features) {
+    if (feature.properties.provenance !== "private_annotation") continue;
+    links.push({
+      source: "private_annotations",
+      provenance: "private_annotation",
+      relationship: "private_annotation",
+      privateAnnotationId: feature.id,
+      publishedAt: feature.properties.updatedAt,
+    });
+  }
+
+  const provenanceCounts: Partial<Record<Provenance, number>> = {};
+  for (const link of links)
+    provenanceCounts[link.provenance] = (provenanceCounts[link.provenance] ?? 0) + 1;
+  const primarySources = [...new Set(links.map((link) => link.source))];
+  const missingLinks =
+    links.length === 0
+      ? [{ kind: "source_item" as const, reason: "Ingen kildekoblinger registrert." }]
+      : undefined;
+
+  return {
+    situationId: situation.id,
+    title: situation.title,
+    status: situation.status,
+    updatedAt: situation.updatedAt,
+    traceabilityState: missingLinks ? "missing" : sourceItems.length === 0 ? "partial" : "complete",
+    sourceCount: primarySources.length,
+    evidenceCount: situation.evidence.length,
+    sourceItemCount: sourceItems.length,
+    privateAnnotationCount: links.filter((link) => link.relationship === "private_annotation")
+      .length,
+    primarySources,
+    ...(situation.activationBasis?.sourceIds
+      ? { activationSourceIds: situation.activationBasis.sourceIds }
+      : {}),
+    ...(situation.officialSource ? { officialSource: situation.officialSource } : {}),
+    provenanceCounts,
+    links,
+    ...(missingLinks ? { missingLinks } : {}),
+  };
+}
+
+interface SourceAuditReadableStore {
+  listSourceHealth(): Promise<SourceHealth[]>;
+  listCollectorRuns(filters?: { source?: SourceId; limit?: number }): Promise<SourceCollectorRun[]>;
+  listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
+  listSituations(filters: SituationFilters, login: string): Promise<SituationPage>;
+  listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
+  getWorkspace(id: string, login?: string): Promise<SituationWorkspace | undefined>;
+}
+
+async function buildSourceAuditWorkspace(
+  store: SourceAuditReadableStore,
+  filters: SourceAuditFilterQuery,
+  login: string,
+): Promise<SourceAuditWorkspaceResponse> {
+  const generatedAt = new Date().toISOString();
+  const [sourceHealth, collectorRuns, sourceItemPage, situationPage] = await Promise.all([
+    store.listSourceHealth(),
+    store.listCollectorRuns({ limit: 500 }),
+    store.listSourceItems({ limit: 100 }, login),
+    store.listSituations({ includeDismissed: true, limit: 100 }, login),
+  ]);
+  const collectorRunsInRange = collectorRuns.filter((run) => sourceAuditRunInRange(run, filters));
+  const sourceItemsInRange = sourceItemPage.items.filter((item) =>
+    sourceAuditItemInRange(item, filters),
+  );
+  const healthBySource = new Map(sourceHealth.map((health) => [health.source, health]));
+  const latestRuns = latestRunBySource(collectorRunsInRange);
+  const traceability = (
+    await Promise.all(
+      situationPage.items.map(async (situation) => {
+        const [workspace, sourceItems] = await Promise.all([
+          store.getWorkspace(situation.id, login),
+          store.listSituationSourceItems(situation.id, login),
+        ]);
+        return workspace ? traceabilityForSituation(workspace, sourceItems) : undefined;
+      }),
+    )
+  ).filter(
+    (entry): entry is IncidentSourceTraceabilitySummary =>
+      entry !== undefined && traceabilityInRange(entry, filters),
+  );
+
+  const sourceIds = new Set<SourceId>(sourceAuditRequiredSources);
+  for (const health of sourceHealth) sourceIds.add(health.source);
+  for (const run of collectorRunsInRange) sourceIds.add(run.source);
+  for (const item of sourceItemsInRange) sourceIds.add(item.provider);
+  for (const trace of traceability) {
+    for (const source of trace.primarySources) sourceIds.add(source);
+  }
+
+  const allContractChecks: SourceContractComplianceCheck[] = [];
+  const allDiagnostics: SourceNonSecretDiagnostic[] = [];
+  const alerts: SourceStaleDataAlert[] = [];
+  const summaries: SourceAuditSourceSummary[] = [...sourceIds].map((source) => {
+    const health = healthBySource.get(source);
+    const latestRun = latestRuns.get(source);
+    const freshness = sourceFreshness(health, latestRun, generatedAt);
+    const reliability = sourceReliability(source, health, latestRun, generatedAt);
+    const diagnostics = sourceDiagnostics(source, health, latestRun, generatedAt);
+    const contractChecks = sourceContractChecks(source, health, generatedAt);
+    const alert = staleAlertForSource(
+      source,
+      health?.label ?? sourceAuditLabelFallbacks[source],
+      health,
+      freshness,
+      generatedAt,
+    );
+    allContractChecks.push(...contractChecks);
+    allDiagnostics.push(...diagnostics);
+    if (alert) alerts.push(alert);
+    const sourceTraces = traceability.filter((trace) =>
+      trace.links.some((link) => link.source === source),
+    );
+
+    return {
+      source,
+      label: health?.label ?? sourceAuditLabelFallbacks[source],
+      group: sourceAuditGroup(source),
+      role: sourceAuditRole(source),
+      provenance: sourceAuditProvenance(source),
+      healthState: health?.state ?? "disabled",
+      freshness,
+      reliability,
+      ...(latestRun ? { latestRun } : {}),
+      openAlertCount: alert ? 1 : 0,
+      criticalAlertCount: alert?.severity === "critical" ? 1 : 0,
+      contractStatus: worstContractStatus(contractChecks),
+      ...(sourceTraces[0]?.updatedAt ? { lastIncidentTraceAt: sourceTraces[0].updatedAt } : {}),
+    };
+  });
+
+  const q = filters.q?.toLocaleLowerCase("nb");
+  const filteredSources = summaries
+    .filter((source) => {
+      if (filters.sources?.length && !filters.sources.includes(source.source)) return false;
+      if (filters.groups?.length && !filters.groups.includes(source.group)) return false;
+      if (filters.roles?.length && !filters.roles.includes(source.role)) return false;
+      if (filters.provenances?.length && !filters.provenances.includes(source.provenance))
+        return false;
+      if (filters.healthStates?.length && !filters.healthStates.includes(source.healthState))
+        return false;
+      if (
+        filters.freshnessStates?.length &&
+        !filters.freshnessStates.includes(source.freshness.state)
+      )
+        return false;
+      if (
+        filters.reliabilityLevels?.length &&
+        !source.reliability.some((item) => filters.reliabilityLevels?.includes(item.level))
+      )
+        return false;
+      if (
+        filters.contractStatuses?.length &&
+        !filters.contractStatuses.includes(source.contractStatus)
+      )
+        return false;
+      if (filters.staleOnly && source.openAlertCount === 0 && source.freshness.state === "fresh")
+        return false;
+      if (
+        q &&
+        !`${source.source} ${source.label} ${source.freshness.detail ?? ""}`
+          .toLocaleLowerCase("nb")
+          .includes(q)
+      )
+        return false;
+      return true;
+    })
+    .sort((left, right) => left.source.localeCompare(right.source));
+  const cursorFilteredSources = filters.cursor
+    ? filteredSources.filter((source) => source.source > filters.cursor!)
+    : filteredSources;
+  const limit = filters.limit ?? 40;
+  const pagedSources = cursorFilteredSources.slice(0, limit);
+  const visibleSourceIds = new Set(pagedSources.map((source) => source.source));
+  const visibleAlerts = alerts.filter(
+    (alert) =>
+      visibleSourceIds.has(alert.source) &&
+      sourceAuditTimestampInRange(alert.lastSeenAt, filters) &&
+      (!filters.alertSeverities?.length || filters.alertSeverities.includes(alert.severity)) &&
+      (filters.includeResolvedAlerts || alert.status !== "resolved"),
+  );
+  const visibleTraceability = traceability.filter((trace) =>
+    trace.links.some((link) => visibleSourceIds.has(link.source)),
+  );
+  const visibleChecks = allContractChecks.filter(
+    (check) =>
+      visibleSourceIds.has(check.source) && sourceAuditTimestampInRange(check.checkedAt, filters),
+  );
+  const visibleRuns = collectorRunsInRange.filter((run) => visibleSourceIds.has(run.source));
+  const nextCursor = cursorFilteredSources.length > limit ? pagedSources.at(-1)?.source : undefined;
+
+  return {
+    generatedAt,
+    filters,
+    sources: pagedSources,
+    collectorRuns: visibleRuns,
+    alerts: visibleAlerts,
+    contractChecks: visibleChecks,
+    traceability: visibleTraceability,
+    ...(nextCursor ? { nextCursor } : {}),
+    ...(filters.includeDiagnostics
+      ? {
+          diagnostics: allDiagnostics.filter(
+            (diagnostic) =>
+              visibleSourceIds.has(diagnostic.key.split(":")[0] as SourceId) &&
+              sourceAuditTimestampInRange(diagnostic.observedAt, filters),
+          ),
+        }
+      : {}),
+  };
+}
+
+interface OperationsTimelineReadableStore extends SourceAuditReadableStore {
+  listSourceHealth(): Promise<SourceHealth[]>;
+  listCollectorRuns(filters?: { source?: SourceId; limit?: number }): Promise<SourceCollectorRun[]>;
+}
+
+function operationsRoleForSource(source: SourceId | undefined): OperationsTimelineEvent["role"] {
+  if (!source) return "system";
+  const role = sourceAuditRole(source);
+  if (role === "telemetry_source") return "telemetry";
+  if (role === "context_source") return "context";
+  if (role === "private_annotation" || role === "internal_analysis") return "private";
+  return "incident";
+}
+
+function severityForSituation(situation: Situation): OperationsTimelineEvent["severity"] {
+  if (situation.status === "dismissed") return "muted";
+  if (situation.importance === "high" && situation.status === "active") return "warning";
+  return "info";
+}
+
+function severityForCollectorRun(run: SourceCollectorRun): OperationsTimelineEvent["severity"] {
+  if (run.status === "failed") return "critical";
+  if (run.status === "partial") return "warning";
+  if (run.status === "skipped") return "muted";
+  return "info";
+}
+
+function severityForStaleAlert(alert: SourceStaleDataAlert): OperationsTimelineEvent["severity"] {
+  if (alert.severity === "critical") return "critical";
+  if (alert.severity === "warning") return "warning";
+  return "info";
+}
+
+function statusLabel(status: Situation["status"]): string {
+  const labels: Record<Situation["status"], string> = {
+    preliminary: "Foreløpig",
+    active: "Aktiv",
+    resolved: "Løst",
+    dismissed: "Avvist",
+  };
+  return labels[status];
+}
+
+function collectorRunStatusLabel(status: SourceCollectorRun["status"]): string {
+  const labels: Record<SourceCollectorRun["status"], string> = {
+    succeeded: "fullført",
+    partial: "delvis fullført",
+    failed: "feilet",
+    skipped: "hoppet over",
+    running: "kjører",
+  };
+  return labels[status];
+}
+
+function sourceItemRelationshipLabel(relationship?: SourceItemRelationship): string {
+  const labels: Record<SourceItemRelationship, string> = {
+    supports: "støtte",
+    contradicts: "motsigelse",
+    context: "kontekst",
+    duplicate: "duplikat",
+  };
+  return relationship ? labels[relationship] : "kontekst";
+}
+
+function externalLink(url?: string): OperationsTimelineEvent["links"][number][] {
+  if (!url) return [];
+  return [{ kind: "external", label: "Original kilde", href: url }];
+}
+
+function situationLinks(
+  situation: Pick<Situation, "id" | "title">,
+): OperationsTimelineEvent["links"] {
+  return [
+    {
+      kind: "situation",
+      label: situation.title,
+      href: `/situasjoner/${encodeURIComponent(situation.id)}`,
+      situationId: situation.id,
+    },
+  ];
+}
+
+function sourceAuditLink(source?: SourceId): OperationsTimelineEvent["links"][number][] {
+  if (!source) return [];
+  return [
+    {
+      kind: "source_audit",
+      label: "Kildeaudit",
+      href: `/drift/kilder?sources=${encodeURIComponent(source)}&detail=${encodeURIComponent(
+        source,
+      )}`,
+      sourceId: source,
+    },
+  ];
+}
+
+function operationsKindForTimelineEntry(entry: TimelineEntry): OperationsTimelineEvent["kind"] {
+  if (entry.kind === "private_annotation") return "private_annotation";
+  if (
+    entry.kind === "status_change" ||
+    entry.kind === "review_action" ||
+    entry.kind === "severity_change" ||
+    entry.kind === "merge_decision" ||
+    entry.kind === "split_decision"
+  ) {
+    return entry.kind;
+  }
+
+  const text = `${entry.title} ${entry.detail}`.toLocaleLowerCase("nb");
+  if (/(flett|slått sammen|duplikat|merge)/.test(text)) return "merge_decision";
+  if (/(splitt|del opp|delt fra|split)/.test(text)) return "split_decision";
+  if (/(status|løst|avvist|gjenåpnet)/.test(text)) return "status_change";
+  if (entry.source) return "source_update";
+  return "situation_update";
+}
+
+function operationEventFromTimelineEntry(
+  situation: Situation,
+  entry: TimelineEntry,
+): OperationsTimelineEvent {
+  const source = entry.source;
+  const provenance = entry.provenance ?? (source ? sourceAuditProvenance(source) : undefined);
+  const kind = operationsKindForTimelineEntry(entry);
+  const isPrivate = provenance === "private_annotation" || kind === "private_annotation";
+  return {
+    id: `timeline:${entry.id}`,
+    timestamp: entry.timestamp,
+    kind,
+    severity: kind === "status_change" ? severityForSituation(situation) : "info",
+    title: entry.title,
+    detail: entry.detail,
+    ...(source ? { source } : {}),
+    ...(entry.sourceLabel ? { sourceLabel: entry.sourceLabel } : {}),
+    situationId: situation.id,
+    situationTitle: situation.title,
+    situationStatus: situation.status,
+    role: isPrivate ? "private" : operationsRoleForSource(source),
+    ...(provenance ? { provenance } : {}),
+    ...(entry.confidence ? { confidence: entry.confidence } : {}),
+    private: isPrivate,
+    links: [
+      ...situationLinks(situation),
+      ...sourceAuditLink(source),
+      ...externalLink(entry.sourceUrl),
+    ],
+    ...(entry.sourceItemIds?.length || entry.privateAnnotationId
+      ? {
+          metadata: {
+            ...(entry.sourceItemIds?.[0] ? { sourceItemId: entry.sourceItemIds[0] } : {}),
+            ...(entry.privateAnnotationId
+              ? { relationship: "private_annotation" as const }
+              : { relationship: "timeline" as const }),
+          },
+        }
+      : {}),
+  };
+}
+
+function operationEventFromSourceItem(
+  situation: Situation,
+  item: SourceItem,
+): OperationsTimelineEvent {
+  const provenance = sourceAuditProvenance(item.provider);
+  const timestamp = item.publishedAt ?? item.fetchedAt;
+  const relationship = item.relationship ?? "context";
+  return {
+    id: `source-item:${situation.id}:${item.id}:${relationship}`,
+    timestamp,
+    kind: "source_update",
+    severity: relationship === "contradicts" ? "warning" : "info",
+    title: item.title ?? "Kildeelement koblet",
+    detail: `Kildeelement brukt som ${sourceItemRelationshipLabel(relationship)} i situasjonen.`,
+    source: item.provider,
+    sourceLabel: sourceAuditLabelFallbacks[item.provider],
+    situationId: situation.id,
+    situationTitle: situation.title,
+    situationStatus: situation.status,
+    role: operationsRoleForSource(item.provider),
+    provenance,
+    ...(item.confidence ? { confidence: item.confidence } : {}),
+    private: provenance === "private_annotation",
+    links: [
+      ...situationLinks(situation),
+      ...sourceAuditLink(item.provider),
+      {
+        kind: "source_item",
+        label: "Kildeelement",
+        sourceItemId: item.id,
+      },
+      ...externalLink(item.originalUrl),
+    ],
+    metadata: {
+      sourceItemId: item.id,
+      relationship,
+    },
+  };
+}
+
+function operationEventFromCollectorRun(run: SourceCollectorRun): OperationsTimelineEvent {
+  return {
+    id: `collector:${run.id}`,
+    timestamp: run.completedAt ?? run.startedAt,
+    kind: "collector_run",
+    severity: severityForCollectorRun(run),
+    title: `${sourceAuditLabelFallbacks[run.source]} ${collectorRunStatusLabel(run.status)}`,
+    detail: `${run.recordsAccepted} inn, ${run.recordsRejected} avvik, ${run.recordsSeen} sett.`,
+    source: run.source,
+    sourceLabel: sourceAuditLabelFallbacks[run.source],
+    collector: run.collector,
+    role: operationsRoleForSource(run.source),
+    provenance: sourceAuditProvenance(run.source),
+    private: false,
+    links: sourceAuditLink(run.source),
+    metadata: {
+      recordsSeen: run.recordsSeen,
+      recordsAccepted: run.recordsAccepted,
+      recordsRejected: run.recordsRejected,
+      ...(run.durationMs !== undefined ? { durationMs: run.durationMs } : {}),
+    },
+  };
+}
+
+function operationEventFromStaleAlert(
+  alert: SourceStaleDataAlert,
+  label: string,
+): OperationsTimelineEvent {
+  return {
+    id: `stale:${alert.id}`,
+    timestamp: alert.lastSeenAt,
+    kind: "stale_warning",
+    severity: severityForStaleAlert(alert),
+    title: `${label} trenger tilsyn`,
+    detail: alert.message,
+    source: alert.source,
+    sourceLabel: label,
+    role: operationsRoleForSource(alert.source),
+    provenance: sourceAuditProvenance(alert.source),
+    private: false,
+    links: sourceAuditLink(alert.source),
+  };
+}
+
+function operationEventsFromWorkspace(
+  workspace: SituationWorkspace,
+  sourceItems: SourceItem[],
+): OperationsTimelineEvent[] {
+  const { situation } = workspace;
+  const events: OperationsTimelineEvent[] = [];
+
+  events.push({
+    id: `situation:${situation.id}:updated`,
+    timestamp: situation.updatedAt,
+    kind: situation.status === "active" ? "situation_update" : "status_change",
+    severity: severityForSituation(situation),
+    title:
+      situation.status === "active" ? situation.title : `Status: ${statusLabel(situation.status)}`,
+    detail:
+      situation.status === "active"
+        ? `Situasjonen er aktiv i ${situation.locationLabel}.`
+        : `Situasjonen er markert som ${statusLabel(situation.status).toLocaleLowerCase("nb")}.`,
+    ...(situation.officialSource ? { source: situation.officialSource } : {}),
+    ...(situation.officialSource
+      ? { sourceLabel: sourceAuditLabelFallbacks[situation.officialSource] }
+      : {}),
+    situationId: situation.id,
+    situationTitle: situation.title,
+    situationStatus: situation.status,
+    role: operationsRoleForSource(situation.officialSource),
+    ...(situation.officialSource
+      ? { provenance: sourceAuditProvenance(situation.officialSource) }
+      : {}),
+    ...(situation.sourceConfidence ? { confidence: situation.sourceConfidence } : {}),
+    private: false,
+    links: situationLinks(situation),
+  });
+
+  if (situation.importance === "high") {
+    events.push({
+      id: `situation:${situation.id}:importance`,
+      timestamp: situation.updatedAt,
+      kind: "severity_change",
+      severity: "warning",
+      title: "Alvorlighet markert som høy",
+      detail: `${situation.title} ligger høyt i operativ prioritet.`,
+      situationId: situation.id,
+      situationTitle: situation.title,
+      situationStatus: situation.status,
+      role: "system",
+      private: false,
+      links: situationLinks(situation),
+      metadata: { nextValue: "high" },
+    });
+  }
+
+  for (const entry of situation.timeline)
+    events.push(operationEventFromTimelineEntry(situation, entry));
+  for (const item of sourceItems) events.push(operationEventFromSourceItem(situation, item));
+
+  for (const feature of situation.features) {
+    if (feature.properties.provenance !== "private_annotation") continue;
+    events.push({
+      id: `private-feature:${situation.id}:${feature.id}`,
+      timestamp: feature.properties.updatedAt,
+      kind: "private_annotation",
+      severity: "muted",
+      title: "Privat kartmarkering",
+      detail:
+        "Eier la inn eller oppdaterte en privat markering. Innholdet er ikke offentlig bevis.",
+      source: "private_annotations",
+      sourceLabel: sourceAuditLabelFallbacks.private_annotations,
+      situationId: situation.id,
+      situationTitle: situation.title,
+      situationStatus: situation.status,
+      role: "private",
+      provenance: "private_annotation",
+      private: true,
+      links: [
+        ...situationLinks(situation),
+        {
+          kind: "private_workspace",
+          label: "Privat arbeidsflate",
+          href: `/situasjoner/${encodeURIComponent(situation.id)}`,
+          situationId: situation.id,
+        },
+      ],
+      metadata: { relationship: "private_annotation" },
+    });
+  }
+
+  for (const note of workspace.notes) {
+    events.push({
+      id: `private-note:${situation.id}:${note.id}`,
+      timestamp: note.createdAt,
+      kind: "review_action",
+      severity: "muted",
+      title: "Privat notat lagt til",
+      detail: "Notatinnholdet holdes i arbeidsflaten og vises ikke i operasjonstidslinjen.",
+      source: "private_annotations",
+      sourceLabel: sourceAuditLabelFallbacks.private_annotations,
+      situationId: situation.id,
+      situationTitle: situation.title,
+      situationStatus: situation.status,
+      role: "private",
+      provenance: "private_annotation",
+      private: true,
+      links: situationLinks(situation),
+    });
+  }
+
+  for (const task of workspace.tasks) {
+    events.push({
+      id: `review-task:${situation.id}:${task.id}`,
+      timestamp: task.createdAt,
+      kind: "review_action",
+      severity: "muted",
+      title: task.completed ? "Privat oppgave fullført" : "Privat oppgave opprettet",
+      detail: "Oppgaveteksten holdes i arbeidsflaten og brukes ikke som offentlig kildegrunnlag.",
+      source: "private_annotations",
+      sourceLabel: sourceAuditLabelFallbacks.private_annotations,
+      situationId: situation.id,
+      situationTitle: situation.title,
+      situationStatus: situation.status,
+      role: "private",
+      provenance: "private_annotation",
+      private: true,
+      links: situationLinks(situation),
+    });
+  }
+
+  return events;
+}
+
+function timelineEventMatchesQuery(
+  event: OperationsTimelineEvent,
+  filters: OperationsTimelineQuery,
+): boolean {
+  if (filters.sources?.length && (!event.source || !filters.sources.includes(event.source))) {
+    return false;
+  }
+  if (
+    filters.provenances?.length &&
+    (!event.provenance || !filters.provenances.includes(event.provenance))
+  ) {
+    return false;
+  }
+  if (filters.kinds?.length && !filters.kinds.includes(event.kind)) return false;
+  if (
+    filters.situationIds?.length &&
+    (!event.situationId || !filters.situationIds.includes(event.situationId))
+  ) {
+    return false;
+  }
+  if (
+    filters.statuses?.length &&
+    (!event.situationStatus || !filters.statuses.includes(event.situationStatus))
+  ) {
+    return false;
+  }
+  if (filters.severities?.length && !filters.severities.includes(event.severity)) return false;
+  if (filters.roles?.length && !filters.roles.includes(event.role)) return false;
+  if (filters.includePrivateAnnotations === false && event.private) return false;
+  if (filters.from && event.timestamp < filters.from) return false;
+  if (filters.to && event.timestamp > filters.to) return false;
+  if (filters.q) {
+    const haystack =
+      `${event.title} ${event.detail} ${event.sourceLabel ?? ""} ${event.situationTitle ?? ""}`.toLocaleLowerCase(
+        "nb",
+      );
+    if (!haystack.includes(filters.q.toLocaleLowerCase("nb"))) return false;
+  }
+  return true;
+}
+
+function timelineEventAfterCursor(
+  event: OperationsTimelineEvent,
+  cursor: { timestamp: string; id?: string } | undefined,
+  sort: "asc" | "desc",
+): boolean {
+  if (!cursor) return true;
+  if (sort === "asc") {
+    return (
+      event.timestamp > cursor.timestamp ||
+      (event.timestamp === cursor.timestamp && Boolean(cursor.id && event.id > cursor.id))
+    );
+  }
+  return beforeCursor(event.timestamp, event.id, cursor);
+}
+
+async function buildOperationsTimeline(
+  store: OperationsTimelineReadableStore,
+  filters: OperationsTimelineQuery,
+  login: string,
+): Promise<OperationsTimelineResponse> {
+  const generatedAt = new Date().toISOString();
+  const [situationPage, collectorRuns, sourceHealth] = await Promise.all([
+    store.listSituations({ includeDismissed: true, limit: 100 }, login),
+    store.listCollectorRuns({ limit: 100 }),
+    store.listSourceHealth(),
+  ]);
+  const workspaceRows = await Promise.all(
+    situationPage.items.map(async (situation) => {
+      const [workspace, sourceItems] = await Promise.all([
+        store.getWorkspace(situation.id, login),
+        store.listSituationSourceItems(situation.id, login),
+      ]);
+      return workspace ? { workspace, sourceItems } : undefined;
+    }),
+  );
+
+  const events: OperationsTimelineEvent[] = [];
+  for (const row of workspaceRows) {
+    if (row) events.push(...operationEventsFromWorkspace(row.workspace, row.sourceItems));
+  }
+  events.push(...collectorRuns.map(operationEventFromCollectorRun));
+
+  const healthBySource = new Map(sourceHealth.map((health) => [health.source, health]));
+  const latestRuns = latestRunBySource(collectorRuns);
+  for (const health of sourceHealth) {
+    const freshness = sourceFreshness(health, latestRuns.get(health.source), generatedAt);
+    const alert = staleAlertForSource(health.source, health.label, health, freshness, generatedAt);
+    if (alert) events.push(operationEventFromStaleAlert(alert, health.label));
+  }
+  for (const run of collectorRuns) {
+    if (!healthBySource.has(run.source)) {
+      const freshness = sourceFreshness(undefined, run, generatedAt);
+      const label = sourceAuditLabelFallbacks[run.source];
+      const alert = staleAlertForSource(run.source, label, undefined, freshness, generatedAt);
+      if (alert) events.push(operationEventFromStaleAlert(alert, label));
+    }
+  }
+
+  const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+  const sort = filters.sort ?? "desc";
+  const visibleEvents = events
+    .filter((event) => timelineEventMatchesQuery(event, filters))
+    .filter((event) => timelineEventAfterCursor(event, cursor, sort))
+    .sort((left, right) =>
+      sort === "asc"
+        ? left.timestamp.localeCompare(right.timestamp) || left.id.localeCompare(right.id)
+        : right.timestamp.localeCompare(left.timestamp) || right.id.localeCompare(left.id),
+    );
+  const limit = filters.limit ?? 80;
+  const page = visibleEvents.slice(0, limit);
+  const last = page.at(-1);
+  const activeSituationIds = new Set(
+    page.flatMap((event) =>
+      event.situationId && event.situationStatus === "active" ? [event.situationId] : [],
+    ),
+  );
+
+  return {
+    generatedAt,
+    filters,
+    events: page,
+    summary: {
+      total: visibleEvents.length,
+      activeSituations: activeSituationIds.size,
+      staleWarnings: visibleEvents.filter((event) => event.kind === "stale_warning").length,
+      collectorRuns: visibleEvents.filter((event) => event.kind === "collector_run").length,
+      reviewerActions: visibleEvents.filter((event) =>
+        [
+          "review_action",
+          "status_change",
+          "severity_change",
+          "merge_decision",
+          "split_decision",
+        ].includes(event.kind),
+      ).length,
+      privateEvents: visibleEvents.filter((event) => event.private).length,
+    },
+    nextCursor:
+      visibleEvents.length > limit && last ? encodeCursor(last.timestamp, last.id) : undefined,
+  };
 }
 
 const TRAFFIC_PULSE_STALE_AFTER_MS = 20 * 60 * 1000;
@@ -649,15 +1815,19 @@ export class MemoryStore implements Store {
     return clone(feature);
   }
 
-  async updatePrivateFeature(situationId: string, featureId: string, label: string, note?: string) {
+  async updatePrivateFeature(
+    situationId: string,
+    featureId: string,
+    patch: PrivateAnnotationUpdateRequest,
+  ) {
     const feature = this.situations
       .get(situationId)
       ?.features.find((item) => item.id === featureId);
     if (!feature || feature.properties.provenance !== "private_annotation") return undefined;
     feature.properties = {
       ...feature.properties,
-      label,
-      note,
+      ...patch,
+      provenance: "private_annotation",
       updatedAt: new Date().toISOString(),
     };
     return clone(feature);
@@ -773,6 +1943,34 @@ export class MemoryStore implements Store {
     return clone(sampleBootstrap.sourceHealth);
   }
 
+  async listCollectorRuns(
+    filters: { source?: SourceId; limit?: number } = {},
+  ): Promise<SourceCollectorRun[]> {
+    const metrics = await this.getLatestWorkerCycleMetrics();
+    if (!metrics) return [];
+    const runs = Object.entries(metrics.sourceDurationsMs).map(([source, durationMs]) => ({
+      id: `${source}:${metrics.cycleStartedAt}`,
+      source: source as SourceId,
+      collector: source,
+      status: ((metrics.parseFailures[source] ?? 0) > 0
+        ? metrics.sourceItemCounts[source]
+          ? "partial"
+          : "failed"
+        : "succeeded") as SourceCollectorRun["status"],
+      startedAt: metrics.cycleStartedAt,
+      completedAt: metrics.cycleCompletedAt,
+      durationMs,
+      recordsSeen: (metrics.sourceItemCounts[source] ?? 0) + (metrics.parseFailures[source] ?? 0),
+      recordsAccepted: metrics.sourceItemCounts[source] ?? 0,
+      recordsRejected: metrics.parseFailures[source] ?? 0,
+    })) satisfies SourceCollectorRun[];
+    return clone(
+      runs
+        .filter((run) => !filters.source || run.source === filters.source)
+        .slice(0, filters.limit ?? 40),
+    );
+  }
+
   async getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined> {
     return clone({
       cycleStartedAt: "2026-06-02T06:00:00.000Z",
@@ -791,6 +1989,14 @@ export class MemoryStore implements Store {
         datex: 0,
       },
     });
+  }
+
+  async getSourceAuditWorkspace(filters: SourceAuditFilterQuery, login: string) {
+    return buildSourceAuditWorkspace(this, filters, login);
+  }
+
+  async getOperationsTimeline(filters: OperationsTimelineQuery, login: string) {
+    return buildOperationsTimeline(this, filters, login);
   }
 
   async getOperationsStatus(): Promise<OperationsStatus> {
@@ -1515,10 +2721,13 @@ export class PgStore implements Store {
     return feature;
   }
 
-  async updatePrivateFeature(situationId: string, featureId: string, label: string, note?: string) {
+  async updatePrivateFeature(
+    situationId: string,
+    featureId: string,
+    input: PrivateAnnotationUpdateRequest,
+  ) {
     const patch = {
-      label,
-      note,
+      ...input,
       provenance: "private_annotation",
       updatedAt: new Date().toISOString(),
     };
@@ -1678,6 +2887,83 @@ export class PgStore implements Store {
     return result.rows;
   }
 
+  async listCollectorRuns(
+    filters: { source?: SourceId; limit?: number } = {},
+  ): Promise<SourceCollectorRun[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.source) {
+      params.push(filters.source);
+      where.push(`source = $${params.length}`);
+    }
+    params.push(filters.limit ?? 40);
+    const result = await this.pool.query<{
+      id: string;
+      source: SourceId;
+      collector: string;
+      status: SourceCollectorRun["status"];
+      startedAt: Date | string;
+      completedAt: Date | string | null;
+      durationMs: number | null;
+      recordsSeen: number;
+      recordsAccepted: number;
+      recordsRejected: number;
+      errorCode: string | null;
+      errorMessage: string | null;
+      diagnostics: SourceCollectorRun["diagnostics"] | null;
+    }>(
+      `SELECT id, source, collector, status, started_at AS "startedAt",
+       completed_at AS "completedAt", duration_ms AS "durationMs",
+       records_seen AS "recordsSeen", records_accepted AS "recordsAccepted",
+       records_rejected AS "recordsRejected", error_code AS "errorCode",
+       error_message AS "errorMessage", diagnostics
+       FROM collector_runs
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY started_at DESC, id DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    if (result.rows.length === 0) {
+      const metrics = await this.getLatestWorkerCycleMetrics();
+      if (!metrics) return [];
+      return Object.entries(metrics.sourceDurationsMs)
+        .filter(([source]) => !filters.source || source === filters.source)
+        .slice(0, filters.limit ?? 40)
+        .map(([source, durationMs]) => ({
+          id: `${source}:${metrics.cycleStartedAt}`,
+          source: source as SourceId,
+          collector: source,
+          status: ((metrics.parseFailures[source] ?? 0) > 0
+            ? metrics.sourceItemCounts[source]
+              ? "partial"
+              : "failed"
+            : "succeeded") as SourceCollectorRun["status"],
+          startedAt: metrics.cycleStartedAt,
+          completedAt: metrics.cycleCompletedAt,
+          durationMs,
+          recordsSeen:
+            (metrics.sourceItemCounts[source] ?? 0) + (metrics.parseFailures[source] ?? 0),
+          recordsAccepted: metrics.sourceItemCounts[source] ?? 0,
+          recordsRejected: metrics.parseFailures[source] ?? 0,
+        }));
+    }
+    return result.rows.map((row) => ({
+      id: row.id,
+      source: row.source,
+      collector: row.collector,
+      status: row.status,
+      startedAt: new Date(row.startedAt).toISOString(),
+      ...(row.completedAt ? { completedAt: new Date(row.completedAt).toISOString() } : {}),
+      ...(row.durationMs !== null ? { durationMs: row.durationMs } : {}),
+      recordsSeen: row.recordsSeen,
+      recordsAccepted: row.recordsAccepted,
+      recordsRejected: row.recordsRejected,
+      ...(row.errorCode ? { errorCode: row.errorCode } : {}),
+      ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+      ...(row.diagnostics ? { diagnostics: row.diagnostics } : {}),
+    }));
+  }
+
   async listTrafficPulseCorridors(limit = 30): Promise<TrafficPulseCorridor[]> {
     const result = await this.pool.query<{
       payload: TrafficPulseCorridor;
@@ -1701,6 +2987,14 @@ export class PgStore implements Store {
       "SELECT payload FROM worker_cycle_metrics WHERE id = 'latest' LIMIT 1",
     );
     return result.rows[0]?.payload;
+  }
+
+  async getSourceAuditWorkspace(filters: SourceAuditFilterQuery, login: string) {
+    return buildSourceAuditWorkspace(this, filters, login);
+  }
+
+  async getOperationsTimeline(filters: OperationsTimelineQuery, login: string) {
+    return buildOperationsTimeline(this, filters, login);
   }
 
   async getOperationsStatus(): Promise<OperationsStatus> {

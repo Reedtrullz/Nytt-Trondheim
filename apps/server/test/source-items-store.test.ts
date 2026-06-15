@@ -271,6 +271,98 @@ describe("source item store", () => {
     expect(query.mock.calls[0]?.[0]).not.toContain("source_items");
   });
 
+  it("loads collector run history for the source audit console", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: "datex:run",
+          source: "datex",
+          collector: "datex",
+          status: "partial",
+          startedAt: new Date("2026-06-02T06:00:00.000Z"),
+          completedAt: new Date("2026-06-02T06:00:01.000Z"),
+          durationMs: 1000,
+          recordsSeen: 3,
+          recordsAccepted: 2,
+          recordsRejected: 1,
+          errorCode: "parse_or_collection_failure",
+          errorMessage: "1 parsefeil",
+          diagnostics: null,
+        },
+      ],
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    await expect(store.listCollectorRuns({ source: "datex", limit: 5 })).resolves.toEqual([
+      expect.objectContaining({
+        id: "datex:run",
+        source: "datex",
+        status: "partial",
+        recordsAccepted: 2,
+        recordsRejected: 1,
+      }),
+    ]);
+    expect(query.mock.calls[0]?.[0]).toContain("FROM collector_runs");
+    expect(query.mock.calls[0]?.[1]).toEqual(["datex", 5]);
+  });
+
+  it("builds source audit summaries with traceability in MemoryStore", async () => {
+    const store = new MemoryStore();
+
+    const audit = await store.getSourceAuditWorkspace(
+      { sources: ["nrk"], includeDiagnostics: true, limit: 20 },
+      "Reedtrullz",
+    );
+
+    expect(audit.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "nrk",
+          label: "NRK Trøndelag",
+          role: "incident_source",
+        }),
+      ]),
+    );
+    expect(audit.collectorRuns).toEqual(
+      expect.arrayContaining([expect.objectContaining({ source: "nrk" })]),
+    );
+    expect(audit.traceability).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          situationId: sampleSituation.id,
+          links: expect.arrayContaining([expect.objectContaining({ source: "nrk" })]),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(audit)).not.toContain("rawPayload");
+  });
+
+  it("classifies official context-only sources without incident-source provenance", async () => {
+    const store = new MemoryStore();
+
+    const audit = await store.getSourceAuditWorkspace({ includeDiagnostics: true }, "Reedtrullz");
+
+    expect(audit.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "trondheim_kommune",
+          role: "context_source",
+          provenance: "official",
+        }),
+        expect.objectContaining({
+          source: "bane_nor",
+          role: "context_source",
+          provenance: "official",
+        }),
+        expect.objectContaining({
+          source: "vegvesen_traffic_info",
+          role: "context_source",
+          provenance: "official",
+        }),
+      ]),
+    );
+  });
+
   it("returns undefined when PgStore cannot link missing source items or situations", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
     const store = new PgStore({ query } as unknown as pg.Pool);

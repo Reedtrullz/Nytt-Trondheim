@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GeoJsonObject } from "geojson";
 import L, { type LatLngTuple } from "leaflet";
 import {
@@ -8,10 +8,17 @@ import {
   Marker,
   TileLayer,
   WMSTileLayer,
+  useMap,
   useMapEvents,
 } from "react-leaflet";
-import type { Article, MapFeature, PrivateMapFeatureInput, Situation } from "@nytt/shared";
+import type { MapFeature, PrivateMapFeatureInput, Situation } from "@nytt/shared";
+import type { NearbyStoryItem } from "../homeNearby.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
+import {
+  boundsFromLatLngs,
+  latLngFromGeoJsonPosition,
+  latLngsFromGeometry,
+} from "../mapCoordinates.js";
 import {
   bearingDegrees,
   circlePolygon,
@@ -20,29 +27,76 @@ import {
   sectorPolygon,
 } from "../mapTools/geometry.js";
 import { mapToolPresets, type MapToolPreset } from "../mapTools/presets.js";
+import { MapAccessibility } from "./map/MapAccessibility.js";
 import { MapBoundsWatcher } from "./map/MapBoundsWatcher.js";
 import { PublicTransportLayer, PublicTransportSummary } from "./map/PublicTransportLayer.js";
 
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
-export function NewsMap({ articles }: { articles: Article[] }) {
-  const locations = articles.filter((article) => article.location);
+
+function FitMapToPositions({ positions }: { positions: Array<[number, number]> }) {
+  const map = useMap();
+  const focusKey = useMemo(
+    () => positions.map((position) => position.join(",")).join("|"),
+    [positions],
+  );
+  const bounds = useMemo(() => {
+    const stablePositions = focusKey
+      ? focusKey.split("|").map((position) => {
+          const [lat, lng] = position.split(",").map(Number);
+          return [lat ?? 0, lng ?? 0] as [number, number];
+        })
+      : [];
+    return boundsFromLatLngs(stablePositions);
+  }, [focusKey]);
+
+  useEffect(() => {
+    if (!bounds) return;
+    if (bounds[0][0] === bounds[1][0] && bounds[0][1] === bounds[1][1]) {
+      map.setView(bounds[0], Math.max(map.getZoom(), 12), { animate: false });
+      return;
+    }
+    map.fitBounds(bounds, { padding: [22, 22], maxZoom: 13, animate: false });
+  }, [bounds, focusKey, map]);
+
+  return null;
+}
+
+export function NewsMap({
+  items,
+  selectedId,
+  onSelect,
+}: {
+  items: NearbyStoryItem[];
+  selectedId?: string;
+  onSelect?: (id: string) => void;
+}) {
+  const selected = items.find((item) => item.id === selectedId);
+  const activeId = selected?.id ?? items[0]?.id;
+  const center: LatLngTuple = selected?.position ?? items[0]?.position ?? [63.421, 10.395];
   return (
     <MapContainer
-      center={[63.421, 10.395]}
+      id="map"
+      center={center}
       zoom={12}
       className="nearby-map"
       zoomControl={false}
       scrollWheelZoom={false}
     >
       <TileLayer url={tiles} attribution="© Kartverket" />
-      {locations.map((article, index) => (
+      <MapAccessibility label="Kart over nærliggende nyhetssaker" />
+      <FitMapToPositions positions={items.map(({ position }) => position)} />
+      {items.map((item) => (
         <Marker
-          key={article.id}
-          position={[article.location!.lat, article.location!.lng]}
+          key={item.id}
+          position={item.position}
+          title={`${item.markerLabel}. ${item.title} (${item.locationLabel})`}
+          eventHandlers={{ click: () => onSelect?.(item.id) }}
           icon={L.divIcon({
-            className: "story-marker",
-            html: `<span>${index + 1}</span>`,
-            iconSize: [25, 25],
+            className: `story-marker story-marker-${item.kind}${
+              activeId === item.id ? " story-marker-selected" : ""
+            }`,
+            html: `<span>${item.markerLabel}</span>`,
+            iconSize: [30, 30],
           })}
         />
       ))}
@@ -222,14 +276,14 @@ export function SituationMap({
       ),
     [layers.warning, situation.features],
   );
+  const featurePositions = useMemo(
+    () => visibleFeatures.flatMap((feature) => latLngsFromGeometry(feature.geometry)),
+    [visibleFeatures],
+  );
   const privateFeatures = situation.features.filter(
     (feature) => feature.properties.provenance === "private_annotation",
   );
-  const mappedPoint = situation.features.find((feature) => feature.geometry.type === "Point");
-  const mapCenter: LatLngTuple =
-    mappedPoint?.geometry.type === "Point"
-      ? ([mappedPoint.geometry.coordinates[1], mappedPoint.geometry.coordinates[0]] as LatLngTuple)
-      : [63.421, 10.395];
+  const mapCenter: LatLngTuple = featurePositions[0] ?? [63.421, 10.395];
 
   const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
     setBounds(nextBounds);
@@ -406,6 +460,8 @@ export function SituationMap({
       </div>
       <MapContainer center={mapCenter} zoom={13} className="incident-map">
         <TileLayer url={tiles} attribution="© Kartverket" />
+        <MapAccessibility label={`Situasjonskart for ${situation.title}`} />
+        <FitMapToPositions positions={featurePositions} />
         <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
         {layers.dsbStations ? (
           <WMSTileLayer
@@ -421,24 +477,27 @@ export function SituationMap({
             attribution="DSB"
           />
         ) : null}
-        {visibleFeatures.map((feature) =>
-          feature.geometry.type === "Point" ? (
-            <CircleMarker
-              key={feature.id}
-              center={
-                [feature.geometry.coordinates[1], feature.geometry.coordinates[0]] as LatLngTuple
-              }
-              radius={7}
-              pathOptions={featureStyle(feature)}
-            />
-          ) : (
+        {visibleFeatures.flatMap((feature) => {
+          if (feature.geometry.type === "Point") {
+            const center = latLngFromGeoJsonPosition(feature.geometry.coordinates);
+            if (!center) return [];
+            return [
+              <CircleMarker
+                key={feature.id}
+                center={center}
+                radius={7}
+                pathOptions={featureStyle(feature)}
+              />,
+            ];
+          }
+          return [
             <GeoJSON
               key={feature.id}
               data={feature as GeoJsonObject}
               style={() => featureStyle(feature)}
-            />
-          ),
-        )}
+            />,
+          ];
+        })}
         {draftGeoJson ? (
           <GeoJSON
             data={draftGeoJson as GeoJsonObject}

@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { sampleWorkspace } from "@nytt/shared";
+import { sampleBootstrap, sampleWorkspace, type Article } from "@nytt/shared";
 
 async function openTrafficLayersIfHidden(page: Page): Promise<void> {
   const layersButton = page.getByRole("button", { name: "Lag" });
@@ -37,6 +37,117 @@ test("Situation Room explains provenance and keeps private map controls distinct
   await expect(
     sourceItemsPanel.getByText(/Ingen kildeelementer er koblet ennå|nrk|adresseavisen|vegvesen/i),
   ).toBeVisible();
+});
+
+test("home nearby module links ranked local stories with the map", async ({ page }) => {
+  await page.goto("/");
+
+  const nearby = page.locator(".nearby-module");
+  await expect(nearby.getByRole("heading", { name: "I nærheten" })).toBeVisible();
+  await expect(nearby.getByText("4 stedsfestede saker fra nyhetslisten.")).toBeVisible();
+  await expect(nearby.getByRole("link", { name: "Åpne situasjonskart" })).toHaveAttribute(
+    "href",
+    "/situasjoner",
+  );
+
+  const situationRow = nearby.getByRole("button", { name: /Skogbrann ved Bymarka/ });
+  await expect(situationRow).toHaveAttribute("aria-current", "true");
+  await expect(nearby.getByText("Tilknyttet situasjon")).toBeVisible();
+  await expect(nearby.getByRole("link", { name: "Åpne situasjon", exact: true })).toHaveAttribute(
+    "href",
+    "/situasjoner/skogbrann-bymarka",
+  );
+
+  const municipalRow = nearby.getByRole("button", { name: /Varsel om veiarbeid/ });
+  await municipalRow.click();
+  await expect(municipalRow).toHaveAttribute("aria-current", "true");
+  await expect(nearby.getByRole("heading", { name: /Varsel om veiarbeid/ })).toBeVisible();
+  await expect(nearby.getByText("Kommunalt varsel")).toBeVisible();
+  await expect(nearby.getByRole("link", { name: /Åpne trafikkart/ })).toHaveAttribute(
+    "href",
+    "/trafikk",
+  );
+
+  await page.getByTitle(/Ny bru over Nidelva/).click();
+  await expect(nearby.getByRole("heading", { name: /Ny bru over Nidelva/ })).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+});
+
+test("home feed consolidates similar stories from different sources", async ({ page }) => {
+  const articles: Article[] = [
+    {
+      id: "nrk-antibac",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Tente på antibac i Trondheim",
+      excerpt: "En mann i 50-åra spruta antibac på bakken og tente på det på Torvet i Trondheim.",
+      url: "https://example.test/nrk-antibac",
+      publishedAt: "2026-06-15T18:12:00.000Z",
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Trondheim", "Torvet"],
+      location: { lat: 63.4305, lng: 10.3951, label: "Torvet" },
+    },
+    {
+      id: "politiloggen-antibac",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Ro og orden: Trondheim, Torvet",
+      excerpt:
+        "Klokken 1846 fikk politiet inn en melding om en mann som sprutet antibac på bakken og tente på.",
+      url: "https://example.test/politiloggen-antibac",
+      publishedAt: "2026-06-15T18:00:00.000Z",
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Trondheim", "Torvet"],
+      location: { lat: 63.4305, lng: 10.3951, label: "Torvet" },
+    },
+    {
+      ...sampleBootstrap.articles[0]!,
+      id: "other-local-story",
+      publishedAt: "2026-06-15T16:30:00.000Z",
+      situationId: undefined,
+    },
+  ];
+
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        articles,
+        situations: [],
+        sourceHealth: sampleBootstrap.sourceHealth,
+      }),
+    });
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: articles }),
+    });
+  });
+  await page.route("**/api/situations?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+
+  await page.goto("/");
+
+  const lead = page.locator(".lead-story");
+  const sources = lead.locator(".source-cluster");
+  await expect(lead.getByRole("heading", { name: "Tente på antibac i Trondheim" })).toBeVisible();
+  await expect(sources.getByText("2 kilder dekker samme sak")).toBeVisible();
+  await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toBeVisible();
+  await expect(sources.getByRole("link", { name: /Politiloggen/ })).toBeVisible();
+  await expect(sources.getByText("Ro og orden: Trondheim, Torvet")).toBeVisible();
+  await expect(page.locator(".news-row .headline", { hasText: "Ro og orden" })).toHaveCount(0);
 });
 
 test("traffic page shows summary cards semantic layers ranked list and detail drawer", async ({
@@ -661,15 +772,28 @@ test("weather page presents the preparedness desk with source-labeled official g
         warnings: [
           {
             id: "met-rain",
+            source: "met",
             sourceLabel: "MET farevarsel",
             title: "Kraftig regn",
             area: "Trøndelag",
             level: "Gult",
             validUntil: "2026-06-02T09:00:00.000Z",
             url: "https://api.met.no/weatherapi/metalerts/2.0/current.rss",
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [10.2, 63.3],
+                  [10.6, 63.3],
+                  [10.6, 63.5],
+                  [10.2, 63.3],
+                ],
+              ],
+            },
           },
           {
             id: "nve-flood",
+            source: "nve",
             sourceLabel: "NVE flomvarsel",
             title: "Flomvarsel",
             area: "Trondheim",
@@ -679,14 +803,26 @@ test("weather page presents the preparedness desk with source-labeled official g
           },
         ],
         hourly: [],
-        roadWeather: [],
+        roadWeather: [
+          {
+            id: "datex-weather:e6-tonstad",
+            source: "datex_weather",
+            stationId: "e6-tonstad",
+            stationName: "E6 Tonstad",
+            observedAt: "2026-06-01T08:03:00.000Z",
+            updatedAt: "2026-06-01T08:04:00.000Z",
+            geometry: { type: "Point", coordinates: [10.39, 63.36] },
+            roadSurfaceTemperatureC: 1.5,
+            precipitationMm: 1.8,
+          },
+        ],
         mapLayers: [
           {
             id: "met-warnings",
-            title: "MET warning polygons",
+            title: "MET farevarselgeometri",
             source: "MET",
-            status: "planned",
-            detail: "Vises når varselgeometri eksponeres i værkartet.",
+            status: "available",
+            detail: "Tegnes med kildegeometri.",
           },
         ],
         sources: [],
@@ -702,10 +838,13 @@ test("weather page presents the preparedness desk with source-labeled official g
   await expect(page.getByRole("heading", { name: "Flom/skred" })).toBeVisible();
   await expect(page.getByText("MET farevarsel + Trondheim klimatilpasning")).toBeVisible();
   await expect(page.getByText("Nytt er ikke koblet til Nødvarsel")).toBeVisible();
-  await expect(page.getByText("Neste lag")).toBeVisible();
-  await expect(page.locator(".warning-area")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Værkart for Trondheim" })).toBeVisible();
+  await expect(page.getByText("Vegværstasjoner", { exact: true })).toBeVisible();
+  await expect(page.getByText("Tegnes i kart")).toBeVisible();
+  await expect(page.locator(".weather-warning-area")).toHaveCount(1);
+  await expect(page.locator(".road-context-marker-weather")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Hvem påvirkes?" })).toBeVisible();
-  await expect(page.getByText("Innbyggere")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Innbyggere" })).toBeVisible();
   await expect(page.getByText("Sivilforsvaret støtter politi, brann, helse")).toBeVisible();
 });
 
@@ -715,7 +854,9 @@ test("searching from trafikk navigates home and shows filtered results", async (
 
   await expect(page).toHaveURL(/\/\?q=bru$/);
   await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Ny bru over Nidelva/ })).toBeVisible();
+  await expect(
+    page.locator(".news-section").getByRole("heading", { name: /Ny bru over Nidelva/ }),
+  ).toBeVisible();
   await expect(page.locator(".situation-banner")).toHaveCount(0);
 });
 
@@ -808,7 +949,7 @@ test("article save is disabled while a request is pending", async ({ page }) => 
     name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
   });
   await expect(pendingSaveButton).toBeDisabled();
-  await pendingSaveButton.click({ force: true }).catch(() => undefined);
+  expect(calls).toBe(1);
   releaseSave();
 
   const expectedLabel = initialLabel.startsWith("Fjern fra lagret")
@@ -1284,12 +1425,21 @@ test("owner can open the real situation index and operations status", async ({ p
   await page.goto("/");
   await page.getByRole("link", { name: "Situasjonsrom", exact: true }).click();
   await expect(page).toHaveURL(/\/situasjoner$/);
-  await expect(page.getByRole("heading", { name: "Hendelser og utvikling" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Åpne oversikt" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Trondheim situasjonskart" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Åpne arbeidsrom" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Se i operasjonstidslinje" })).toBeVisible();
   await page.getByRole("link", { name: "Drift" }).click();
   await expect(page.getByRole("heading", { name: "Kilder og systemstatus" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();
   await expect(page.getByText("Innhentede saker")).toBeVisible();
+  await page.getByRole("link", { name: "Åpne kilderevisjon" }).click();
+  await expect(page).toHaveURL(/\/drift\/kilder$/);
+  await expect(page.getByRole("heading", { name: "Kildehelse og proveniens" })).toBeVisible();
+  await expect(page.getByText("Kilder i filter")).toBeVisible();
+  await page.getByRole("link", { name: "Tidslinje" }).click();
+  await expect(page).toHaveURL(/\/drift\/tidslinje$/);
+  await expect(page.getByRole("heading", { name: "Operasjonstidslinje" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Siste operative spor" })).toBeVisible();
   await page.getByRole("link", { name: "Lagret" }).click();
   await expect(page.getByRole("heading", { name: "Lagret" })).toBeVisible();
 });

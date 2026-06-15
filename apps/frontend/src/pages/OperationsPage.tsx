@@ -4,9 +4,11 @@ import { api } from "../api.js";
 
 function time(value?: string) {
   return value
-    ? new Intl.DateTimeFormat("nb-NO", { dateStyle: "medium", timeStyle: "short" }).format(
-        new Date(value),
-      )
+    ? new Intl.DateTimeFormat("nb-NO", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Europe/Oslo",
+      }).format(new Date(value))
     : "Ikke registrert";
 }
 
@@ -83,6 +85,14 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
         <p className="label">Privat drift</p>
         <h1>Kilder og systemstatus</h1>
         <p>Sist innhenting {time(status.latestCollectionAt)}</p>
+        <div className="operations-page-actions">
+          <a className="operations-audit-link" href="/drift/tidslinje">
+            Åpne tidslinje
+          </a>
+          <a className="operations-audit-link" href="/drift/kilder">
+            Åpne kilderevisjon
+          </a>
+        </div>
       </header>
       <div className="operations-summary">
         <article>
@@ -108,7 +118,7 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
           <h2 id="worker-metrics-heading">Worker-syklus</h2>
           <p>
             Rå driftstall fra siste fullførte innhenting. Dette er ikke hendelsesbevis og legges
-            ikke i kildeledgeren.
+            ikke i kildeloggen.
           </p>
         </div>
         <div className="worker-metrics-grid">
@@ -211,15 +221,26 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
 export function OperationsPage() {
   const [status, setStatus] = useState<OperationsStatus>();
   const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    setError(undefined);
     void api
       .operations()
       .then(setStatus)
       .catch((reason: Error) => setError(reason.message));
-  }, []);
+  }, [attempt]);
 
-  if (error) return <main className="operations-page">Kunne ikke hente driftstatus: {error}</main>;
+  if (error) {
+    return (
+      <main className="operations-page" role="alert">
+        <p>Kunne ikke hente driftstatus: {error}</p>
+        <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+          Prøv igjen
+        </button>
+      </main>
+    );
+  }
   if (!status) return <main className="operations-page">Henter driftstatus...</main>;
 
   return <OperationsDashboard status={status} />;

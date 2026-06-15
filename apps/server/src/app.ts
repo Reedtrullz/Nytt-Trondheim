@@ -9,24 +9,38 @@ import pg from "pg";
 import { ZodError } from "zod";
 import {
   articleQuerySchema,
-  labelInputSchema,
   lifecycleInputSchema,
   noteInputSchema,
+  operationsTimelineQuerySchema,
+  privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
   publicTransportMapQuerySchema,
   sourceItemLinkInputSchema,
   sourceItemQuerySchema,
+  sourceAuditFilterQuerySchema,
+  provenanceLabels,
   situationQuerySchema,
+  sourceConfidenceLabels,
   taskInputSchema,
   trafficMapQuerySchema,
   travelPlanQuerySchema,
+  workspaceMapQuerySchema,
   type MapFeature,
+  type MapFirstSituation,
+  type PrivateAnnotationFeature,
+  type Provenance,
+  type ProvenanceConfidence,
   type PublicTransportVehicle,
   type Situation,
   type SituationExplanation,
+  type SituationMapWorkspace,
+  type SituationWorkspace,
+  type SourceConfidenceLevel,
+  type SourceConfidenceSummary,
   type SourceHealth,
   type SourceId,
   type SourceItem,
+  type TimelineEntry,
   type TrafficEventState,
   type TrafficMapEvent,
   type TrafficMapSourceStatus,
@@ -311,6 +325,319 @@ function filterTrafficMapEvents(
     }
     return true;
   });
+}
+
+function confidenceLevelFromScore(score?: number): SourceConfidenceLevel {
+  if (score === undefined || !Number.isFinite(score)) return "uncertain";
+  if (score >= 0.85) return "confirmed";
+  if (score >= 0.65) return "likely";
+  if (score >= 0.35) return "uncertain";
+  return "speculative";
+}
+
+function sourceConfidenceForSituation(
+  situation: Situation,
+  sourceItems: SourceItem[],
+): SourceConfidenceSummary {
+  const evidenceScores = situation.evidence
+    .map((evidence) => evidence.confidence)
+    .filter((value) => Number.isFinite(value));
+  const score =
+    evidenceScores.length > 0
+      ? evidenceScores.reduce((total, value) => total + value, 0) / evidenceScores.length
+      : undefined;
+  const hasOfficialSignal =
+    situation.verificationStatus === "Offentlig bekreftet" ||
+    situation.evidence.some((evidence) => evidence.provenance === "official") ||
+    sourceItems.some(
+      (item) => item.reliabilityTier === "official" && item.relationship === "supports",
+    );
+  const level = hasOfficialSignal ? "confirmed" : confidenceLevelFromScore(score);
+  const sourceIds = new Set<SourceId>([
+    ...situation.evidence.map((evidence) => evidence.source),
+    ...situation.timeline.flatMap((entry) => (entry.source ? [entry.source] : [])),
+    ...sourceItems.map((item) => item.provider),
+  ]);
+  return {
+    level,
+    label: sourceConfidenceLabels[level],
+    ...(score !== undefined ? { score: Math.round(score * 100) / 100 } : {}),
+    sourceCount: sourceIds.size,
+    updatedAt: situation.updatedAt,
+    rationale: hasOfficialSignal
+      ? "Offentlig eller offisielt kildegrunnlag er koblet til situasjonen."
+      : "Bygget fra tilgjengelige kilde- og tidslinjesignaler.",
+  };
+}
+
+function addProvenanceBucket(
+  buckets: Map<
+    Provenance,
+    {
+      sourceIds: Set<SourceId>;
+      evidenceIds: string[];
+      sourceItemIds: string[];
+      scores: number[];
+    }
+  >,
+  provenance: Provenance,
+  input: {
+    sourceId?: SourceId;
+    evidenceId?: string;
+    sourceItemId?: string;
+    score?: number;
+  },
+) {
+  const bucket = buckets.get(provenance) ?? {
+    sourceIds: new Set<SourceId>(),
+    evidenceIds: [],
+    sourceItemIds: [],
+    scores: [],
+  };
+  if (input.sourceId) bucket.sourceIds.add(input.sourceId);
+  if (input.evidenceId) bucket.evidenceIds.push(input.evidenceId);
+  if (input.sourceItemId) bucket.sourceItemIds.push(input.sourceItemId);
+  if (typeof input.score === "number" && Number.isFinite(input.score))
+    bucket.scores.push(input.score);
+  buckets.set(provenance, bucket);
+}
+
+function provenanceSummaryForSituation(
+  situation: Situation,
+  sourceItems: SourceItem[],
+): ProvenanceConfidence[] {
+  const buckets = new Map<
+    Provenance,
+    {
+      sourceIds: Set<SourceId>;
+      evidenceIds: string[];
+      sourceItemIds: string[];
+      scores: number[];
+    }
+  >();
+
+  for (const evidence of situation.evidence) {
+    addProvenanceBucket(buckets, evidence.provenance, {
+      sourceId: evidence.source,
+      evidenceId: evidence.id,
+      score: evidence.confidence,
+    });
+  }
+  for (const feature of situation.features) {
+    addProvenanceBucket(buckets, feature.properties.provenance, {
+      sourceId: feature.properties.source,
+      score: feature.properties.sourceConfidence?.score,
+    });
+  }
+  for (const item of sourceItems) {
+    const provenance: Provenance =
+      item.relationship === "supports"
+        ? item.reliabilityTier === "official"
+          ? "official"
+          : "reporting_estimate"
+        : "preparedness_context";
+    addProvenanceBucket(buckets, provenance, {
+      sourceId: item.provider,
+      sourceItemId: item.id,
+      score: item.confidence?.score,
+    });
+  }
+
+  return [...buckets.entries()].map(([provenance, bucket]) => {
+    const averageScore =
+      bucket.scores.length > 0
+        ? bucket.scores.reduce((total, value) => total + value, 0) / bucket.scores.length
+        : undefined;
+    const level = provenance === "official" ? "confirmed" : confidenceLevelFromScore(averageScore);
+    return {
+      provenance,
+      label: provenanceLabels[provenance],
+      sourceIds: [...bucket.sourceIds].sort(),
+      confidence: {
+        level,
+        label: sourceConfidenceLabels[level],
+        ...(averageScore !== undefined ? { score: Math.round(averageScore * 100) / 100 } : {}),
+        sourceCount: bucket.sourceIds.size,
+        updatedAt: situation.updatedAt,
+      },
+      ...(bucket.evidenceIds.length ? { evidenceIds: bucket.evidenceIds } : {}),
+      ...(bucket.sourceItemIds.length ? { sourceItemIds: bucket.sourceItemIds } : {}),
+    };
+  });
+}
+
+function inferredTimelineProvenance(entry: TimelineEntry): Provenance {
+  if (entry.provenance) return entry.provenance;
+  return entry.official ? "official" : "reporting_estimate";
+}
+
+function timelineEntryMatchesWorkspaceQuery(
+  entry: TimelineEntry,
+  query: ReturnType<typeof workspaceMapQuerySchema.parse>,
+): boolean {
+  if (query.includeTelemetry === false && entry.source && telemetrySourceIds.has(entry.source))
+    return false;
+  if (query.sources && (!entry.source || !query.sources.includes(entry.source))) return false;
+  const provenance = inferredTimelineProvenance(entry);
+  if (query.provenances && !query.provenances.includes(provenance)) return false;
+  if (
+    query.confidenceLevels &&
+    !query.confidenceLevels.includes(entry.confidence?.level ?? "uncertain")
+  ) {
+    return false;
+  }
+  if (query.includePrivateAnnotations === false && provenance === "private_annotation")
+    return false;
+  const search = query.q?.toLocaleLowerCase("nb");
+  if (
+    search &&
+    !`${entry.title} ${entry.detail} ${entry.sourceLabel}`.toLocaleLowerCase("nb").includes(search)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function featureMatchesWorkspaceQuery(
+  feature: MapFeature,
+  query: ReturnType<typeof workspaceMapQuerySchema.parse>,
+): boolean {
+  if (
+    query.includeTelemetry === false &&
+    feature.properties.source &&
+    telemetrySourceIds.has(feature.properties.source)
+  ) {
+    return false;
+  }
+  if (
+    query.includePrivateAnnotations === false &&
+    feature.properties.provenance === "private_annotation"
+  ) {
+    return false;
+  }
+  if (query.provenances && !query.provenances.includes(feature.properties.provenance)) return false;
+  if (
+    query.confidenceLevels &&
+    !query.confidenceLevels.includes(feature.properties.sourceConfidence?.level ?? "uncertain")
+  ) {
+    return false;
+  }
+  if (
+    typeof query.north === "number" &&
+    typeof query.south === "number" &&
+    typeof query.east === "number" &&
+    typeof query.west === "number" &&
+    !geometryIntersectsBounds(feature.geometry, {
+      north: query.north,
+      south: query.south,
+      east: query.east,
+      west: query.west,
+    })
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isPrivateAnnotationFeature(feature: MapFeature): feature is PrivateAnnotationFeature {
+  return feature.properties.provenance === "private_annotation";
+}
+
+function sourceIdsForSituation(situation: Situation, sourceItems: SourceItem[]): Set<SourceId> {
+  return new Set<SourceId>([
+    ...situation.evidence.map((evidence) => evidence.source),
+    ...situation.timeline.flatMap((entry) => (entry.source ? [entry.source] : [])),
+    ...situation.features.flatMap((feature) =>
+      feature.properties.source ? [feature.properties.source] : [],
+    ),
+    ...sourceItems.map((item) => item.provider),
+    ...(situation.officialSource ? [situation.officialSource] : []),
+    ...(situation.activationBasis?.sourceIds ?? []),
+  ]);
+}
+
+function situationMatchesWorkspaceQuery(
+  situation: Situation,
+  sourceItems: SourceItem[],
+  sourceConfidence: SourceConfidenceSummary,
+  query: ReturnType<typeof workspaceMapQuerySchema.parse>,
+): boolean {
+  if (query.statuses && !query.statuses.includes(situation.status)) return false;
+  if (query.types && !query.types.includes(situation.type)) return false;
+  if (query.sources) {
+    const sources = sourceIdsForSituation(situation, sourceItems);
+    const allowedSources =
+      query.includeTelemetry === false
+        ? query.sources.filter((source) => !telemetrySourceIds.has(source))
+        : query.sources;
+    if (!allowedSources.length || !allowedSources.some((source) => sources.has(source)))
+      return false;
+  }
+  if (query.provenances) {
+    const provenances = new Set<Provenance>([
+      ...situation.evidence.map((evidence) => evidence.provenance),
+      ...situation.features.map((feature) => feature.properties.provenance),
+      ...situation.timeline.map(inferredTimelineProvenance),
+    ]);
+    if (!query.provenances.some((provenance) => provenances.has(provenance))) return false;
+  }
+  if (query.confidenceLevels && !query.confidenceLevels.includes(sourceConfidence.level))
+    return false;
+  const search = query.q?.toLocaleLowerCase("nb");
+  if (
+    search &&
+    !`${situation.title} ${situation.summary} ${situation.locationLabel}`
+      .toLocaleLowerCase("nb")
+      .includes(search)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function mapFirstSituationFromWorkspace(
+  situation: Situation,
+  sourceItems: SourceItem[],
+  query: ReturnType<typeof workspaceMapQuerySchema.parse>,
+): MapFirstSituation | undefined {
+  const sourceConfidence = sourceConfidenceForSituation(situation, sourceItems);
+  if (!situationMatchesWorkspaceQuery(situation, sourceItems, sourceConfidence, query)) {
+    return undefined;
+  }
+  const features = situation.features.filter((feature) =>
+    featureMatchesWorkspaceQuery(feature, query),
+  );
+  const timelinePreview = situation.timeline
+    .filter((entry) => timelineEntryMatchesWorkspaceQuery(entry, query))
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+    .slice(0, 4);
+  const primaryFeature =
+    features.find(
+      (feature) =>
+        feature.geometry.type === "Point" && feature.properties.provenance !== "private_annotation",
+    ) ??
+    features.find((feature) => feature.geometry.type === "Point") ??
+    features[0];
+
+  return {
+    id: situation.id,
+    type: situation.type,
+    title: situation.title,
+    summary: situation.summary,
+    status: situation.status,
+    importance: situation.importance,
+    updatedAt: situation.updatedAt,
+    locationLabel: situation.locationLabel,
+    ...(primaryFeature ? { primaryFeature } : {}),
+    features,
+    timelinePreview,
+    provenanceSummary: provenanceSummaryForSituation(situation, sourceItems),
+    sourceConfidence,
+    hasPrivateAnnotations: situation.features.some(
+      (feature) => feature.properties.provenance === "private_annotation",
+    ),
+    saved: situation.saved,
+  };
 }
 
 export interface AppRuntime {
@@ -625,6 +952,83 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.get("/api/situations/workspace-map", async (req, res, next) => {
+    try {
+      const query = workspaceMapQuerySchema.parse(req.query);
+      const login = currentLogin(req);
+      const includeDismissed = query.statuses?.includes("dismissed") ?? false;
+      const situations = await store.listSituations({ includeDismissed, limit: 100 }, login);
+      const workspaceRows = await Promise.all(
+        situations.items.map(async (situation) => {
+          const [workspace, sourceItems] = await Promise.all([
+            store.getWorkspace(situation.id, login),
+            store.listSituationSourceItems(situation.id, login),
+          ]);
+          if (!workspace) return undefined;
+          return { workspace, sourceItems };
+        }),
+      );
+      const entries = workspaceRows.filter(
+        (entry): entry is { workspace: SituationWorkspace; sourceItems: SourceItem[] } =>
+          Boolean(entry),
+      );
+      const mappedSituations = entries
+        .map(({ workspace, sourceItems }) =>
+          mapFirstSituationFromWorkspace(workspace.situation, sourceItems, query),
+        )
+        .filter((situation): situation is MapFirstSituation => Boolean(situation));
+      const visibleIds = new Set(mappedSituations.map((situation) => situation.id));
+      const timeline = entries
+        .filter(({ workspace }) => visibleIds.has(workspace.situation.id))
+        .flatMap(({ workspace }) => workspace.situation.timeline)
+        .filter((entry) => timelineEntryMatchesWorkspaceQuery(entry, query))
+        .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+        .slice(0, 100);
+      const privateAnnotations = mappedSituations.flatMap((situation) =>
+        query.includePrivateAnnotations === false
+          ? []
+          : situation.features.filter(isPrivateAnnotationFeature),
+      );
+      const payload: SituationMapWorkspace = {
+        situations: mappedSituations,
+        mapState: {
+          ...(typeof query.north === "number" &&
+          typeof query.south === "number" &&
+          typeof query.east === "number" &&
+          typeof query.west === "number"
+            ? {
+                bounds: {
+                  north: query.north,
+                  south: query.south,
+                  east: query.east,
+                  west: query.west,
+                },
+              }
+            : {}),
+          layers: query.layers ?? [
+            "situations",
+            "evidence",
+            "preparedness_context",
+            "private_annotations",
+          ],
+          sourceFilters: {
+            providers: query.sources,
+            provenances: query.provenances,
+            confidenceLevels: query.confidenceLevels,
+            includeTelemetry: query.includeTelemetry,
+            includePrivateAnnotations: query.includePrivateAnnotations,
+            q: query.q,
+          },
+        },
+        timeline,
+        privateAnnotations,
+      };
+      res.json(payload);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/situations/:id", async (req, res, next) => {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
@@ -753,23 +1157,34 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   };
 
+  async function unlinkedPrivateAnnotationSourceItemIds(
+    situationId: string,
+    login: string,
+    sourceItemIds: string[] | undefined,
+  ) {
+    if (!sourceItemIds?.length) return [];
+    const linkedIds = new Set(
+      (await store.listSituationSourceItems(situationId, login)).map((item) => item.id),
+    );
+    return sourceItemIds.filter((sourceItemId) => !linkedIds.has(sourceItemId));
+  }
+
   app.post("/api/situations/:id/features", ensureSituationExists, async (req, res, next) => {
     try {
       const input = privateMapFeatureInputSchema.parse(req.body);
       const login = currentLogin(req);
       const situationId = String(req.params.id);
       const sourceItemIds = input.properties.sourceItemIds ?? [];
-      if (sourceItemIds.length) {
-        const linkedIds = new Set(
-          (await store.listSituationSourceItems(situationId, login)).map((item) => item.id),
-        );
-        const invalidIds = sourceItemIds.filter((sourceItemId) => !linkedIds.has(sourceItemId));
-        if (invalidIds.length) {
-          return void res.status(400).json({
-            error:
-              "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
-          });
-        }
+      const invalidIds = await unlinkedPrivateAnnotationSourceItemIds(
+        situationId,
+        login,
+        sourceItemIds,
+      );
+      if (invalidIds.length) {
+        return void res.status(400).json({
+          error:
+            "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
+        });
       }
       const feature: MapFeature = {
         id: randomUUID(),
@@ -789,13 +1204,21 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.patch("/api/situations/:id/features/:featureId", async (req, res, next) => {
     try {
-      const { label, note } = labelInputSchema.parse(req.body);
-      const feature = await store.updatePrivateFeature(
-        req.params.id,
-        req.params.featureId,
-        label,
-        note,
+      const input = privateAnnotationUpdateRequestSchema.parse(req.body);
+      const login = currentLogin(req);
+      const situationId = String(req.params.id);
+      const invalidIds = await unlinkedPrivateAnnotationSourceItemIds(
+        situationId,
+        login,
+        input.sourceItemIds,
       );
+      if (invalidIds.length) {
+        return void res.status(400).json({
+          error:
+            "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
+        });
+      }
+      const feature = await store.updatePrivateFeature(situationId, req.params.featureId, input);
       if (!feature) return void res.status(404).json({ error: "Markeringen finnes ikke." });
       res.json(feature);
     } catch (error) {
@@ -1005,6 +1428,24 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/operations/sources", async (_req, res, next) => {
     try {
       res.json(await store.listSourceHealth());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/source-audit", async (req, res, next) => {
+    try {
+      const filters = sourceAuditFilterQuerySchema.parse(req.query);
+      res.json(await store.getSourceAuditWorkspace(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/timeline", async (req, res, next) => {
+    try {
+      const filters = operationsTimelineQuerySchema.parse(req.query);
+      res.json(await store.getOperationsTimeline(filters, currentLogin(req)));
     } catch (error) {
       next(error);
     }

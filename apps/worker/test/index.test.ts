@@ -17,6 +17,7 @@ import {
   collectTrafficInfoForMap,
   createCollectionGuard,
   buildWorkerCycleMetrics,
+  collectorRunFromMetric,
   normalizeDatexSituationEndpoint,
   shouldResolveMissingDatexSituations,
 } from "../src/index.js";
@@ -194,6 +195,26 @@ describe("worker lifecycle helpers", () => {
         nrk: 0,
         datex: 1,
       },
+    });
+  });
+
+  it("records skipped collector telemetry without reporting success", () => {
+    expect(
+      collectorRunFromMetric({
+        source: "trafikkdata",
+        startedAtMs: Date.parse("2026-06-02T06:00:00.000Z"),
+        completedAtMs: Date.parse("2026-06-02T06:00:00.010Z"),
+        sourceItemCount: 0,
+        parseFailures: 0,
+        skipped: true,
+      }),
+    ).toMatchObject({
+      source: "trafikkdata",
+      collector: "trafikkdata",
+      status: "skipped",
+      recordsSeen: 0,
+      recordsAccepted: 0,
+      recordsRejected: 0,
     });
   });
 
@@ -702,15 +723,17 @@ describe("Entur worker collection", () => {
       activeVehicleIds: ["8790"],
     });
 
-    await collectEnturVehiclesForMap({
-      repository: repository as never,
-      clientName: "reidar-nytt-trondheim",
-      codespaceId: "ATB",
-      bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
-      nextPollAt: "2026-05-31T21:16:00.000Z",
-      now: () => new Date("2026-05-31T21:15:00.000Z"),
-      collector,
-    });
+    await expect(
+      collectEnturVehiclesForMap({
+        repository: repository as never,
+        clientName: "reidar-nytt-trondheim",
+        codespaceId: "ATB",
+        bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
+        nextPollAt: "2026-05-31T21:16:00.000Z",
+        now: () => new Date("2026-05-31T21:15:00.000Z"),
+        collector,
+      }),
+    ).resolves.toEqual({ sourceItemCount: 1, parseFailures: 0 });
 
     expect(repository.upsertPublicTransportVehicles).toHaveBeenCalledWith(
       expect.any(Array),
@@ -743,15 +766,17 @@ describe("Entur worker collection", () => {
         };
       });
 
-    await collectEnturVehiclesForMapCodespaces({
-      repository: repository as never,
-      clientName: "reidar-nytt-trondheim",
-      codespaceIds: ["ATB", "SKY"],
-      bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
-      nextPollAt: "2026-05-31T21:16:00.000Z",
-      now: () => new Date("2026-05-31T21:15:00.000Z"),
-      collector,
-    });
+    await expect(
+      collectEnturVehiclesForMapCodespaces({
+        repository: repository as never,
+        clientName: "reidar-nytt-trondheim",
+        codespaceIds: ["ATB", "SKY"],
+        bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
+        nextPollAt: "2026-05-31T21:16:00.000Z",
+        now: () => new Date("2026-05-31T21:15:00.000Z"),
+        collector,
+      }),
+    ).resolves.toEqual({ sourceItemCount: 1, parseFailures: 1 });
 
     expect(repository.upsertPublicTransportVehicles).toHaveBeenCalledTimes(1);
     expect(repository.markMissingPublicTransportVehiclesStale).toHaveBeenCalledWith(
@@ -777,15 +802,17 @@ describe("Entur worker collection", () => {
     };
     const collector = vi.fn().mockRejectedValue(new Error("Entur unavailable"));
 
-    await collectEnturVehiclesForMap({
-      repository: repository as never,
-      clientName: "reidar-nytt-trondheim",
-      codespaceId: "ATB",
-      bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
-      nextPollAt: "2026-05-31T21:16:00.000Z",
-      now: () => new Date("2026-05-31T21:15:00.000Z"),
-      collector,
-    });
+    await expect(
+      collectEnturVehiclesForMap({
+        repository: repository as never,
+        clientName: "reidar-nytt-trondheim",
+        codespaceId: "ATB",
+        bounds: { minLat: 63.3, minLon: 10.2, maxLat: 63.55, maxLon: 10.65 },
+        nextPollAt: "2026-05-31T21:16:00.000Z",
+        now: () => new Date("2026-05-31T21:15:00.000Z"),
+        collector,
+      }),
+    ).resolves.toEqual({ sourceItemCount: 0, parseFailures: 1 });
 
     expect(repository.upsertPublicTransportVehicles).not.toHaveBeenCalled();
     expect(repository.markMissingPublicTransportVehiclesStale).not.toHaveBeenCalled();

@@ -2,6 +2,24 @@
 
 Every new external source must have a source contract before adapter code.
 
+Internal API/workspace features that only compose existing persisted Nytt data do not need a
+source contract; document their data contract, privacy boundaries and verification plan in
+`docs/ARCHITECTURE.md` or a dated `docs/plans/` note instead. If an internal feature starts
+polling a new endpoint or writing a new provider/kind pair into `source_items`, add the source
+contract first.
+
+Source-health/provenance audit consoles are internal operations features under this rule when they
+only read `source_health`, `collector_state`, `worker_cycle_metrics`, `source_items`,
+`situation_source_items`, situations, evidence and related operational tables. They need a source
+contract only if they add live upstream probes, persist new upstream records or introduce a new
+`source_items.provider`/`kind` boundary.
+
+Newsroom operations timelines follow the same rule when they only compose existing situation
+timelines, source-item links, collector runs, source-health freshness, private workspace metadata
+and map annotations. They must document privacy and telemetry boundaries in `docs/plans/`, but do
+not need a source contract unless they start polling a new endpoint or writing a new provider/kind
+boundary.
+
 ## Contract template
 
 ### Provider
