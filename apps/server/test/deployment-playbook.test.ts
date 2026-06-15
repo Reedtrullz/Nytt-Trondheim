@@ -65,6 +65,18 @@ describe("deployment playbook Entur verification", () => {
     );
   });
 
+  it("polls the encrypted backup and restore check instead of holding one long SSH session", () => {
+    const taskStart = playbook.indexOf("- name: Create and verify encrypted pre-migration backup");
+    const taskEnd = playbook.indexOf("- name: Apply database migrations", taskStart);
+    const task = playbook.slice(taskStart, taskEnd);
+
+    expect(taskStart).toBeGreaterThan(-1);
+    expect(task).toContain("/usr/local/bin/nytt-backup");
+    expect(task).toContain("/usr/local/bin/nytt-restore-check");
+    expect(task).toMatch(/async:\s*1800/);
+    expect(task).toMatch(/poll:\s*15/);
+  });
+
   it("requires DATEX source health rows to be ok without deploy-time freshness coupling", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify DATEX source health rows when DATEX is enabled",
