@@ -428,6 +428,50 @@ describe("private situation API", () => {
     expect(response.body.summary.reviewerActions).toBe(4);
   });
 
+  it("keeps operations timeline summary counts independent from page size", async () => {
+    const { app, store } = await testApp();
+    const firstSituation = {
+      ...sampleSituation,
+      id: "timeline-active-one",
+      title: "Aktiv hendelse én",
+      importance: "normal",
+      updatedAt: "2026-06-15T08:00:00.000Z",
+      timeline: [],
+    } satisfies Situation;
+    const secondSituation = {
+      ...sampleSituation,
+      id: "timeline-active-two",
+      title: "Aktiv hendelse to",
+      importance: "normal",
+      updatedAt: "2026-06-15T08:05:00.000Z",
+      timeline: [],
+    } satisfies Situation;
+    vi.spyOn(store, "listSituations").mockResolvedValue({
+      items: [firstSituation, secondSituation],
+    });
+    vi.spyOn(store, "getWorkspace").mockImplementation(async (id) => {
+      const situation = id === firstSituation.id ? firstSituation : secondSituation;
+      return {
+        situation,
+        relatedArticles: [],
+        tasks: [],
+        notes: [],
+        attachments: [],
+      };
+    });
+    vi.spyOn(store, "listSituationSourceItems").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([]);
+    vi.spyOn(store, "listCollectorRuns").mockResolvedValue([]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent.get("/api/operations/timeline?limit=1").expect(200);
+
+    expect(response.body.events).toHaveLength(1);
+    expect(response.body.summary.total).toBe(2);
+    expect(response.body.summary.activeSituations).toBe(2);
+  });
+
   it("returns a map-first situation workspace with source-filtered timeline", async () => {
     const { agent } = await ownerAgent();
     const response = await agent

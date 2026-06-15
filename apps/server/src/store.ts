@@ -429,6 +429,7 @@ const sourceAuditPolicy: Partial<
   Record<SourceId, { role: SourceAuditRole; provenance: Provenance }>
 > = {
   bane_nor: { role: "context_source", provenance: "official" },
+  entur: { role: "context_source", provenance: "preparedness_context" },
   trondheim_kommune: { role: "context_source", provenance: "official" },
   vegvesen_traffic_info: { role: "context_source", provenance: "official" },
 };
@@ -1464,7 +1465,7 @@ async function buildOperationsTimeline(
   const page = visibleEvents.slice(0, limit);
   const last = page.at(-1);
   const activeSituationIds = new Set(
-    page.flatMap((event) =>
+    visibleEvents.flatMap((event) =>
       event.situationId && event.situationStatus === "active" ? [event.situationId] : [],
     ),
   );

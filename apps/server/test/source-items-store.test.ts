@@ -337,13 +337,18 @@ describe("source item store", () => {
     expect(JSON.stringify(audit)).not.toContain("rawPayload");
   });
 
-  it("classifies official context-only sources without incident-source provenance", async () => {
+  it("classifies context-only sources without incident-source provenance", async () => {
     const store = new MemoryStore();
 
     const audit = await store.getSourceAuditWorkspace({ includeDiagnostics: true }, "Reedtrullz");
 
     expect(audit.sources).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          source: "entur",
+          role: "context_source",
+          provenance: "preparedness_context",
+        }),
         expect.objectContaining({
           source: "trondheim_kommune",
           role: "context_source",
