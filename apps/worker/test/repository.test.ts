@@ -56,6 +56,7 @@ describe("WorkerRepository", () => {
     const sourceItemRefreshCall = query.mock.calls.find(([sql]) =>
       String(sql).includes("UPDATE source_items"),
     );
+    expect(String(sourceItemRefreshCall?.[0])).toContain("WHERE id=$1");
     expect(String(sourceItemRefreshCall?.[0])).toContain("WHERE capture_hash=$13");
     expect(String(sourceItemRefreshCall?.[0])).toContain("provider=$2 AND kind=$3");
   });

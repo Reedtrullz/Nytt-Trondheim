@@ -142,6 +142,7 @@ export class WorkerRepository {
          reliability_tier=$15,
          updated_at=now()
        WHERE id = COALESCE(
+         (SELECT id FROM source_items WHERE id=$1),
          (SELECT id FROM source_items WHERE capture_hash=$13),
          (SELECT id FROM source_items WHERE $4::text IS NOT NULL AND provider=$2 AND kind=$3 AND external_id=$4)
        )`,
