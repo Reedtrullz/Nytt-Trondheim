@@ -5152,6 +5152,19 @@ button {
     padding: 16px;
     gap: 14px;
     overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .traffic-page-shell > *,
+  .traffic-now-summary,
+  .traffic-now-cards,
+  .traffic-workspace,
+  .traffic-bottom-panel {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .situation-workspace-page {
@@ -5204,13 +5217,19 @@ button {
   }
 
   .traffic-workspace {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .traffic-mobile-layers-button {
     display: inline-flex;
     justify-content: center;
+    max-width: 100%;
+    min-width: 0;
     padding: 10px 12px;
     border: 1px solid var(--line);
     background: var(--paper);
@@ -5231,6 +5250,8 @@ button {
 
   .traffic-map {
     min-height: 520px;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .traffic-bottom-panel {

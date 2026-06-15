@@ -1149,9 +1149,14 @@ test("mobile traffic page shows heading and controls before the map", async ({
 
   const headingBox = await heading.boundingBox();
   const layersBox = await layersButton.boundingBox();
+  const workspaceBox = await page.locator(".traffic-workspace").boundingBox();
   const mapBox = await page.locator(".traffic-map").boundingBox();
   expect(headingBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
   expect(layersBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
+  for (const box of [layersBox, workspaceBox, mapBox]) {
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.width ?? Number.POSITIVE_INFINITY) + (box?.x ?? 0)).toBeLessThanOrEqual(391);
+  }
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
   ).toBe(true);

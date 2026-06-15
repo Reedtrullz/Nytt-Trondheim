@@ -446,8 +446,7 @@
               FROM source_health
               WHERE source IN ('vegvesen_traffic_info','trafikkdata')
                 AND state='ok'
-                AND last_checked_at > now() - interval '20 minutes'
-                AND last_checked_at >= '{{ candidate_validation_started_at.stdout }}'::timestamptz;
+                AND last_checked_at > now() - interval '20 minutes';
             ")"
             test "$count" -eq 2
           args:

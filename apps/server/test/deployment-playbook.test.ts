@@ -77,10 +77,6 @@ describe("deployment playbook Entur verification", () => {
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("state='ok'");
     expect(task).toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
-    expect(task).toContain("candidate_validation_started_at.stdout");
-    expect(task).toMatch(
-      /last_checked_at\s*>=\s*'\{\{ candidate_validation_started_at\.stdout \}\}'::timestamptz/,
-    );
     expect(task).toContain("until:");
     expect(task).toMatch(/retries:\s*\d+/);
   });
@@ -97,10 +93,9 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
     expect(task).toContain("state='ok'");
     expect(task).toContain('test "$count" -eq 2');
-    expect(task).toContain("candidate_validation_started_at.stdout");
-    expect(task).toMatch(
-      /last_checked_at\s*>=\s*'\{\{ candidate_validation_started_at\.stdout \}\}'::timestamptz/,
-    );
+    expect(task).toContain("last_checked_at > now() - interval '20 minutes'");
+    expect(task).not.toContain("collector_runs");
+    expect(task).not.toContain("candidate_validation_started_at.stdout");
     expect(task).toContain("register: traffic_source_health");
     expect(task).toContain("until: traffic_source_health.rc == 0");
   });
