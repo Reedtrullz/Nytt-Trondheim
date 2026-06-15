@@ -318,21 +318,11 @@
 
     - name: Promote candidate and validate production
       block:
-        - name: Record candidate validation start timestamp
-          ansible.builtin.command: date -u +%Y-%m-%dT%H:%M:%SZ
-          register: candidate_validation_started_at
-          changed_when: false
-
         - name: Promote API and worker
           ansible.builtin.command: docker compose --env-file .env.production up -d app worker
           args:
             chdir: "{{ app_dir }}"
           changed_when: true
-
-        - name: Record candidate promotion timestamp
-          ansible.builtin.command: date -u +%Y-%m-%dT%H:%M:%SZ
-          register: candidate_promoted_at
-          changed_when: false
 
         - name: Remove healthy canary
           community.docker.docker_container:
@@ -466,8 +456,7 @@
               FROM source_health
               WHERE source IN ('datex','datex_travel_time')
                 AND state='ok'
-                AND last_checked_at > now() - interval '30 minutes'
-                AND last_checked_at >= '{{ candidate_validation_started_at.stdout }}'::timestamptz;
+                AND last_checked_at > now() - interval '30 minutes';
             ")"
             test "$count" -eq 2
           args:
@@ -503,8 +492,7 @@
               FROM source_health
               WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
                 AND state='ok'
-                AND last_checked_at > now() - interval '20 minutes'
-                AND last_checked_at >= '{{ candidate_validation_started_at.stdout }}'::timestamptz;
+                AND last_checked_at > now() - interval '20 minutes';
 
               IF entur_source_health_count <> 2 THEN
                 RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;

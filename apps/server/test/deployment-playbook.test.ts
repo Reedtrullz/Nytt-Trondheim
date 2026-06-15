@@ -25,9 +25,7 @@ describe("deployment playbook Entur verification", () => {
     expect(rescueStart).toBeGreaterThan(blockStart);
 
     const validationBlock = playbook.slice(blockStart, rescueStart);
-    expect(validationBlock).toContain("- name: Record candidate validation start timestamp");
     expect(validationBlock).toContain("- name: Promote API and worker");
-    expect(validationBlock).toContain("- name: Record candidate promotion timestamp");
     expect(validationBlock).toContain("- name: Verify production health");
     expect(validationBlock).toMatch(/- name: Verify worker/);
     expect(validationBlock).toContain(
@@ -77,6 +75,7 @@ describe("deployment playbook Entur verification", () => {
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("state='ok'");
     expect(task).toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
+    expect(task).not.toContain("candidate_validation_started_at.stdout");
     expect(task).toContain("until:");
     expect(task).toMatch(/retries:\s*\d+/);
   });
@@ -109,7 +108,7 @@ describe("deployment playbook Entur verification", () => {
     );
   });
 
-  it("requires fresh Entur source health rows after candidate promotion", () => {
+  it("requires fresh Entur source health rows without candidate timestamp coupling", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify Entur source health and provenance invariants when tables exist",
     );
@@ -118,8 +117,6 @@ describe("deployment playbook Entur verification", () => {
 
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("last_checked_at > now() - interval '20 minutes'");
-    expect(task).toMatch(
-      /last_checked_at\s*>=\s*'\{\{ candidate_validation_started_at\.stdout \}\}'::timestamptz/,
-    );
+    expect(task).not.toContain("candidate_validation_started_at.stdout");
   });
 });

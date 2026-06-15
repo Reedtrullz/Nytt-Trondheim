@@ -81,7 +81,7 @@ Do not add these values to the required deployment secrets list; the playbook wr
 
 ## DATEX Verification
 
-The deployment playbook now automatically verifies live health, promoted worker container state, fresh `state='ok'` traffic source-health rows, fresh `state='ok'` DATEX/datex_travel_time `source_health` rows when DATEX credentials are enabled, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. Trafikkdata is cooldown-gated, so a fresh `source_health` row may honestly say the poll was skipped because the last successful fetch is still recent; do not require a new end-of-cycle `collector_runs` row during deployment. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
+The deployment playbook now automatically verifies live health, promoted worker container state, fresh `state='ok'` traffic, DATEX/datex_travel_time and Entur `source_health` rows, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. These source-health checks are freshness-based rather than pinned to candidate start because collectors are external, scheduled and sometimes cooldown-gated; Trafikkdata, for example, may honestly say the poll was skipped because the last successful fetch is still recent. Do not require a new end-of-cycle `collector_runs` row during deployment. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
 
 ```bash
 curl -fsS https://nytt.reidar.tech/health
@@ -96,7 +96,7 @@ ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -c \"select id,name,state,travel_time_seconds,free_flow_seconds,delay_seconds,measurement_to from datex_travel_times order by delay_seconds desc nulls last, name asc limit 10;\""
 ```
 
-A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on fresh post-promotion `source_health.state='ok'`, worker logs and source-health timestamps to distinguish that from collector failure. TravelTime source health appears as `datex_travel_time`; rows in `datex_travel_times` are measured/estimated travel time and delay pulse data only. They do not create `official_events`, do not promote or create `OfficialEvent` rows, and do not create or update `situations`. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
+A zero DATEX event count can be healthy when the current SRTI snapshot has no Trondheim/Trøndelag matches; rely on fresh `source_health.state='ok'`, worker logs and source-health timestamps to distinguish that from collector failure. TravelTime source health appears as `datex_travel_time`; rows in `datex_travel_times` are measured/estimated travel time and delay pulse data only. They do not create `official_events`, do not promote or create `OfficialEvent` rows, and do not create or update `situations`. Use the compose service name `postgres` from `docker-compose.yml`; do not assume a literal container name such as `nytt-postgres` exists.
 
 ## Entur Verification
 
@@ -137,7 +137,7 @@ SQL
 
 Expected results:
 
-- Entur source health rows are present and `state='ok'`; the deploy playbook retries this check after promotion so transient worker startup lag does not create a false red deploy. `entur_vehicle_positions` may legitimately report zero vehicles when Entur has none inside the configured bounds.
+- Entur source health rows are present and `state='ok'`; the deploy playbook retries this freshness check so transient worker startup lag does not create a false red deploy. `entur_vehicle_positions` may legitimately report zero vehicles when Entur has none inside the configured bounds.
 - `source_items WHERE provider='entur'` can be non-zero for service alerts.
 - `accidental_vehicle_source_items` must be zero; this proves vehicle telemetry did not enter `source_items` either under `entur_vehicle_positions` or disguised as `provider='entur'` rows.
 - `official_events` for Entur sources must be zero in this plan.
