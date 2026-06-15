@@ -158,6 +158,58 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
   ) : null;
 }
 
+const preferredWeatherSources = ["MET", "NVE/Varsom", "Statens vegvesen DATEX", "DSB"];
+
+function compactWeatherSourceLabel(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.toLocaleLowerCase("nb");
+  if (normalized.includes("met")) return "MET";
+  if (normalized.includes("nve") || normalized.includes("varsom")) return "NVE/Varsom";
+  if (normalized.includes("vegvesen") || normalized.includes("datex"))
+    return "Statens vegvesen DATEX";
+  if (
+    normalized.includes("dsb") ||
+    normalized.includes("nødvarsel") ||
+    normalized.includes("sivilforsvaret")
+  ) {
+    return "DSB";
+  }
+  if (normalized.includes("trondheim kommune")) return "Trondheim kommune";
+  return value.trim() || undefined;
+}
+
+export function weatherPreparednessSourceLine(payload: WeatherPreparednessPayload): string {
+  const labels = new Set<string>();
+  const add = (value: string | undefined) => {
+    const label = compactWeatherSourceLabel(value);
+    if (label) labels.add(label);
+  };
+
+  add(payload.current.summary);
+  payload.risks.forEach((risk) => add(risk.source));
+  payload.actions.forEach((action) => add(action.source));
+  payload.warnings.forEach((warning) => {
+    add(warning.source);
+    add(warning.sourceLabel);
+  });
+  payload.impactGroups.forEach((group) => add(group.source));
+  payload.mapLayers.forEach((layer) => add(layer.source));
+  payload.authority.links.forEach((link) => add(link.source));
+  payload.sources.forEach((source) => {
+    add(source.label);
+    add(source.source);
+  });
+
+  const ordered = [
+    ...preferredWeatherSources.filter((source) => labels.has(source)),
+    ...[...labels].filter((source) => !preferredWeatherSources.includes(source)),
+  ].slice(0, 4);
+
+  return ordered.length
+    ? `Kilder: ${ordered.join(", ")}`
+    : "Kilder: MET, NVE/Varsom, Statens vegvesen DATEX, DSB";
+}
+
 function layerStatus(layer: WeatherMapLayer): string {
   if (layer.status === "available") return "Aktiv i Nytt";
   if (layer.status === "context") return "Kontekst";
@@ -473,10 +525,7 @@ export function WeatherPage() {
 
   const sourceLine = useMemo(() => {
     if (!payload) return "Kilder: MET, NVE/Varsom, Statens vegvesen DATEX, DSB";
-    const sources = payload.sources.map((source) => source.label).slice(0, 4);
-    return sources.length
-      ? `Kilder: ${sources.join(", ")}`
-      : "Kilder: MET, NVE/Varsom, Statens vegvesen DATEX, DSB";
+    return weatherPreparednessSourceLine(payload);
   }, [payload]);
 
   if (loading && !payload) {

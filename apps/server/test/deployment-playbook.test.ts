@@ -25,6 +25,7 @@ describe("deployment playbook Entur verification", () => {
     expect(rescueStart).toBeGreaterThan(blockStart);
 
     const validationBlock = playbook.slice(blockStart, rescueStart);
+    expect(validationBlock).toContain("- name: Record candidate validation start timestamp");
     expect(validationBlock).toContain("- name: Promote API and worker");
     expect(validationBlock).toContain("- name: Record candidate promotion timestamp");
     expect(validationBlock).toContain("- name: Verify production health");
@@ -76,29 +77,40 @@ describe("deployment playbook Entur verification", () => {
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("state='ok'");
     expect(task).toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
-    expect(task).toContain("candidate_promoted_at.stdout");
+    expect(task).toContain("candidate_validation_started_at.stdout");
     expect(task).toMatch(
-      /last_checked_at\s*>=\s*'\{\{ candidate_promoted_at\.stdout \}\}'::timestamptz/,
+      /last_checked_at\s*>=\s*'\{\{ candidate_validation_started_at\.stdout \}\}'::timestamptz/,
     );
     expect(task).toContain("until:");
     expect(task).toMatch(/retries:\s*\d+/);
   });
 
-  it("verifies promoted worker container state and traffic collector runs", () => {
+  it("verifies promoted worker container state and fresh traffic source health", () => {
     const workerTaskStart = playbook.indexOf("- name: Verify worker");
     const workerTaskEnd = playbook.indexOf("- name: Verify DATEX source health", workerTaskStart);
     const task = playbook.slice(workerTaskStart, workerTaskEnd);
 
     expect(workerTaskStart).toBeGreaterThan(-1);
     expect(task).toContain("ps --services --filter status=running worker | grep -qx worker");
-    expect(task).toContain("- name: Verify traffic collector runs after candidate promotion");
-    expect(task).toContain("FROM collector_runs");
+    expect(task).toContain("- name: Verify traffic source health after candidate promotion");
+    expect(task).toContain("FROM source_health");
     expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
-    expect(task).toContain("status IN ('succeeded','partial','skipped')");
+    expect(task).toContain("state='ok'");
     expect(task).toContain('test "$count" -eq 2');
-    expect(task).toContain("candidate_promoted_at.stdout");
+    expect(task).toContain("candidate_validation_started_at.stdout");
     expect(task).toMatch(
-      /started_at\s*>=\s*'\{\{ candidate_promoted_at\.stdout \}\}'::timestamptz/,
+      /last_checked_at\s*>=\s*'\{\{ candidate_validation_started_at\.stdout \}\}'::timestamptz/,
+    );
+    expect(task).toContain("register: traffic_source_health");
+    expect(task).toContain("until: traffic_source_health.rc == 0");
+  });
+
+  it("uses guarded JSON access for production and rollback health checks", () => {
+    expect(playbook).toContain(
+      "until: (production_health.json | default({})).get('status') == \"ok\"",
+    );
+    expect(playbook).toContain(
+      "until: (rollback_health.json | default({})).get('status') == \"ok\"",
     );
   });
 
@@ -112,7 +124,7 @@ describe("deployment playbook Entur verification", () => {
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("last_checked_at > now() - interval '20 minutes'");
     expect(task).toMatch(
-      /last_checked_at\s*>=\s*'\{\{ candidate_promoted_at\.stdout \}\}'::timestamptz/,
+      /last_checked_at\s*>=\s*'\{\{ candidate_validation_started_at\.stdout \}\}'::timestamptz/,
     );
   });
 });

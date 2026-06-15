@@ -318,6 +318,11 @@
 
     - name: Promote candidate and validate production
       block:
+        - name: Record candidate validation start timestamp
+          ansible.builtin.command: date -u +%Y-%m-%dT%H:%M:%SZ
+          register: candidate_validation_started_at
+          changed_when: false
+
         - name: Promote API and worker
           ansible.builtin.command: docker compose --env-file .env.production up -d app worker
           args:
@@ -416,7 +421,7 @@
             url: "https://nytt.reidar.tech/health"
             return_content: true
           register: production_health
-          until: production_health.json.status == "ok"
+          until: (production_health.json | default({})).get('status') == "ok"
           retries: 6
           delay: 5
 
@@ -433,26 +438,23 @@
           delay: 5
           changed_when: false
 
-        - name: Verify traffic collector runs after candidate promotion
+        - name: Verify traffic source health after candidate promotion
           ansible.builtin.shell: |
             set -euo pipefail
             count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -Atqc "
               SELECT count(*)
-              FROM (
-                SELECT DISTINCT ON (source) source, status, started_at
-                FROM collector_runs
-                WHERE source IN ('vegvesen_traffic_info','trafikkdata')
-                  AND started_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz
-                ORDER BY source, started_at DESC
-              ) recent
-              WHERE status IN ('succeeded','partial','skipped');
+              FROM source_health
+              WHERE source IN ('vegvesen_traffic_info','trafikkdata')
+                AND state='ok'
+                AND last_checked_at > now() - interval '20 minutes'
+                AND last_checked_at >= '{{ candidate_validation_started_at.stdout }}'::timestamptz;
             ")"
             test "$count" -eq 2
           args:
             chdir: "{{ app_dir }}"
             executable: /bin/bash
-          register: traffic_collector_runs
-          until: traffic_collector_runs.rc == 0
+          register: traffic_source_health
+          until: traffic_source_health.rc == 0
           retries: 12
           delay: 10
           changed_when: false
@@ -466,7 +468,7 @@
               WHERE source IN ('datex','datex_travel_time')
                 AND state='ok'
                 AND last_checked_at > now() - interval '30 minutes'
-                AND last_checked_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz;
+                AND last_checked_at >= '{{ candidate_validation_started_at.stdout }}'::timestamptz;
             ")"
             test "$count" -eq 2
           args:
@@ -503,7 +505,7 @@
               WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
                 AND state='ok'
                 AND last_checked_at > now() - interval '20 minutes'
-                AND last_checked_at >= '{{ candidate_promoted_at.stdout }}'::timestamptz;
+                AND last_checked_at >= '{{ candidate_validation_started_at.stdout }}'::timestamptz;
 
               IF entur_source_health_count <> 2 THEN
                 RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;
@@ -597,7 +599,7 @@
             url: "https://nytt.reidar.tech/health"
             return_content: true
           register: rollback_health
-          until: rollback_health.json.status == "ok"
+          until: (rollback_health.json | default({})).get('status') == "ok"
           retries: 6
           delay: 5
 

@@ -34,7 +34,7 @@ vi.mock("react-leaflet", () => ({
   }),
 }));
 
-import { WeatherPreparednessMap } from "./WeatherPage.js";
+import { WeatherPreparednessMap, weatherPreparednessSourceLine } from "./WeatherPage.js";
 
 const payload = {
   generatedAt: "2026-06-01T08:00:00.000Z",
@@ -126,5 +126,26 @@ describe("WeatherPreparednessMap", () => {
     expect(html).not.toContain("rain-band");
     expect(html).not.toContain("weather-map-road");
     expect(html).not.toContain("weather-map-label");
+  });
+
+  it("builds a compact source line from the preparedness evidence, not only source health", () => {
+    expect(
+      weatherPreparednessSourceLine({
+        ...payload,
+        current: { ...payload.current, summary: "MET Locationforecast: skyet nå" },
+        authority: {
+          ...payload.authority,
+          links: [{ label: "DSB egenberedskap", url: "https://example.test", source: "DSB" }],
+        },
+        sources: [
+          {
+            source: "datex",
+            label: "Vegvesen DATEX",
+            state: "awaiting_access",
+            detail: "Venter på DATEX Basic Auth",
+          },
+        ],
+      }),
+    ).toBe("Kilder: MET, NVE/Varsom, Statens vegvesen DATEX, DSB");
   });
 });

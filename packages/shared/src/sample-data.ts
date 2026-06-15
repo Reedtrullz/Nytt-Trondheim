@@ -39,8 +39,6 @@ export const sampleArticles: Article[] = [
     category: "Transport",
     places: ["Midtbyen", "Skansen"],
     location: { lat: 63.4303, lng: 10.3852, label: "Midtbyen" },
-    imageUrl:
-      "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=70",
   },
   {
     id: "a-sluppen",

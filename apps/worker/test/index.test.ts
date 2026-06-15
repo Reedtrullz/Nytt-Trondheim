@@ -267,7 +267,15 @@ describe("Trafikkdata counter collection", () => {
     expect(repository.collectorState).toHaveBeenCalledWith("trafikkdata:lastSuccessfulPollAt");
     expect(collector).not.toHaveBeenCalled();
     expect(repository.upsertTrafficCounterSnapshots).not.toHaveBeenCalled();
-    expect(repository.setHealth).not.toHaveBeenCalled();
+    expect(repository.setHealth).toHaveBeenCalledWith({
+      source: "trafikkdata",
+      label: "Vegvesen Trafikkdata",
+      state: "ok",
+      lastCheckedAt: "2026-05-29T10:15:00.000Z",
+      nextPollAt: "2026-05-29T10:16:00.000Z",
+      detail:
+        "Trafikkdata-poll hoppet over fordi siste vellykkede poll var 2026-05-29T10:01:00.000Z. Neste poll tidligst 2026-05-29T10:16:00.000Z",
+    });
   });
 
   it("fetches after 15 minutes and writes ok health with counts and next poll", async () => {

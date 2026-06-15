@@ -81,7 +81,7 @@ Do not add these values to the required deployment secrets list; the playbook wr
 
 ## DATEX Verification
 
-The deployment playbook now automatically verifies live health, promoted worker container state, source-health rows updated after the candidate promotion timestamp, fresh `state='ok'` DATEX/datex_travel_time `source_health` rows when DATEX credentials are enabled, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
+The deployment playbook now automatically verifies live health, promoted worker container state, traffic source-health check-ins updated after candidate validation starts, fresh `state='ok'` DATEX/datex_travel_time `source_health` rows when DATEX credentials are enabled, source-item query sanity and the invariant that TravelTime traffic-pulse rows are not written to `source_items`. Trafikkdata is cooldown-gated, so a post-promotion `source_health` row may honestly say the poll was skipped because the last successful fetch is still recent. For manual follow-up after deploying DATEX ingestion, verify source status, worker stability, persisted official traffic rows and TravelTime traffic-pulse rows:
 
 ```bash
 curl -fsS https://nytt.reidar.tech/health

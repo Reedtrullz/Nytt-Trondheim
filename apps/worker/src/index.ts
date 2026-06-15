@@ -468,6 +468,17 @@ export async function collectTrafikkdataCounters({
   if (Number.isFinite(lastSuccessfulPollMs)) {
     const elapsedMs = checkedAtDate.getTime() - lastSuccessfulPollMs;
     if (elapsedMs >= 0 && elapsedMs < trafikkdataPollIntervalMs) {
+      const earliestNextPollAt = new Date(
+        lastSuccessfulPollMs + trafikkdataPollIntervalMs,
+      ).toISOString();
+      await repository.setHealth({
+        source: "trafikkdata",
+        label: "Vegvesen Trafikkdata",
+        state: "ok",
+        lastCheckedAt: checkedAt,
+        nextPollAt: earliestNextPollAt,
+        detail: `Trafikkdata-poll hoppet over fordi siste vellykkede poll var ${lastSuccessfulPollAt}. Neste poll tidligst ${earliestNextPollAt}`,
+      });
       return { skipped: true, sourceItemCount: 0, parseFailures: 0 };
     }
   }
