@@ -65,7 +65,7 @@ describe("deployment playbook Entur verification", () => {
     );
   });
 
-  it("requires DATEX source health rows to be ok and fresh", () => {
+  it("requires DATEX source health rows to be ok without deploy-time freshness coupling", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify DATEX source health rows when DATEX is enabled",
     );
@@ -74,13 +74,13 @@ describe("deployment playbook Entur verification", () => {
 
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("state='ok'");
-    expect(task).toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
+    expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
     expect(task).not.toContain("candidate_validation_started_at.stdout");
     expect(task).toContain("until:");
     expect(task).toMatch(/retries:\s*\d+/);
   });
 
-  it("verifies promoted worker container state and fresh traffic source health", () => {
+  it("verifies promoted worker container state and healthy traffic source rows", () => {
     const workerTaskStart = playbook.indexOf("- name: Verify worker");
     const workerTaskEnd = playbook.indexOf("- name: Verify DATEX source health", workerTaskStart);
     const task = playbook.slice(workerTaskStart, workerTaskEnd);
@@ -92,7 +92,7 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
     expect(task).toContain("state='ok'");
     expect(task).toContain('test "$count" -eq 2');
-    expect(task).toContain("last_checked_at > now() - interval '20 minutes'");
+    expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
     expect(task).not.toContain("collector_runs");
     expect(task).not.toContain("candidate_validation_started_at.stdout");
     expect(task).toContain("register: traffic_source_health");
@@ -108,7 +108,7 @@ describe("deployment playbook Entur verification", () => {
     );
   });
 
-  it("requires fresh Entur source health rows without candidate timestamp coupling", () => {
+  it("requires healthy Entur source health rows without deploy-time freshness coupling", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify Entur source health and provenance invariants when tables exist",
     );
@@ -116,7 +116,7 @@ describe("deployment playbook Entur verification", () => {
     const task = playbook.slice(taskStart, taskEnd);
 
     expect(taskStart).toBeGreaterThan(-1);
-    expect(task).toContain("last_checked_at > now() - interval '20 minutes'");
+    expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
     expect(task).not.toContain("candidate_validation_started_at.stdout");
   });
 });

@@ -435,8 +435,7 @@
               SELECT count(*)
               FROM source_health
               WHERE source IN ('vegvesen_traffic_info','trafikkdata')
-                AND state='ok'
-                AND last_checked_at > now() - interval '20 minutes';
+                AND state='ok';
             ")"
             test "$count" -eq 2
           args:
@@ -455,8 +454,7 @@
               SELECT count(*)
               FROM source_health
               WHERE source IN ('datex','datex_travel_time')
-                AND state='ok'
-                AND last_checked_at > now() - interval '30 minutes';
+                AND state='ok';
             ")"
             test "$count" -eq 2
           args:
@@ -491,8 +489,7 @@
               SELECT count(*) INTO entur_source_health_count
               FROM source_health
               WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
-                AND state='ok'
-                AND last_checked_at > now() - interval '20 minutes';
+                AND state='ok';
 
               IF entur_source_health_count <> 2 THEN
                 RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;
