@@ -151,22 +151,19 @@ describe("Trafikkdata counter parser and client", () => {
     });
 
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher).toHaveBeenNthCalledWith(
-      1,
-      "https://trafikkdata.example.test/graphql",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ "Content-Type": "application/json" }),
-        body: expect.stringContaining("trafficRegistrationPoints"),
-      }),
-    );
-    expect(fetcher).toHaveBeenNthCalledWith(
-      2,
-      "https://trafikkdata.example.test/graphql",
-      expect.objectContaining({
-        body: expect.stringContaining("trafficData"),
-      }),
-    );
+    const [firstUrl, firstInit] = fetcher.mock.calls[0]!;
+    const [secondUrl, secondInit] = fetcher.mock.calls[1]!;
+    const firstHeaders = new Headers(firstInit?.headers);
+    expect(firstUrl).toBe("https://trafikkdata.example.test/graphql");
+    expect(firstInit).toMatchObject({
+      method: "POST",
+      body: expect.stringContaining("trafficRegistrationPoints"),
+    });
+    expect(firstInit?.signal).toBeTruthy();
+    expect(firstHeaders.get("Content-Type")).toBe("application/json");
+    expect(secondUrl).toBe("https://trafikkdata.example.test/graphql");
+    expect(secondInit?.body).toEqual(expect.stringContaining("trafficData"));
+    expect(secondInit?.signal).toBeTruthy();
     expect(counters).toHaveLength(1);
     expect(counters[0]).toMatchObject({
       pointId: "06970V72811",

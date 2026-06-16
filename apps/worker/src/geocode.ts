@@ -1,4 +1,5 @@
 import type { Article } from "@nytt/shared";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 interface PlaceResult {
   navn?: Array<{
@@ -26,9 +27,7 @@ export async function geocodeArticles(
     endpoint.searchParams.set("kommunenummer", "5001");
     endpoint.searchParams.set("treffPerSide", "1");
     try {
-      const response = await fetcher(endpoint, {
-        headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-      });
+      const response = await fetchWithSourcePolicy(fetcher, endpoint);
       if (!response.ok) continue;
       const match = ((await response.json()) as PlaceResult).navn?.[0];
       if (match) {

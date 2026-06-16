@@ -17,12 +17,16 @@ const article: Article = {
 
 describe("Kartverket place enrichment", () => {
   it("maps a source-mentioned Trondheim place to an estimated marker location", async () => {
-    const result = await geocodeArticles([article], async () =>
-      Response.json({
+    let requestInit: RequestInit | undefined;
+    const result = await geocodeArticles([article], async (_url, init) => {
+      requestInit = init;
+      return Response.json({
         navn: [{ skrivemåte: "Bymarka", representasjonspunkt: { nord: 63.4094, øst: 10.26072 } }],
-      }),
-    );
+      });
+    });
     expect(result[0]?.location).toEqual({ label: "Bymarka", lat: 63.4094, lng: 10.26072 });
+    expect(requestInit?.signal).toBeTruthy();
+    expect(new Headers(requestInit?.headers).get("User-Agent")).toContain("NyttTrondheim");
   });
 
   it("does not map broader regional reporting into Trondheim", async () => {

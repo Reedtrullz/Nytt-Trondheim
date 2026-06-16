@@ -54,6 +54,7 @@ import {
 } from "./politiloggen.js";
 import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
+import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 import { WorkerRepository } from "./repository.js";
 import {
   collectTrafficInfoMessages,
@@ -530,9 +531,9 @@ async function fetchDatexText(
   envName = "DATEX_ENDPOINT",
 ): Promise<string> {
   const normalizedEndpoint = normalizeDatexCredentialedEndpoint(endpoint, envName);
-  const response = await fetcher(normalizedEndpoint, {
+  const response = await fetchWithSourcePolicy(fetcher, normalizedEndpoint, {
     headers: {
-      "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+      "User-Agent": sourceUserAgent,
       Authorization: datexBasicAuthHeader(username, password),
     },
   });

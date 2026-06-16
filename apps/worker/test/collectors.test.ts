@@ -170,10 +170,19 @@ describe("RSS collection policy", () => {
 
 describe("DATEX official source probe", () => {
   it("waits for Basic Auth credentials when DATEX username and password are missing", async () => {
-    const statuses = await probeOfficialSources(async () => new Response("ok", { status: 200 }));
+    const requestInits: RequestInit[] = [];
+    const statuses = await probeOfficialSources(async (_url, init) => {
+      requestInits.push(init ?? {});
+      return new Response("ok", { status: 200 });
+    });
 
     const datex = statuses.find((status) => status.source === "datex");
 
+    expect(requestInits.length).toBeGreaterThanOrEqual(3);
+    for (const init of requestInits) {
+      expect(init.signal).toBeTruthy();
+      expect(new Headers(init.headers).get("User-Agent")).toContain("NyttTrondheim");
+    }
     expect(datex).toMatchObject({
       label: "Vegvesen DATEX",
       state: "awaiting_access",
@@ -188,12 +197,14 @@ describe("DATEX official source probe", () => {
     process.env.DATEX_PASSWORD = "svv-pass";
     let datexUrl: string | undefined;
     let datexAuthorization: string | undefined;
+    let datexSignal: AbortSignal | undefined;
 
     const statuses = await probeOfficialSources(async (url, init) => {
       if (String(url).includes("GetSituation")) {
         datexUrl = String(url);
         const headers = new Headers(init?.headers);
         datexAuthorization = headers.get("Authorization") ?? undefined;
+        datexSignal = init?.signal ?? undefined;
       }
       return new Response("ok", { status: 200 });
     });
@@ -203,6 +214,7 @@ describe("DATEX official source probe", () => {
     expect(new URL(datexUrl!).searchParams.get("srti")).toBe("True");
     expect(new URL(datexUrl!).searchParams.get("foo")).toBe("bar");
     expect(datexAuthorization).toBe("Basic c3Z2LXVzZXI6c3Z2LXBhc3M=");
+    expect(datexSignal).toBeTruthy();
     expect(datex).toMatchObject({
       label: "Vegvesen DATEX",
       state: "ok",

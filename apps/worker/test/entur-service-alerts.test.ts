@@ -128,7 +128,9 @@ describe("Entur service alerts", () => {
 
   it("queries Entur service-alert stop places and lines from PtSituationElement fields", async () => {
     let requestBody = "";
+    let requestInit: RequestInit | undefined;
     const fetcher = (async (_url, init) => {
+      requestInit = init;
       requestBody = String(init?.body ?? "");
       return new Response(
         JSON.stringify({
@@ -168,6 +170,8 @@ describe("Entur service alerts", () => {
     expect(body.query).toContain("stopPlaces {");
     expect(body.query).toContain("lines {");
     expect(body.query).not.toMatch(/\baffects\s*\{/);
+    expect(requestInit?.signal).toBeTruthy();
+    expect(new Headers(requestInit?.headers).get("ET-Client-Name")).toBe("nytt-test");
     expect(result.alerts[0]).toMatchObject({
       situationNumber: "ATB:SituationNumber:live-shape",
       affectedStopNames: ["Sentrum"],

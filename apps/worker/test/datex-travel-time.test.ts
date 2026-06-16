@@ -166,6 +166,7 @@ describe("DATEX travel time collection", () => {
 
     for (const [, init] of fetcher.mock.calls) {
       const headers = responseHeaders(init);
+      expect(init?.signal).toBeTruthy();
       expect(headers.get("Authorization")).toBe(expectedTravelTimeAuthorization);
       expect(headers.get("User-Agent")).toBe(expectedTravelTimeUserAgent);
       expect(headers.get("If-Modified-Since")).toBeNull();

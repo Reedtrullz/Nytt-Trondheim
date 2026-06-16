@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
+  collectTrafficInfoMessages,
   defaultTrafficInfoEndpoint,
   parseTrafficInfoMessages,
   trafficInfoSourceItemInput,
@@ -98,6 +99,28 @@ describe("Vegvesen TrafficInfo", () => {
     });
     expect(item.rawPayload).toEqual({ id: "NPRA_HBT_21-04-2026.66010" });
     expect(item.normalizedPayload).toMatchObject({ state: "active", category: "roadworks" });
+  });
+
+  it("fetches TrafficInfo messages with API contract headers and timeout signal", async () => {
+    const payload = await readFile(fixturePath, "utf8");
+    let requestInit: RequestInit | undefined;
+    const result = await collectTrafficInfoMessages({
+      endpoint: defaultTrafficInfoEndpoint,
+      fetcher: async (_url, init) => {
+        requestInit = init;
+        return new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+      now: () => new Date("2026-05-29T11:15:00.000Z"),
+    });
+
+    const headers = new Headers(requestInit?.headers);
+    expect(requestInit?.signal).toBeTruthy();
+    expect(headers.get("X-System-ID")).toBe("vvtraf");
+    expect(headers.get("accept")).toBe("application/vnd.svv.v2+json; charset=utf-8");
+    expect(result.events).toHaveLength(2);
   });
 
   it("skips messages with missing IDs or malformed geometry and keeps outside-region messages out of Nytt's traffic map table", async () => {

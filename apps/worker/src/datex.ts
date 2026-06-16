@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { Geometry } from "geojson";
 import type { OfficialEvent, OfficialEventState } from "@nytt/shared";
 import { XMLParser } from "fast-xml-parser";
+import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 
 type DatexObject = Record<string, unknown>;
 
@@ -103,9 +104,9 @@ export async function probeDatexAccess(options: {
   fetcher?: typeof fetch;
 }): Promise<void> {
   const endpoint = normalizeDatexSituationEndpoint(options.endpoint);
-  const response = await (options.fetcher ?? fetch)(endpoint, {
+  const response = await fetchWithSourcePolicy(options.fetcher ?? fetch, endpoint, {
     headers: {
-      "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+      "User-Agent": sourceUserAgent,
       Authorization: datexBasicAuthHeader(options.username, options.password),
     },
   });
@@ -122,12 +123,12 @@ export async function collectDatexSituationEvents({
 }: DatexCollectOptions): Promise<DatexCollectResult> {
   const normalizedEndpoint = normalizeDatexSituationEndpoint(endpoint);
   const headers: Record<string, string> = {
-    "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+    "User-Agent": sourceUserAgent,
     Authorization: datexBasicAuthHeader(username, password),
   };
   if (lastModified) headers["If-Modified-Since"] = lastModified;
 
-  const response = await fetcher(normalizedEndpoint, { headers });
+  const response = await fetchWithSourcePolicy(fetcher, normalizedEndpoint, { headers });
   if (response.status === 304) return { events: [], notModified: true, lastModified };
   if (!response.ok) throw new Error(`DATEX returned HTTP ${response.status}`);
 

@@ -205,6 +205,7 @@ describe("DATEX situation parsing", () => {
   it("fetches DATEX with Basic Auth and If-Modified-Since", async () => {
     const xml = await readFile(fixturePath, "utf8");
     let capturedHeaders: Headers | undefined;
+    let capturedSignal: AbortSignal | undefined;
 
     const result = await collectDatexSituationEvents({
       endpoint:
@@ -214,6 +215,7 @@ describe("DATEX situation parsing", () => {
       lastModified: "Wed, 27 May 2026 10:00:00 GMT",
       fetcher: async (_url, init) => {
         capturedHeaders = new Headers(init?.headers);
+        capturedSignal = init?.signal ?? undefined;
         return new Response(xml, {
           status: 200,
           headers: { "Last-Modified": "Thu, 28 May 2026 10:00:00 GMT" },
@@ -224,6 +226,7 @@ describe("DATEX situation parsing", () => {
 
     expect(capturedHeaders?.get("Authorization")).toBe("Basic c3Z2LXVzZXI6c3Z2LXBhc3M=");
     expect(capturedHeaders?.get("If-Modified-Since")).toBe("Wed, 27 May 2026 10:00:00 GMT");
+    expect(capturedSignal).toBeTruthy();
     expect(result.notModified).toBe(false);
     expect(result.lastModified).toBe("Thu, 28 May 2026 10:00:00 GMT");
     expect(result.events).toHaveLength(1);

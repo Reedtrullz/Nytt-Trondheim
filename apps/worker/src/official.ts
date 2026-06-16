@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import type { Geometry } from "geojson";
 import type { OfficialEvent, SituationType } from "@nytt/shared";
 import { XMLParser } from "fast-xml-parser";
+import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 
-const userAgent = { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" };
+const userAgent = { "User-Agent": sourceUserAgent };
 const metRssUrl =
   "https://api.met.no/weatherapi/metalerts/2.0/current.rss?county=50&geographicDomain=land&lang=no";
 
@@ -70,7 +71,7 @@ export async function collectMetWarnings(
   _knownIds?: Set<string>,
 ): Promise<OfficialEvent[]> {
   void _knownIds;
-  const response = await fetcher(metRssUrl, { headers: userAgent });
+  const response = await fetchWithSourcePolicy(fetcher, metRssUrl, { headers: userAgent });
   if (!response.ok) throw new Error(`MET MetAlerts returned ${response.status}`);
   const rss = object(
     new XMLParser({ ignoreAttributes: false, processEntities: false }).parse(await response.text()),
@@ -89,7 +90,7 @@ export async function collectMetWarnings(
     const sourceUrl = xmlText(item.link);
     const geometry = parsePolygon(item["georss:polygon"]);
     if (!identifier || !sourceUrl) continue;
-    const capResponse = await fetcher(sourceUrl, { headers: userAgent });
+    const capResponse = await fetchWithSourcePolicy(fetcher, sourceUrl, { headers: userAgent });
     if (!capResponse.ok) throw new Error(`MET CAP document returned ${capResponse.status}`);
     const parsedCap = object(
       new XMLParser({
@@ -173,7 +174,7 @@ function nveAreaLabel(warning: JsonObject, scopeLabel: string): string {
 export async function collectNveWarnings(fetcher: typeof fetch = fetch): Promise<OfficialEvent[]> {
   const eventSets = await Promise.all(
     nveEndpoints.map(async ({ url, type, label, scopeLabel }) => {
-      const response = await fetcher(url, {
+      const response = await fetchWithSourcePolicy(fetcher, url, {
         headers: { ...userAgent, Accept: "application/json" },
       });
       if (!response.ok) throw new Error(`${label} returned ${response.status}`);

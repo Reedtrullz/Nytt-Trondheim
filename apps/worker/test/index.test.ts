@@ -394,12 +394,11 @@ describe("DATEX road context collection", () => {
     expect(fetcher.mock.calls[1]?.[0]).toBe(
       "https://datex-server-get-v3-1.atlas.vegvesen.no/weather-measurements",
     );
-    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
-      headers: expect.objectContaining({
-        "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
-        Authorization: "Basic dXNlcjpwYXNz",
-      }),
-    });
+    const firstRequestInit = fetcher.mock.calls[0]?.[1];
+    const firstRequestHeaders = new Headers(firstRequestInit?.headers);
+    expect(firstRequestInit?.signal).toBeTruthy();
+    expect(firstRequestHeaders.get("User-Agent")).toBe("NyttTrondheim/0.1 kontakt@reidar.tech");
+    expect(firstRequestHeaders.get("Authorization")).toBe("Basic dXNlcjpwYXNz");
     expect(parser).toHaveBeenCalledWith("<sites />", "<measurements />", {
       receivedAt: checkedAt,
     });
@@ -509,6 +508,7 @@ describe("DATEX road context collection", () => {
     });
 
     expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.every(([, init]) => init?.signal)).toBe(true);
     expect(parser).toHaveBeenCalledWith("<sites />", "<status />", { receivedAt: checkedAt });
     expect(repository.upsertRoadCameras).toHaveBeenCalledWith([camera]);
     expect(repository.upsertRoadWeatherObservations).not.toHaveBeenCalled();

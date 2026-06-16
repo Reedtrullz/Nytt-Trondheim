@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { baneNorRssEndpoint, baneNorSourceItemInput, parseBaneNorRss } from "../src/baneNor.js";
+import {
+  baneNorRssEndpoint,
+  baneNorSourceItemInput,
+  fetchBaneNorRailMessages,
+  parseBaneNorRss,
+} from "../src/baneNor.js";
 
 const fixturePath = new URL("./fixtures/bane-nor-rss.xml", import.meta.url);
 
@@ -94,6 +99,23 @@ describe("Bane NOR RSS", () => {
     expect(item.normalizedPayload).not.toHaveProperty("geoHint");
     expect(item).not.toHaveProperty("geoHint");
     expect(item.captureHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("fetches Bane NOR RSS with source identity and timeout signal", async () => {
+    const payload = await readFile(fixturePath, "utf8");
+    let requestInit: RequestInit | undefined;
+    const result = await fetchBaneNorRailMessages({
+      endpoint: baneNorRssEndpoint,
+      receivedAt: "2026-06-02T07:15:00.000Z",
+      fetcher: async (_url, init) => {
+        requestInit = init;
+        return new Response(payload, { status: 200 });
+      },
+    });
+
+    expect(requestInit?.signal).toBeTruthy();
+    expect(new Headers(requestInit?.headers).get("User-Agent")).toContain("NyttTrondheim");
+    expect(result.messages).toHaveLength(1);
   });
 
   it("parses same-day validity phrases with fra kl./til kl. as future planned work", () => {

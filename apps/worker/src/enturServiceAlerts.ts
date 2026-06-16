@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { MultiPoint, Point } from "geojson";
 import type { PublicTransportServiceAlert, SourceItemInput } from "@nytt/shared";
 import { enturHeaders } from "./enturVehicles.js";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export const enturJourneyPlannerEndpoint = "https://api.entur.io/journey-planner/v3/graphql";
 
@@ -243,7 +244,7 @@ export async function fetchEnturServiceAlerts({
       infoLinks { uri label }
     }
   }`;
-  const response = await fetcher(endpoint, {
+  const response = await fetchWithSourcePolicy(fetcher, endpoint, {
     method: "POST",
     headers: enturHeaders(clientName),
     body: JSON.stringify({ query, variables: { codespaces: [codespaceId] } }),

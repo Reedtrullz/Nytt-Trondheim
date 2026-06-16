@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Article, EvidenceItem, MapFeature, Situation } from "@nytt/shared";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export interface PolitiloggenThreadMessage {
   id?: string | null;
@@ -179,9 +180,7 @@ export async function collectPolitiloggen(
   url.searchParams.set("SortByEnum", "LastMessageOn");
   url.searchParams.set("SortByAsc", "false");
 
-  const response = await fetcher(url, {
-    headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-  });
+  const response = await fetchWithSourcePolicy(fetcher, url);
   if (response.status === 204) return { threads: [], articles: [], count: 0 };
   if (!response.ok) throw new Error(`Politiloggen returned HTTP ${response.status}`);
 

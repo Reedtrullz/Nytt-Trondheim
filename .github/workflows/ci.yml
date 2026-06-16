@@ -81,6 +81,8 @@ jobs:
           SELECT count(*) AS schema_migration_count FROM schema_migrations;
           SELECT count(*) AS source_item_count FROM source_items;
           SQL
+      - name: Run migration guardrail invariants
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration-invariants.sql
 
   docker-build:
     name: Docker Build

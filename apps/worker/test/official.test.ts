@@ -22,15 +22,19 @@ describe("official warning collection", () => {
           <area><areaDesc>Trøndelag</areaDesc></area>
         </info>
       </alert>`;
-    const events = await collectMetWarnings(async (url) =>
-      String(url).includes("current.rss")
+    const requestInits: RequestInit[] = [];
+    const events = await collectMetWarnings(async (url, init) => {
+      requestInits.push(init ?? {});
+      return String(url).includes("current.rss")
         ? new Response(rss, { status: 200 })
-        : new Response(cap, { status: 200 }),
-    );
+        : new Response(cap, { status: 200 });
+    });
     expect(events[0]?.eventType).toBe("fire");
     expect(events[0]?.state).toBe("cancelled");
     expect(events[0]?.geometry?.type).toBe("Polygon");
     expect(events[0]?.replacesIds).toEqual([officialId("met", "cap-original")]);
+    expect(requestInits).toHaveLength(2);
+    expect(requestInits.every((init) => init.signal)).toBe(true);
 
     const alreadyStored = await collectMetWarnings(
       async (url) =>
@@ -44,8 +48,10 @@ describe("official warning collection", () => {
   });
 
   it("stores only raised NVE municipality warning levels as textual official context", async () => {
-    const events = await collectNveWarnings(async () =>
-      Response.json([
+    const requestInits: RequestInit[] = [];
+    const events = await collectNveWarnings(async (_url, init) => {
+      requestInits.push(init ?? {});
+      return Response.json([
         {
           Id: "nve-1",
           MasterId: "nve",
@@ -58,9 +64,14 @@ describe("official warning collection", () => {
           ValidTo: "2026-05-27T10:00:00Z",
         },
         { ActivityLevel: "1" },
-      ]),
-    );
+      ]);
+    });
     expect(events).toHaveLength(2);
+    expect(requestInits).toHaveLength(4);
+    expect(requestInits.every((init) => init.signal)).toBe(true);
+    expect(
+      requestInits.every((init) => new Headers(init.headers).get("Accept") === "application/json"),
+    ).toBe(true);
     expect(events.every((event) => event.geometry === undefined)).toBe(true);
     expect(events[0]?.areaLabel).toBe("Trondheim");
     expect(events.map((event) => event.eventType)).toEqual(["flood", "landslide"]);

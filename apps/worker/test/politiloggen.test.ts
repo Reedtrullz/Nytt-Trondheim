@@ -43,10 +43,12 @@ describe("Politiloggen ingestion", () => {
   it("fetches Trondheim threads from the documented API and normalizes them to articles", async () => {
     let requestedUrl: URL | undefined;
     let userAgent: string | null = null;
+    let signal: AbortSignal | undefined;
 
     const result = await collectPolitiloggen(async (url, init) => {
       requestedUrl = new URL(String(url));
       userAgent = new Headers(init?.headers).get("User-Agent");
+      signal = init?.signal ?? undefined;
       return new Response(JSON.stringify({ messageThreads: [activeThread], count: 1 }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -58,6 +60,7 @@ describe("Politiloggen ingestion", () => {
     expect(requestedUrl?.searchParams.get("Municipalities")).toBe("Trondheim");
     expect(requestedUrl?.searchParams.get("Take")).toBe("1000");
     expect(userAgent).toContain("NyttTrondheim");
+    expect(signal).toBeTruthy();
     expect(result.threads).toEqual([activeThread]);
     expect(result.articles[0]).toMatchObject({
       id: "politiloggen-265vq7",

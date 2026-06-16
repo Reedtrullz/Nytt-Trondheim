@@ -7,6 +7,7 @@ import type {
   TrafficEventState,
   TrafficMapEvent,
 } from "@nytt/shared";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export type TrafficInfoObject = Record<string, unknown>;
 
@@ -291,7 +292,9 @@ export async function collectTrafficInfoMessages({
   fetcher = fetch,
   now = () => new Date(),
 }: TrafficInfoCollectOptions): Promise<TrafficInfoParseResult> {
-  const response = await fetcher(endpoint, { headers: trafficInfoRequestHeaders() });
+  const response = await fetchWithSourcePolicy(fetcher, endpoint, {
+    headers: trafficInfoRequestHeaders(),
+  });
   if (!response.ok) throw new Error(`TrafficInfo returned HTTP ${response.status}`);
   return parseTrafficInfoMessages(await response.text(), {
     endpoint,

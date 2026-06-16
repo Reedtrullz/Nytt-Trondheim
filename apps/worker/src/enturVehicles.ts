@@ -1,4 +1,5 @@
 import type { PublicTransportVehicle, PublicTransportVehicleMode } from "@nytt/shared";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export const enturVehiclesEndpoint = "https://api.entur.io/realtime/v2/vehicles/graphql";
 
@@ -139,7 +140,7 @@ export async function fetchEnturVehicles({
       progressBetweenStops { percentage }
     }
   }`;
-  const response = await fetcher(endpoint, {
+  const response = await fetchWithSourcePolicy(fetcher, endpoint, {
     method: "POST",
     headers: enturHeaders(clientName),
     body: JSON.stringify({ query, variables: { codespaceId, bounds } }),

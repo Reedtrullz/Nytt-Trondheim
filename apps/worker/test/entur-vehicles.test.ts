@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { enturHeaders, parseEnturVehicles } from "../src/enturVehicles.js";
+import { enturHeaders, fetchEnturVehicles, parseEnturVehicles } from "../src/enturVehicles.js";
 
 const fixturePath = new URL("./fixtures/entur-vehicles-atb.json", import.meta.url);
 
@@ -30,6 +30,31 @@ describe("Entur vehicle positions", () => {
       stale: false,
     });
     expect(result.activeVehicleIds).toEqual(["8790"]);
+  });
+
+  it("fetches Entur vehicles with client identity and timeout signal", async () => {
+    const payload = await readFile(fixturePath, "utf8");
+    let requestInit: RequestInit | undefined;
+    const result = await fetchEnturVehicles({
+      endpoint: "https://example.test/vehicles/graphql",
+      clientName: "nytt-test",
+      codespaceId: "ATB",
+      bounds: { minLat: 63.2, minLon: 10.1, maxLat: 63.6, maxLon: 10.8 },
+      fetcher: async (_url, init) => {
+        requestInit = init;
+        return new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    });
+
+    const headers = new Headers(requestInit?.headers);
+    expect(requestInit?.method).toBe("POST");
+    expect(requestInit?.signal).toBeTruthy();
+    expect(headers.get("ET-Client-Name")).toBe("nytt-test");
+    expect(String(requestInit?.body)).toContain("vehicles");
+    expect(result.vehicles).toHaveLength(1);
   });
 
   it("skips vehicles with missing id or invalid coordinates", () => {

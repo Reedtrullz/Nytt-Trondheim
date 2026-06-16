@@ -8,6 +8,7 @@ import {
   normalizeDatexSituationEndpoint,
   probeDatexAccess,
 } from "./datex.js";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 import { defaultPolitiloggenEndpoint, isPolitiloggenEnabled } from "./politiloggen.js";
 
 interface FeedSource {
@@ -16,9 +17,6 @@ interface FeedSource {
   url: string;
   retainRegionalUnmatched?: boolean;
 }
-
-const sourceUserAgent = "NyttTrondheim/0.1 kontakt@reidar.tech";
-const defaultFetchTimeoutMs = 15_000;
 
 export const rssSources: FeedSource[] = [
   {
@@ -54,37 +52,6 @@ function stableId(source: SourceId, url: string): string {
 function nonEmptyEnv(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function fetchTimeoutMs(): number {
-  const configured = Number(process.env.NYTT_FETCH_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : defaultFetchTimeoutMs;
-}
-
-async function fetchWithSourcePolicy(
-  fetcher: typeof fetch,
-  url: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutMs = fetchTimeoutMs();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const headers = new Headers(init.headers);
-  if (!headers.has("User-Agent")) headers.set("User-Agent", sourceUserAgent);
-  try {
-    return await fetcher(url, {
-      ...init,
-      headers,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`Kildehenting tidsavbrutt etter ${timeoutMs} ms`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 export function canonicalUrl(rawUrl: string, base?: string): string {
@@ -279,9 +246,7 @@ async function probePolitiloggen(fetcher: typeof fetch): Promise<OfficialProbeRe
   url.searchParams.set("Take", "1");
   url.searchParams.set("Skip", "0");
   try {
-    const response = await fetcher(url, {
-      headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-    });
+    const response = await fetchWithSourcePolicy(fetcher, url);
     return {
       source: "politiloggen",
       label: "Politiloggen",
@@ -324,9 +289,7 @@ export async function probeOfficialSources(
   ];
   for (const [source, label, url] of probes) {
     try {
-      const response = await fetcher(url, {
-        headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-      });
+      const response = await fetchWithSourcePolicy(fetcher, url);
       results.push({
         source,
         label,

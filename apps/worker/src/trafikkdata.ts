@@ -1,5 +1,6 @@
 import type { Point, Position } from "geojson";
 import type { TrafficCounterSnapshot } from "@nytt/shared";
+import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 
 export const defaultTrafikkdataGraphqlEndpoint = "https://trafikkdata-api.atlas.vegvesen.no/";
 
@@ -142,12 +143,12 @@ async function postTrafikkdataGraphql(
   fetcher: typeof fetch,
   body: Record<string, unknown>,
 ): Promise<unknown> {
-  const response = await fetcher(endpoint, {
+  const response = await fetchWithSourcePolicy(fetcher, endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
-      "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech",
+      "User-Agent": sourceUserAgent,
     },
     body: JSON.stringify(body),
   });

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SourceItemInput } from "@nytt/shared";
 import { XMLParser } from "fast-xml-parser";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export const baneNorRssEndpoint =
   "https://www.banenor.no/reise-og-trafikk/trafikkmeldinger/?rss=true";
@@ -461,9 +462,7 @@ export async function fetchBaneNorRailMessages({
   receivedAt?: string;
   fetcher?: typeof fetch;
 } = {}): Promise<BaneNorParseResult> {
-  const response = await fetcher(endpoint, {
-    headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-  });
+  const response = await fetchWithSourcePolicy(fetcher, endpoint);
   if (!response.ok) throw new Error(`Bane NOR RSS fetch failed ${response.status}`);
   return parseBaneNorRss(await response.text(), { receivedAt });
 }

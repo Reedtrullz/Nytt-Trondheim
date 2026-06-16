@@ -1,6 +1,7 @@
 import type { TrafficPulseCorridor } from "@nytt/shared";
 import { XMLParser } from "fast-xml-parser";
 import { datexBasicAuthHeader, normalizeDatexCredentialedEndpoint } from "./datex.js";
+import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export const defaultDatexTravelTimeLocationsEndpoint =
   "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetPredefinedTravelTimeLocations/pullsnapshotdata";
@@ -250,7 +251,7 @@ async function fetchDatexTravelTimeSnapshot(
   endpoint: string,
   headers: Record<string, string>,
 ): Promise<string> {
-  const response = await fetcher(endpoint, { headers });
+  const response = await fetchWithSourcePolicy(fetcher, endpoint, { headers });
   if (!response.ok) {
     throw new Error(`DATEX TravelTime ${endpointType} returned HTTP ${response.status}`);
   }
