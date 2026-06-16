@@ -99,12 +99,17 @@ type LimitedBoundsFilter = {
 };
 
 const nonSupportingSourceItemProviders = new Set<SourceItem["provider"]>([
+  "bane_nor",
+  "met",
+  "nve",
   "datex_travel_time",
   "datex_weather",
   "datex_cctv",
   "trafikkdata",
+  "vegvesen_traffic_info",
   "entur_vehicle_positions",
   "entur_service_alerts",
+  "dsb",
 ]);
 
 function sourceItemCanUseRelationship(
@@ -373,6 +378,7 @@ const sourceAuditRequiredSources: SourceId[] = [
   "entur",
   "entur_vehicle_positions",
   "entur_service_alerts",
+  "dsb",
   "politiloggen",
   "internal",
   "deepseek",
@@ -417,6 +423,7 @@ const sourceAuditContractPaths: Partial<Record<SourceId, string>> = {
   entur: "docs/source-contracts/entur.md",
   entur_vehicle_positions: "docs/source-contracts/entur.md",
   entur_service_alerts: "docs/source-contracts/entur.md",
+  dsb: "docs/source-contracts/dsb-ogc.md",
   met: "docs/source-contracts/met-nve.md",
   nve: "docs/source-contracts/met-nve.md",
   politiloggen: "docs/source-contracts/politiloggen.md",
@@ -429,6 +436,7 @@ const sourceAuditPolicy: Partial<
   Record<SourceId, { role: SourceAuditRole; provenance: Provenance }>
 > = {
   bane_nor: { role: "context_source", provenance: "official" },
+  dsb: { role: "context_source", provenance: "preparedness_context" },
   entur: { role: "context_source", provenance: "preparedness_context" },
   trondheim_kommune: { role: "context_source", provenance: "official" },
   vegvesen_traffic_info: { role: "context_source", provenance: "official" },

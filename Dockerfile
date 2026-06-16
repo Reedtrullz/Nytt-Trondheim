@@ -34,4 +34,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD curl 
 CMD ["node", "apps/server/dist/index.js"]
 
 FROM runtime-base AS worker
+HEALTHCHECK --interval=60s --timeout=10s --start-period=5m --retries=3 CMD node -e "const pg=require('pg'); const client=new pg.Client({connectionString:process.env.DATABASE_URL}); client.connect().then(()=>client.query(\"SELECT 1 FROM worker_cycle_metrics WHERE id='latest' AND cycle_completed_at > now() - interval '2 hours'\" )).then((result)=>process.exit(result.rowCount>0?0:1)).catch(()=>process.exit(1)).finally(()=>client.end().catch(()=>{}));"
 CMD ["node", "apps/worker/dist/index.js"]

@@ -8,6 +8,8 @@ CACHE_DIR="${XDG_CACHE_HOME:-/var/cache/nytt-restic}"
 export XDG_CACHE_HOME="$CACHE_DIR"
 mkdir -p "$BACKUP_STAGE" "$STATUS_DIR" "$CACHE_DIR"
 cd "$APP_DIR"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+started_epoch="$(date -u +%s)"
 
 docker compose --env-file .env.production exec -T postgres pg_dump -Fc -U nytt nytt > "$BACKUP_STAGE/nytt.dump"
 docker run --rm -v nytt_uploads:/source:ro -v "$BACKUP_STAGE:/backup" alpine \
@@ -20,6 +22,8 @@ if [[ "${BACKUP_APPLY_RETENTION:-false}" == "true" ]]; then
   restic forget --retry-lock 2m --tag nytt-trondheim --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune
 fi
 
-printf '{"status":"ok","completedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATUS_DIR/backup.json.tmp"
+completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+duration_seconds="$(($(date -u +%s) - started_epoch))"
+printf '{"status":"ok","startedAt":"%s","completedAt":"%s","durationSeconds":%s}\n' "$started_at" "$completed_at" "$duration_seconds" > "$STATUS_DIR/backup.json.tmp"
 chmod 0644 "$STATUS_DIR/backup.json.tmp"
 mv "$STATUS_DIR/backup.json.tmp" "$STATUS_DIR/backup.json"

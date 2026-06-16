@@ -45,8 +45,33 @@ const status: OperationsStatus = {
       datex: 2,
     },
   },
-  backup: { status: "ok", completedAt: "2026-06-02T05:00:00.000Z" },
-  restoreCheck: { status: "ok", completedAt: "2026-06-02T04:00:00.000Z" },
+  workerFreshness: {
+    status: "ok",
+    label: "Worker-syklus",
+    detail: "Sist fullført 4 min siden.",
+    checkedAt: "2026-06-02T06:05:00.000Z",
+    completedAt: "2026-06-02T06:00:03.250Z",
+    staleAfterSeconds: 7200,
+    ageSeconds: 297,
+  },
+  backup: {
+    status: "ok",
+    label: "Sikkerhetskopi",
+    detail: "Sist fullført 65 min siden.",
+    checkedAt: "2026-06-02T06:05:00.000Z",
+    completedAt: "2026-06-02T05:00:00.000Z",
+    staleAfterSeconds: 129600,
+    ageSeconds: 3900,
+  },
+  restoreCheck: {
+    status: "stale",
+    label: "Gjenopprettingstest",
+    detail: "Sist fullført 9 døgn siden; forventet innen 8 døgn siden.",
+    checkedAt: "2026-06-11T06:05:00.000Z",
+    completedAt: "2026-06-02T04:00:00.000Z",
+    staleAfterSeconds: 691200,
+    ageSeconds: 785100,
+  },
 };
 
 describe("OperationsDashboard", () => {
@@ -62,6 +87,9 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("2");
     expect(html).toContain("3 operasjonelle objekter");
     expect(html).toContain("Kilder som trenger tilsyn");
+    expect(html).toContain("Worker");
+    expect(html).toContain("Sist fullført 4 min siden.");
+    expect(html).toContain("Utdatert");
     expect(html).toContain("Gjenopprettingstest");
     expect(html).toContain("/drift/tidslinje");
     expect(html).toContain("Åpne tidslinje");

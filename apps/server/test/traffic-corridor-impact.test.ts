@@ -50,6 +50,8 @@ describe("traffic corridor impact travel-time telemetry", () => {
     expect(impact).toMatchObject({
       id: "e6-south",
       eventCount: 1,
+      geometry: expect.objectContaining({ type: "LineString" }),
+      bufferMeters: 800,
       travelTime: {
         id: "100141",
         state: "slow",
@@ -69,6 +71,7 @@ describe("traffic corridor impact travel-time telemetry", () => {
     expect(impact).toMatchObject({
       id: "e6-south",
       eventCount: 0,
+      geometry: expect.objectContaining({ type: "LineString" }),
       affectedEventIds: [],
       travelTime: {
         id: "100141",

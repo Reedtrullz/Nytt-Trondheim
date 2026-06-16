@@ -2,8 +2,10 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useSearchParams } from "react-router-dom";
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import type {
+  TrafficCorridorImpact,
   TrafficEventCategory,
   TrafficEventState,
+  TrafficEventSeverity,
   TrafficMapEvent,
   TravelPlanPayload,
 } from "@nytt/shared";
@@ -59,6 +61,12 @@ interface TrafficTimeWindow {
 
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
+const severityRank: Record<TrafficEventSeverity, number> = {
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+};
 
 function addHours(date: Date, hours: number): Date {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
@@ -109,18 +117,57 @@ export function routePositions(plan: TravelPlanPayload): [number, number][] {
   return latLngsFromLineString(plan.route.geometry);
 }
 
+function severityColor(severity: TrafficEventSeverity): string {
+  switch (severity) {
+    case "critical":
+      return "#7f1d1d";
+    case "high":
+      return "#dc2626";
+    case "medium":
+      return "#d97706";
+    default:
+      return "#64748b";
+  }
+}
+
+function strongestRouteImpact(plan: TravelPlanPayload): TrafficEventSeverity | undefined {
+  return [...plan.trafficImpacts].sort(
+    (left, right) => severityRank[right.severity] - severityRank[left.severity],
+  )[0]?.severity;
+}
+
 function TravelPlanLayer({ plan }: { plan?: TravelPlanPayload }) {
   if (!plan) return null;
   const positions = routePositions(plan);
   const origin = latLngFromGeoJsonPosition(plan.origin.coordinate);
   const destination = latLngFromGeoJsonPosition(plan.destination.coordinate);
+  const routeSeverity = strongestRouteImpact(plan);
   return (
     <>
       {positions.length >= 2 ? (
         <Polyline
           positions={positions}
-          pathOptions={{ color: "#2563eb", weight: 5, opacity: 0.8, dashArray: "8 8" }}
-        />
+          pathOptions={{
+            color: routeSeverity ? severityColor(routeSeverity) : "#2563eb",
+            weight: routeSeverity ? 7 : 5,
+            opacity: routeSeverity ? 0.88 : 0.78,
+            dashArray: routeSeverity ? "10 4" : "8 8",
+            className: `travel-plan-route${routeSeverity ? ` travel-plan-route-${routeSeverity}` : ""}`,
+          }}
+        >
+          <Popup>
+            <article className="traffic-popup">
+              <strong>
+                Rute: {plan.origin.label} → {plan.destination.label}
+              </strong>
+              <p>
+                {plan.trafficImpacts.length
+                  ? `${plan.trafficImpacts.length} trafikkhendelser langs korridoren.`
+                  : "Ingen trafikkhendelser langs ruten akkurat nå."}
+              </p>
+            </article>
+          </Popup>
+        </Polyline>
       ) : null}
       {origin ? (
         <CircleMarker center={origin} radius={7} pathOptions={{ color: "#16a34a" }}>
@@ -132,6 +179,55 @@ function TravelPlanLayer({ plan }: { plan?: TravelPlanPayload }) {
           <Popup>{plan.destination.label}</Popup>
         </CircleMarker>
       ) : null}
+    </>
+  );
+}
+
+function CorridorImpactLayer({
+  impacts = [],
+  selectedImpactId,
+  onSelectImpact,
+}: {
+  impacts?: TrafficCorridorImpact[];
+  selectedImpactId?: string;
+  onSelectImpact: (impactId?: string) => void;
+}) {
+  return (
+    <>
+      {impacts.flatMap((impact) => {
+        const positions = latLngsFromLineString(impact.geometry);
+        if (positions.length < 2) return [];
+        const selected = impact.id === selectedImpactId;
+        const delayed = (impact.travelTime?.delaySeconds ?? 0) > 0;
+        return [
+          <Polyline
+            key={impact.id}
+            positions={positions}
+            pathOptions={{
+              color: selected ? "#19549a" : severityColor(impact.highestSeverity),
+              weight: selected ? 8 : delayed || impact.eventCount > 0 ? 6 : 4,
+              opacity: selected ? 0.95 : delayed || impact.eventCount > 0 ? 0.72 : 0.38,
+              dashArray: impact.eventCount > 0 || delayed ? undefined : "7 7",
+              className: `traffic-corridor traffic-corridor-${impact.highestSeverity}${selected ? " selected" : ""}`,
+            }}
+            eventHandlers={{ click: () => onSelectImpact(selected ? undefined : impact.id) }}
+          >
+            <Popup>
+              <article className="traffic-popup">
+                <strong>{impact.name}</strong>
+                <p>
+                  {impact.eventCount} hendelser · {impact.bufferMeters} m korridorbuffer
+                </p>
+                {impact.travelTime?.delaySeconds ? (
+                  <p>
+                    {Math.max(1, Math.round(impact.travelTime.delaySeconds / 60))} min forsinkelse
+                  </p>
+                ) : null}
+              </article>
+            </Popup>
+          </Polyline>,
+        ];
+      })}
     </>
   );
 }
@@ -553,7 +649,7 @@ export function TrafficMapPage() {
           aria-controls="traffic-workspace-sidebar"
           onClick={() => setMobileLayersOpen((open) => !open)}
         >
-          Lag
+          Kartlag og filtre
         </button>
         <div
           id="traffic-workspace-sidebar"
@@ -613,6 +709,13 @@ export function TrafficMapPage() {
           <MapAccessibility label="Trafikkart for Trondheim" />
           <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
           <TrafficMapFocus selectedEvent={selectedEvent} travelPlan={travelPlan} />
+          {visibleContextLayers.travelTime ? (
+            <CorridorImpactLayer
+              impacts={data?.corridorImpacts}
+              selectedImpactId={selectedCorridorId}
+              onSelectImpact={setSelectedCorridorId}
+            />
+          ) : null}
           {data?.events ? (
             <TrafficLayer
               events={visibleTrafficEvents}

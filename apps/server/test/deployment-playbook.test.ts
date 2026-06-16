@@ -2,8 +2,21 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const playbook = readFileSync(new URL("../../../ansible-playbook.yml", import.meta.url), "utf8");
+const compose = readFileSync(new URL("../../../docker-compose.yml", import.meta.url), "utf8");
 
 describe("deployment playbook Entur verification", () => {
+  it("keeps API and worker compose healthchecks on their own runtime duties", () => {
+    const appStart = compose.indexOf("  app:");
+    const workerStart = compose.indexOf("  worker:");
+    const appBlock = compose.slice(appStart, workerStart);
+    const workerBlock = compose.slice(workerStart);
+
+    expect(appBlock).toContain("curl -f http://localhost:8080/health");
+    expect(appBlock).not.toContain("worker_cycle_metrics");
+    expect(workerBlock).toContain("worker_cycle_metrics");
+    expect(workerBlock).not.toContain("curl -f http://localhost:8080/health");
+  });
+
   it("waits for healthy Entur source rows instead of passing on degraded placeholders", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify Entur source health and provenance invariants when tables exist",

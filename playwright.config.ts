@@ -1,8 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5173";
-const healthURL = process.env.PLAYWRIGHT_HEALTH_URL ?? "http://127.0.0.1:8080/health";
-const webServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ?? "npm run dev";
+const frontendPort = process.env.PLAYWRIGHT_FRONTEND_PORT ?? "5176";
+const apiPort = process.env.PLAYWRIGHT_API_PORT ?? "18080";
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${frontendPort}`;
+const healthURL = process.env.PLAYWRIGHT_HEALTH_URL ?? `http://127.0.0.1:${apiPort}/health`;
+const webServerCommand =
+  process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ??
+  `concurrently -n api,web "PORT=${apiPort} npm run dev -w @nytt/server" "VITE_API_TARGET=http://127.0.0.1:${apiPort} npm run dev -w @nytt/frontend -- --host 127.0.0.1 --port ${frontendPort} --strictPort"`;
 
 export default defineConfig({
   testDir: "./e2e",

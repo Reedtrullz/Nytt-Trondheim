@@ -6,12 +6,18 @@ import {
   GeoJSON,
   MapContainer,
   Marker,
+  Popup,
   TileLayer,
   WMSTileLayer,
   useMap,
   useMapEvents,
 } from "react-leaflet";
-import type { MapFeature, PrivateMapFeatureInput, Situation } from "@nytt/shared";
+import {
+  provenanceLabels,
+  type MapFeature,
+  type PrivateMapFeatureInput,
+  type Situation,
+} from "@nytt/shared";
 import type { NearbyStoryItem } from "../homeNearby.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import {
@@ -27,6 +33,7 @@ import {
   sectorPolygon,
 } from "../mapTools/geometry.js";
 import { mapToolPresets, type MapToolPreset } from "../mapTools/presets.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
 import { MapAccessibility } from "./map/MapAccessibility.js";
 import { MapBoundsWatcher } from "./map/MapBoundsWatcher.js";
 import { PublicTransportLayer, PublicTransportSummary } from "./map/PublicTransportLayer.js";
@@ -222,6 +229,51 @@ function featureStyle(feature?: MapFeature) {
     };
   }
   return { color: "#176446", weight: 2, fillColor: "#176446", fillOpacity: 0.2 };
+}
+
+const mapPopupTimeFormatter = new Intl.DateTimeFormat("nb-NO", {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Europe/Oslo",
+});
+
+function formatMapPopupTime(value?: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return mapPopupTimeFormatter.format(date);
+}
+
+function SituationFeaturePopup({ feature }: { feature: MapFeature }) {
+  const sourceUrl = safeExternalUrl(feature.properties.sourceUrl);
+  const updatedAt = formatMapPopupTime(feature.properties.updatedAt);
+  const confidence =
+    feature.properties.sourceConfidence?.label ??
+    (feature.properties.confidence ? "Privat vurdering" : undefined);
+  const sourceLine = [feature.properties.sourceLabel, confidence, updatedAt]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <Popup>
+      <article className="situation-map-popup situation-room-map-popup">
+        <strong>{feature.properties.label}</strong>
+        <span>{provenanceLabels[feature.properties.provenance]}</span>
+        {feature.properties.note ? <p>{feature.properties.note}</p> : null}
+        {feature.properties.sourceConfidence?.rationale ? (
+          <p>{feature.properties.sourceConfidence.rationale}</p>
+        ) : null}
+        {sourceLine ? <small>{sourceLine}</small> : null}
+        {sourceUrl ? (
+          <a href={sourceUrl} target="_blank" rel="noreferrer noopener">
+            Åpne kilde
+          </a>
+        ) : null}
+      </article>
+    </Popup>
+  );
 }
 
 export function SituationMap({
@@ -478,6 +530,7 @@ export function SituationMap({
           />
         ) : null}
         {visibleFeatures.flatMap((feature) => {
+          const popup = mode ? null : <SituationFeaturePopup feature={feature} />;
           if (feature.geometry.type === "Point") {
             const center = latLngFromGeoJsonPosition(feature.geometry.coordinates);
             if (!center) return [];
@@ -487,7 +540,9 @@ export function SituationMap({
                 center={center}
                 radius={7}
                 pathOptions={featureStyle(feature)}
-              />,
+              >
+                {popup}
+              </CircleMarker>,
             ];
           }
           return [
@@ -495,7 +550,9 @@ export function SituationMap({
               key={feature.id}
               data={feature as GeoJsonObject}
               style={() => featureStyle(feature)}
-            />,
+            >
+              {popup}
+            </GeoJSON>,
           ];
         })}
         {draftGeoJson ? (

@@ -326,6 +326,33 @@ function TimelinePanel({
   );
 }
 
+function SituationMapSelectionCard({
+  situation,
+  onClose,
+}: {
+  situation?: MapFirstSituation;
+  onClose: () => void;
+}) {
+  if (!situation) return null;
+  return (
+    <section className="situation-map-selection" aria-label="Valgt situasjon i kartet">
+      <div>
+        <span className={`case-status ${situation.status}`}>{statusLabel(situation.status)}</span>
+        <strong>{situation.title}</strong>
+        <small>
+          {situation.locationLabel} · {situation.sourceConfidence.label}
+        </small>
+      </div>
+      <div className="situation-map-selection-actions">
+        <Link to={`/situasjoner/${situation.id}`}>Åpne arbeidsrom</Link>
+        <button type="button" onClick={onClose}>
+          Tøm valg
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function SituationDetailDrawer({
   situation,
   selectionMissing,
@@ -438,7 +465,21 @@ export function SituationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchText = searchParams.toString();
   const filters = useMemo(() => parseSituationWorkspaceFilters(searchText), [searchText]);
-  const query = useMemo(() => workspaceQueryFromFilters(filters), [filters]);
+  const statusKey = filters.statuses.join(",");
+  const sourceKey = filters.sources.join(",");
+  const provenanceKey = filters.provenances.join(",");
+  const confidenceKey = filters.confidenceLevels.join(",");
+  const query = useMemo(
+    () => workspaceQueryFromFilters(filters),
+    [
+      confidenceKey,
+      filters.includePrivateAnnotations,
+      filters.q,
+      provenanceKey,
+      sourceKey,
+      statusKey,
+    ],
+  );
   const [workspace, setWorkspace] =
     useState<Awaited<ReturnType<typeof api.situationMapWorkspace>>>();
   const [error, setError] = useState<string>();
@@ -542,6 +583,10 @@ export function SituationsPage() {
               onSelectSituation={selectSituation}
             />
           </MapContainer>
+          <SituationMapSelectionCard
+            situation={selectedSituation}
+            onClose={clearSelectedSituation}
+          />
           {loading ? <p className="map-state">Henter situasjonskart ...</p> : null}
           {error ? (
             <div className="map-state error" role="alert">

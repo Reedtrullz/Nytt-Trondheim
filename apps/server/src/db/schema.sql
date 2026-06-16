@@ -87,6 +87,39 @@ ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_telemetry_source_che
     'trafikkdata',
     'entur_vehicle_positions'
   ));
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM evidence_items WHERE source = 'dsb') THEN
+    RAISE EXCEPTION 'DSB is health-only and must not exist in evidence_items';
+  END IF;
+END;
+$$;
+ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_no_health_only_source_check;
+ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_health_only_source_check
+  CHECK (source <> 'dsb');
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM evidence_items
+    WHERE source NOT IN (
+      'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+      'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
+      'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
+      'private_annotations','deepseek'
+    )
+  ) THEN
+    RAISE EXCEPTION 'unknown source exists in evidence_items';
+  END IF;
+END;
+$$;
+ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_source_id_check;
+ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_source_id_check
+  CHECK (source IN (
+    'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
+    'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
+    'private_annotations','deepseek'
+  ));
 
 CREATE TABLE IF NOT EXISTS timeline_entries (
   id text PRIMARY KEY,
@@ -161,6 +194,39 @@ ALTER TABLE source_items ADD CONSTRAINT source_items_entur_official_event_servic
     OR kind <> 'official_event'
     OR (normalized_payload->>'source') IS NOT DISTINCT FROM 'entur_service_alerts'
   );
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM source_items
+    WHERE provider NOT IN (
+      'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+      'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
+      'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
+      'private_annotations','deepseek'
+    )
+  ) THEN
+    RAISE EXCEPTION 'unknown provider exists in source_items';
+  END IF;
+END;
+$$;
+ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_provider_source_id_check;
+ALTER TABLE source_items ADD CONSTRAINT source_items_provider_source_id_check
+  CHECK (provider IN (
+    'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
+    'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
+    'private_annotations','deepseek'
+  ));
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM source_items WHERE provider = 'dsb') THEN
+    RAISE EXCEPTION 'DSB is health-only and must not exist in source_items';
+  END IF;
+END;
+$$;
+ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_no_health_only_provider_check;
+ALTER TABLE source_items ADD CONSTRAINT source_items_no_health_only_provider_check
+  CHECK (provider <> 'dsb');
 
 CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_kind_external_id_unique
   ON source_items (provider, kind, external_id)
@@ -195,12 +261,17 @@ BEGIN
     WHERE ssi.relationship = 'supports'
       AND (
         si.provider IN (
+          'met',
+          'nve',
           'datex_travel_time',
           'datex_weather',
           'datex_cctv',
           'trafikkdata',
+          'vegvesen_traffic_info',
           'entur_vehicle_positions',
-          'entur_service_alerts'
+          'entur_service_alerts',
+          'bane_nor',
+          'dsb'
         )
         OR (si.provider = 'entur' AND si.kind = 'official_event')
       )
@@ -220,12 +291,17 @@ BEGIN
   IF NEW.relationship = 'supports'
     AND (
       source_provider IN (
+        'met',
+        'nve',
         'datex_travel_time',
         'datex_weather',
         'datex_cctv',
         'trafikkdata',
+        'vegvesen_traffic_info',
         'entur_vehicle_positions',
-        'entur_service_alerts'
+        'entur_service_alerts',
+        'bane_nor',
+        'dsb'
       )
       OR (source_provider = 'entur' AND source_kind = 'official_event')
     )
@@ -627,6 +703,17 @@ CREATE TABLE IF NOT EXISTS source_health (
 );
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_failure_at timestamptz;
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS next_poll_at timestamptz;
+ALTER TABLE source_health DROP CONSTRAINT IF EXISTS source_health_source_id_check;
+ALTER TABLE source_health ADD CONSTRAINT source_health_source_id_check
+  CHECK (source IN (
+    'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
+    'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
+    'private_annotations','deepseek'
+  ));
+ALTER TABLE source_health DROP CONSTRAINT IF EXISTS source_health_state_check;
+ALTER TABLE source_health ADD CONSTRAINT source_health_state_check
+  CHECK (state IN ('ok', 'degraded', 'disabled', 'awaiting_access'));
 
 CREATE TABLE IF NOT EXISTS collector_state (
   key text PRIMARY KEY,

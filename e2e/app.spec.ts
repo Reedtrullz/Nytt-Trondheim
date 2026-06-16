@@ -3,8 +3,12 @@ import { expect, test, type Page } from "@playwright/test";
 import { sampleBootstrap, sampleWorkspace, type Article } from "@nytt/shared";
 
 async function openTrafficLayersIfHidden(page: Page): Promise<void> {
-  const layersButton = page.getByRole("button", { name: "Lag" });
-  await layersButton.waitFor({ state: "attached", timeout: 1_000 }).catch(() => undefined);
+  const layersButton = page.getByRole("button", { name: "Kartlag og filtre" });
+  const buttonAttached = await layersButton
+    .waitFor({ state: "attached", timeout: 1_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!buttonAttached) return;
   const expanded = await layersButton.getAttribute("aria-expanded").catch(() => null);
   if ((await layersButton.isVisible().catch(() => false)) && expanded !== "true") {
     await layersButton.click();
@@ -37,6 +41,119 @@ test("Situation Room explains provenance and keeps private map controls distinct
   await expect(
     sourceItemsPanel.getByText(/Ingen kildeelementer er koblet ennå|nrk|adresseavisen|vegvesen/i),
   ).toBeVisible();
+});
+
+test("situation overview keeps the selected map case actionable", async ({ page }) => {
+  await page.goto("/situasjoner");
+
+  const selected = page.getByRole("region", { name: "Valgt situasjon i kartet" });
+  await expect(selected).toContainText("Skogbrann ved Bymarka");
+  await expect(selected).toContainText("Bymarka");
+  await expect(selected.getByRole("link", { name: "Åpne arbeidsrom" })).toHaveAttribute(
+    "href",
+    "/situasjoner/skogbrann-bymarka",
+  );
+});
+
+test("situation overview changes map selection without refetching workspace data", async ({
+  page,
+}) => {
+  const first = {
+    id: "skogbrann-bymarka",
+    type: "fire",
+    title: "Skogbrann ved Bymarka",
+    summary: "Samlet oversikt fra åpne, publiserte kilder.",
+    status: "active",
+    importance: "high",
+    updatedAt: "2026-05-26T12:18:00.000Z",
+    locationLabel: "Bymarka / Granåsen",
+    primaryFeature: sampleWorkspace.situation.features[0],
+    features: sampleWorkspace.situation.features,
+    timelinePreview: sampleWorkspace.situation.timeline.slice(0, 1),
+    provenanceSummary: [
+      {
+        provenance: "reporting_estimate",
+        label: "Rapportert anslag",
+        sourceIds: ["nrk"],
+        confidence: {
+          level: "likely",
+          label: "Sannsynlig",
+          sourceCount: 1,
+          updatedAt: "2026-05-26T12:18:00.000Z",
+        },
+      },
+    ],
+    sourceConfidence: {
+      level: "likely",
+      label: "Sannsynlig",
+      sourceCount: 1,
+      updatedAt: "2026-05-26T12:18:00.000Z",
+      rationale: "Rapportert i åpne kilder.",
+    },
+    hasPrivateAnnotations: false,
+  };
+  const second = {
+    ...first,
+    id: "flom-nidelva",
+    type: "flood",
+    title: "Vannstand ved Nidelva",
+    status: "preliminary",
+    importance: "normal",
+    locationLabel: "Nidelva",
+    primaryFeature: {
+      id: "feature-nidelva",
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [10.404, 63.425] },
+      properties: {
+        label: "Rapportert ved Nidelva",
+        provenance: "reporting_estimate",
+        sourceLabel: "Adresseavisen",
+        updatedAt: "2026-05-26T12:19:00.000Z",
+      },
+    },
+    features: [
+      {
+        id: "feature-nidelva",
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [10.404, 63.425] },
+        properties: {
+          label: "Rapportert ved Nidelva",
+          provenance: "reporting_estimate",
+          sourceLabel: "Adresseavisen",
+          updatedAt: "2026-05-26T12:19:00.000Z",
+        },
+      },
+    ],
+  };
+  let requests = 0;
+  await page.route("**/api/situations/workspace-map**", async (route) => {
+    requests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        situations: [first, second],
+        mapState: {
+          layers: ["situations"],
+          sourceFilters: {},
+        },
+        timeline: [],
+        privateAnnotations: [],
+      }),
+    });
+  });
+
+  await page.goto("/situasjoner");
+  const selected = page.getByRole("region", { name: "Valgt situasjon i kartet" });
+  await expect(selected).toContainText("Skogbrann ved Bymarka");
+  const requestsAfterLoad = requests;
+  expect(requestsAfterLoad).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: /Vannstand ved Nidelva/ }).click();
+  await expect(selected).toContainText("Vannstand ved Nidelva");
+  await expect(page).toHaveURL(/s=flom-nidelva/);
+  await page.waitForTimeout(100);
+  expect(requests).toBe(requestsAfterLoad);
 });
 
 test("home nearby module links ranked local stories with the map", async ({ page }) => {
@@ -219,6 +336,15 @@ test("traffic page shows summary cards semantic layers ranked list and detail dr
             eventCount: 1,
             affectedEventIds: ["datex:e6-sluppen"],
             highestSeverity: "critical",
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [10.34, 63.37],
+                [10.4, 63.4],
+                [10.45, 63.44],
+              ],
+            },
+            bufferMeters: 650,
             travelTime: {
               id: "100141",
               name: "E6 Sluppen → Tiller",
@@ -361,6 +487,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
               geometry: { type: "Point", coordinates: [10.432, 63.432] },
             },
             distanceMeters: 80,
+            severity: "high",
             summary: "80 m fra foreslått rute",
           },
         ],
@@ -1135,7 +1262,7 @@ test("situation save failure stays visible and blocks duplicate clicks while pen
   expect(calls).toBe(1);
 });
 
-test("mobile traffic page shows heading and controls before the map", async ({
+test("mobile traffic page prioritizes the map before long summaries and filters", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chromium", "mobile layout contract");
@@ -1144,15 +1271,15 @@ test("mobile traffic page shows heading and controls before the map", async ({
 
   const heading = page.getByRole("heading", { name: "Nå i trafikken" });
   await expect(heading).toBeVisible();
-  const layersButton = page.getByRole("button", { name: "Lag" });
+  const layersButton = page.getByRole("button", { name: "Kartlag og filtre" });
   await expect(layersButton).toBeVisible();
 
   const headingBox = await heading.boundingBox();
   const layersBox = await layersButton.boundingBox();
   const workspaceBox = await page.locator(".traffic-workspace").boundingBox();
   const mapBox = await page.locator(".traffic-map").boundingBox();
-  expect(headingBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
-  expect(layersBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
+  expect(mapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(headingBox?.y ?? 0);
+  expect(mapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(layersBox?.y ?? 0);
   for (const box of [layersBox, workspaceBox, mapBox]) {
     expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
     expect((box?.width ?? Number.POSITIVE_INFINITY) + (box?.x ?? 0)).toBeLessThanOrEqual(391);
@@ -1431,8 +1558,11 @@ test("owner can open the real situation index and operations status", async ({ p
   await page.getByRole("link", { name: "Situasjonsrom", exact: true }).click();
   await expect(page).toHaveURL(/\/situasjoner$/);
   await expect(page.getByRole("heading", { name: "Trondheim situasjonskart" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Åpne arbeidsrom" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Se i operasjonstidslinje" })).toBeVisible();
+  const situationDetails = page.getByLabel("Situasjonsdetaljer");
+  await expect(situationDetails.getByRole("link", { name: "Åpne arbeidsrom" })).toBeVisible();
+  await expect(
+    situationDetails.getByRole("link", { name: "Se i operasjonstidslinje" }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Drift" }).click();
   await expect(page.getByRole("heading", { name: "Kilder og systemstatus" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();

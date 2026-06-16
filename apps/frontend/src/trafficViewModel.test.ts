@@ -79,6 +79,14 @@ const traffic: TrafficMapPayload = {
     {
       id: "e6-south",
       name: "E6 Sluppen → Tiller",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [10.379, 63.341],
+          [10.403, 63.43],
+        ],
+      },
+      bufferMeters: 800,
       eventCount: 1,
       affectedEventIds: ["critical-e6"],
       highestSeverity: "critical",

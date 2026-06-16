@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import type { OperationsStatus, TrafficPulseCorridor, WorkerCycleMetrics } from "@nytt/shared";
+import type {
+  OperationsStatus,
+  RuntimeFreshness,
+  TrafficPulseCorridor,
+  WorkerCycleMetrics,
+} from "@nytt/shared";
 import { api } from "../api.js";
 
 function time(value?: string) {
@@ -68,7 +73,19 @@ function sourceItemCountText(metrics?: WorkerCycleMetrics) {
 }
 
 function staleSourceCount(status: OperationsStatus) {
-  return status.sources.filter((source) => source.state !== "ok").length;
+  return status.sources.filter((source) => source.state !== "ok" || source.activeAlerts?.length)
+    .length;
+}
+
+function freshnessLabel(entry?: RuntimeFreshness) {
+  if (!entry) return "Ukjent";
+  if (entry.status === "ok") return "OK";
+  if (entry.status === "stale") return "Utdatert";
+  return "Mangler";
+}
+
+function freshnessDetail(entry?: RuntimeFreshness) {
+  return entry?.detail ?? "Ingen status registrert.";
 }
 
 export function OperationsDashboard({ status }: { status: OperationsStatus }) {
@@ -143,14 +160,19 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
             <small>Ikke-OK i kildelisten</small>
           </article>
           <article>
+            <span>Worker</span>
+            <strong>{freshnessLabel(status.workerFreshness)}</strong>
+            <small>{freshnessDetail(status.workerFreshness)}</small>
+          </article>
+          <article>
             <span>Sikkerhetskopi</span>
-            <strong>{status.backup?.status ?? "Ukjent"}</strong>
-            <small>{time(status.backup?.completedAt)}</small>
+            <strong>{freshnessLabel(status.backup)}</strong>
+            <small>{freshnessDetail(status.backup)}</small>
           </article>
           <article>
             <span>Gjenopprettingstest</span>
-            <strong>{status.restoreCheck?.status ?? "Ukjent"}</strong>
-            <small>{time(status.restoreCheck?.completedAt)}</small>
+            <strong>{freshnessLabel(status.restoreCheck)}</strong>
+            <small>{freshnessDetail(status.restoreCheck)}</small>
           </article>
         </div>
       </section>
@@ -207,9 +229,13 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
           <h2>Sikkerhetskopi</h2>
           <p>
             Siste krypterte kopi: <strong>{time(status.backup?.completedAt)}</strong>
+            <br />
+            <span>{freshnessDetail(status.backup)}</span>
           </p>
           <p>
             Siste gjenopprettingstest: <strong>{time(status.restoreCheck?.completedAt)}</strong>
+            <br />
+            <span>{freshnessDetail(status.restoreCheck)}</span>
           </p>
           <p className="muted">DATEX og Politiloggen vises i kildelisten over.</p>
         </div>

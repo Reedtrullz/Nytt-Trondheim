@@ -17,6 +17,9 @@ interface FeedSource {
   retainRegionalUnmatched?: boolean;
 }
 
+const sourceUserAgent = "NyttTrondheim/0.1 kontakt@reidar.tech";
+const defaultFetchTimeoutMs = 15_000;
+
 export const rssSources: FeedSource[] = [
   {
     id: "nrk",
@@ -53,6 +56,37 @@ function nonEmptyEnv(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function fetchTimeoutMs(): number {
+  const configured = Number(process.env.NYTT_FETCH_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : defaultFetchTimeoutMs;
+}
+
+async function fetchWithSourcePolicy(
+  fetcher: typeof fetch,
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutMs = fetchTimeoutMs();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = new Headers(init.headers);
+  if (!headers.has("User-Agent")) headers.set("User-Agent", sourceUserAgent);
+  try {
+    return await fetcher(url, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Kildehenting tidsavbrutt etter ${timeoutMs} ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function canonicalUrl(rawUrl: string, base?: string): string {
   const url = new URL(rawUrl, base);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -67,18 +101,24 @@ export function canonicalUrl(rawUrl: string, base?: string): string {
   return url.toString();
 }
 
+function feedPublishedAt(value: unknown): string {
+  const parsed = Date.parse(textValue(value));
+  return new Date(Number.isFinite(parsed) ? parsed : Date.now()).toISOString();
+}
+
 export async function collectRss(
   source: FeedSource,
   fetcher: typeof fetch = fetch,
 ): Promise<Article[]> {
-  const response = await fetcher(source.url, {
-    headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-  });
+  const response = await fetchWithSourcePolicy(fetcher, source.url);
   if (!response.ok) throw new Error(`${source.label} returned ${response.status}`);
   const xml = await response.text();
   const feed = new XMLParser({ ignoreAttributes: false }).parse(xml) as {
     rss?: { channel?: { item?: Array<Record<string, unknown>> | Record<string, unknown> } };
   };
+  if (!feed.rss?.channel) {
+    throw new Error(`${source.label} RSS-format mangler kanal`);
+  }
   return asArray(feed.rss?.channel?.item).flatMap((item) => {
     const title = textValue(item.title).trim();
     const excerpt = textValue(item.description)
@@ -89,7 +129,7 @@ export async function collectRss(
     if (!title || !link) return [];
     let url: string;
     try {
-      url = canonicalUrl(link);
+      url = canonicalUrl(link, source.url);
     } catch {
       return [];
     }
@@ -103,7 +143,7 @@ export async function collectRss(
         title,
         excerpt: excerpt.slice(0, 300),
         url,
-        publishedAt: new Date(textValue(item.pubDate) || Date.now()).toISOString(),
+        publishedAt: feedPublishedAt(item.pubDate),
         scope: scope ?? "trondelag",
         category: categorize(`${title} ${excerpt}`),
         places: extractPlaces(`${title} ${excerpt}`),
@@ -139,9 +179,7 @@ function parseNorwegianDate(value: string): string | undefined {
 
 async function municipalPublishedAt(url: string, fetcher: typeof fetch): Promise<string> {
   try {
-    const response = await fetcher(url, {
-      headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-    });
+    const response = await fetchWithSourcePolicy(fetcher, url);
     if (!response.ok) return new Date().toISOString();
     const detail = cheerio.load(await response.text());
     const value = detail('meta[property="article:published_time"]').attr("content") ?? "";
@@ -153,18 +191,24 @@ async function municipalPublishedAt(url: string, fetcher: typeof fetch): Promise
 
 export async function collectMunicipality(fetcher: typeof fetch = fetch): Promise<Article[]> {
   const url = "https://www.trondheim.kommune.no/aktuelt/nyheter/";
-  const response = await fetcher(url, {
-    headers: { "User-Agent": "NyttTrondheim/0.1 kontakt@reidar.tech" },
-  });
+  const response = await fetchWithSourcePolicy(fetcher, url);
   if (!response.ok) throw new Error(`Trondheim kommune returned ${response.status}`);
   const $ = cheerio.load(await response.text());
+  if ($("article.card").length === 0) {
+    throw new Error("Trondheim kommune nyhetsliste mangler forventede artikkelkort");
+  }
   const candidates: Array<Omit<Article, "publishedAt">> = [];
   $("article.card").each((_index, element) => {
     const link = $(element).find("a[href]").first();
     const title = link.text().replace(/\s+/g, " ").trim();
     const href = link.attr("href");
     if (!title || !href) return;
-    const canonical = canonicalUrl(href, url);
+    let canonical: string;
+    try {
+      canonical = canonicalUrl(href, url);
+    } catch {
+      return;
+    }
     const excerpt = $(element).text().replace(title, "").replace(/\s+/g, " ").trim();
     candidates.push({
       id: stableId("trondheim_kommune", canonical),

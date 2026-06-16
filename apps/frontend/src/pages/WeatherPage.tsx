@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { GeoJsonObject } from "geojson";
 import type { PathOptions } from "leaflet";
-import { GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
+import { Circle, GeoJSON, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 import type {
+  WeatherImpactGroup,
   WeatherMapLayer,
   WeatherPreparednessPayload,
   WeatherRiskItem,
@@ -18,6 +19,7 @@ import {
   groupWeatherMapLayers,
   visibleWeatherImpacts,
   visibleWeatherWarnings,
+  weatherConsequenceZones,
   weatherMapBounds,
   weatherRoadStations,
 } from "../weatherMapModel.js";
@@ -262,6 +264,47 @@ function warningGeometryStyle(level: string): PathOptions {
   };
 }
 
+function consequenceZoneStyle(level: WeatherImpactGroup["level"]): PathOptions {
+  if (level === "severe") {
+    return {
+      className: "weather-consequence-zone weather-consequence-zone-severe",
+      color: "#9f1f18",
+      fillColor: "#dc3f31",
+      fillOpacity: 0.16,
+      weight: 2,
+      dashArray: "7 5",
+    };
+  }
+  if (level === "warning") {
+    return {
+      className: "weather-consequence-zone weather-consequence-zone-warning",
+      color: "#b45309",
+      fillColor: "#f59e0b",
+      fillOpacity: 0.14,
+      weight: 2,
+      dashArray: "7 5",
+    };
+  }
+  if (level === "watch") {
+    return {
+      className: "weather-consequence-zone weather-consequence-zone-watch",
+      color: "#9a7b17",
+      fillColor: "#eab308",
+      fillOpacity: 0.12,
+      weight: 2,
+      dashArray: "6 5",
+    };
+  }
+  return {
+    className: "weather-consequence-zone weather-consequence-zone-normal",
+    color: "#2f7b4d",
+    fillColor: "#6ca85b",
+    fillOpacity: 0.1,
+    weight: 2,
+    dashArray: "6 5",
+  };
+}
+
 function WeatherMapFit({ bounds }: { bounds?: LeafletBounds }) {
   const map = useMap();
 
@@ -318,17 +361,29 @@ export function WeatherPreparednessMap({ payload }: { payload: WeatherPreparedne
     () => warnings.filter((warning) => warning.geometry),
     [warnings],
   );
+  const impacts = useMemo(
+    () => visibleWeatherImpacts(payload.impactGroups),
+    [payload.impactGroups],
+  );
+  const consequenceZones = useMemo(
+    () => weatherConsequenceZones(payload.impactGroups),
+    [payload.impactGroups],
+  );
   const mapBounds = useMemo(
     () =>
       weatherMapBounds({
         warnings: visible.warnings ? warningGeometries : [],
         roadWeather: visible.roadWeather ? stations.map((station) => station.observation) : [],
+        impactGroups: visible.consequences ? payload.impactGroups : [],
       }),
-    [stations, visible.roadWeather, visible.warnings, warningGeometries],
-  );
-  const impacts = useMemo(
-    () => visibleWeatherImpacts(payload.impactGroups),
-    [payload.impactGroups],
+    [
+      payload.impactGroups,
+      stations,
+      visible.consequences,
+      visible.roadWeather,
+      visible.warnings,
+      warningGeometries,
+    ],
   );
 
   return (
@@ -390,13 +445,33 @@ export function WeatherPreparednessMap({ payload }: { payload: WeatherPreparedne
             {visible.roadWeather ? (
               <RoadContextLayer weather={stations.map((station) => station.observation)} />
             ) : null}
+            {visible.consequences
+              ? consequenceZones.map((zone) => (
+                  <Circle
+                    key={zone.group.group}
+                    center={zone.center}
+                    radius={zone.radiusMeters}
+                    pathOptions={consequenceZoneStyle(zone.group.level)}
+                  >
+                    <Popup>
+                      <article className="weather-consequence-popup">
+                        <strong>{zone.group.group}</strong>
+                        <p>{zone.group.status}</p>
+                        <small>{zone.note}</small>
+                      </article>
+                    </Popup>
+                  </Circle>
+                ))
+              : null}
           </MapContainer>
           {visible.roadWeather && stations.length === 0 ? (
             <p className="weather-map-empty">
               Ingen vegværstasjoner med gyldig posisjon akkurat nå.
             </p>
           ) : null}
-          <div className="weather-map-source-pill">Aktivt kartlag: DATEX vegvær · Kartverket</div>
+          <div className="weather-map-source-pill">
+            Aktive lag: varsler, vegvær og lokale konsekvensflater · Kartverket
+          </div>
         </div>
         <aside className="weather-map-inspector" aria-label="Varsler og konsekvenser i kartet">
           {visible.warnings ? (

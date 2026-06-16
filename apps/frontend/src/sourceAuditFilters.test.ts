@@ -37,6 +37,25 @@ describe("source audit filters", () => {
     expect(search).toBe("sources=nrk%2Cadressa&fresh=fresh&diag=false&detail=nrk");
   });
 
+  it("keeps newer source providers selectable from URLs", () => {
+    expect(
+      parseSourceAuditFilters(
+        "sources=vg,dagbladet,trondheim_kommune,bane_nor,met,nve,trafikkdata,vegvesen_traffic_info,dsb,deepseek",
+      ).sources,
+    ).toEqual([
+      "vg",
+      "dagbladet",
+      "trondheim_kommune",
+      "bane_nor",
+      "met",
+      "nve",
+      "trafikkdata",
+      "vegvesen_traffic_info",
+      "dsb",
+      "deepseek",
+    ]);
+  });
+
   it("converts UI filters to the API query shape", () => {
     expect(
       sourceAuditQueryFromFilters({

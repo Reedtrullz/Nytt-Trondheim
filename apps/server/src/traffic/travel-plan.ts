@@ -331,6 +331,7 @@ function trafficImpacts(
     .slice(0, 8)
     .map((impact) => ({
       ...impact,
+      severity: impact.event.severity,
       summary: `${impact.distanceMeters} m fra foreslått rute`,
     }));
 }

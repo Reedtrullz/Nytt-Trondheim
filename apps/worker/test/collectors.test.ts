@@ -85,6 +85,37 @@ describe("RSS collection policy", () => {
     expect(articles).toEqual([]);
   });
 
+  it("degrades malformed successful RSS responses instead of reporting an empty healthy feed", async () => {
+    await expect(
+      collectRss(
+        { id: "vg", label: "VG", url: "https://example.test/rss" },
+        async () => new Response("<html>ikke rss</html>", { status: 200 }),
+      ),
+    ).rejects.toThrow(/RSS-format/);
+  });
+
+  it("resolves relative feed links and tolerates invalid publication dates per item", async () => {
+    let requestInit: RequestInit | undefined;
+    const relativeRss = `<?xml version="1.0"?><rss><channel>
+      <item><title>Brann i Trondheim sentrum</title><description>Nødetatene er varslet.</description>
+      <link>/nyheter/brann</link><pubDate>ikke en dato</pubDate></item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      { id: "nrk", label: "NRK Trøndelag", url: "https://example.test/rss/feed.xml" },
+      async (_url, init) => {
+        requestInit = init;
+        return new Response(relativeRss, { status: 200 });
+      },
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toBe("https://example.test/nyheter/brann");
+    expect(Number.isNaN(Date.parse(articles[0]?.publishedAt ?? ""))).toBe(false);
+    expect(requestInit?.signal).toBeTruthy();
+    expect(new Headers(requestInit?.headers).get("User-Agent")).toContain("NyttTrondheim");
+  });
+
   it("canonicalUrl allows only http and https schemes", () => {
     expect(canonicalUrl("https://example.test/news?utm_source=rss&id=3#top")).toBe(
       "https://example.test/news?id=3",
@@ -113,6 +144,27 @@ describe("RSS collection policy", () => {
         new Response(String(url).includes("/aktuelt/vinter/") ? detail : listing, { status: 200 }),
     );
     expect(articles[0]?.publishedAt).toBe("2026-01-26T12:15:00.000Z");
+  });
+
+  it("skips unsafe municipal cards instead of failing the whole collection", async () => {
+    const listing = `
+      <article class="card"><a href="javascript:alert(1)">Ugyldig lenke</a></article>
+      <article class="card"><a href="/aktuelt/trygg/">Brann i Trondheim sentrum</a></article>
+    `;
+    const detail = '<meta property="article:published_time" content="26.05.2026 13:15:00">';
+    const articles = await collectMunicipality(
+      async (url) =>
+        new Response(String(url).includes("/aktuelt/trygg/") ? detail : listing, { status: 200 }),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toBe("https://www.trondheim.kommune.no/aktuelt/trygg/");
+  });
+
+  it("degrades municipal listing shape changes instead of reporting an empty healthy listing", async () => {
+    await expect(
+      collectMunicipality(async () => new Response("<main>Ingen artikkelkort</main>")),
+    ).rejects.toThrow(/artikkelkort/);
   });
 });
 

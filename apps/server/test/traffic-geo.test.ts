@@ -35,6 +35,7 @@ describe("traffic geo corridor impact", () => {
     expect(e6SouthImpact).toMatchObject({
       eventCount: 1,
       highestSeverity: "high",
+      geometry: expect.objectContaining({ type: "LineString" }),
       affectedEventIds: ["traffic-crossing-line"],
     });
   });

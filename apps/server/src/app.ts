@@ -40,6 +40,7 @@ import {
   type SourceHealth,
   type SourceId,
   type SourceItem,
+  type RuntimeFreshness,
   type TimelineEntry,
   type TrafficEventState,
   type TrafficMapEvent,
@@ -78,6 +79,9 @@ const publicTransportSourceIdSet = new Set<string>([
 ]);
 const defaultPublicTransportBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
 const defaultWeatherBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
+const workerStaleAfterSeconds = 2 * 60 * 60;
+const backupStaleAfterSeconds = 36 * 60 * 60;
+const restoreCheckStaleAfterSeconds = 8 * 24 * 60 * 60;
 const telemetrySourceIds = new Set<SourceId>([
   "datex_travel_time",
   "datex_weather",
@@ -209,6 +213,63 @@ function trafficMapSourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourc
       detail: source.detail,
       ...(source.lastCheckedAt ? { lastCheckedAt: source.lastCheckedAt } : {}),
     }));
+}
+
+function formatRuntimeAge(ageSeconds: number): string {
+  const minutes = Math.max(1, Math.round(ageSeconds / 60));
+  if (minutes < 90) return `${minutes} min siden`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} t siden`;
+  return `${Math.round(hours / 24)} døgn siden`;
+}
+
+function formatRuntimeInterval(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 90) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} t`;
+  return `${Math.round(hours / 24)} døgn`;
+}
+
+function runtimeFreshness(input: {
+  label: string;
+  completedAt?: string;
+  staleAfterSeconds: number;
+  checkedAt?: Date;
+  startedAt?: string;
+  durationSeconds?: number;
+}): RuntimeFreshness {
+  const checkedAt = input.checkedAt ?? new Date();
+  const completedTime = input.completedAt ? new Date(input.completedAt).getTime() : Number.NaN;
+  if (!Number.isFinite(completedTime)) {
+    return {
+      status: "missing",
+      label: input.label,
+      checkedAt: checkedAt.toISOString(),
+      staleAfterSeconds: input.staleAfterSeconds,
+      detail: "Ingen fullført status registrert.",
+    };
+  }
+  const ageSeconds = Math.max(0, Math.round((checkedAt.getTime() - completedTime) / 1000));
+  const status = ageSeconds > input.staleAfterSeconds ? "stale" : "ok";
+  return {
+    status,
+    label: input.label,
+    completedAt: input.completedAt,
+    checkedAt: checkedAt.toISOString(),
+    staleAfterSeconds: input.staleAfterSeconds,
+    ageSeconds,
+    ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+    ...(typeof input.durationSeconds === "number"
+      ? { durationSeconds: input.durationSeconds }
+      : {}),
+    detail:
+      status === "ok"
+        ? `Sist fullført ${formatRuntimeAge(ageSeconds)}.`
+        : `Sist fullført ${formatRuntimeAge(ageSeconds)}; forventet innen ${formatRuntimeInterval(
+            input.staleAfterSeconds,
+          )}.`,
+  };
 }
 
 function attachmentSizeBytes(size: unknown): number {
@@ -574,9 +635,13 @@ function situationMatchesWorkspaceQuery(
       return false;
   }
   if (query.provenances) {
+    const visibleFeatures = situation.features.filter(
+      (feature) =>
+        query.includePrivateAnnotations !== false || !isPrivateAnnotationFeature(feature),
+    );
     const provenances = new Set<Provenance>([
       ...situation.evidence.map((evidence) => evidence.provenance),
-      ...situation.features.map((feature) => feature.properties.provenance),
+      ...visibleFeatures.map((feature) => feature.properties.provenance),
       ...situation.timeline.map(inferredTimelineProvenance),
     ]);
     if (!query.provenances.some((provenance) => provenances.has(provenance))) return false;
@@ -631,11 +696,9 @@ function mapFirstSituationFromWorkspace(
     ...(primaryFeature ? { primaryFeature } : {}),
     features,
     timelinePreview,
-    provenanceSummary: provenanceSummaryForSituation(situation, sourceItems),
+    provenanceSummary: provenanceSummaryForSituation({ ...situation, features }, sourceItems),
     sourceConfidence,
-    hasPrivateAnnotations: situation.features.some(
-      (feature) => feature.properties.provenance === "private_annotation",
-    ),
+    hasPrivateAnnotations: features.some(isPrivateAnnotationFeature),
     saved: situation.saved,
   };
 }
@@ -1461,6 +1524,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           ) as {
             status: "ok";
             completedAt: string;
+            startedAt?: string;
+            durationSeconds?: number;
           };
         } catch {
           return undefined;
@@ -1470,7 +1535,32 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         runtimeEntry("backup.json"),
         runtimeEntry("restore-check.json"),
       ]);
-      res.json({ ...status, backup, restoreCheck });
+      const checkedAt = new Date();
+      res.json({
+        ...status,
+        workerFreshness: runtimeFreshness({
+          label: "Worker-syklus",
+          completedAt: status.workerCycleMetrics?.cycleCompletedAt,
+          staleAfterSeconds: workerStaleAfterSeconds,
+          checkedAt,
+        }),
+        backup: runtimeFreshness({
+          label: "Sikkerhetskopi",
+          completedAt: backup?.completedAt,
+          startedAt: backup?.startedAt,
+          durationSeconds: backup?.durationSeconds,
+          staleAfterSeconds: backupStaleAfterSeconds,
+          checkedAt,
+        }),
+        restoreCheck: runtimeFreshness({
+          label: "Gjenopprettingstest",
+          completedAt: restoreCheck?.completedAt,
+          startedAt: restoreCheck?.startedAt,
+          durationSeconds: restoreCheck?.durationSeconds,
+          staleAfterSeconds: restoreCheckStaleAfterSeconds,
+          checkedAt,
+        }),
+      });
     } catch (error) {
       next(error);
     }

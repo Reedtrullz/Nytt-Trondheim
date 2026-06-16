@@ -58,16 +58,27 @@ describe("source item schema", () => {
     const schema = await readFile(schemaPath, "utf8");
 
     for (const provider of [
+      "met",
+      "nve",
       "datex_travel_time",
       "datex_weather",
       "datex_cctv",
       "trafikkdata",
+      "vegvesen_traffic_info",
       "entur_vehicle_positions",
       "entur_service_alerts",
+      "bane_nor",
+      "dsb",
     ]) {
       expect(schema).toContain(provider);
     }
     expect(schema).toContain("evidence_items_no_telemetry_source_check");
+    expect(schema).toContain("evidence_items_no_health_only_source_check");
+    expect(schema).toContain("evidence_items_source_id_check");
+    expect(schema).toContain("source_items_provider_source_id_check");
+    expect(schema).toContain("source_items_no_health_only_provider_check");
+    expect(schema).toContain("source_health_source_id_check");
+    expect(schema).toContain("source_health_state_check");
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
     expect(schema).toContain("source_items_entur_official_event_service_alert_check");
     expect(schema).toContain(
@@ -75,6 +86,7 @@ describe("source item schema", () => {
     );
     expect(schema).toContain("Entur official_event source_items must be service alerts");
     expect(schema).toContain("telemetry/context source_items are already linked as supports");
+    expect(schema).toContain("'dsb'");
     expect(schema).toContain("OR (source_provider = 'entur' AND source_kind = 'official_event')");
     expect(schema).toContain("enforce_situation_source_item_relationship");
     expect(schema).toContain("relationship = 'supports'");

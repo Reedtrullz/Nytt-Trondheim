@@ -3,6 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react-leaflet", () => ({
+  Circle: ({
+    center,
+    children,
+    pathOptions,
+  }: {
+    center: [number, number];
+    children?: React.ReactNode;
+    pathOptions?: { className?: string };
+  }) => (
+    <div data-center={center.join(",")} data-class={pathOptions?.className} data-layer="circle">
+      {children}
+    </div>
+  ),
   CircleMarker: ({
     center,
     children,

@@ -78,6 +78,8 @@ export interface TrafficBrief {
 export interface TrafficCorridorImpact {
   id: string;
   name: string;
+  geometry: LineString;
+  bufferMeters: number;
   eventCount: number;
   affectedEventIds: string[];
   highestSeverity: TrafficEventSeverity;
@@ -185,6 +187,7 @@ export interface TravelPlanRoute {
 export interface TravelPlanTrafficImpact {
   event: TrafficMapEvent;
   distanceMeters: number;
+  severity: TrafficEventSeverity;
   summary: string;
 }
 

@@ -29,6 +29,14 @@ const event: TrafficMapEvent = {
 const pulse: TrafficCorridorImpact = {
   id: "e6-south",
   name: "E6 sør inn mot Trondheim",
+  geometry: {
+    type: "LineString",
+    coordinates: [
+      [10.379, 63.341],
+      [10.403, 63.43],
+    ],
+  },
+  bufferMeters: 800,
   eventCount: 0,
   affectedEventIds: [],
   highestSeverity: "low",

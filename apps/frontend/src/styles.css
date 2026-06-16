@@ -1241,6 +1241,66 @@ button {
   font-weight: 700;
 }
 
+.situation-map-selection {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 254, 250, 0.96);
+  box-shadow: 0 14px 36px rgba(22, 28, 29, 0.14);
+}
+
+.situation-map-selection div {
+  min-width: 0;
+}
+
+.situation-map-selection strong,
+.situation-map-selection small {
+  display: block;
+}
+
+.situation-map-selection strong {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.situation-map-selection small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.situation-map-selection-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.situation-map-selection a,
+.situation-map-selection button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .situation-map-feature {
   transition:
     stroke-width 160ms ease,
@@ -4416,6 +4476,21 @@ button {
   filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.7));
 }
 
+.traffic-corridor {
+  stroke-linecap: round;
+  filter: drop-shadow(0 2px 4px rgba(22, 28, 29, 0.18));
+}
+
+.traffic-corridor.selected,
+.travel-plan-route {
+  filter: drop-shadow(0 0 7px rgba(25, 84, 154, 0.34));
+}
+
+.travel-plan-route-high,
+.travel-plan-route-critical {
+  filter: drop-shadow(0 0 8px rgba(168, 67, 40, 0.4));
+}
+
 .road-context-marker {
   stroke: var(--road-context-color, var(--blue));
   fill: var(--road-context-color, var(--blue));
@@ -4480,6 +4555,24 @@ button {
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.weather-consequence-zone {
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(22, 28, 29, 0.18));
+}
+
+.weather-consequence-popup p {
+  margin: 6px 0;
+  color: #39434b;
+  font-size: 13px;
+}
+
+.weather-consequence-popup small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 @media (max-width: 720px) {
@@ -4727,28 +4820,29 @@ button {
 
   .masthead {
     height: auto;
-    min-height: 84px;
+    min-height: 72px;
     align-content: center;
     flex-wrap: wrap;
-    row-gap: 12px;
+    row-gap: 8px;
     column-gap: 18px;
-    padding: 14px 22px;
+    padding: 10px 18px;
   }
 
   .masthead nav {
     order: 3;
     width: 100%;
-    height: 38px;
+    height: 34px;
     align-self: auto;
     overflow-x: auto;
   }
 
   .search {
-    order: 4;
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    margin-left: 0;
+    order: 2;
+    width: min(280px, 35vw);
+    min-width: 170px;
+    max-width: 280px;
+    height: 38px;
+    margin-left: auto;
   }
 
   .refreshed {
@@ -4769,6 +4863,32 @@ button {
   .saved-page,
   .weather-page {
     padding-inline: 22px;
+  }
+
+  .situation-page {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .situation-page .back {
+    order: 0;
+  }
+
+  .incident-header {
+    order: 1;
+  }
+
+  .situation-layout {
+    order: 2;
+  }
+
+  .situation-explanation {
+    order: 3;
+    margin-top: 26px;
+  }
+
+  .workspace-panel {
+    order: 4;
   }
 
   .home-grid,
@@ -4802,6 +4922,10 @@ button {
     min-height: 0;
   }
 
+  .weather-map-panel {
+    order: -1;
+  }
+
   .traffic-map-page {
     grid-template-columns: 1fr;
     grid-template-rows: auto 560px auto;
@@ -4826,8 +4950,14 @@ button {
   }
 
   .situation-workspace-sidebar {
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1fr);
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .situation-overview-map-frame {
+    order: -1;
   }
 
   .situation-detail-drawer {
@@ -4842,6 +4972,10 @@ button {
   .traffic-workspace,
   .traffic-bottom-panel {
     grid-template-columns: 1fr;
+  }
+
+  .traffic-map {
+    order: -1;
   }
 
   .traffic-workspace-sidebar {
@@ -4867,27 +5001,29 @@ button {
   }
 
   .masthead {
-    padding: 18px;
+    padding: 10px 14px;
     flex-wrap: wrap;
+    row-gap: 7px;
   }
 
   .brand {
-    font-size: 31px;
+    font-size: 28px;
   }
 
   .masthead nav {
-    height: 40px;
+    height: 34px;
     order: 3;
     width: 100%;
   }
 
   .search {
     order: 4;
+    height: 38px;
     min-width: 100%;
   }
 
   .refreshed {
-    margin-left: auto;
+    display: none;
   }
 
   .logout {
@@ -4997,7 +5133,11 @@ button {
   }
 
   .weather-hero h1 {
-    font-size: 50px;
+    font-size: 40px;
+  }
+
+  .weather-map-panel {
+    order: -1;
   }
 
   .weather-now {
@@ -5199,25 +5339,47 @@ button {
 
   .situation-workspace-page {
     padding: 16px;
-    gap: 14px;
+    gap: 12px;
     overflow-x: hidden;
   }
 
   .situation-workspace-hero h1 {
-    font-size: 38px;
+    font-size: 34px;
   }
 
   .situation-workspace-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .situation-workspace-metrics article {
+    min-height: 74px;
+    padding: 11px;
   }
 
   .situation-workspace-grid {
+    display: grid;
     min-height: 0;
+  }
+
+  .situation-workspace-sidebar {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .situation-overview-map-frame,
   .situation-overview-map {
-    min-height: 520px;
+    min-height: clamp(360px, 54vh, 520px);
+  }
+
+  .situation-map-selection {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    display: grid;
+  }
+
+  .situation-map-selection-actions {
+    justify-content: stretch;
   }
 
   .situation-timeline-panel li {
@@ -5233,8 +5395,12 @@ button {
     display: block;
   }
 
+  .traffic-now-summary {
+    order: 2;
+  }
+
   .traffic-now-summary h1 {
-    font-size: 38px;
+    font-size: 34px;
   }
 
   .traffic-now-cards {
@@ -5247,6 +5413,7 @@ button {
   }
 
   .traffic-workspace {
+    order: 1;
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     width: 100%;
@@ -5258,6 +5425,7 @@ button {
   .traffic-mobile-layers-button {
     display: inline-flex;
     justify-content: center;
+    order: 2;
     max-width: 100%;
     min-width: 0;
     padding: 10px 12px;
@@ -5269,6 +5437,7 @@ button {
 
   .traffic-workspace-sidebar {
     display: none;
+    order: 3;
     padding: 14px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
@@ -5279,6 +5448,7 @@ button {
   }
 
   .traffic-map {
+    order: 1;
     min-height: 520px;
     max-width: 100%;
     min-width: 0;
@@ -5286,6 +5456,7 @@ button {
 
   .traffic-bottom-panel {
     display: block;
+    order: 3;
   }
 
   .traffic-bottom-list {

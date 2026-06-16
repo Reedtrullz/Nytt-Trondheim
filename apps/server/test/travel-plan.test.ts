@@ -360,6 +360,7 @@ describe("traffic travel planner API", () => {
       expect.objectContaining({
         event: expect.objectContaining({ title: "Større berørt område ved Lade" }),
         distanceMeters: 0,
+        severity: "high",
       }),
     ]);
   });

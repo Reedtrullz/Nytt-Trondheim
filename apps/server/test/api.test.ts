@@ -553,6 +553,10 @@ describe("private situation API", () => {
     expect(hidden.body.situations[0].features).toEqual(
       expect.not.arrayContaining([expect.objectContaining({ id: created.body.id })]),
     );
+    expect(hidden.body.situations[0].provenanceSummary).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ provenance: "private_annotation" })]),
+    );
+    expect(hidden.body.situations[0].hasPrivateAnnotations).toBe(false);
   });
 
   it("honors includeTelemetry when filtering the workspace map", async () => {
@@ -742,6 +746,14 @@ describe("private situation API", () => {
           sourceItemCounts: { nrk: 2 },
           parseFailures: { datex: 0 },
         });
+        expect(response.body.workerFreshness).toMatchObject({
+          label: "Worker-syklus",
+        });
+        expect(response.body.workerFreshness.detail).toContain("Sist fullført");
+        expect(response.body.backup).toMatchObject({
+          status: "missing",
+          label: "Sikkerhetskopi",
+        });
       });
     await agent
       .get(
@@ -914,6 +926,40 @@ describe("private situation API", () => {
     expect(stdout).toContain('"confidence": "reported_unverified"');
     expect(stdout).toContain('"scenario": "sar"');
     expect(stdout).toContain('"radiusMeters": 500');
+  });
+
+  it("does not treat source-health freshness as a completed worker cycle", async () => {
+    const { app, store } = await testApp();
+    const latestCollectionAt = new Date().toISOString();
+    vi.spyOn(store, "getOperationsStatus").mockResolvedValue({
+      sources: [
+        {
+          source: "nrk",
+          label: "NRK Trøndelag",
+          state: "ok",
+          detail: "RSS sist hentet.",
+          lastCheckedAt: latestCollectionAt,
+        },
+      ],
+      articleCount: 1,
+      situationCounts: { preliminary: 0, active: 1, resolved: 0, dismissed: 0 },
+      latestAiRun: undefined,
+      trafficPulse: [],
+      latestCollectionAt,
+    });
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    await agent
+      .get("/api/operations/status")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.latestCollectionAt).toBe(latestCollectionAt);
+        expect(response.body.workerFreshness).toMatchObject({
+          status: "missing",
+          label: "Worker-syklus",
+        });
+      });
   });
 
   it("returns normalized and filtered DATEX traffic map events", async () => {

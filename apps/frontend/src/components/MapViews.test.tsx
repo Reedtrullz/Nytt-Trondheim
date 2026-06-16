@@ -1,4 +1,4 @@
-import type { Article } from "@nytt/shared";
+import { sampleSituation, type Article } from "@nytt/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { nearbyStoryItems } from "../homeNearby.js";
@@ -10,8 +10,20 @@ vi.mock("leaflet", () => ({
 }));
 
 vi.mock("react-leaflet", () => ({
-  CircleMarker: () => null,
-  GeoJSON: () => null,
+  CircleMarker: ({
+    center,
+    children,
+  }: {
+    center: [number, number];
+    children?: React.ReactNode;
+  }) => (
+    <div data-center={center.join(",")} data-layer="circle">
+      {children}
+    </div>
+  ),
+  GeoJSON: ({ children }: { children?: React.ReactNode }) => (
+    <div data-layer="geojson">{children}</div>
+  ),
   MapContainer: ({ children, id }: { children?: React.ReactNode; id?: string }) => (
     <div data-layer="map" id={id}>
       {children}
@@ -52,7 +64,7 @@ vi.mock("react-leaflet", () => ({
   useMapEvents: () => null,
 }));
 
-import { NewsMap } from "./MapViews.js";
+import { NewsMap, SituationMap } from "./MapViews.js";
 
 const article: Article = {
   id: "article-1",
@@ -113,5 +125,74 @@ describe("NewsMap", () => {
     expect(html).toContain("story-marker-selected");
     expect(html).toContain("story-marker-municipal");
     expect(html).toContain('title="1. Kommunalt varsel ved Lade (Lade)"');
+  });
+});
+
+describe("SituationMap", () => {
+  it("shows source and provenance details in feature popups", () => {
+    const situation = {
+      ...sampleSituation,
+      features: sampleSituation.features.map((feature) =>
+        feature.id === "feature-reported"
+          ? {
+              ...feature,
+              properties: {
+                ...feature.properties,
+                sourceUrl: "https://example.test/source",
+                sourceConfidence: {
+                  level: "likely" as const,
+                  label: "Sannsynlig" as const,
+                  sourceCount: 2,
+                  rationale: "To redaksjonelle kilder peker mot samme område.",
+                  updatedAt: feature.properties.updatedAt,
+                },
+              },
+            }
+          : feature,
+      ),
+    };
+    const html = renderToStaticMarkup(
+      <SituationMap
+        situation={situation}
+        onCreateFeature={() => Promise.resolve(true)}
+        onUpdateFeature={() => Promise.resolve()}
+        onDeleteFeature={() => Promise.resolve()}
+      />,
+    );
+
+    expect(html).toContain("Omtalt stedsnavn - geokodet anslag fra rapportering");
+    expect(html).toContain("Anslag fra rapportering");
+    expect(html).toContain("NRK Trøndelag / Adresseavisen · Sannsynlig");
+    expect(html).toContain("To redaksjonelle kilder peker mot samme område.");
+    expect(html).toContain('href="https://example.test/source"');
+    expect(html).toContain("Farevarsel fra MET");
+    expect(html).toContain("Offisiell");
+  });
+
+  it("omits unsafe source links from feature popups", () => {
+    const situation = {
+      ...sampleSituation,
+      features: [
+        {
+          ...sampleSituation.features[0]!,
+          properties: {
+            ...sampleSituation.features[0]!.properties,
+            sourceUrl: "javascript:alert(1)",
+          },
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <SituationMap
+        situation={situation}
+        onCreateFeature={() => Promise.resolve(true)}
+        onUpdateFeature={() => Promise.resolve()}
+        onDeleteFeature={() => Promise.resolve()}
+      />,
+    );
+
+    expect(html).toContain("Omtalt stedsnavn - geokodet anslag fra rapportering");
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("Åpne kilde");
   });
 });

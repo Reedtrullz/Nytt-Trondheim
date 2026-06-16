@@ -184,9 +184,14 @@ describe("source item store", () => {
       ["datex_weather", "official_event"],
       ["datex_cctv", "official_event"],
       ["trafikkdata", "official_event"],
+      ["vegvesen_traffic_info", "official_event"],
+      ["met", "official_event"],
+      ["nve", "official_event"],
       ["entur_vehicle_positions", "media_asset"],
       ["entur_service_alerts", "official_event"],
       ["entur", "official_event"],
+      ["bane_nor", "official_event"],
+      ["dsb", "official_event"],
     ] as const) {
       const sourceItemId = `context:${provider}`;
       sourceItems.set(sourceItemId, {
@@ -212,8 +217,13 @@ describe("source item store", () => {
   it("rejects support links for telemetry and service-alert PgStore source items before writing", async () => {
     for (const [provider, kind] of [
       ["datex_weather", "official_event"],
+      ["vegvesen_traffic_info", "official_event"],
+      ["met", "official_event"],
+      ["nve", "official_event"],
       ["entur_service_alerts", "official_event"],
       ["entur", "official_event"],
+      ["bane_nor", "official_event"],
+      ["dsb", "official_event"],
     ] as const) {
       const query = vi.fn().mockResolvedValueOnce({
         rows: [pgSourceItemRow({ provider, kind })],
@@ -358,6 +368,12 @@ describe("source item store", () => {
           source: "bane_nor",
           role: "context_source",
           provenance: "official",
+        }),
+        expect.objectContaining({
+          source: "dsb",
+          role: "context_source",
+          provenance: "preparedness_context",
+          contractStatus: "pass",
         }),
         expect.objectContaining({
           source: "vegvesen_traffic_info",

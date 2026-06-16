@@ -127,6 +127,8 @@ export function buildCorridorImpacts(
     return {
       id: corridor.id,
       name: corridor.name,
+      geometry: { type: "LineString", coordinates: corridor.polyline },
+      bufferMeters: corridor.bufferMeters,
       affectedEventIds: affectedEvents.map((event) => event.id),
       eventCount: affectedEvents.length,
       highestSeverity: highestSeverity(affectedEvents),

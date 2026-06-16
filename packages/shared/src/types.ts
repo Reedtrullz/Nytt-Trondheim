@@ -903,6 +903,20 @@ export interface WorkerCycleMetrics {
   parseFailures: Record<string, number>;
 }
 
+export type RuntimeFreshnessStatus = "ok" | "stale" | "missing";
+
+export interface RuntimeFreshness {
+  status: RuntimeFreshnessStatus;
+  label: string;
+  detail: string;
+  checkedAt: string;
+  staleAfterSeconds: number;
+  completedAt?: string;
+  ageSeconds?: number;
+  startedAt?: string;
+  durationSeconds?: number;
+}
+
 export interface OperationsStatus {
   sources: SourceHealth[];
   articleCount: number;
@@ -911,8 +925,9 @@ export interface OperationsStatus {
   latestCollectionAt?: string;
   trafficPulse?: TrafficPulseCorridor[];
   workerCycleMetrics?: WorkerCycleMetrics;
-  backup?: { status: "ok"; completedAt: string };
-  restoreCheck?: { status: "ok"; completedAt: string };
+  workerFreshness?: RuntimeFreshness;
+  backup?: RuntimeFreshness;
+  restoreCheck?: RuntimeFreshness;
 }
 
 export interface SessionPayload {
