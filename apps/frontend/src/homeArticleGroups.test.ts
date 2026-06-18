@@ -115,6 +115,38 @@ describe("home article grouping", () => {
     expect(groups[1]?.primary.id).toBe("other");
   });
 
+  it("consolidates same-place police reports when one source says innbruddsalarm", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "nrk-tiller",
+        title: "Innbruddsalarm på Tiller",
+        excerpt:
+          "En halv time over midnatt mottok politiet melding om en innbruddsalarm på Tiller i Trondheim. Politiet kom i kontakt med to personer.",
+        publishedAt: "2026-06-18T03:31:00.000Z",
+        places: ["Tiller"],
+        location: { lat: 63.33974, lng: 10.4203, label: "Tiller" },
+      }),
+      article({
+        id: "politiloggen-tiller",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Innbrudd: Trondheim, Tiller",
+        excerpt:
+          "Politiet mottok melding om en innbruddsalarm på Tiller. Politiet har rykket ut og kommet i kontakt med to personer.",
+        publishedAt: "2026-06-17T22:57:00.000Z",
+        places: ["Tiller", "Trondheim"],
+        location: { lat: 63.33974, lng: 10.4203, label: "Tiller" },
+        situationId: "politiloggen-tiller",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "nrk-tiller",
+      "politiloggen-tiller",
+    ]);
+  });
+
   it("does not consolidate unrelated city-wide stories just because both mention Trondheim", () => {
     const groups = groupHomeArticles([
       article({

@@ -13,7 +13,11 @@ import {
   type HomeFilters,
 } from "../homeFilters.js";
 import { groupHomeArticles, type HomeArticleGroup } from "../homeArticleGroups.js";
-import { nearbyStoryItems, nearbyStorySummary, type NearbyStoryItem } from "../homeNearby.js";
+import {
+  nearbyStoryItemsForGroups,
+  nearbyStorySummary,
+  type NearbyStoryItem,
+} from "../homeNearby.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
@@ -209,18 +213,26 @@ function NewsRow({
 }
 
 function nearbyMapTarget(item: NearbyStoryItem | undefined): { label: string; to: string } {
-  if (item?.article.situationId) {
-    return { label: "Åpne situasjon", to: `/situasjoner/${item.article.situationId}` };
+  if (item?.situationId) {
+    return { label: "Åpne situasjon", to: `/situasjoner/${item.situationId}` };
   }
   if (item?.category === "Transport") return { label: "Åpne trafikkart", to: "/trafikk" };
   if (item?.category === "Vær") return { label: "Åpne værkart", to: "/vaer" };
   return { label: "Åpne situasjonskart", to: "/situasjoner" };
 }
 
-function NearbyRail({ articles, data }: { articles: Article[]; data: BootstrapPayload }) {
+function NearbyRail({
+  articles,
+  data,
+  groups,
+}: {
+  articles: Article[];
+  data: BootstrapPayload;
+  groups: HomeArticleGroup[];
+}) {
   const allNearby = useMemo(
-    () => nearbyStoryItems(articles, { limit: Number.MAX_SAFE_INTEGER }),
-    [articles],
+    () => nearbyStoryItemsForGroups(groups, { limit: Number.MAX_SAFE_INTEGER }),
+    [groups],
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
   const [selectedNearbyId, setSelectedNearbyId] = useState<string>();
@@ -455,10 +467,6 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const groupedArticles = useMemo(() => groupHomeArticles(filtered), [filtered]);
   const leadGroup = groupedArticles[0];
   const secondaryGroups = groupedArticles.slice(1);
-  const nearbyArticles = useMemo(
-    () => groupedArticles.map((group) => group.primary),
-    [groupedArticles],
-  );
 
   async function updateSaved(id: string, saved: boolean) {
     if (savingArticleIdsRef.current.has(id)) return;
@@ -592,7 +600,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
             </button>
           ) : null}
         </section>
-        <NearbyRail articles={nearbyArticles} data={initialData} />
+        <NearbyRail articles={articles} groups={groupedArticles} data={initialData} />
       </div>
     </main>
   );

@@ -1,6 +1,6 @@
 import type { Article } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
-import { nearbyStoryItems, nearbyStorySummary } from "./homeNearby.js";
+import { nearbyStoryItems, nearbyStoryItemsForGroups, nearbyStorySummary } from "./homeNearby.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -78,5 +78,46 @@ describe("home nearby story model", () => {
     expect(nearbyStorySummary([nearbyStoryItems([article()])[0]!], 3)).toBe(
       "1 av 3 stedsfestede saker fra nyhetslisten.",
     );
+  });
+
+  it("uses one nearby marker for a grouped case covered by multiple providers", () => {
+    const primary = article({
+      id: "nrk-tiller",
+      sourceLabel: "NRK Trøndelag",
+      title: "Innbruddsalarm på Tiller",
+      publishedAt: "2026-06-18T03:31:00.000Z",
+      location: { lat: 63.33974, lng: 10.4203, label: "Tiller" },
+    });
+    const official = article({
+      id: "politiloggen-tiller",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Innbrudd: Trondheim, Tiller",
+      publishedAt: "2026-06-17T22:57:00.000Z",
+      location: { lat: 63.33974, lng: 10.4203, label: "Tiller" },
+      situationId: "politiloggen-tiller",
+    });
+
+    const items = nearbyStoryItemsForGroups(
+      [
+        {
+          id: "article:nrk-tiller",
+          primary,
+          articles: [primary, official],
+          sourceLabels: ["NRK Trøndelag", "Politiloggen"],
+        },
+      ],
+      { limit: 4 },
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: "article:nrk-tiller",
+      markerLabel: "1",
+      title: "Innbruddsalarm på Tiller",
+      sourceLabel: "2 kilder",
+      situationId: "politiloggen-tiller",
+      kind: "situation",
+    });
   });
 });

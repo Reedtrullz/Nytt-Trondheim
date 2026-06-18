@@ -12,6 +12,7 @@ export type NearbyStoryKind =
 export interface NearbyStoryItem {
   id: string;
   article: Article;
+  situationId?: string;
   position: [number, number];
   markerLabel: string;
   title: string;
@@ -23,6 +24,13 @@ export interface NearbyStoryItem {
   relevanceLabel: string;
   relevanceDetail: string;
   score: number;
+}
+
+interface NearbyArticleGroup {
+  id: string;
+  primary: Article;
+  articles: Article[];
+  sourceLabels: string[];
 }
 
 const categoryPriority = {
@@ -95,29 +103,54 @@ function nearbyScore(article: Article, kind: NearbyStoryKind): number {
   );
 }
 
-export function nearbyStoryItems(
-  articles: Article[],
+function locatedArticle(group: NearbyArticleGroup): Article | undefined {
+  const located = [
+    group.primary,
+    ...group.articles.filter((article) => article.id !== group.primary.id),
+  ].filter((article) => latLngFromLonLat(article.location?.lng, article.location?.lat));
+  return located[0];
+}
+
+function sourceLabelFor(group: NearbyArticleGroup): string {
+  if (group.sourceLabels.length < 2) return group.primary.sourceLabel;
+  return `${group.sourceLabels.length} kilder`;
+}
+
+function situationIdFor(group: NearbyArticleGroup): string | undefined {
+  return group.articles.find((article) => article.situationId)?.situationId;
+}
+
+export function nearbyStoryItemsForGroups(
+  groups: NearbyArticleGroup[],
   { limit = 4 }: { limit?: number } = {},
 ): NearbyStoryItem[] {
-  return articles
-    .flatMap((article) => {
-      const position = latLngFromLonLat(article.location?.lng, article.location?.lat);
-      if (!position || !article.location) return [];
-      const kind = nearbyKind(article);
+  return groups
+    .flatMap((group) => {
+      const locationArticle = locatedArticle(group);
+      const position = latLngFromLonLat(
+        locationArticle?.location?.lng,
+        locationArticle?.location?.lat,
+      );
+      if (!position || !locationArticle?.location) return [];
+      const representative = group.articles.find((article) => article.situationId) ?? group.primary;
+      const kind = nearbyKind(representative);
       const copy = relevanceCopy(kind);
       return [
         {
-          id: article.id,
-          article,
+          id: group.id,
+          article: group.primary,
+          situationId: situationIdFor(group),
           position,
           markerLabel: "",
-          title: article.title,
-          locationLabel: article.location.label,
-          sourceLabel: article.sourceLabel,
-          category: article.category,
-          publishedAt: article.publishedAt,
+          title: group.primary.title,
+          locationLabel: locationArticle.location.label,
+          sourceLabel: sourceLabelFor(group),
+          category: group.primary.category,
+          publishedAt: group.primary.publishedAt,
           kind,
-          score: nearbyScore(article, kind),
+          score: Math.max(
+            ...group.articles.map((article) => nearbyScore(article, nearbyKind(article))),
+          ),
           ...copy,
         },
       ];
@@ -130,6 +163,21 @@ export function nearbyStoryItems(
     )
     .slice(0, limit)
     .map((item, index) => ({ ...item, markerLabel: String(index + 1) }));
+}
+
+export function nearbyStoryItems(
+  articles: Article[],
+  { limit = 4 }: { limit?: number } = {},
+): NearbyStoryItem[] {
+  return nearbyStoryItemsForGroups(
+    articles.map((article) => ({
+      id: article.id,
+      primary: article,
+      articles: [article],
+      sourceLabels: [article.sourceLabel],
+    })),
+    { limit },
+  );
 }
 
 export function nearbyStorySummary(items: NearbyStoryItem[], locatedCount: number): string {

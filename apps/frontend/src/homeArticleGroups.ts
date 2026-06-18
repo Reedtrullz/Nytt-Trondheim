@@ -8,6 +8,7 @@ export interface HomeArticleGroup {
 }
 
 const maxGroupAgeMs = 24 * 60 * 60 * 1000;
+const crossSourceIncidentWindowMs = 8 * 60 * 60 * 1000;
 const genericPlaceTokens = new Set(["trondheim", "trøndelag", "trondelag"]);
 const stopWords = new Set([
   "alle",
@@ -47,6 +48,13 @@ const stopWords = new Set([
   "var",
   "ved",
 ]);
+const incidentSignals: Array<[string, RegExp]> = [
+  ["innbrudd", /\binnbrudd\w*/iu],
+  ["tyveri", /\b(tyveri|tyvgods|stj(?:å|a)l\w*)\b/iu],
+  ["brann", /\b(brann|røykutvikling)\b/iu],
+  ["trafikk", /\b(trafikk|kollisjon|ulykke|påkjør\w*|bilstans)\b/iu],
+  ["orden", /\b(ro og orden|ordensforstyrrelse)\b/iu],
+];
 
 function normalizeText(value: string): string {
   return value
@@ -112,6 +120,19 @@ function articleText(article: Article): string {
     .join(" ");
 }
 
+function articleIncidentSignals(article: Article): Set<string> {
+  const text = articleText(article);
+  return new Set(
+    incidentSignals.flatMap(([signal, pattern]) => (pattern.test(text) ? [signal] : [])),
+  );
+}
+
+function hasSharedIncidentSignal(left: Article, right: Article): boolean {
+  const leftSignals = articleIncidentSignals(left);
+  if (leftSignals.size === 0) return false;
+  return [...articleIncidentSignals(right)].some((signal) => leftSignals.has(signal));
+}
+
 function articlesSimilar(left: Article, right: Article): boolean {
   if (left.id === right.id) return true;
   if (left.situationId && left.situationId === right.situationId) return true;
@@ -123,6 +144,16 @@ function articlesSimilar(left: Article, right: Article): boolean {
 
   const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
   const sharedPlace = hasSharedPlace(left, right);
+  if (
+    left.source !== right.source &&
+    publishedDistanceMs(left, right) <= crossSourceIncidentWindowMs &&
+    body.overlap >= 4 &&
+    sameBroadCategory(left, right) &&
+    sharedPlace &&
+    hasSharedIncidentSignal(left, right)
+  ) {
+    return true;
+  }
   if (body.overlap >= 5 && body.score >= 0.38 && sameBroadCategory(left, right) && sharedPlace) {
     return true;
   }
