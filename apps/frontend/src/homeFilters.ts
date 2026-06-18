@@ -6,6 +6,7 @@ export const articleCategories = [
   "Hendelser",
   "Byutvikling",
   "Kultur",
+  "Sport",
   "Transport",
   "Politikk",
 ] as const;

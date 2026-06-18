@@ -414,6 +414,63 @@ describe("home article grouping", () => {
     expect(groups[0]?.sourceLabels).toEqual(["NRK Trøndelag", "Politiloggen"]);
   });
 
+  it("bundles same-place break-in coverage without merging nearby separate burglaries", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "adressa-kompis-lade",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Mann med hette og svart plagg i ansiktet dukket opp på bildene",
+        excerpt:
+          "En mann brukte brekkjern for å bryte seg inn i restauranten Kompis på Lade i Trondheim natt til torsdag.",
+        publishedAt: "2026-06-18T04:33:40.000Z",
+        category: "Transport",
+        places: ["Lade", "Trondheim"],
+        location: { lat: 63.44626, lng: 10.44344, label: "Lade" },
+      }),
+      article({
+        id: "nrk-lade-break-in",
+        title: "Innbrudd på Lade i Trondheim",
+        excerpt:
+          "Like før klokka 4.30 i natt meldte en vekter fra om innbrudd hos ei bedrift på Lade i Trondheim. Overvåkingsbilder viste at en mann hadde tatt seg inn på stedet, så politiet rykka ut.",
+        publishedAt: "2026-06-18T03:38:20.000Z",
+        places: ["Lade", "Trondheim"],
+        location: { lat: 63.44626, lng: 10.44344, label: "Lade" },
+      }),
+      article({
+        id: "nrk-postbil-lade",
+        title: "Tok pakker fra postbil i Trondheim",
+        excerpt:
+          "Ved 3-tida i natt rykka politiet ut til Lade i Trondheim etter melding om mistenkelige personer ved et kjøretøy. To unge menn skal ha åpna pakker fra en postbil.",
+        publishedAt: "2026-06-18T03:34:51.000Z",
+        places: ["Lade", "Trondheim"],
+        location: { lat: 63.44626, lng: 10.44344, label: "Lade" },
+      }),
+      article({
+        id: "nrk-tiller-alarm",
+        title: "Innbruddsalarm på Tiller",
+        excerpt:
+          "En halv time over midnatt mottok politiet melding om en innbruddsalarm på Tiller i Trondheim. Politiet rykka ut og kom i kontakt med to personer.",
+        publishedAt: "2026-06-18T03:31:51.000Z",
+        places: ["Tiller", "Trondheim"],
+        location: { lat: 63.33974, lng: 10.4203, label: "Tiller" },
+      }),
+    ]);
+
+    expect(groups).toHaveLength(3);
+    expect(
+      groups
+        .find((group) => group.articles.some((item) => item.id === "nrk-lade-break-in"))
+        ?.articles.map((item) => item.id),
+    ).toEqual(["adressa-kompis-lade", "nrk-lade-break-in"]);
+    expect(groups.find((group) => group.primary.id === "nrk-postbil-lade")?.articles).toHaveLength(
+      1,
+    );
+    expect(groups.find((group) => group.primary.id === "nrk-tiller-alarm")?.articles).toHaveLength(
+      1,
+    );
+  });
+
   it("bundles developing Rosenborg trainer topic coverage across categories", () => {
     const groups = groupHomeArticles([
       article({
@@ -529,6 +586,82 @@ describe("home article grouping", () => {
       "generic-innbrudd-news",
       "generic-innbrudd-log",
     ]);
+  });
+
+  it("does not consolidate different official situation ids even with similar titles", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "politiloggen-sentrum-1",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Tyveri: Trondheim, Sentrum",
+        excerpt: "Politiet har opprettet sak etter et tyveri ved et bakeri i sentrum.",
+        publishedAt: "2026-06-18T15:10:00.000Z",
+        places: ["Sentrum", "Trondheim"],
+        location: { lat: 63.43209, lng: 10.3991, label: "Trondheim sentrum" },
+        situationId: "politiloggen-sentrum-bakeri",
+      }),
+      article({
+        id: "politiloggen-sentrum-2",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Tyveri: Trondheim, Sentrum",
+        excerpt: "Politiet har opprettet sak etter et tyveri fra en butikk ved Solsiden.",
+        publishedAt: "2026-06-18T14:55:00.000Z",
+        places: ["Solsiden", "Trondheim"],
+        location: { lat: 63.436, lng: 10.414, label: "Solsiden" },
+        situationId: "politiloggen-sentrum-solsiden",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.primary.id)).toEqual([
+      "politiloggen-sentrum-1",
+      "politiloggen-sentrum-2",
+    ]);
+  });
+
+  it("does not let a generic city-center theft bridge distinct specific places", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "generic-sentrum-theft",
+        title: "Tyveri i Trondheim sentrum",
+        excerpt:
+          "En mann stjal alkohol i Trondheim sentrum og ble bortvist fra området etter hendelsen.",
+        publishedAt: "2026-06-18T15:02:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "snurr-theft",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Tyveri: Trondheim",
+        excerpt:
+          "En mann stjal alkohol på bakeriet Snurr i Trondheim sentrum og ble bortvist fra stedet.",
+        publishedAt: "2026-06-18T14:59:00.000Z",
+        places: ["Sentrum", "Trondheim"],
+        location: { lat: 63.43209, lng: 10.3991, label: "Trondheim sentrum" },
+      }),
+      article({
+        id: "solsiden-theft",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Tyveri på Solsiden",
+        excerpt: "En mann stjal alkohol fra en butikk på Solsiden i Trondheim sentrum.",
+        publishedAt: "2026-06-18T14:58:00.000Z",
+        places: ["Solsiden", "Trondheim"],
+        location: { lat: 63.436, lng: 10.414, label: "Solsiden" },
+      }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(
+      groups
+        .find((group) => group.articles.some((item) => item.id === "snurr-theft"))
+        ?.articles.map((item) => item.id),
+    ).toEqual(["generic-sentrum-theft", "snurr-theft"]);
+    expect(groups.find((group) => group.primary.id === "solsiden-theft")?.articles).toHaveLength(1);
   });
 
   it("does not bundle generic Rosenborg stories without trainer-topic overlap", () => {

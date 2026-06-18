@@ -513,6 +513,10 @@ button {
   background: var(--amber);
 }
 
+.topic.sport::before {
+  background: #155aa8;
+}
+
 .lead-footer a {
   display: inline-flex;
   align-items: center;

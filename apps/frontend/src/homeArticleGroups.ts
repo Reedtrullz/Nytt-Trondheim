@@ -90,7 +90,10 @@ const stopWords = new Set([
   "ved",
 ]);
 const incidentSignals: Array<[string, RegExp]> = [
-  ["innbrudd", /\binnbrudd\w*/iu],
+  [
+    "innbrudd",
+    /\b(innbrudd\w*|brekkjern\w*|br[øo]t\s+seg\s+inn|brutt\s+seg\s+inn|bryt(?:e|er)?\s+seg\s+inn)\b/iu,
+  ],
   ["tyveri", /\b(tyveri|tyvgods|tyv\w*|tjuv\w*|stj(?:e|å|a)l\w*)\b/iu],
   ["brann", /\b(brann\w*|røyk\w*|slukk\w*)\b/iu],
   ["trafikk", /\b(trafikk|kollisjon|ulykke|påkjør\w*|bilstans)\b/iu],
@@ -168,6 +171,13 @@ function hasSharedPlace(left: Article, right: Article): boolean {
   return tokenSimilarity(leftPlaces, rightPlaces).overlap > 0;
 }
 
+function hasConflictingSpecificPlaces(left: Article, right: Article): boolean {
+  const leftPlaces = articlePlaceTokens(left);
+  const rightPlaces = articlePlaceTokens(right);
+  if (leftPlaces.size === 0 || rightPlaces.size === 0) return false;
+  return tokenSimilarity(leftPlaces, rightPlaces).overlap === 0;
+}
+
 function sameBroadCategory(left: Article, right: Article): boolean {
   if (left.category === right.category) return true;
   const eventLike = new Set(["Hendelser", "Nyheter"]);
@@ -208,11 +218,19 @@ function hasSharedIncidentSignal(left: Article, right: Article): boolean {
   return sharedIncidentSignals(left, right).size > 0;
 }
 
+function articlesConflict(left: Article, right: Article): boolean {
+  if (left.situationId && right.situationId && left.situationId !== right.situationId) {
+    return true;
+  }
+  return hasConflictingSpecificPlaces(left, right) && hasSharedIncidentSignal(left, right);
+}
+
 function hasGenericPlaceIncidentMatch(
   left: Article,
   right: Article,
   body: { overlap: number; score: number },
 ): boolean {
+  if (hasConflictingSpecificPlaces(left, right)) return false;
   if (!sameBroadCategory(left, right)) return false;
   const distance = publishedDistanceMs(left, right);
   const distinctive = tokenSimilarity(
@@ -243,6 +261,7 @@ function hasTopicalThreadMatch(
 function articlesSimilar(left: Article, right: Article): boolean {
   if (left.id === right.id) return true;
   if (left.situationId && left.situationId === right.situationId) return true;
+  if (left.situationId && right.situationId) return false;
   if (publishedDistanceMs(left, right) > maxGroupAgeMs) return false;
 
   const title = tokenSimilarity(tokens(left.title), tokens(right.title));
@@ -270,7 +289,6 @@ function articlesSimilar(left: Article, right: Article): boolean {
     left.source !== right.source &&
     publishedDistanceMs(left, right) <= crossSourceIncidentWindowMs &&
     body.overlap >= 4 &&
-    sameBroadCategory(left, right) &&
     sharedPlace &&
     hasSharedIncidentSignal(left, right)
   ) {
@@ -299,14 +317,17 @@ function sourceLabelsFor(articles: Article[]): string[] {
   return [...new Set(articles.map((article) => article.sourceLabel))];
 }
 
+function articleFitsGroup(article: Article, group: HomeArticleGroup): boolean {
+  if (group.articles.some((existing) => articlesConflict(article, existing))) return false;
+  return group.articles.some((existing) => articlesSimilar(article, existing));
+}
+
 export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
   const groups: HomeArticleGroup[] = [];
   const sorted = [...articles].sort(sortArticles);
 
   sorted.forEach((article) => {
-    const group = groups.find((candidate) =>
-      candidate.articles.some((existing) => articlesSimilar(article, existing)),
-    );
+    const group = groups.find((candidate) => articleFitsGroup(article, candidate));
     if (group) {
       group.articles = [...group.articles, article].sort(sortArticles);
       group.primary = group.articles[0]!;

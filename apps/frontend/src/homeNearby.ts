@@ -40,6 +40,7 @@ const categoryPriority = {
   Byutvikling: 34,
   Politikk: 28,
   Nyheter: 24,
+  Sport: 20,
   Kultur: 18,
 } as const satisfies Record<Article["category"], number>;
 

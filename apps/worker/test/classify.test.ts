@@ -49,6 +49,13 @@ describe("Trondheim relevance classification", () => {
     expect(categorize("Ny skole åpner i Trondheim")).toBe("Nyheter");
   });
 
+  it("categorizes local sports coverage separately from incidents and culture", () => {
+    expect(categorize("Freyr Alexandersson blir ny hovedtrener i Rosenborg")).toBe("Sport");
+    expect(categorize("Han kan bli RBK-trener")).toBe("Sport");
+    expect(categorize("Kolstad håndball møter europeisk motstand")).toBe("Sport");
+    expect(categorize("Brann i Bymarka")).toBe("Hendelser");
+  });
+
   it("prefers a specific district over the generic city when placing a story", () => {
     expect(extractPlaces("Brann i Bymarka i Trondheim")).toEqual(["Bymarka", "Trondheim"]);
   });
@@ -58,6 +65,16 @@ describe("Trondheim relevance classification", () => {
     expect(extractPlaces("Tyveri i Trondheim sentrum")).toEqual(["Sentrum", "Trondheim"]);
     expect(detectScope("Tyveri i Oslo sentrum")).toBeUndefined();
     expect(extractPlaces("Tyveri i Oslo sentrum")).toEqual([]);
+  });
+
+  it("extracts recurring incident anchors around Kyvannet and Solsiden", () => {
+    expect(detectScope("Person funnet livløs under vann ved Kyvatnet")).toBe("trondheim");
+    expect(extractPlaces("Person funnet livløs under vann ved Kyvatnet")).toEqual(["Kyvannet"]);
+    expect(extractPlaces("Redningsaksjon ved Kyvannet i Trondheim")).toEqual([
+      "Kyvannet",
+      "Trondheim",
+    ]);
+    expect(extractPlaces("Tyveri ved Solsiden i Trondheim")).toEqual(["Solsiden", "Trondheim"]);
   });
 
   it("opens only multi-source preliminary incident candidates", () => {

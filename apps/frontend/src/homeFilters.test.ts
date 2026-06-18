@@ -16,7 +16,7 @@ describe("home filter query params", () => {
   });
 
   it("falls back to safe defaults for unknown params", () => {
-    expect(parseHomeFilters("?scope=bergen&category=Sport&q=%20%20")).toEqual({
+    expect(parseHomeFilters("?scope=bergen&category=Mat&q=%20%20")).toEqual({
       q: "",
       scope: "trondheim",
       category: "Alle",
@@ -27,6 +27,9 @@ describe("home filter query params", () => {
     expect(buildHomeSearch({ q: " bru ", scope: "trondheim", category: "Alle" })).toBe("?q=bru");
     expect(buildHomeSearch({ q: "", scope: "trondelag", category: "Transport" })).toBe(
       "?scope=trondelag&category=Transport",
+    );
+    expect(buildHomeSearch({ q: "", scope: "trondheim", category: "Sport" })).toBe(
+      "?category=Sport",
     );
   });
 
@@ -45,6 +48,9 @@ describe("home filter query params", () => {
     );
     expect(searchSummary({ q: "", scope: "trondelag", category: "Transport" })).toBe(
       "Transport i Trøndelag",
+    );
+    expect(searchSummary({ q: "RBK", scope: "trondheim", category: "Sport" })).toBe(
+      '"RBK" Sport i Trondheim',
     );
   });
 });

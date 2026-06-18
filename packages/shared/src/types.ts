@@ -30,6 +30,7 @@ export type ArticleCategory =
   | "Hendelser"
   | "Byutvikling"
   | "Kultur"
+  | "Sport"
   | "Transport"
   | "Politikk"
   | "Vær";

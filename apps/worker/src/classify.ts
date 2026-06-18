@@ -3,6 +3,8 @@ import type { ArticleCategory, GeographicScope } from "@nytt/shared";
 const trondheimTerms = [
   "kroppanbrua",
   "kroppan bru",
+  "kyvatnet",
+  "kyvannet",
   "bakklandet",
   "brattøra",
   "byåsen",
@@ -37,6 +39,7 @@ const trondheimTerms = [
   "saupstad",
   "singsaker",
   "sintef",
+  "solsiden",
   "skansen",
   "sluppen",
   "stavne-leangen",
@@ -98,6 +101,7 @@ const displayLabels: Record<string, string> = {
   "ski-vm": "Ski-VM",
   "st olavs": "St. Olavs",
   "st. olavs": "St. Olavs",
+  kyvatnet: "Kyvannet",
   "trondheim sentrum": "Sentrum",
   "trondheim s": "Trondheim S",
 };
@@ -105,10 +109,26 @@ const displayLabels: Record<string, string> = {
 const placeAliases = new Map<string, string>([
   ["kroppanbrua", "Kroppan Bru"],
   ["kroppan bru", "Kroppan Bru"],
+  ["kyvatnet", "Kyvannet"],
   ["trondheim sentrum", "Sentrum"],
 ]);
 
 const categoryRules: Array<[ArticleCategory, string[]]> = [
+  [
+    "Sport",
+    [
+      "fotball",
+      "hovedtrener",
+      "håndball",
+      "kolstad håndball",
+      "rbk",
+      "ranheim fotball",
+      "rosenborg",
+      "ski-vm",
+      "trenerjobb",
+      "vm-jubel",
+    ],
+  ],
   [
     "Hendelser",
     [
