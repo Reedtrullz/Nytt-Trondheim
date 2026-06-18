@@ -347,7 +347,7 @@ describe("source item store", () => {
     expect(JSON.stringify(audit)).not.toContain("rawPayload");
   });
 
-  it("classifies context-only sources without incident-source provenance", async () => {
+  it("classifies context sources and official municipal corroborators", async () => {
     const store = new MemoryStore();
 
     const audit = await store.getSourceAuditWorkspace({ includeDiagnostics: true }, "Reedtrullz");
@@ -361,7 +361,7 @@ describe("source item store", () => {
         }),
         expect.objectContaining({
           source: "trondheim_kommune",
-          role: "context_source",
+          role: "incident_source",
           provenance: "official",
         }),
         expect.objectContaining({

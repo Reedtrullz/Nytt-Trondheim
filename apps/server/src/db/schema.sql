@@ -31,6 +31,63 @@ CREATE TABLE IF NOT EXISTS situations (
   updated_at timestamptz NOT NULL,
   payload jsonb NOT NULL
 );
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM situations
+    WHERE payload->>'officialSource' IS NOT NULL
+      AND payload->>'officialSource' NOT IN ('datex', 'politiloggen')
+  ) THEN
+    RAISE EXCEPTION 'situations contain unsupported officialSource values';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM situations
+    WHERE COALESCE(payload->'activationBasis'->'sourceIds', '[]'::jsonb) ?| ARRAY[
+      'bane_nor',
+      'datex_cctv',
+      'datex_travel_time',
+      'datex_weather',
+      'dsb',
+      'entur',
+      'entur_service_alerts',
+      'entur_vehicle_positions',
+      'met',
+      'nve',
+      'trafikkdata',
+      'vegvesen_traffic_info'
+    ]
+  ) THEN
+    RAISE EXCEPTION 'situations contain context-only activation source ids';
+  END IF;
+END;
+$$;
+ALTER TABLE situations DROP CONSTRAINT IF EXISTS situations_official_source_check;
+ALTER TABLE situations ADD CONSTRAINT situations_official_source_check
+  CHECK (payload->>'officialSource' IS NULL OR payload->>'officialSource' IN ('datex', 'politiloggen'));
+ALTER TABLE situations DROP CONSTRAINT IF EXISTS situations_activation_source_ids_array_check;
+ALTER TABLE situations ADD CONSTRAINT situations_activation_source_ids_array_check
+  CHECK (
+    payload->'activationBasis'->'sourceIds' IS NULL
+    OR jsonb_typeof(payload->'activationBasis'->'sourceIds') IN ('array', 'null')
+  );
+ALTER TABLE situations DROP CONSTRAINT IF EXISTS situations_activation_sources_no_context_source_check;
+ALTER TABLE situations ADD CONSTRAINT situations_activation_sources_no_context_source_check
+  CHECK (
+    NOT (COALESCE(payload->'activationBasis'->'sourceIds', '[]'::jsonb) ?| ARRAY[
+      'bane_nor',
+      'datex_cctv',
+      'datex_travel_time',
+      'datex_weather',
+      'dsb',
+      'entur',
+      'entur_service_alerts',
+      'entur_vehicle_positions',
+      'met',
+      'nve',
+      'trafikkdata',
+      'vegvesen_traffic_info'
+    ])
+  );
 
 CREATE TABLE IF NOT EXISTS situation_activations (
   situation_id text PRIMARY KEY REFERENCES situations(id) ON DELETE CASCADE,
@@ -44,6 +101,50 @@ CREATE TABLE IF NOT EXISTS situation_activations (
 );
 CREATE INDEX IF NOT EXISTS situation_activations_signature_idx
   ON situation_activations (incident_signature);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM situation_activations
+    WHERE source_ids ?| ARRAY[
+      'bane_nor',
+      'datex_cctv',
+      'datex_travel_time',
+      'datex_weather',
+      'dsb',
+      'entur',
+      'entur_service_alerts',
+      'entur_vehicle_positions',
+      'met',
+      'nve',
+      'trafikkdata',
+      'vegvesen_traffic_info'
+    ]
+  ) THEN
+    RAISE EXCEPTION 'situation_activations contain context-only activation source ids';
+  END IF;
+END;
+$$;
+ALTER TABLE situation_activations DROP CONSTRAINT IF EXISTS situation_activations_source_ids_array_check;
+ALTER TABLE situation_activations ADD CONSTRAINT situation_activations_source_ids_array_check
+  CHECK (jsonb_typeof(source_ids) = 'array');
+ALTER TABLE situation_activations DROP CONSTRAINT IF EXISTS situation_activations_source_ids_no_context_source_check;
+ALTER TABLE situation_activations ADD CONSTRAINT situation_activations_source_ids_no_context_source_check
+  CHECK (
+    NOT (source_ids ?| ARRAY[
+      'bane_nor',
+      'datex_cctv',
+      'datex_travel_time',
+      'datex_weather',
+      'dsb',
+      'entur',
+      'entur_service_alerts',
+      'entur_vehicle_positions',
+      'met',
+      'nve',
+      'trafikkdata',
+      'vegvesen_traffic_info'
+    ])
+  );
 
 CREATE TABLE IF NOT EXISTS situation_articles (
   situation_id text NOT NULL REFERENCES situations(id) ON DELETE CASCADE,

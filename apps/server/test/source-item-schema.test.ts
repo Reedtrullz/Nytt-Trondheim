@@ -81,6 +81,9 @@ describe("source item schema", () => {
     expect(schema).toContain("source_health_state_check");
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
     expect(schema).toContain("source_items_entur_official_event_service_alert_check");
+    expect(schema).toContain("situations_official_source_check");
+    expect(schema).toContain("situations_activation_sources_no_context_source_check");
+    expect(schema).toContain("situation_activations_source_ids_no_context_source_check");
     expect(schema).toContain(
       "(normalized_payload->>'source') IS NOT DISTINCT FROM 'entur_service_alerts'",
     );

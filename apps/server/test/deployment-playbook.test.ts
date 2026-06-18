@@ -42,6 +42,9 @@ describe("deployment playbook Entur verification", () => {
     expect(validationBlock).toContain("- name: Verify production health");
     expect(validationBlock).toMatch(/- name: Verify worker/);
     expect(validationBlock).toContain(
+      "- name: Verify worker completed a fresh cycle after candidate promotion",
+    );
+    expect(validationBlock).toContain(
       "- name: Verify DATEX source health rows when DATEX is enabled",
     );
     expect(validationBlock).toContain("- name: Verify Entur source health");
@@ -90,7 +93,7 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toMatch(/poll:\s*15/);
   });
 
-  it("requires DATEX source health rows to be ok without deploy-time freshness coupling", () => {
+  it("requires DATEX source health rows to be ok without per-source timestamp coupling", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify DATEX source health rows when DATEX is enabled",
     );
@@ -105,21 +108,27 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toMatch(/retries:\s*\d+/);
   });
 
-  it("verifies promoted worker container state and healthy traffic source rows", () => {
+  it("verifies promoted worker container state and a candidate-era worker cycle", () => {
     const workerTaskStart = playbook.indexOf("- name: Verify worker");
     const workerTaskEnd = playbook.indexOf("- name: Verify DATEX source health", workerTaskStart);
     const task = playbook.slice(workerTaskStart, workerTaskEnd);
 
     expect(workerTaskStart).toBeGreaterThan(-1);
     expect(task).toContain("ps --services --filter status=running worker | grep -qx worker");
+    expect(task).toContain(
+      "- name: Verify worker completed a fresh cycle after candidate promotion",
+    );
+    expect(task).toContain("candidate_validation_started_at.stdout");
+    expect(task).toContain("FROM worker_cycle_metrics");
+    expect(task).toContain("cycle_completed_at >= :'validation_started'::timestamptz");
+    expect(task).toContain("register: promoted_worker_cycle");
+    expect(task).toContain("until: promoted_worker_cycle.rc == 0");
     expect(task).toContain("- name: Verify traffic source health after candidate promotion");
     expect(task).toContain("FROM source_health");
     expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
     expect(task).toContain("state='ok'");
     expect(task).toContain('test "$count" -eq 2');
     expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
-    expect(task).not.toContain("collector_runs");
-    expect(task).not.toContain("candidate_validation_started_at.stdout");
     expect(task).toContain("register: traffic_source_health");
     expect(task).toContain("until: traffic_source_health.rc == 0");
   });

@@ -438,7 +438,7 @@ const sourceAuditPolicy: Partial<
   bane_nor: { role: "context_source", provenance: "official" },
   dsb: { role: "context_source", provenance: "preparedness_context" },
   entur: { role: "context_source", provenance: "preparedness_context" },
-  trondheim_kommune: { role: "context_source", provenance: "official" },
+  trondheim_kommune: { role: "incident_source", provenance: "official" },
   vegvesen_traffic_info: { role: "context_source", provenance: "official" },
 };
 

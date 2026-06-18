@@ -33,6 +33,56 @@ INSERT INTO situations (id, type, status, verification_status, importance, updat
 VALUES ('ci-guardrail-situation', 'ci', 'active', 'unverified', 'low', now(), '{}'::jsonb);
 
 SELECT pg_temp.expect_check_violation(
+  'Entur must not be officialSource for situations',
+  $$INSERT INTO situations (
+      id, type, status, verification_status, importance, updated_at, payload
+    ) VALUES (
+      'ci-invalid-official-source',
+      'ci',
+      'active',
+      'unverified',
+      'low',
+      now(),
+      '{"officialSource":"entur"}'::jsonb
+    )$$,
+  'situations_official_source_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
+  'MET must not activate situations via activationBasis',
+  $$INSERT INTO situations (
+      id, type, status, verification_status, importance, updated_at, payload
+    ) VALUES (
+      'ci-invalid-activation-source',
+      'ci',
+      'active',
+      'unverified',
+      'low',
+      now(),
+      '{"activationBasis":{"rule":"two_independent_sources","sourceIds":["met"],"articleIds":["ci-met"],"activatedAt":"2026-06-18T00:00:00.000Z"}}'::jsonb
+    )$$,
+  'situations_activation_sources_no_context_source_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
+  'DATEX context sources must not enter situation_activations',
+  $$INSERT INTO situation_activations (
+      situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at
+    ) VALUES (
+      'ci-guardrail-situation',
+      'ci-invalid-datex-weather',
+      'ci',
+      '["datex_weather"]'::jsonb,
+      '["ci-datex-weather"]'::jsonb,
+      now()
+    )$$,
+  'situation_activations_source_ids_no_context_source_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
   'DSB must stay out of evidence_items',
   $$INSERT INTO evidence_items (
       id, situation_id, source, source_url, provenance, confidence, payload, extracted_at

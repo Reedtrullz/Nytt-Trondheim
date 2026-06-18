@@ -192,7 +192,14 @@ test("home nearby module links ranked local stories with the map", async ({ page
   ).toBe(true);
 });
 
-test("home feed consolidates similar stories from different sources", async ({ page }) => {
+test("home feed renders persisted coverage-bundle labels for similar stories", async ({ page }) => {
+  const coverageBundle = {
+    id: "coverage:incident:torvet-antibac",
+    kind: "incident",
+    confidence: "high",
+    reason: "Samme hendelse på tvers av kilder",
+    generatedAt: "2026-06-15T18:13:00.000Z",
+  } as const;
   const articles: Article[] = [
     {
       id: "nrk-antibac",
@@ -206,6 +213,7 @@ test("home feed consolidates similar stories from different sources", async ({ p
       category: "Hendelser",
       places: ["Trondheim", "Torvet"],
       location: { lat: 63.4305, lng: 10.3951, label: "Torvet" },
+      coverageBundle,
     },
     {
       id: "politiloggen-antibac",
@@ -220,6 +228,7 @@ test("home feed consolidates similar stories from different sources", async ({ p
       category: "Hendelser",
       places: ["Trondheim", "Torvet"],
       location: { lat: 63.4305, lng: 10.3951, label: "Torvet" },
+      coverageBundle,
     },
     {
       ...sampleBootstrap.articles[0]!,
@@ -260,7 +269,7 @@ test("home feed consolidates similar stories from different sources", async ({ p
   const lead = page.locator(".lead-story");
   const sources = lead.locator(".source-cluster");
   await expect(lead.getByRole("heading", { name: "Tente på antibac i Trondheim" })).toBeVisible();
-  await expect(sources.getByText("2 kilder dekker samme sak")).toBeVisible();
+  await expect(sources.getByText("2 kilder · samme hendelse på tvers av kilder")).toBeVisible();
   await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toBeVisible();
   await expect(sources.getByRole("link", { name: /Politiloggen/ })).toBeVisible();
   await expect(sources.getByText("Ro og orden: Trondheim, Torvet")).toBeVisible();
@@ -997,12 +1006,12 @@ test("home keeps Vær as weather page navigation, not an article category filter
   await expect(page.getByText('Ingen saker samsvarer med "bru" i Trøndelag.')).toBeVisible();
 });
 
-test("article save failure rolls back optimistic state", async ({ page }) => {
+test("article save missing target rolls back optimistic state", async ({ page }) => {
   await page.route("**/api/saved/articles/a-bridge", async (route) => {
     await route.fulfill({
-      status: 500,
+      status: 404,
       contentType: "application/json",
-      body: JSON.stringify({ error: "Lagring er midlertidig utilgjengelig." }),
+      body: JSON.stringify({ error: "Saken finnes ikke lenger." }),
     });
   });
 
@@ -1014,7 +1023,7 @@ test("article save failure rolls back optimistic state", async ({ page }) => {
   await expect(saveButton).toBeEnabled();
 
   await saveButton.click();
-  await expect(page.getByRole("alert")).toContainText("Lagring er midlertidig utilgjengelig.");
+  await expect(page.getByRole("alert")).toContainText("Saken finnes ikke lenger.");
   await expect(
     page.getByRole("button", { name: initialLabel ?? /Ny bru over Nidelva/ }),
   ).toBeEnabled();
