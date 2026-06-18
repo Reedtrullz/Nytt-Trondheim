@@ -1,4 +1,5 @@
 import type {
+  Article,
   RoadCamera,
   RoadWeatherObservation,
   TrafficCounterSnapshot,
@@ -19,9 +20,32 @@ import {
   buildWorkerCycleMetrics,
   collectorRunFromMetric,
   normalizeDatexSituationEndpoint,
+  prepareArticleCoverageAnalysis,
   shouldResolveMissingDatexSituations,
 } from "../src/index.js";
 import { normalizeDatexCredentialedEndpoint } from "../src/datex.js";
+
+function newsArticle(overrides: Partial<Article> = {}): Article {
+  return {
+    id: overrides.id ?? "nrk-saupstad-fight",
+    source: overrides.source ?? "nrk",
+    sourceLabel: overrides.sourceLabel ?? "NRK Trøndelag",
+    title: overrides.title ?? "Rykker ut til slåssing",
+    excerpt:
+      overrides.excerpt ??
+      "Politiet er på vei til Saupstad i Trondheim hvor noen ungdommer slåss med hverandre.",
+    url: overrides.url ?? "https://example.test/nrk-saupstad-fight",
+    publishedAt: overrides.publishedAt ?? "2026-06-18T10:39:00.000Z",
+    scope: overrides.scope ?? "trondheim",
+    category: overrides.category ?? "Hendelser",
+    places: overrides.places ?? ["Trondheim"],
+    location: overrides.location,
+    saved: overrides.saved,
+    situationId: overrides.situationId,
+    imageUrl: overrides.imageUrl,
+    coverageBundle: overrides.coverageBundle,
+  };
+}
 
 function trafficInfoEvent(overrides: Partial<TrafficMapEvent> = {}): TrafficMapEvent {
   return {
@@ -216,6 +240,54 @@ describe("worker lifecycle helpers", () => {
       recordsAccepted: 0,
       recordsRejected: 0,
     });
+  });
+
+  it("geocodes collected articles before deriving coverage bundle decisions", async () => {
+    const generatedAt = "2026-06-18T10:45:00.000Z";
+    const nrkArticle = newsArticle();
+    const politiloggenArticle = newsArticle({
+      id: "politiloggen-saupstad-fight",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Ro og orden: Trondheim, Saupstad",
+      excerpt:
+        "Vi er på veg til Saupstad etter å ha fått melding om ungdommer som sloss. Det er ikke meldt om noen skadde.",
+      url: "https://example.test/politiloggen-saupstad-fight",
+      publishedAt: "2026-06-18T10:37:00.000Z",
+      places: ["Saupstad"],
+    });
+    const geocoder = vi.fn(async (articles: Article[]) =>
+      articles.map((article) => ({
+        ...article,
+        places: ["Saupstad"],
+        location: { lat: 63.367, lng: 10.35, label: "Saupstad" },
+      })),
+    );
+
+    const analysis = await prepareArticleCoverageAnalysis({
+      articlesForGeocoding: [nrkArticle],
+      articlesWithoutGeocoding: [politiloggenArticle],
+      generatedAt,
+      geocoder,
+    });
+
+    expect(geocoder).toHaveBeenCalledWith([nrkArticle]);
+    expect(analysis.articles.find((article) => article.id === nrkArticle.id)?.location).toEqual({
+      lat: 63.367,
+      lng: 10.35,
+      label: "Saupstad",
+    });
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      confidence: "high",
+      generatedAt,
+      kind: "incident",
+      memberArticleIds: [nrkArticle.id, politiloggenArticle.id],
+      sourceIds: ["nrk", "politiloggen"],
+    });
+    expect(analysis.bundles[0]?.signals.map((signal) => signal.kind)).toContain(
+      "generic_place_incident",
+    );
   });
 
   it("resolves missing DATEX situations only after a fresh snapshot", () => {

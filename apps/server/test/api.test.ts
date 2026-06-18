@@ -167,6 +167,7 @@ describe("private situation API", () => {
       rateLimitEnabled: true,
     });
     await request(app).get("/api/bootstrap").expect(401);
+    await request(app).get("/api/operations/coverage-bundles").expect(401);
   });
 
   it("includes a provenance explanation for situation workspaces", async () => {
@@ -1698,6 +1699,100 @@ describe("private situation API", () => {
           ]),
         );
       });
+  });
+
+  it("serves coverage bundle decisions through the operations API with filters and pagination", async () => {
+    const { app, store } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const articles: Article[] = [
+      {
+        id: "ops-rbk-vg",
+        source: "vg",
+        sourceLabel: "VG",
+        title: "Freyr Alexandersson blir ny hovedtrener i Rosenborg",
+        excerpt: "I dag ble han presentert som Rosenborgs nye trener.",
+        url: "https://example.test/ops-rbk-vg",
+        publishedAt: "2026-06-18T15:57:00.000Z",
+        scope: "trondheim",
+        category: "Sport",
+        places: ["Trondheim"],
+      },
+      {
+        id: "ops-rbk-adressa",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Han kan bli RBK-trener",
+        excerpt: "Freyr Alexandersson har vært i konkrete samtaler med Rosenborg.",
+        url: "https://example.test/ops-rbk-adressa",
+        publishedAt: "2026-06-18T15:50:00.000Z",
+        scope: "trondheim",
+        category: "Sport",
+        places: ["Trondheim"],
+      },
+      {
+        id: "ops-smoke-nrk",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Rykka til Flatåsen etter røykutvikling",
+        excerpt: "Nødetatene har rykka til Flatåsen i Trondheim etter meldinger om røyk.",
+        url: "https://example.test/ops-smoke-nrk",
+        publishedAt: "2026-06-18T10:50:00.000Z",
+        scope: "trondheim",
+        category: "Hendelser",
+        places: ["Flatåsen", "Trondheim"],
+      },
+      {
+        id: "ops-smoke-politiloggen",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Brann: Trondheim",
+        excerpt:
+          "Nødetatene rykker til Øvre Flatåsveg i Trondheim i forbindelse med melding om røyk fra bygning.",
+        url: "https://example.test/ops-smoke-politiloggen",
+        publishedAt: "2026-06-18T10:48:00.000Z",
+        scope: "trondheim",
+        category: "Hendelser",
+        places: ["Flatåsen", "Trondheim"],
+      },
+    ];
+    (store as unknown as { articles: Article[] }).articles.unshift(...articles);
+
+    const topic = await agent
+      .get("/api/operations/coverage-bundles?kind=topic&q=Rosenborg&limit=1")
+      .expect(200);
+
+    expect(topic.body.summary).toMatchObject({
+      recentBundleCount: expect.any(Number),
+      byKind: expect.objectContaining({ topic: expect.any(Number) }),
+      byConfidence: expect.objectContaining({ high: expect.any(Number) }),
+      latestGeneratedAt: expect.any(String),
+    });
+    expect(topic.body.items).toHaveLength(1);
+    expect(topic.body.items[0]).toMatchObject({
+      kind: "topic",
+      reason: "Samme nyhetstema",
+      sourceLabels: ["VG", "Adresseavisen"],
+      memberArticles: [
+        expect.objectContaining({ id: "ops-rbk-vg", title: expect.stringContaining("Freyr") }),
+        expect.objectContaining({ id: "ops-rbk-adressa", title: "Han kan bli RBK-trener" }),
+      ],
+      signals: expect.arrayContaining([expect.objectContaining({ kind: "topical_thread" })]),
+    });
+    expect(topic.body.items[0]).not.toHaveProperty("payload");
+    expect(JSON.stringify(topic.body)).not.toContain("raw_payload");
+
+    const first = await agent.get("/api/operations/coverage-bundles?limit=1").expect(200);
+    expect(first.body.items).toHaveLength(1);
+    expect(first.body.nextCursor).toBeTruthy();
+    const second = await agent
+      .get(
+        `/api/operations/coverage-bundles?limit=1&cursor=${encodeURIComponent(
+          first.body.nextCursor as string,
+        )}`,
+      )
+      .expect(200);
+    expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
   });
 
   it("stores uploaded private attachment metadata with a content checksum", async () => {

@@ -5,6 +5,7 @@ import { ApiError, api } from "./api.js";
 import { headerFreshnessLabel } from "./freshness.js";
 import { buildHomeSearch, parseHomeFilters } from "./homeFilters.js";
 import { HomePage } from "./pages/HomePage.js";
+import { CoverageBundlesPage } from "./pages/CoverageBundlesPage.js";
 import { OperationsPage } from "./pages/OperationsPage.js";
 import { OperationsTimelinePage } from "./pages/OperationsTimelinePage.js";
 import { SavedPage } from "./pages/SavedPage.js";
@@ -129,6 +130,7 @@ export function App() {
           <Route path="/vaer" element={<WeatherPage />} />
           <Route path="/lagret" element={<SavedPage />} />
           <Route path="/drift" element={<OperationsPage />} />
+          <Route path="/drift/dekning" element={<CoverageBundlesPage />} />
           <Route path="/drift/kilder" element={<SourceAuditPage />} />
           <Route path="/drift/tidslinje" element={<OperationsTimelinePage />} />
         </Routes>

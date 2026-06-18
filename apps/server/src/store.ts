@@ -1,9 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   Article,
+  ArticleCoverageBundleConfidence,
+  ArticleCoverageBundleDecision,
+  ArticleCoverageBundleKind,
   ArticlePage,
   Attachment,
   BootstrapPayload,
+  CoverageBundleArticleSummary,
+  CoverageBundleListItem,
+  CoverageBundlePage,
+  CoverageBundleQueryInput,
+  CoverageBundleSummary,
   EvidenceItem,
   MapFeature,
   OfficialEvent,
@@ -48,6 +56,7 @@ import type {
   WorkspaceTask,
 } from "@nytt/shared";
 import {
+  analyzeArticleCoverage,
   sampleArticles,
   sampleBootstrap,
   sampleNotes,
@@ -144,6 +153,10 @@ export interface ExportRecord {
 export interface Store {
   getBootstrap(login: string): Promise<BootstrapPayload>;
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
+  listCoverageBundles(
+    filters: CoverageBundleQueryInput,
+    login: string,
+  ): Promise<CoverageBundlePage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
@@ -331,6 +344,23 @@ interface SourceItemRow {
   relationship?: SourceItemRelationship | null;
 }
 
+interface CoverageBundleRow {
+  id: string;
+  kind: ArticleCoverageBundleKind;
+  confidence: ArticleCoverageBundleConfidence;
+  reason: string;
+  generated_at: Date | string;
+  last_seen_at: Date | string;
+  last_seen_at_cursor: string;
+  primary_article_id: string;
+  member_article_ids: string[];
+  source_ids: SourceId[];
+  source_labels: string[];
+  signals: CoverageBundleListItem["signals"];
+  near_misses: CoverageBundleListItem["nearMisses"];
+  updated_at: Date | string;
+}
+
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
   return {
     id: row.id,
@@ -358,6 +388,118 @@ function sourceItemSelectColumns(alias = "si"): string {
        ${alias}.capture_hash,
        ST_AsGeoJSON(${alias}.geo_hint)::json AS geo_hint, ${alias}.reliability_tier,
        links.linked_situation_ids`;
+}
+
+function coverageBundleArticleSummary(article: Article): CoverageBundleArticleSummary {
+  return {
+    id: article.id,
+    source: article.source,
+    sourceLabel: article.sourceLabel,
+    title: article.title,
+    excerpt: article.excerpt,
+    url: article.url,
+    publishedAt: article.publishedAt,
+    category: article.category,
+    places: article.places,
+    ...(article.location ? { location: article.location } : {}),
+    ...(article.coverageBundle ? { coverageBundle: article.coverageBundle } : {}),
+  };
+}
+
+function emptyCoverageBundleSummary(): CoverageBundleSummary {
+  return {
+    recentBundleCount: 0,
+    byKind: { incident: 0, topic: 0, update: 0 },
+    byConfidence: { high: 0, medium: 0 },
+  };
+}
+
+function summarizeCoverageBundleItems(items: CoverageBundleListItem[]): CoverageBundleSummary {
+  const summary = emptyCoverageBundleSummary();
+  summary.recentBundleCount = items.length;
+  for (const item of items) {
+    summary.byKind[item.kind] += 1;
+    summary.byConfidence[item.confidence] += 1;
+    if (!summary.latestGeneratedAt || item.generatedAt > summary.latestGeneratedAt) {
+      summary.latestGeneratedAt = item.generatedAt;
+    }
+  }
+  return summary;
+}
+
+function coverageBundleMatchesQuery(item: CoverageBundleListItem, query: string): boolean {
+  const haystack = [
+    item.id,
+    item.kind,
+    item.confidence,
+    item.reason,
+    item.sourceLabels.join(" "),
+    ...item.memberArticles.flatMap((article) => [
+      article.title,
+      article.excerpt,
+      article.sourceLabel,
+      article.places.join(" "),
+    ]),
+  ]
+    .join(" ")
+    .toLocaleLowerCase("nb");
+  return haystack.includes(query.toLocaleLowerCase("nb"));
+}
+
+function filterCoverageBundleItems(
+  items: CoverageBundleListItem[],
+  filters: CoverageBundleQueryInput,
+): CoverageBundleListItem[] {
+  const query = filters.q?.trim();
+  return items.filter(
+    (item) =>
+      (!filters.kind || item.kind === filters.kind) &&
+      (!filters.confidence || item.confidence === filters.confidence) &&
+      (!query || coverageBundleMatchesQuery(item, query)),
+  );
+}
+
+function coverageBundleItemFromDecision(
+  decision: ArticleCoverageBundleDecision,
+  articlesById: Map<string, Article>,
+  lastSeenAt: string,
+  updatedAt: string,
+): CoverageBundleListItem {
+  return {
+    ...decision,
+    lastSeenAt,
+    updatedAt,
+    memberArticles: decision.memberArticleIds.flatMap((articleId) => {
+      const article = articlesById.get(articleId);
+      return article ? [coverageBundleArticleSummary(article)] : [];
+    }),
+  };
+}
+
+function coverageBundleItemFromRow(
+  row: CoverageBundleRow,
+  articlesById: Map<string, Article>,
+): CoverageBundleListItem {
+  const generatedAt = new Date(row.generated_at).toISOString();
+  return {
+    id: row.id,
+    kind: row.kind,
+    confidence: row.confidence,
+    reason: row.reason,
+    generatedAt,
+    primaryArticleId: row.primary_article_id,
+    memberArticleIds: row.member_article_ids,
+    sourceIds: row.source_ids,
+    sourceLabels: row.source_labels,
+    signals: row.signals,
+    nearMisses: row.near_misses,
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+    memberArticles: row.member_article_ids.flatMap((articleId) => {
+      const article = articlesById.get(articleId);
+      return article ? [coverageBundleArticleSummary(article)] : [];
+    }),
+  };
 }
 
 const sourceAuditRequiredSources: SourceId[] = [
@@ -1630,6 +1772,39 @@ export class MemoryStore implements Store {
     };
   }
 
+  async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
+    const generatedAt = new Date().toISOString();
+    const analysis = analyzeArticleCoverage(this.articles, generatedAt);
+    const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const limit = filters.limit ?? 30;
+    const allItems = analysis.bundles
+      .map((bundle) => {
+        const lastSeenAt =
+          bundle.memberArticleIds
+            .flatMap((articleId) => articlesById.get(articleId)?.publishedAt ?? [])
+            .sort()
+            .at(-1) ?? generatedAt;
+        return coverageBundleItemFromDecision(bundle, articlesById, lastSeenAt, generatedAt);
+      })
+      .sort(
+        (left, right) =>
+          right.lastSeenAt.localeCompare(left.lastSeenAt) || right.id.localeCompare(left.id),
+      );
+    const filtered = filterCoverageBundleItems(allItems, filters);
+    const cursorFiltered = filtered.filter((item) =>
+      beforeCursor(item.lastSeenAt, item.id, cursor),
+    );
+    const page = cursorFiltered.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: clone(page),
+      summary: summarizeCoverageBundleItems(filtered),
+      nextCursor:
+        cursorFiltered.length > limit && last ? encodeCursor(last.lastSeenAt, last.id) : undefined,
+    };
+  }
+
   async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {
     const search = filters.q?.toLocaleLowerCase("nb");
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
@@ -2126,6 +2301,125 @@ export class PgStore implements Store {
       nextCursor:
         result.rows.length > limit && items.at(-1)
           ? encodeCursor(items.at(-1)!.publishedAt, items.at(-1)!.id)
+          : undefined,
+    };
+  }
+
+  async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.kind) {
+      params.push(filters.kind);
+      where.push(`cb.kind = $${params.length}`);
+    }
+    if (filters.confidence) {
+      params.push(filters.confidence);
+      where.push(`cb.confidence = $${params.length}`);
+    }
+    if (filters.q) {
+      params.push(`%${filters.q}%`);
+      where.push(
+        `(cb.id ILIKE $${params.length}
+          OR cb.reason ILIKE $${params.length}
+          OR array_to_string(cb.source_labels, ' ') ILIKE $${params.length}
+          OR EXISTS (
+            SELECT 1 FROM articles a
+            WHERE a.id = ANY(cb.member_article_ids)
+              AND (
+                a.payload->>'title' ILIKE $${params.length}
+                OR a.payload->>'excerpt' ILIKE $${params.length}
+                OR a.payload::text ILIKE $${params.length}
+              )
+          ))`,
+      );
+    }
+
+    const summaryParams = [...params];
+    const summaryWhere = [...where];
+    if (filters.cursor) {
+      const cursor = decodeCursor(filters.cursor);
+      params.push(cursor.timestamp);
+      const timestampIndex = params.length;
+      if (cursor.id) {
+        params.push(cursor.id);
+        where.push(
+          `(cb.last_seen_at < $${timestampIndex} OR (cb.last_seen_at = $${timestampIndex} AND cb.id < $${params.length}))`,
+        );
+      } else {
+        where.push(`cb.last_seen_at < $${timestampIndex}`);
+      }
+    }
+
+    params.push((filters.limit ?? 30) + 1);
+    const result = await this.pool.query<CoverageBundleRow>(
+      `SELECT cb.id, cb.kind, cb.confidence, cb.reason, cb.generated_at, cb.last_seen_at,
+        to_char(cb.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS last_seen_at_cursor,
+        cb.primary_article_id, cb.member_article_ids, cb.source_ids, cb.source_labels,
+        cb.signals, cb.near_misses, cb.updated_at
+       FROM coverage_bundles cb
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY cb.last_seen_at DESC, cb.id DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    const articleIds = [...new Set(result.rows.flatMap((row) => row.member_article_ids))];
+    const articleResult = articleIds.length
+      ? await this.pool.query<{ payload: Article }>(
+          "SELECT payload FROM articles WHERE id = ANY($1::text[])",
+          [articleIds],
+        )
+      : { rows: [] };
+    const articlesById = new Map(articleResult.rows.map((row) => [row.payload.id, row.payload]));
+    const limit = filters.limit ?? 30;
+    const visibleRows = result.rows.slice(0, limit);
+    const items = visibleRows.map((row) => coverageBundleItemFromRow(row, articlesById));
+
+    const summaryResult = await this.pool.query<{
+      total: string;
+      incident: string;
+      topic: string;
+      update: string;
+      high: string;
+      medium: string;
+      latest_generated_at: Date | string | null;
+    }>(
+      `SELECT
+        count(*)::text AS total,
+        count(*) FILTER (WHERE cb.kind = 'incident')::text AS incident,
+        count(*) FILTER (WHERE cb.kind = 'topic')::text AS topic,
+        count(*) FILTER (WHERE cb.kind = 'update')::text AS update,
+        count(*) FILTER (WHERE cb.confidence = 'high')::text AS high,
+        count(*) FILTER (WHERE cb.confidence = 'medium')::text AS medium,
+        max(cb.generated_at) AS latest_generated_at
+       FROM coverage_bundles cb
+       ${summaryWhere.length ? `WHERE ${summaryWhere.join(" AND ")}` : ""}`,
+      summaryParams,
+    );
+    const summaryRow = summaryResult.rows[0];
+    const summary: CoverageBundleSummary = summaryRow
+      ? {
+          recentBundleCount: Number(summaryRow.total),
+          byKind: {
+            incident: Number(summaryRow.incident),
+            topic: Number(summaryRow.topic),
+            update: Number(summaryRow.update),
+          },
+          byConfidence: {
+            high: Number(summaryRow.high),
+            medium: Number(summaryRow.medium),
+          },
+          ...(summaryRow.latest_generated_at
+            ? { latestGeneratedAt: new Date(summaryRow.latest_generated_at).toISOString() }
+            : {}),
+        }
+      : emptyCoverageBundleSummary();
+    const lastRow = visibleRows.at(-1);
+    return {
+      items,
+      summary,
+      nextCursor:
+        result.rows.length > limit && lastRow
+          ? encodeCursor(lastRow.last_seen_at_cursor, lastRow.id)
           : undefined,
     };
   }

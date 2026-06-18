@@ -32,6 +32,52 @@ $$ LANGUAGE plpgsql;
 INSERT INTO situations (id, type, status, verification_status, importance, updated_at, payload)
 VALUES ('ci-guardrail-situation', 'ci', 'active', 'unverified', 'low', now(), '{}'::jsonb);
 
+INSERT INTO coverage_bundles (
+  id,
+  kind,
+  confidence,
+  reason,
+  generated_at,
+  last_seen_at,
+  primary_article_id,
+  member_article_ids,
+  source_ids,
+  source_labels,
+  signals,
+  near_misses,
+  payload
+) VALUES (
+  'ci-coverage-derived-bundle',
+  'incident',
+  'high',
+  'Derived analysis must stay outside source_items',
+  now(),
+  now(),
+  'ci-article-primary',
+  ARRAY['ci-article-primary', 'ci-article-secondary'],
+  ARRAY['nrk', 'politiloggen'],
+  ARRAY['NRK Trøndelag', 'Politiloggen'],
+  '[{"kind":"generic_place_incident","articleIds":["ci-article-primary","ci-article-secondary"]}]'::jsonb,
+  '[]'::jsonb,
+  '{}'::jsonb
+);
+
+DO $$
+DECLARE
+  coverage_source_item_count integer;
+BEGIN
+  SELECT count(*) INTO coverage_source_item_count
+  FROM source_items
+  WHERE provider = 'coverage_bundles'
+     OR kind = 'coverage_bundle'
+     OR external_id = 'ci-coverage-derived-bundle';
+
+  IF coverage_source_item_count <> 0 THEN
+    RAISE EXCEPTION 'coverage_bundles must not create source_items rows';
+  END IF;
+END;
+$$;
+
 SELECT pg_temp.expect_check_violation(
   'Entur must not be officialSource for situations',
   $$INSERT INTO situations (

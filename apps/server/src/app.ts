@@ -9,6 +9,7 @@ import pg from "pg";
 import { ZodError } from "zod";
 import {
   articleQuerySchema,
+  coverageBundleQuerySchema,
   lifecycleInputSchema,
   noteInputSchema,
   operationsTimelineQuerySchema,
@@ -1523,6 +1524,15 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const filters = sourceAuditFilterQuerySchema.parse(req.query);
       res.json(await store.getSourceAuditWorkspace(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/coverage-bundles", async (req, res, next) => {
+    try {
+      const filters = coverageBundleQuerySchema.parse(req.query);
+      res.json(await store.listCoverageBundles(filters, currentLogin(req)));
     } catch (error) {
       next(error);
     }

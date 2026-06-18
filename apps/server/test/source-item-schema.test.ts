@@ -119,4 +119,22 @@ describe("source item schema", () => {
     expect(schema).toContain("009_collector_runs");
     expect(schema).not.toMatch(/CREATE TABLE IF NOT EXISTS collector_runs[\s\S]*raw_payload/);
   });
+
+  it("stores derived coverage bundle decisions outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS coverage_bundles");
+    expect(schema).toContain("member_article_ids text[] NOT NULL");
+    expect(schema).toContain("source_labels text[] NOT NULL");
+    expect(schema).toContain("signals jsonb NOT NULL DEFAULT '[]'::jsonb");
+    expect(schema).toContain("near_misses jsonb NOT NULL DEFAULT '[]'::jsonb");
+    expect(schema).toContain("coverage_bundles_generated_at_idx");
+    expect(schema).toContain("coverage_bundles_last_seen_at_idx");
+    expect(schema).toContain("coverage_bundles_kind_idx");
+    expect(schema).toContain("coverage_bundles_confidence_idx");
+    expect(schema).toContain("coverage_bundles_member_article_ids_gin_idx");
+    expect(schema).toContain("010_coverage_bundles");
+    expect(schema).not.toMatch(/coverage_bundles[\s\S]{0,120}source_items/);
+    expect(schema).not.toContain("'coverage_bundles'");
+  });
 });

@@ -2,6 +2,8 @@ import type {
   Attachment,
   ArticlePage,
   BootstrapPayload,
+  CoverageBundlePage,
+  CoverageBundleQueryInput,
   MapFeature,
   OperationsTimelineQuery,
   OperationsTimelineResponse,
@@ -130,6 +132,20 @@ export const api = {
     const search = parameters.toString();
     return request<SourceAuditWorkspaceResponse>(
       `/api/operations/source-audit${search ? `?${search}` : ""}`,
+    );
+  },
+  coverageBundles: (query: CoverageBundleQueryInput = { limit: 30 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<CoverageBundlePage>(
+      `/api/operations/coverage-bundles${search ? `?${search}` : ""}`,
     );
   },
   operationsTimeline: (query: OperationsTimelineQuery = {}) => {

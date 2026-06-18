@@ -119,6 +119,33 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests coverage bundle operations with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        items: [],
+        summary: {
+          recentBundleCount: 0,
+          byKind: { incident: 0, topic: 0, update: 0 },
+          byConfidence: { high: 0, medium: 0 },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.coverageBundles({
+      kind: "incident",
+      confidence: "high",
+      q: "Flatåsen",
+      cursor: "cursor:one",
+      limit: 25,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/coverage-bundles?kind=incident&confidence=high&q=Flat%C3%A5sen&cursor=cursor%3Aone&limit=25",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("encodes reserved characters in situation source item paths", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse([]));
     vi.stubGlobal("fetch", fetchMock);
