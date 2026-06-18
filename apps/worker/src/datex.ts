@@ -186,16 +186,18 @@ function recordKind(record: DatexObject): string {
   return datexAttribute(record, "type") || datexAttribute(record, "xsi:type") || "DATEX situation";
 }
 
-function datexImpact(
+export function datexImpact(
   kind: string,
   severity: string,
   detail: string,
 ): { impact: "high" | "normal"; promoteToSituation: boolean } {
   const text = `${kind} ${severity} ${detail}`.toLocaleLowerCase("nb");
   const high =
-    /accident|ulykke|closed|closure|stengt|blockage|obstruction|hindring|kø|queue|congestion|srti/.test(
+    severity.toLocaleLowerCase("en") === "high" ||
+    /\b(accident|ulykke|closed|closure|stengt|blockage|blocked|sperret|kø|queue|congestion|srti)\b/u.test(
       text,
-    ) || severity.toLocaleLowerCase("en") === "high";
+    ) ||
+    /\b(skred|ras|steinskred|steinsprang|flom|flood)\b/u.test(text);
   const lowMaintenance = /maintenanceworks|roadworks|vegarbeid|kantklipp/.test(text) && !high;
   return { impact: high ? "high" : "normal", promoteToSituation: high && !lowMaintenance };
 }

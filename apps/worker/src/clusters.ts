@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Article, EvidenceItem, MapFeature, OfficialEvent, Situation } from "@nytt/shared";
 import { canonicalPlaceName } from "./classify.js";
+import { datexImpact } from "./datex.js";
 
 interface CandidateGroup {
   key: string;
@@ -36,13 +37,24 @@ function rawDatex(event: OfficialEvent): Record<string, unknown> {
 }
 
 function shouldPromoteDatex(event: OfficialEvent): boolean {
+  const raw = rawDatex(event);
+  const currentImpact = datexImpact(
+    String(raw.recordKind ?? ""),
+    event.severity ?? "",
+    `${event.title} ${event.detail}`,
+  );
   return (
     event.source === "datex" &&
     event.eventType === "traffic" &&
     event.state !== "cancelled" &&
     event.state !== "expired" &&
-    rawDatex(event).promoteToSituation === true
+    raw.promoteToSituation === true &&
+    currentImpact.promoteToSituation
   );
+}
+
+export function promotableDatexEventIds(events: OfficialEvent[]): Set<string> {
+  return new Set(events.filter(shouldPromoteDatex).map((event) => event.id));
 }
 
 function datexSituationKey(event: OfficialEvent): string {
@@ -244,7 +256,7 @@ export function resolvedOfficialTrafficSituationsForMissingDatex(
 
 export function resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
   existingSituations: Situation[],
-  activeDatexEventIds: Set<string>,
+  activePromotableDatexEventIds: Set<string>,
   activeSituationIds: Set<string>,
   resolvedAt: string,
 ): Situation[] {
@@ -255,7 +267,7 @@ export function resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
         situation.status === "active" &&
         situation.officialSource === "datex" &&
         situation.officialEventId &&
-        activeDatexEventIds.has(situation.officialEventId) &&
+        activePromotableDatexEventIds.has(situation.officialEventId) &&
         !activeSituationIds.has(situation.id),
     )
     .map((situation) => {
@@ -276,6 +288,51 @@ export function resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
             title: "DATEX-delhendelse er samlet i en hovedsituasjon",
             detail:
               "Denne DATEX-posten er en delpost i samme Vegvesen-hendelse og vises samlet i én aktiv situasjon.",
+            sourceLabel,
+            sourceUrl,
+            official: true,
+          },
+        ],
+      } satisfies Situation;
+    });
+}
+
+export function resolvedNonPromotableOfficialTrafficSituations(
+  existingSituations: Situation[],
+  activeDatexEventIds: Set<string>,
+  activePromotableDatexEventIds: Set<string>,
+  activeSituationIds: Set<string>,
+  resolvedAt: string,
+): Situation[] {
+  const sourceLabel = "Statens vegvesen DATEX";
+  return existingSituations
+    .filter(
+      (situation) =>
+        situation.status === "active" &&
+        situation.officialSource === "datex" &&
+        situation.officialEventId &&
+        activeDatexEventIds.has(situation.officialEventId) &&
+        !activePromotableDatexEventIds.has(situation.officialEventId) &&
+        !activeSituationIds.has(situation.id),
+    )
+    .map((situation) => {
+      const sourceUrl =
+        situation.evidence.find(
+          (evidence) => evidence.source === "datex" && evidence.provenance === "official",
+        )?.sourceUrl ?? "";
+      return {
+        ...situation,
+        status: "resolved",
+        updatedAt: resolvedAt,
+        timeline: [
+          ...situation.timeline,
+          {
+            id: `timeline-datex-no-longer-promoted-${situation.officialEventId}`,
+            situationId: situation.id,
+            timestamp: resolvedAt,
+            title: "DATEX-hendelsen vises ikke lenger som aktiv situasjon",
+            detail:
+              "DATEX-posten er fortsatt tilgjengelig som trafikkontekst, men oppfyller ikke lenger terskelen for automatisk situasjonsrom.",
             sourceLabel,
             sourceUrl,
             official: true,

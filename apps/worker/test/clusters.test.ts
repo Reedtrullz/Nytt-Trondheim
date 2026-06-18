@@ -3,7 +3,9 @@ import type { Article, OfficialEvent, Situation } from "@nytt/shared";
 import {
   detectPreliminarySituations,
   officialTrafficSituationsFromEvents,
+  promotableDatexEventIds,
   resolvedDuplicateOfficialTrafficSituationsForMergedDatex,
+  resolvedNonPromotableOfficialTrafficSituations,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "../src/clusters.js";
 import { promotableDatexEvent } from "./fixtures/incident-fixtures.js";
@@ -195,7 +197,7 @@ describe("official traffic situation promotion", () => {
     const active = officialTrafficSituationsFromEvents([rerouting, obstruction], existing);
     const resolved = resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
       existing,
-      new Set([obstruction.id, rerouting.id]),
+      promotableDatexEventIds([obstruction, rerouting]),
       new Set(active.map((situation) => situation.id)),
       "2026-05-28T10:30:00.000Z",
     );
@@ -214,9 +216,59 @@ describe("official traffic situation promotion", () => {
     });
   });
 
+  it("resolves active DATEX situations when their event no longer qualifies for promotion", () => {
+    const [existing] = officialTrafficSituationsFromEvents([datexEvent], []);
+    const demoted: OfficialEvent = {
+      ...datexEvent,
+      raw: { datex: { promoteToSituation: false, impact: "normal" } },
+    };
+
+    const resolved = resolvedNonPromotableOfficialTrafficSituations(
+      [existing!],
+      new Set([demoted.id]),
+      promotableDatexEventIds([demoted]),
+      new Set<string>(),
+      "2026-06-18T08:45:00.000Z",
+    );
+
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]).toMatchObject({
+      id: existing?.id,
+      status: "resolved",
+      updatedAt: "2026-06-18T08:45:00.000Z",
+    });
+    expect(resolved[0]?.timeline.at(-1)).toMatchObject({
+      title: "DATEX-hendelsen vises ikke lenger som aktiv situasjon",
+      detail:
+        "DATEX-posten er fortsatt tilgjengelig som trafikkontekst, men oppfyller ikke lenger terskelen for automatisk situasjonsrom.",
+      official: true,
+    });
+  });
+
   it("does not promote low-impact DATEX roadworks", () => {
     const low = { ...datexEvent, id: "datex-low", raw: { datex: { promoteToSituation: false } } };
     expect(officialTrafficSituationsFromEvents([low], [])).toEqual([]);
+  });
+
+  it("does not promote stale raw flags for low-impact animal obstructions", () => {
+    const animal: OfficialEvent = {
+      ...datexEvent,
+      id: "datex-animal",
+      title: "Dyr",
+      detail: "Dyr.",
+      severity: "low",
+      areaLabel: "Kvamsvegen",
+      raw: {
+        datex: {
+          impact: "high",
+          promoteToSituation: true,
+          recordKind: "EnvironmentalObstruction",
+        },
+      },
+    };
+
+    expect(promotableDatexEventIds([animal])).toEqual(new Set());
+    expect(officialTrafficSituationsFromEvents([animal], [])).toEqual([]);
   });
 
   it("does not reuse a non-DATEX situation with a matching official event id", () => {

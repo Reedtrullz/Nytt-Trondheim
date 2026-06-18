@@ -8,7 +8,8 @@
 
 ## Boundaries
 
-- `datex` may create `official_events`, official traffic situations and official source items when DATEX situation records are relevant.
+- `datex` may create `official_events` and official source items when DATEX situation records are relevant. It may create official traffic situations only for high-impact accidents, closures, congestion and road-blocking obstructions.
+- Low-impact DATEX records, including planned roadworks and low-impact animal/environmental obstructions without closure or high severity, remain traffic context and must not activate a situation room.
 - `datex_travel_time` may write `datex_travel_times` and source health only. It must not create source items, official events or situations.
 - `datex_weather` may write road-weather context and source health only.
 - `datex_cctv` may write camera context and source health only.

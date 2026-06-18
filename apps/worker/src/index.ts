@@ -20,7 +20,9 @@ import {
 import {
   detectPreliminarySituations,
   officialTrafficSituationsFromEvents,
+  promotableDatexEventIds,
   resolvedDuplicateOfficialTrafficSituationsForMergedDatex,
+  resolvedNonPromotableOfficialTrafficSituations,
   resolvedOfficialTrafficSituationsForMissingDatex,
 } from "./clusters.js";
 import {
@@ -1110,12 +1112,20 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     articles,
   );
   const activeDatexEventIds = new Set(currentDatexEvents.map((event) => event.id));
+  const activePromotableDatexEventIds = promotableDatexEventIds(currentDatexEvents);
   const activeDatexSituationIds = new Set(
     officialTrafficSituations.map((situation) => situation.id),
   );
   const resolvedDuplicateDatexSituations = resolvedDuplicateOfficialTrafficSituationsForMergedDatex(
     trackedSituations,
+    activePromotableDatexEventIds,
+    activeDatexSituationIds,
+    new Date().toISOString(),
+  );
+  const resolvedNonPromotableDatexSituations = resolvedNonPromotableOfficialTrafficSituations(
+    trackedSituations,
     activeDatexEventIds,
+    activePromotableDatexEventIds,
     activeDatexSituationIds,
     new Date().toISOString(),
   );
@@ -1133,6 +1143,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     ...officialTrafficSituations,
     ...politiloggenSituations,
     ...resolvedDuplicateDatexSituations,
+    ...resolvedNonPromotableDatexSituations,
     ...resolvedDatexSituations,
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
