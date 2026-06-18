@@ -91,6 +91,8 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Sist fullført 4 min siden.");
     expect(html).toContain("Utdatert");
     expect(html).toContain("Gjenopprettingstest");
+    expect(html).toContain("/drift/dekning");
+    expect(html).toContain("Åpne dekningsgrupper");
     expect(html).toContain("/drift/tidslinje");
     expect(html).toContain("Åpne tidslinje");
   });

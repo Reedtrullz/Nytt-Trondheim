@@ -22,6 +22,34 @@ UPDATE articles SET dedupe_key = id WHERE dedupe_key IS NULL;
 ALTER TABLE articles ALTER COLUMN dedupe_key SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS articles_dedupe_key_idx ON articles (dedupe_key);
 
+CREATE TABLE IF NOT EXISTS coverage_bundles (
+  id text PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('incident', 'topic', 'update')),
+  confidence text NOT NULL CHECK (confidence IN ('high', 'medium')),
+  reason text NOT NULL,
+  generated_at timestamptz NOT NULL,
+  last_seen_at timestamptz NOT NULL,
+  primary_article_id text NOT NULL,
+  member_article_ids text[] NOT NULL,
+  source_ids text[] NOT NULL,
+  source_labels text[] NOT NULL,
+  signals jsonb NOT NULL DEFAULT '[]'::jsonb,
+  near_misses jsonb NOT NULL DEFAULT '[]'::jsonb,
+  payload jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (array_length(member_article_ids, 1) >= 2),
+  CHECK (jsonb_typeof(signals) = 'array'),
+  CHECK (jsonb_typeof(near_misses) = 'array')
+);
+CREATE INDEX IF NOT EXISTS coverage_bundles_generated_at_idx
+  ON coverage_bundles (generated_at DESC);
+CREATE INDEX IF NOT EXISTS coverage_bundles_last_seen_at_idx
+  ON coverage_bundles (last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS coverage_bundles_kind_idx ON coverage_bundles (kind);
+CREATE INDEX IF NOT EXISTS coverage_bundles_confidence_idx ON coverage_bundles (confidence);
+CREATE INDEX IF NOT EXISTS coverage_bundles_member_article_ids_gin_idx
+  ON coverage_bundles USING gin (member_article_ids);
+
 CREATE TABLE IF NOT EXISTS situations (
   id text PRIMARY KEY,
   type text NOT NULL,
@@ -868,3 +896,4 @@ INSERT INTO schema_migrations (version) VALUES ('006_trafikkdata_counters') ON C
 INSERT INTO schema_migrations (version) VALUES ('007_entur_public_transport') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('008_worker_cycle_metrics') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('009_collector_runs') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('010_coverage_bundles') ON CONFLICT DO NOTHING;

@@ -14,6 +14,87 @@ export interface HomeArticleGroup {
   bundle?: ArticleCoverageBundle;
 }
 
+export type ArticleCoverageDecisionSignalKind =
+  | "persisted_bundle"
+  | "situation_id"
+  | "title_similarity"
+  | "near_duplicate"
+  | "generic_place_incident"
+  | "topical_thread"
+  | "cross_source_incident"
+  | "shared_place";
+
+export interface ArticleCoverageDecisionSignal {
+  kind: ArticleCoverageDecisionSignalKind;
+  articleIds: string[];
+  detail?: string;
+  overlap?: number;
+  score?: number;
+}
+
+export type ArticleCoverageNearMissReason =
+  | "conflicting_specific_places"
+  | "different_situation"
+  | "outside_time_window"
+  | "low_text_overlap"
+  | "stale_persisted_bundle";
+
+export interface ArticleCoverageNearMiss {
+  articleIds: string[];
+  reason: ArticleCoverageNearMissReason;
+  detail?: string;
+  overlap?: number;
+  score?: number;
+}
+
+export interface ArticleCoverageBundleDecision extends ArticleCoverageBundle {
+  primaryArticleId: string;
+  memberArticleIds: string[];
+  sourceIds: Article["source"][];
+  sourceLabels: string[];
+  signals: ArticleCoverageDecisionSignal[];
+  nearMisses: ArticleCoverageNearMiss[];
+}
+
+export interface ArticleCoverageAnalysis {
+  articles: Article[];
+  bundles: ArticleCoverageBundleDecision[];
+  nearMisses: ArticleCoverageNearMiss[];
+}
+
+export interface CoverageBundleArticleSummary {
+  id: string;
+  source: Article["source"];
+  sourceLabel: string;
+  title: string;
+  excerpt: string;
+  url: string;
+  publishedAt: string;
+  category: Article["category"];
+  places: string[];
+  location?: Article["location"];
+  coverageBundle?: ArticleCoverageBundle;
+}
+
+export interface CoverageBundleListItem extends ArticleCoverageBundleDecision {
+  lastSeenAt: string;
+  updatedAt: string;
+  memberArticles: CoverageBundleArticleSummary[];
+}
+
+export interface CoverageBundleSummary {
+  recentBundleCount: number;
+  byKind: Record<ArticleCoverageBundleKind, number>;
+  byConfidence: Record<ArticleCoverageBundleConfidence, number>;
+  latestGeneratedAt?: string;
+}
+
+export interface CoverageBundlePage {
+  items: CoverageBundleListItem[];
+  summary: CoverageBundleSummary;
+  nextCursor?: string;
+}
+
 const maxGroupAgeMs = 24 * 60 * 60 * 1000;
 const crossSourceIncidentWindowMs = 8 * 60 * 60 * 1000;
 const nearDuplicateTextWindowMs = 2 * 60 * 60 * 1000;
@@ -248,26 +329,37 @@ function articlesConflict(left: Article, right: Article): boolean {
   return hasConflictingSpecificPlaces(left, right) && hasSharedIncidentSignal(left, right);
 }
 
-function hasGenericPlaceIncidentMatch(
+function genericPlaceIncidentSignals(
   left: Article,
   right: Article,
   body: { overlap: number; score: number },
-): boolean {
-  if (hasConflictingSpecificPlaces(left, right)) return false;
-  if (!sameBroadCategory(left, right)) return false;
+): ArticleCoverageDecisionSignal[] {
+  if (hasConflictingSpecificPlaces(left, right)) return [];
+  if (!sameBroadCategory(left, right)) return [];
   const distance = publishedDistanceMs(left, right);
   const distinctive = tokenSimilarity(
     distinctiveIncidentTokens(articleText(left)),
     distinctiveIncidentTokens(articleText(right)),
   );
-  return [...sharedIncidentSignals(left, right)].some((signal) => {
+  return [...sharedIncidentSignals(left, right)].flatMap((signal) => {
     const rule = genericPlaceIncidentSignalRules.get(signal);
-    return Boolean(
-      rule &&
-      distance <= rule.windowMs &&
-      body.overlap >= rule.minBodyOverlap &&
-      distinctive.overlap >= rule.minDistinctiveOverlap,
-    );
+    if (
+      !rule ||
+      distance > rule.windowMs ||
+      body.overlap < rule.minBodyOverlap ||
+      distinctive.overlap < rule.minDistinctiveOverlap
+    ) {
+      return [];
+    }
+    return [
+      {
+        kind: "generic_place_incident" as const,
+        articleIds: [left.id, right.id],
+        detail: signal,
+        overlap: body.overlap,
+        score: body.score,
+      },
+    ];
   });
 }
 
@@ -281,17 +373,53 @@ function hasTopicalThreadMatch(
   return body.overlap >= 2;
 }
 
-function articlesSimilar(left: Article, right: Article): boolean {
-  if (left.id === right.id) return true;
-  if (left.situationId && left.situationId === right.situationId) return true;
-  if (left.situationId && right.situationId) return false;
-  if (hasConflictingSpecificPlaces(left, right) && !sameCanonicalUrl(left, right)) return false;
-  if (coverageBundlesCompatible(left, right)) return true;
-  if (publishedDistanceMs(left, right) > maxGroupAgeMs) return false;
+function coverageBundlesStale(left: Article, right: Article): boolean {
+  const bundleId = left.coverageBundle?.id;
+  return Boolean(
+    bundleId &&
+    bundleId === right.coverageBundle?.id &&
+    !bundleId.startsWith("coverage:situation:") &&
+    publishedDistanceMs(left, right) > maxGroupAgeMs,
+  );
+}
+
+function articlePairSignals(left: Article, right: Article): ArticleCoverageDecisionSignal[] {
+  const signals: ArticleCoverageDecisionSignal[] = [];
+  if (left.id === right.id) return [{ kind: "shared_place", articleIds: [left.id, right.id] }];
+  if (left.situationId || right.situationId) {
+    signals.push({
+      kind: "situation_id",
+      articleIds: [left.id, right.id],
+      detail: [left.situationId, right.situationId].filter(Boolean).join(", "),
+    });
+  }
+  if (left.situationId && left.situationId === right.situationId) return signals;
+  if (left.situationId && right.situationId) return [];
+  if (hasConflictingSpecificPlaces(left, right) && !sameCanonicalUrl(left, right)) return [];
+  if (coverageBundlesCompatible(left, right)) {
+    signals.push({
+      kind: "persisted_bundle",
+      articleIds: [left.id, right.id],
+      detail: left.coverageBundle?.id,
+    });
+    return signals;
+  }
+  if (publishedDistanceMs(left, right) > maxGroupAgeMs) return [];
 
   const title = tokenSimilarity(tokens(left.title), tokens(right.title));
-  if (title.overlap >= 3 && title.score >= 0.56) return true;
-  if (normalizeText(left.title) === normalizeText(right.title)) return true;
+  if (title.overlap >= 3 && title.score >= 0.56) {
+    signals.push({
+      kind: "title_similarity",
+      articleIds: [left.id, right.id],
+      overlap: title.overlap,
+      score: title.score,
+    });
+    return signals;
+  }
+  if (normalizeText(left.title) === normalizeText(right.title)) {
+    signals.push({ kind: "title_similarity", articleIds: [left.id, right.id], score: 1 });
+    return signals;
+  }
 
   const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
   if (
@@ -300,13 +428,26 @@ function articlesSimilar(left: Article, right: Article): boolean {
     body.score >= 0.5 &&
     sameBroadCategory(left, right)
   ) {
-    return true;
+    signals.push({
+      kind: "near_duplicate",
+      articleIds: [left.id, right.id],
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
   }
-  if (hasGenericPlaceIncidentMatch(left, right, body)) {
-    return true;
-  }
+
+  const genericSignals = genericPlaceIncidentSignals(left, right, body);
+  if (genericSignals.length > 0) return [...signals, ...genericSignals];
+
   if (hasTopicalThreadMatch(left, right, body)) {
-    return true;
+    signals.push({
+      kind: "topical_thread",
+      articleIds: [left.id, right.id],
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
   }
 
   const sharedPlace = hasSharedPlace(left, right);
@@ -317,16 +458,67 @@ function articlesSimilar(left: Article, right: Article): boolean {
     sharedPlace &&
     hasSharedIncidentSignal(left, right)
   ) {
-    return true;
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: [left.id, right.id],
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
   }
   if (body.overlap >= 5 && body.score >= 0.38 && sameBroadCategory(left, right) && sharedPlace) {
-    return true;
+    signals.push({
+      kind: "shared_place",
+      articleIds: [left.id, right.id],
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
   }
   if (body.overlap >= 4 && body.score >= 0.28 && sameBroadCategory(left, right) && sharedPlace) {
-    return true;
+    signals.push({
+      kind: "shared_place",
+      articleIds: [left.id, right.id],
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
   }
 
-  return false;
+  return [];
+}
+
+function nearMissForPair(left: Article, right: Article): ArticleCoverageNearMiss | undefined {
+  const articleIds = [left.id, right.id];
+  if (left.situationId && right.situationId && left.situationId !== right.situationId) {
+    return { articleIds, reason: "different_situation" };
+  }
+  if (hasConflictingSpecificPlaces(left, right) && hasSharedIncidentSignal(left, right)) {
+    return { articleIds, reason: "conflicting_specific_places" };
+  }
+  if (coverageBundlesStale(left, right)) {
+    return { articleIds, reason: "stale_persisted_bundle", detail: left.coverageBundle?.id };
+  }
+  if (publishedDistanceMs(left, right) > maxGroupAgeMs) {
+    return { articleIds, reason: "outside_time_window" };
+  }
+  const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
+  if (
+    sameBroadCategory(left, right) &&
+    (hasSharedPlace(left, right) || hasSharedIncidentSignal(left, right))
+  ) {
+    return {
+      articleIds,
+      reason: "low_text_overlap",
+      overlap: body.overlap,
+      score: body.score,
+    } as ArticleCoverageNearMiss;
+  }
+  return undefined;
+}
+
+function articlesSimilar(left: Article, right: Article): boolean {
+  return articlePairSignals(left, right).length > 0;
 }
 
 function sortArticles(left: Article, right: Article): number {
@@ -456,21 +648,83 @@ function coverageBundleForGroup(
   };
 }
 
+function signalKey(signal: ArticleCoverageDecisionSignal): string {
+  return `${signal.kind}:${signal.articleIds.join(":")}:${signal.detail ?? ""}`;
+}
+
+function uniqueSignals(signals: ArticleCoverageDecisionSignal[]): ArticleCoverageDecisionSignal[] {
+  return [...new Map(signals.map((signal) => [signalKey(signal), signal])).values()];
+}
+
+function coverageDecisionForGroup(
+  group: HomeArticleGroup,
+  generatedAt: string,
+  nearMisses: ArticleCoverageNearMiss[],
+): ArticleCoverageBundleDecision | undefined {
+  const bundle = coverageBundleForGroup(group.articles, generatedAt);
+  if (!bundle) return undefined;
+  const groupArticleIds = new Set(group.articles.map((article) => article.id));
+  const signals = group.articles.flatMap((left, leftIndex) =>
+    group.articles.slice(leftIndex + 1).flatMap((right) => articlePairSignals(left, right)),
+  );
+  return {
+    ...bundle,
+    primaryArticleId: group.primary.id,
+    memberArticleIds: group.articles.map((article) => article.id),
+    sourceIds: [...new Set(group.articles.map((article) => article.source))],
+    sourceLabels: sourceLabelsFor(group.articles),
+    signals: uniqueSignals(signals),
+    nearMisses: nearMisses.filter((nearMiss) =>
+      nearMiss.articleIds.some((articleId) => groupArticleIds.has(articleId)),
+    ),
+  };
+}
+
+function allNearMisses(articles: Article[]): ArticleCoverageNearMiss[] {
+  return articles.flatMap((left, leftIndex) =>
+    articles
+      .slice(leftIndex + 1)
+      .flatMap((right) =>
+        articlePairSignals(left, right).length ? [] : (nearMissForPair(left, right) ?? []),
+      ),
+  );
+}
+
+export function analyzeArticleCoverage(
+  articles: Article[],
+  generatedAt = new Date().toISOString(),
+): ArticleCoverageAnalysis {
+  const groups = groupHomeArticles(articles);
+  const nearMisses = allNearMisses(articles);
+  const bundles = groups.flatMap(
+    (group) => coverageDecisionForGroup(group, generatedAt, nearMisses) ?? [],
+  );
+  const bundleByArticleId = new Map<string, ArticleCoverageBundle>();
+
+  bundles.forEach((bundle) => {
+    const articleBundle: ArticleCoverageBundle = {
+      id: bundle.id,
+      kind: bundle.kind,
+      confidence: bundle.confidence,
+      reason: bundle.reason,
+      generatedAt: bundle.generatedAt,
+    };
+    bundle.memberArticleIds.forEach((articleId) => bundleByArticleId.set(articleId, articleBundle));
+  });
+
+  return {
+    articles: articles.map((article) => ({
+      ...article,
+      coverageBundle: bundleByArticleId.get(article.id),
+    })),
+    bundles,
+    nearMisses,
+  };
+}
+
 export function annotateArticleCoverageBundles(
   articles: Article[],
   generatedAt = new Date().toISOString(),
 ): Article[] {
-  const groups = groupHomeArticles(articles);
-  const bundleByArticleId = new Map<string, ArticleCoverageBundle>();
-
-  groups.forEach((group) => {
-    const bundle = coverageBundleForGroup(group.articles, generatedAt);
-    if (!bundle) return;
-    group.articles.forEach((article) => bundleByArticleId.set(article.id, bundle));
-  });
-
-  return articles.map((article) => ({
-    ...article,
-    coverageBundle: bundleByArticleId.get(article.id),
-  }));
+  return analyzeArticleCoverage(articles, generatedAt).articles;
 }

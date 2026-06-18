@@ -528,6 +528,16 @@ export const articleQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(40),
 });
 
+export const coverageBundleQuerySchema = z.object({
+  kind: z.enum(["incident", "topic", "update"]).optional(),
+  confidence: z.enum(["high", "medium"]).optional(),
+  q: z.string().trim().max(160).optional(),
+  cursor: z.string().trim().max(250).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+export type CoverageBundleQueryInput = z.infer<typeof coverageBundleQuerySchema>;
+
 export const sourceItemQuerySchema = z.object({
   provider: sourceIdSchema.optional(),
   kind: sourceItemKindSchema.optional(),

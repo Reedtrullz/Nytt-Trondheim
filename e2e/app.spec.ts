@@ -276,6 +276,94 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await expect(page.locator(".news-row .headline", { hasText: "Ro og orden" })).toHaveCount(0);
 });
 
+test("coverage bundle operations page renders persisted decisions and drawer detail", async ({
+  page,
+}) => {
+  await page.route("**/api/operations/coverage-bundles**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        summary: {
+          recentBundleCount: 1,
+          byKind: { incident: 1, topic: 0, update: 0 },
+          byConfidence: { high: 1, medium: 0 },
+          latestGeneratedAt: "2026-06-18T10:55:00.000Z",
+        },
+        items: [
+          {
+            id: "coverage:flatåsen-smoke",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme hendelse på tvers av kilder",
+            generatedAt: "2026-06-18T10:55:00.000Z",
+            lastSeenAt: "2026-06-18T10:55:00.000Z",
+            updatedAt: "2026-06-18T10:55:30.000Z",
+            primaryArticleId: "nrk-flatåsen-smoke",
+            memberArticleIds: ["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke"],
+            sourceIds: ["nrk", "politiloggen"],
+            sourceLabels: ["NRK Trøndelag", "Politiloggen"],
+            memberArticles: [
+              {
+                id: "nrk-flatåsen-smoke",
+                source: "nrk",
+                sourceLabel: "NRK Trøndelag",
+                title: "Rykka til Flatåsen etter røykutvikling",
+                excerpt: "Nødetatene har rykka til Flatåsen.",
+                url: "https://example.test/nrk-flatåsen-smoke",
+                publishedAt: "2026-06-18T10:50:00.000Z",
+                category: "Hendelser",
+                places: ["Flatåsen", "Trondheim"],
+              },
+              {
+                id: "politiloggen-flatåsen-smoke",
+                source: "politiloggen",
+                sourceLabel: "Politiloggen",
+                title: "Brann: Trondheim",
+                excerpt: "Nødetatene rykker til Øvre Flatåsveg.",
+                url: "https://example.test/politiloggen-flatåsen-smoke",
+                publishedAt: "2026-06-18T10:48:00.000Z",
+                category: "Hendelser",
+                places: ["Flatåsen", "Trondheim"],
+              },
+            ],
+            signals: [
+              {
+                kind: "generic_place_incident",
+                articleIds: ["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke"],
+                detail: "brann",
+                overlap: 4,
+                score: 0.42,
+              },
+            ],
+            nearMisses: [
+              {
+                articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+                reason: "conflicting_specific_places",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/drift/dekning");
+
+  await expect(page.getByRole("heading", { name: "Dekningsgrupper" })).toBeVisible();
+  await expect(page.getByText("Samme hendelse på tvers av kilder").first()).toBeVisible();
+  await expect(page.getByText("Generisk steds-hendelse")).toBeVisible();
+  await expect(page.getByText("Konflikt i spesifikt sted")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Tidslinje" })).toHaveAttribute(
+    "href",
+    "/drift/tidslinje",
+  );
+  await expect(page.getByRole("link", { name: "Kilderevisjon" })).toHaveAttribute(
+    "href",
+    "/drift/kilder",
+  );
+});
+
 test("traffic page shows summary cards semantic layers ranked list and detail drawer", async ({
   page,
 }) => {

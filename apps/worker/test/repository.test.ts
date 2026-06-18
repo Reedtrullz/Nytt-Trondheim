@@ -168,6 +168,52 @@ describe("WorkerRepository", () => {
     ]);
   });
 
+  it("stores coverage bundle decisions outside the source item ledger", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const bundle = {
+      id: "coverage:decision-one",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-18T10:00:00.000Z",
+      primaryArticleId: "nrk-one",
+      memberArticleIds: ["nrk-one", "politiloggen-one"],
+      sourceIds: ["nrk", "politiloggen"] as const,
+      sourceLabels: ["NRK Trøndelag", "Politiloggen"],
+      signals: [
+        {
+          kind: "cross_source_incident" as const,
+          articleIds: ["nrk-one", "politiloggen-one"],
+          overlap: 4,
+          score: 0.4,
+        },
+      ],
+      nearMisses: [],
+    };
+
+    await repository.upsertCoverageBundles([bundle], "2026-06-18T10:01:00.000Z");
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("INSERT INTO coverage_bundles");
+    expect(sql).not.toContain("source_items");
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      bundle.id,
+      bundle.kind,
+      bundle.confidence,
+      bundle.reason,
+      bundle.generatedAt,
+      "2026-06-18T10:01:00.000Z",
+      bundle.primaryArticleId,
+      bundle.memberArticleIds,
+      bundle.sourceIds,
+      bundle.sourceLabels,
+      bundle.signals,
+      bundle.nearMisses,
+      bundle,
+    ]);
+  });
+
   it("expires DATEX official events missing from a successful snapshot", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [{ id: "datex-expired" }] });
     const repository = new WorkerRepository(transactionalPool(query));

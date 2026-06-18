@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import type {
   Article,
+  ArticleCoverageAnalysis,
   OfficialEvent,
   PublicTransportServiceAlert,
   SourceCollectorRun,
@@ -10,7 +11,7 @@ import type {
   TrafficCounterSnapshot,
   WorkerCycleMetrics,
 } from "@nytt/shared";
-import { annotateArticleCoverageBundles } from "@nytt/shared";
+import { analyzeArticleCoverage } from "@nytt/shared";
 import { collectMunicipality, collectRss, probeOfficialSources, rssSources } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
 import {
@@ -90,6 +91,23 @@ interface WorkerCollectorTelemetry {
   sourceItemCount?: number;
   parseFailures?: number;
   skipped?: boolean;
+}
+
+export async function prepareArticleCoverageAnalysis({
+  articlesForGeocoding,
+  articlesWithoutGeocoding = [],
+  generatedAt = new Date().toISOString(),
+  geocoder = geocodeArticles,
+}: {
+  articlesForGeocoding: Article[];
+  articlesWithoutGeocoding?: Article[];
+  generatedAt?: string;
+  geocoder?: typeof geocodeArticles;
+}): Promise<ArticleCoverageAnalysis> {
+  return analyzeArticleCoverage(
+    [...(await geocoder(articlesForGeocoding)), ...articlesWithoutGeocoding],
+    generatedAt,
+  );
 }
 
 export function buildWorkerCycleMetrics({
@@ -879,11 +897,14 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       detail: "Politiloggen-adapter er slått av med POLITILOGGEN_ENABLED=false",
     });
   }
-  const articles = annotateArticleCoverageBundles([
-    ...(await geocodeArticles(articleSets.flat())),
-    ...articlesWithoutGeocoding,
-  ]);
-  await repository.upsertArticles(articles);
+  const coverageGeneratedAt = new Date().toISOString();
+  const coverageAnalysis = await prepareArticleCoverageAnalysis({
+    articlesForGeocoding: articleSets.flat(),
+    articlesWithoutGeocoding,
+    generatedAt: coverageGeneratedAt,
+  });
+  await repository.upsertArticles(coverageAnalysis.articles);
+  await repository.upsertCoverageBundles(coverageAnalysis.bundles, coverageGeneratedAt);
   for (const status of await probeOfficialSources()) {
     if (status.source === "politiloggen") continue;
     await repository.setHealth({ ...status, lastCheckedAt: new Date().toISOString(), nextPollAt });
@@ -1113,7 +1134,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const politiloggenSituations = politiloggenSituationsFromThreads(
     politiloggenThreads,
     trackedSituations,
-    articles,
+    coverageAnalysis.articles,
   );
   const activeDatexEventIds = new Set(currentDatexEvents.map((event) => event.id));
   const activePromotableDatexEventIds = promotableDatexEventIds(currentDatexEvents);
@@ -1152,7 +1173,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
   console.log(
-    `[worker] stored ${articles.length} articles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen); AI identified ${analysis.result.clusters.length} validated candidates`,
+    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen); AI identified ${analysis.result.clusters.length} validated candidates`,
   );
   const workerMetrics = buildWorkerCycleMetrics({
     cycleStartedAt,

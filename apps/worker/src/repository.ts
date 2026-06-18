@@ -3,6 +3,7 @@ import pg from "pg";
 import type {
   AiProcessingRun,
   Article,
+  ArticleCoverageBundleDecision,
   OfficialEvent,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
@@ -95,6 +96,49 @@ export class WorkerRepository {
         );
       }
       await this.upsertSourceItem(articleSourceItemInput(article, fetchedAt));
+    }
+  }
+
+  async upsertCoverageBundles(
+    bundles: ArticleCoverageBundleDecision[],
+    seenAt = new Date().toISOString(),
+  ): Promise<void> {
+    for (const bundle of bundles) {
+      await this.pool.query(
+        `INSERT INTO coverage_bundles
+          (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
+           member_article_ids, source_ids, source_labels, signals, near_misses, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         ON CONFLICT (id) DO UPDATE SET
+           kind=EXCLUDED.kind,
+           confidence=EXCLUDED.confidence,
+           reason=EXCLUDED.reason,
+           generated_at=EXCLUDED.generated_at,
+           last_seen_at=EXCLUDED.last_seen_at,
+           primary_article_id=EXCLUDED.primary_article_id,
+           member_article_ids=EXCLUDED.member_article_ids,
+           source_ids=EXCLUDED.source_ids,
+           source_labels=EXCLUDED.source_labels,
+           signals=EXCLUDED.signals,
+           near_misses=EXCLUDED.near_misses,
+           payload=EXCLUDED.payload,
+           updated_at=now()`,
+        [
+          bundle.id,
+          bundle.kind,
+          bundle.confidence,
+          bundle.reason,
+          bundle.generatedAt,
+          seenAt,
+          bundle.primaryArticleId,
+          bundle.memberArticleIds,
+          bundle.sourceIds,
+          bundle.sourceLabels,
+          bundle.signals,
+          bundle.nearMisses,
+          bundle,
+        ],
+      );
     }
   }
 

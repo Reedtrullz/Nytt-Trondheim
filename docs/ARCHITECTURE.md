@@ -21,6 +21,8 @@ The API ignores any client attempt to create an annotation under another provena
 
 Inbound public records enter the `source_items` ledger before editorial linking or verification. `source_items` stores provider, kind, durable upstream identity, fetched time, raw/normalized payload, capture hash, optional geo hint and reliability tier. `situation_source_items` links those records to situations without making verification claims by itself.
 
+Article coverage grouping is derived analysis, not upstream evidence. The worker writes the latest observable grouping decisions to `coverage_bundles` after article geocoding and article upsert. Those rows keep bundle kind, confidence, reason, member article ids, source labels, matched signals and near-miss diagnostics for `/drift/dekning`; they must never create a `source_items` provider/kind or act as causal situation evidence.
+
 Source contracts define what each upstream may write before adapter code is enabled. Bane NOR RSS is a phase-1 rail/mobility context source: it may write `source_items` provider `bane_nor`, kind `official_event`, and `source_health` source `bane_nor`, but it must not create `official_events`, `traffic_map_events` or `situations` without a separate promotion plan.
 
 ## AI Boundary

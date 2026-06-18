@@ -241,6 +241,47 @@ Expected live results:
 - `source_items` has `vegvesen_traffic_info | official_event` provenance rows, but context telemetry providers (`datex_weather`, `datex_cctv`, `trafikkdata`, `datex_travel_time`) have zero `source_items` rows.
 - `official_events` and `situations` have no rows promoted from map-only or context-only sources.
 
+## Coverage Bundle Production Verification
+
+Coverage bundles are derived article-analysis rows for the owner-only Drift surface. After a CI-verified SHA deploys and the worker has completed at least one cycle, verify live health, authentication behavior, persisted decisions and the browser surface:
+
+```bash
+HEAD_SHA=$(git rev-parse HEAD)
+gh run list --branch main --limit 10 --json databaseId,headSha,status,conclusion,workflowName,event,url
+# Confirm CI and Deploy to VPS both completed with conclusion=success for HEAD_SHA.
+
+curl -fsS https://nytt.reidar.tech/health
+curl -sS -o /tmp/bootstrap.json -w '%{http_code}\n' https://nytt.reidar.tech/api/bootstrap
+
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -P pager=off -F ' | ' -At" <<'SQL'
+SELECT count(*) AS recent_coverage_bundles
+FROM coverage_bundles
+WHERE last_seen_at >= now() - interval '48 hours';
+SELECT kind, confidence, count(*)
+FROM coverage_bundles
+WHERE last_seen_at >= now() - interval '48 hours'
+GROUP BY kind, confidence
+ORDER BY kind, confidence;
+SELECT id, kind, confidence, reason, array_length(member_article_ids, 1) AS members, source_labels, generated_at, last_seen_at
+FROM coverage_bundles
+ORDER BY last_seen_at DESC
+LIMIT 10;
+SELECT count(*) AS accidental_coverage_source_items
+FROM source_items
+WHERE provider='coverage_bundles'
+   OR kind='coverage_bundle'
+   OR normalized_payload ? 'coverageBundleDecision';
+SQL
+```
+
+Expected results:
+
+- `/health` returns `200` with Postgres-backed `status: ok`.
+- Anonymous `/api/bootstrap` returns `401`; the coverage endpoint is under the same authenticated `/api` boundary.
+- `recent_coverage_bundles` may be zero immediately after deploy if the worker has not yet ingested matching stories, but the query must succeed and `/drift/dekning` must show either live rows or an honest empty state.
+- `accidental_coverage_source_items` must be zero. Coverage grouping explains feed bundling; it is not upstream provenance.
+- In an authenticated browser session, verify `/`, `/drift`, and `/drift/dekning`. The home feed should still show existing bundle labels, `/drift` should link to `Dekningsgrupper`, and `/drift/dekning` should show bundle rows with member stories, signals, near misses and timestamps, or the empty state.
+
 ## Rollback
 
 The deployment preserves the prior API and worker images as `:previous` before building candidates and does not promote containers if backup verification, migration or canary health fails. If post-promotion validation fails, re-tag `:previous` as `:latest`, restart `app` and `worker`, and restore the latest verified restic snapshot before attempting any incompatible migration recovery.
