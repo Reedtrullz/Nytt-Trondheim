@@ -414,6 +414,66 @@ describe("home article grouping", () => {
     expect(groups[0]?.sourceLabels).toEqual(["NRK Trøndelag", "Politiloggen"]);
   });
 
+  it("bundles developing Rosenborg trainer topic coverage across categories", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "vg-freyr-kan-bli",
+        source: "vg",
+        sourceLabel: "VG",
+        title: "Medier: Freyr Alexandersson kan bli ny Rosenborg-trener",
+        excerpt:
+          "Islendingen er aktuell for trenerjobben i Rosenborg, ifølge Bergens Tidende og Adressa.",
+        publishedAt: "2026-06-18T13:57:00.000Z",
+        category: "Nyheter",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "adressa-rbk-trener",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Han kan bli RBK-trener",
+        excerpt: "Freyr Alexandersson har vært i konkrete samtaler med Rosenborg.",
+        publishedAt: "2026-06-18T13:50:00.000Z",
+        category: "Vær",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "vg-freyr-hovedtrener",
+        source: "vg",
+        sourceLabel: "VG",
+        title: "Freyr Alexandersson blir ny hovedtrener i Rosenborg",
+        excerpt:
+          "For bare to og en halv uke siden var han ferdig i Brann. I dag ble han presentert som Rosenborgs nye trener.",
+        publishedAt: "2026-06-18T07:34:00.000Z",
+        category: "Hendelser",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "adressa-neppe-losning",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Neppe en god løsning",
+        excerpt: "KOMMENTAR: Rosenborg har ansatt ny trener. Planen bak er umulig å se.",
+        publishedAt: "2026-06-18T07:22:00.000Z",
+        category: "Byutvikling",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "vg-freyr-kan-bli",
+      "adressa-rbk-trener",
+      "vg-freyr-hovedtrener",
+      "adressa-neppe-losning",
+    ]);
+    expect(groups[0]?.sourceLabels).toEqual(["VG", "Adresseavisen"]);
+  });
+
   it("does not consolidate unrelated city-wide stories just because both mention Trondheim", () => {
     const groups = groupHomeArticles([
       article({
@@ -468,6 +528,39 @@ describe("home article grouping", () => {
     expect(groups.map((group) => group.primary.id)).toEqual([
       "generic-innbrudd-news",
       "generic-innbrudd-log",
+    ]);
+  });
+
+  it("does not bundle generic Rosenborg stories without trainer-topic overlap", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "rosenborg-trener-topic",
+        source: "vg",
+        sourceLabel: "VG",
+        title: "Freyr Alexandersson blir ny hovedtrener i Rosenborg",
+        excerpt: "I dag ble han presentert som Rosenborgs nye trener.",
+        publishedAt: "2026-06-18T07:34:00.000Z",
+        category: "Nyheter",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "rosenborg-kamp",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Rosenborg vant klart hjemme",
+        excerpt: "Laget tok tre poeng foran publikum på Lerkendal.",
+        publishedAt: "2026-06-18T07:30:00.000Z",
+        category: "Nyheter",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.primary.id)).toEqual([
+      "rosenborg-trener-topic",
+      "rosenborg-kamp",
     ]);
   });
 });

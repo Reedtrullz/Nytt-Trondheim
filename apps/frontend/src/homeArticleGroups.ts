@@ -10,6 +10,7 @@ export interface HomeArticleGroup {
 const maxGroupAgeMs = 24 * 60 * 60 * 1000;
 const crossSourceIncidentWindowMs = 8 * 60 * 60 * 1000;
 const nearDuplicateTextWindowMs = 2 * 60 * 60 * 1000;
+const topicalThreadWindowMs = 12 * 60 * 60 * 1000;
 const genericPlaceIncidentSignalRules = new Map<
   string,
   { windowMs: number; minBodyOverlap: number; minDistinctiveOverlap: number }
@@ -100,6 +101,14 @@ const incidentSignals: Array<[string, RegExp]> = [
     /\b(badeulykke\w*|drukn\w*|livl[øo]s\s+under\s+vann|hav(?:net|na)\s+under\s+vann|g[åa]tt\s+under\s+vann|under\s+vann|bading|hjerte\s*-?\s*og\s*lungeredning|redningsaksjon\b(?=.*\b(vann|bading|kyvannet)\b))/iu,
   ],
 ];
+const topicSignals: Array<[string, (text: string) => boolean]> = [
+  [
+    "rosenborg_trener",
+    (text) =>
+      /\b(rosenborg\w*|rbk)\b/iu.test(text) &&
+      /\b(hovedtrener\w*|trenerjobb\w*|trener\w*|ansatt\w*|presentert\w*)\b/iu.test(text),
+  ],
+];
 
 function normalizeText(value: string): string {
   return value
@@ -178,10 +187,21 @@ function articleIncidentSignals(article: Article): Set<string> {
   );
 }
 
+function articleTopicSignals(article: Article): Set<string> {
+  const text = articleText(article);
+  return new Set(topicSignals.flatMap(([signal, matches]) => (matches(text) ? [signal] : [])));
+}
+
 function sharedIncidentSignals(left: Article, right: Article): Set<string> {
   const leftSignals = articleIncidentSignals(left);
   if (leftSignals.size === 0) return new Set();
   return new Set([...articleIncidentSignals(right)].filter((signal) => leftSignals.has(signal)));
+}
+
+function sharedTopicSignals(left: Article, right: Article): Set<string> {
+  const leftSignals = articleTopicSignals(left);
+  if (leftSignals.size === 0) return new Set();
+  return new Set([...articleTopicSignals(right)].filter((signal) => leftSignals.has(signal)));
 }
 
 function hasSharedIncidentSignal(left: Article, right: Article): boolean {
@@ -210,6 +230,16 @@ function hasGenericPlaceIncidentMatch(
   });
 }
 
+function hasTopicalThreadMatch(
+  left: Article,
+  right: Article,
+  body: { overlap: number; score: number },
+): boolean {
+  if (publishedDistanceMs(left, right) > topicalThreadWindowMs) return false;
+  if (sharedTopicSignals(left, right).size === 0) return false;
+  return body.overlap >= 2;
+}
+
 function articlesSimilar(left: Article, right: Article): boolean {
   if (left.id === right.id) return true;
   if (left.situationId && left.situationId === right.situationId) return true;
@@ -229,6 +259,9 @@ function articlesSimilar(left: Article, right: Article): boolean {
     return true;
   }
   if (hasGenericPlaceIncidentMatch(left, right, body)) {
+    return true;
+  }
+  if (hasTopicalThreadMatch(left, right, body)) {
     return true;
   }
 
