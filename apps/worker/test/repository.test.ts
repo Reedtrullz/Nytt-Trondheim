@@ -208,9 +208,9 @@ describe("WorkerRepository", () => {
       bundle.memberArticleIds,
       bundle.sourceIds,
       bundle.sourceLabels,
-      bundle.signals,
-      bundle.nearMisses,
-      bundle,
+      JSON.stringify(bundle.signals),
+      JSON.stringify(bundle.nearMisses),
+      JSON.stringify(bundle),
     ]);
   });
 
