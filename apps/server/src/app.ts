@@ -623,6 +623,7 @@ function situationMatchesWorkspaceQuery(
   sourceConfidence: SourceConfidenceSummary,
   query: ReturnType<typeof workspaceMapQuerySchema.parse>,
 ): boolean {
+  if (query.situationIds && !query.situationIds.includes(situation.id)) return false;
   if (query.statuses && !query.statuses.includes(situation.status)) return false;
   if (query.types && !query.types.includes(situation.type)) return false;
   if (query.sources) {

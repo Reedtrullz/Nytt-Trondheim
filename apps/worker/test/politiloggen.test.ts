@@ -93,7 +93,13 @@ describe("Politiloggen ingestion", () => {
   });
 
   it("promotes active Politiloggen threads to official situations", () => {
-    const situations = politiloggenSituationsFromThreads([activeThread]);
+    const activeIncidentThread = {
+      ...activeThread,
+      messages: [activeThread.messages![0]!],
+      updatedOn: activeThread.createdOn,
+      lastMessageOn: activeThread.createdOn,
+    };
+    const situations = politiloggenSituationsFromThreads([activeIncidentThread]);
 
     expect(situations).toHaveLength(1);
     expect(situations[0]).toMatchObject({
@@ -102,7 +108,7 @@ describe("Politiloggen ingestion", () => {
       title: "Trafikk: Trondheim, Kroppan Bru",
       status: "active",
       verificationStatus: "Offentlig bekreftet",
-      updatedAt: "2026-05-29T15:20:20.738Z",
+      updatedAt: "2026-05-29T14:48:31.554Z",
       createdAt: "2026-05-29T14:48:31.554Z",
       locationLabel: "Kroppan Bru",
       incidentSignature: "politiloggen:265vq7",
@@ -110,16 +116,46 @@ describe("Politiloggen ingestion", () => {
       officialEventId: "265vq7",
       relatedArticleIds: ["politiloggen-265vq7"],
     });
-    expect(situations[0]?.timeline.map((entry) => entry.title)).toEqual([
-      "Politiloggen: Trafikk",
-      "Politiloggen: Trafikk",
-    ]);
+    expect(situations[0]?.timeline.map((entry) => entry.title)).toEqual(["Politiloggen: Trafikk"]);
     expect(situations[0]?.evidence[0]).toMatchObject({
       source: "politiloggen",
       provenance: "official",
       claimType: "official_police_log",
       confidence: 1,
     });
+  });
+
+  it("resolves active Politiloggen traffic threads when the latest message says normal again", () => {
+    const situations = politiloggenSituationsFromThreads([activeThread]);
+
+    expect(situations[0]).toMatchObject({
+      status: "resolved",
+      updatedAt: "2026-05-29T15:20:20.738Z",
+    });
+    expect(situations[0]?.timeline.at(-1)).toMatchObject({
+      title: "Politiloggen-hendelsen er avsluttet",
+      detail: "Siste Politiloggen-oppdatering beskriver hendelsen som avsluttet.",
+      official: true,
+    });
+  });
+
+  it("does not promote low-impact or broad Politiloggen threads to situation rooms", () => {
+    const broadControlThread: PolitiloggenThread = {
+      ...activeThread,
+      id: "control-broad",
+      category: "Fartskontroll",
+      area: undefined,
+      messages: [
+        {
+          id: "control-broad-1",
+          text: "Politiet gjennomfører fartskontroll i Trondheim. Ingen hendelser.",
+          createdOn: "2026-05-29T14:48:31.5544696+00:00",
+          type: "Published",
+        },
+      ],
+    };
+
+    expect(politiloggenSituationsFromThreads([broadControlThread])).toEqual([]);
   });
 
   it("resolves an existing Politiloggen situation when the thread is inactive", () => {
@@ -153,7 +189,7 @@ describe("Politiloggen ingestion", () => {
     expect(resolved?.activationBasis).toEqual(existing.activationBasis);
     expect(resolved?.timeline.at(-1)).toMatchObject({
       title: "Politiloggen-hendelsen er avsluttet",
-      detail: "Politiloggen markerer ikke lenger hendelsen som aktiv.",
+      detail: "Siste Politiloggen-oppdatering beskriver hendelsen som avsluttet.",
       official: true,
     });
   });

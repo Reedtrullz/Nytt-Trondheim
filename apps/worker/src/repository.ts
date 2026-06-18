@@ -1058,18 +1058,35 @@ function timestampMs(value: Date | string | null | undefined): number | undefine
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
+function isNewerOfficialActiveUpdate(existing: Situation, incoming: Situation): boolean {
+  if (existing.status !== "resolved" || incoming.status !== "active") return false;
+  if (incoming.verificationStatus !== "Offentlig bekreftet") return false;
+  if (
+    !incoming.officialSource &&
+    !incoming.evidence.some((item) => item.provenance === "official")
+  ) {
+    return false;
+  }
+  const existingTime = timestampMs(existing.updatedAt);
+  const incomingTime = timestampMs(incoming.updatedAt);
+  return incomingTime !== undefined && (existingTime === undefined || incomingTime > existingTime);
+}
+
 function mergeSituation(existing: Situation | undefined, incoming: Situation): Situation {
   if (!existing) return incoming;
+  const officialReopen = isNewerOfficialActiveUpdate(existing, incoming);
   const lifecycle =
     existing.status === "dismissed"
       ? "dismissed"
-      : existing.status === "resolved"
-        ? "resolved"
-        : incoming.status === "resolved"
+      : officialReopen
+        ? "active"
+        : existing.status === "resolved"
           ? "resolved"
-          : existing.status === "active" || incoming.status === "active"
-            ? "active"
-            : "preliminary";
+          : incoming.status === "resolved"
+            ? "resolved"
+            : existing.status === "active" || incoming.status === "active"
+              ? "active"
+              : "preliminary";
   return {
     ...existing,
     ...incoming,

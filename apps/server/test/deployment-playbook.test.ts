@@ -125,11 +125,16 @@ describe("deployment playbook Entur verification", () => {
   });
 
   it("uses guarded JSON access for production and rollback health checks", () => {
+    expect(playbook).toContain("- (production_health.json | default({})).get('status') == \"ok\"");
     expect(playbook).toContain(
-      "until: (production_health.json | default({})).get('status') == \"ok\"",
+      "- (production_health.json | default({})).get('storage') == \"postgres\"",
+    );
+    expect(playbook).toContain("- (rollback_health.json | default({})).get('status') == \"ok\"");
+    expect(playbook).toContain(
+      "- (rollback_health.json | default({})).get('storage') == \"postgres\"",
     );
     expect(playbook).toContain(
-      "until: (rollback_health.json | default({})).get('status') == \"ok\"",
+      "- (canary_health.json | default({})).get('storage') == \"postgres\"",
     );
   });
 

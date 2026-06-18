@@ -28,14 +28,55 @@ describe("loadConfig session secret policy", () => {
   });
 
   it("requires SESSION_SECRET in production", () => {
-    withEnv({ NODE_ENV: "production", SESSION_SECRET: undefined }, () => {
-      expect(() => loadConfig()).toThrow(/SESSION_SECRET is required in production/);
-    });
+    withEnv(
+      {
+        NODE_ENV: "production",
+        DATABASE_URL: "postgres://nytt:test@localhost:5432/nytt",
+        SESSION_SECRET: undefined,
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(/SESSION_SECRET is required in production/);
+      },
+    );
   });
 
   it("requires a high-entropy SESSION_SECRET in production", () => {
-    withEnv({ NODE_ENV: "production", SESSION_SECRET: "short" }, () => {
-      expect(() => loadConfig()).toThrow(/SESSION_SECRET must be at least 32 characters/);
-    });
+    withEnv(
+      {
+        NODE_ENV: "production",
+        DATABASE_URL: "postgres://nytt:test@localhost:5432/nytt",
+        SESSION_SECRET: "short",
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(/SESSION_SECRET must be at least 32 characters/);
+      },
+    );
+  });
+
+  it("requires persistent Postgres storage in production", () => {
+    withEnv(
+      {
+        NODE_ENV: "production",
+        SESSION_SECRET: "x".repeat(32),
+        DATABASE_URL: undefined,
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(/DATABASE_URL is required in production/);
+      },
+    );
+  });
+
+  it("rejects demo seeding in production", () => {
+    withEnv(
+      {
+        NODE_ENV: "production",
+        SESSION_SECRET: "x".repeat(32),
+        DATABASE_URL: "postgres://nytt:test@localhost:5432/nytt",
+        SEED_DEMO: "true",
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(/SEED_DEMO must not be enabled in production/);
+      },
+    );
   });
 });

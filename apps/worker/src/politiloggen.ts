@@ -152,6 +152,34 @@ function typeForThread(thread: PolitiloggenThread): Situation["type"] {
   return "other";
 }
 
+const genericAreas = new Set(["trondheim", "trøndelag", "trondelag"]);
+const lowImpactCategories = /\b(fartskontroll|kontroll|ordenstjeneste)\b/i;
+
+function hasConcretePlace(thread: PolitiloggenThread, article: Article | undefined): boolean {
+  const area = thread.area?.trim().toLocaleLowerCase("nb");
+  return Boolean((area && !genericAreas.has(area)) || article?.location);
+}
+
+function isResolvedByLatestMessage(thread: PolitiloggenThread): boolean {
+  const latestText = orderedMessages(thread).at(-1)?.text?.toLocaleLowerCase("nb") ?? "";
+  return /\b(trafikken går som normalt igjen|går som normalt igjen|normal trafikk|veien er åpnet|vegen er åpnet|veien åpnet|vegen åpnet|bilen er nå hentet|kjøretøyet er hentet|ryddet|avsluttet)\b/u.test(
+    latestText,
+  );
+}
+
+function shouldPromoteThread(
+  thread: PolitiloggenThread,
+  type: Situation["type"],
+  article: Article | undefined,
+): boolean {
+  if (!hasConcretePlace(thread, article)) return false;
+  if (lowImpactCategories.test(thread.category ?? "")) return false;
+  if (type === "other" || type === "weather" || type === "flood" || type === "landslide") {
+    return false;
+  }
+  return true;
+}
+
 function articleForThread(thread: PolitiloggenThread): Article | undefined {
   if (!thread.id) return undefined;
   const firstMessageAt = orderedMessages(thread)[0]?.createdOn;
@@ -289,6 +317,9 @@ export function politiloggenSituationsFromThreads(
     const articleId = `politiloggen-${thread.id}`;
     const article = articleByThreadId.get(thread.id);
     const extractedAt = new Date().toISOString();
+    const type = typeForThread(thread);
+    const promotable = shouldPromoteThread(thread, type, article);
+    if (!promotable && !existing) return [];
     const latestMessageAt = orderedMessages(thread)
       .map((message) => toIso(message.createdOn, toIso(thread.createdOn)))
       .sort((left, right) => right.localeCompare(left))[0];
@@ -297,15 +328,21 @@ export function politiloggenSituationsFromThreads(
       latestMessageAt ?? toIso(thread.createdOn),
     );
     const createdAt = existing?.createdAt ?? toIso(thread.createdOn, latestMessageAt);
-    const status: Situation["status"] = thread.isActive ? "active" : "resolved";
+    const resolvedByMessage = isResolvedByLatestMessage(thread);
+    const status: Situation["status"] =
+      thread.isActive && promotable && !resolvedByMessage ? "active" : "resolved";
     const timeline = timelineForThread(id, thread);
-    if (!thread.isActive) {
+    if (!thread.isActive || resolvedByMessage || !promotable) {
       timeline.push({
         id: `timeline-politiloggen-resolved-${thread.id}`,
         situationId: id,
         timestamp: updatedAt,
         title: "Politiloggen-hendelsen er avsluttet",
-        detail: "Politiloggen markerer ikke lenger hendelsen som aktiv.",
+        detail: resolvedByMessage
+          ? "Siste Politiloggen-oppdatering beskriver hendelsen som avsluttet."
+          : promotable
+            ? "Politiloggen markerer ikke lenger hendelsen som aktiv."
+            : "Politiloggen-hendelsen oppfyller ikke lenger terskelen for automatisk situasjonsrom.",
         sourceLabel: "Politiloggen",
         sourceUrl: sourceUrl(thread),
         official: true,
@@ -315,15 +352,12 @@ export function politiloggenSituationsFromThreads(
     return [
       {
         id,
-        type: typeForThread(thread),
+        type,
         title: titleForThread(thread),
         summary: excerptForThread(thread),
         status,
         verificationStatus: "Offentlig bekreftet",
-        importance:
-          typeForThread(thread) === "fire" || typeForThread(thread) === "rescue"
-            ? "high"
-            : "normal",
+        importance: type === "fire" || type === "rescue" ? "high" : "normal",
         updatedAt,
         createdAt,
         locationLabel: thread.area?.trim() || thread.municipality?.trim() || "Trondheim",

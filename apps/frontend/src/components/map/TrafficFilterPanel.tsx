@@ -96,6 +96,7 @@ export function TrafficFilterPanel({
             <button
               key={preset.value}
               type="button"
+              aria-pressed={selectedPreset === preset.value}
               className={selectedPreset === preset.value ? "selected" : undefined}
               onClick={() => onPresetChange(preset.value)}
             >

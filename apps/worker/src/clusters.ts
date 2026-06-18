@@ -620,7 +620,11 @@ function detectType(article: Article): Situation["type"] | undefined {
   if (/\b(savnet|leteaksjon|forsvunnet)\b/.test(text)) return "missing_person";
   if (/\b(jordskred|ras)\b/.test(text)) return "landslide";
   if (/\bflom\b/.test(text)) return "flood";
-  if (/\b(trafikkulykke|trafikkhendelse|kollisjon|bilstans|veiarbeid|kø)\b/.test(text)) {
+  if (
+    /\b(trafikkulykke|trafikkhendelse|kollisjon|sammenstøt|påkjør\w*|syklist|sykkelulykke|bilstans|veiarbeid|kø)\b/.test(
+      text,
+    )
+  ) {
     return "traffic";
   }
   if (/\b(ekstremvær|farevarsel|storm|orkan)\b/.test(text)) return "weather";

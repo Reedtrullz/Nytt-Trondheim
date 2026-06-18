@@ -151,9 +151,19 @@ function tokenSimilarity(
 }
 
 function articlePlaceTokens(article: Article): Set<string> {
-  const placeTokens = tokens(
-    [article.location?.label, ...article.places].filter(Boolean).join(" "),
+  const placeValues = [article.location?.label, ...article.places].filter(
+    (place): place is string => Boolean(place),
   );
+  const placeTokens = tokens(placeValues.join(" "));
+  placeValues.forEach((place) => {
+    const normalized = normalizeText(place);
+    if (normalized === "kroppanbrua" || normalized === "kroppan bru") {
+      placeTokens.add("kroppan-bru");
+    }
+    if (normalized === "trondheim s") {
+      placeTokens.add("trondheim-s");
+    }
+  });
   genericPlaceTokens.forEach((token) => placeTokens.delete(token));
   return placeTokens;
 }
@@ -182,6 +192,10 @@ function sameBroadCategory(left: Article, right: Article): boolean {
   if (left.category === right.category) return true;
   const eventLike = new Set(["Hendelser", "Nyheter"]);
   return eventLike.has(left.category) && eventLike.has(right.category);
+}
+
+function sameCanonicalUrl(left: Article, right: Article): boolean {
+  return left.url.length > 0 && left.url === right.url;
 }
 
 function articleText(article: Article): string {
@@ -263,6 +277,7 @@ function articlesSimilar(left: Article, right: Article): boolean {
   if (left.situationId && left.situationId === right.situationId) return true;
   if (left.situationId && right.situationId) return false;
   if (publishedDistanceMs(left, right) > maxGroupAgeMs) return false;
+  if (hasConflictingSpecificPlaces(left, right) && !sameCanonicalUrl(left, right)) return false;
 
   const title = tokenSimilarity(tokens(left.title), tokens(right.title));
   if (title.overlap >= 3 && title.score >= 0.56) return true;

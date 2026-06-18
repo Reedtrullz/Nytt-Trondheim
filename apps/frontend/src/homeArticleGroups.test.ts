@@ -177,6 +177,68 @@ describe("home article grouping", () => {
     ]);
   });
 
+  it("consolidates traffic coverage across canonical local place aliases", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "nrk-kroppanbrua",
+        title: "Trafikkulykke på Kroppanbrua",
+        excerpt: "En kollisjon gir kø ved Kroppan bru etter trafikkulykke.",
+        publishedAt: "2026-06-18T08:00:00.000Z",
+        category: "Transport",
+        places: ["Kroppanbrua"],
+        location: { lat: 63.373, lng: 10.365, label: "Kroppanbrua" },
+      }),
+      article({
+        id: "adressa-kroppan-bru",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Kollisjon på Kroppan bru",
+        excerpt: "En kollisjon gir kø ved Kroppan bru etter trafikkulykke.",
+        publishedAt: "2026-06-18T07:55:00.000Z",
+        category: "Transport",
+        places: ["Kroppan bru"],
+        location: { lat: 63.373, lng: 10.365, label: "Kroppan bru" },
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "nrk-kroppanbrua",
+      "adressa-kroppan-bru",
+    ]);
+  });
+
+  it("keeps Trondheim S as a specific station place anchor", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "nrk-trondheim-s",
+        title: "Signalfeil gir forsinkelser på Trondheim S",
+        excerpt: "Togene står på grunn av signalfeil ved Trondheim S.",
+        publishedAt: "2026-06-18T08:20:00.000Z",
+        category: "Transport",
+        places: ["Trondheim", "Trondheim S"],
+        location: { lat: 63.436, lng: 10.399, label: "Trondheim S" },
+      }),
+      article({
+        id: "adressa-trondheim-s",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Signalfeil ved Trondheim S",
+        excerpt: "Togene står på grunn av signalfeil ved Trondheim S.",
+        publishedAt: "2026-06-18T08:15:00.000Z",
+        category: "Transport",
+        places: ["Trondheim", "Trondheim S"],
+        location: { lat: 63.436, lng: 10.399, label: "Trondheim S" },
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "nrk-trondheim-s",
+      "adressa-trondheim-s",
+    ]);
+  });
+
   it("consolidates near-duplicate police updates even when RSS places are generic", () => {
     const groups = groupHomeArticles([
       article({
@@ -557,6 +619,34 @@ describe("home article grouping", () => {
 
     expect(groups).toHaveLength(2);
     expect(groups.map((group) => group.primary.id)).toEqual(["school-budget", "concert-update"]);
+  });
+
+  it("does not consolidate exact same headlines at conflicting specific places", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "lade-facility",
+        title: "Nytt nærmiljøanlegg åpnet",
+        excerpt: "Anlegget på Lade er klart for bruk.",
+        url: "https://example.test/lade-facility",
+        publishedAt: "2026-06-18T12:00:00.000Z",
+        category: "Nyheter",
+        places: ["Lade", "Trondheim"],
+        location: { lat: 63.443, lng: 10.45, label: "Lade" },
+      }),
+      article({
+        id: "tiller-facility",
+        title: "Nytt nærmiljøanlegg åpnet",
+        excerpt: "Anlegget på Tiller er klart for bruk.",
+        url: "https://example.test/tiller-facility",
+        publishedAt: "2026-06-18T11:55:00.000Z",
+        category: "Nyheter",
+        places: ["Tiller", "Trondheim"],
+        location: { lat: 63.339, lng: 10.42, label: "Tiller" },
+      }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.primary.id)).toEqual(["lade-facility", "tiller-facility"]);
   });
 
   it("does not consolidate generic incident-keyword stories without a distinctive shared clue", () => {

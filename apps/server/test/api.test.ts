@@ -507,6 +507,23 @@ describe("private situation API", () => {
     ]);
   });
 
+  it("honors explicit situationIds in the workspace map", async () => {
+    const { agent } = await ownerAgent();
+
+    const missing = await agent
+      .get("/api/situations/workspace-map?situationIds=missing-situation-id")
+      .expect(200);
+    expect(missing.body.situations).toEqual([]);
+    expect(missing.body.timeline).toEqual([]);
+
+    const matching = await agent
+      .get("/api/situations/workspace-map?situationIds=skogbrann-bymarka")
+      .expect(200);
+    expect(matching.body.situations).toEqual([
+      expect.objectContaining({ id: "skogbrann-bymarka" }),
+    ]);
+  });
+
   it("projects private annotations in the map workspace without making them evidence", async () => {
     const { agent, csrf } = await ownerAgent();
     const created = await agent

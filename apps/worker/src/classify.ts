@@ -113,7 +113,9 @@ const placeAliases = new Map<string, string>([
   ["trondheim sentrum", "Sentrum"],
 ]);
 
-const categoryRules: Array<[ArticleCategory, string[]]> = [
+type CategoryMatcher = string | RegExp;
+
+const categoryRules: Array<[ArticleCategory, CategoryMatcher[]]> = [
   [
     "Sport",
     [
@@ -123,7 +125,7 @@ const categoryRules: Array<[ArticleCategory, string[]]> = [
       "kolstad håndball",
       "rbk",
       "ranheim fotball",
-      "rosenborg",
+      /\b(?:rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u,
       "ski-vm",
       "trenerjobb",
       "vm-jubel",
@@ -136,7 +138,7 @@ const categoryRules: Array<[ArticleCategory, string[]]> = [
       "brann",
       "driftsstans",
       "evaku",
-      "politi",
+      /\bpoliti(?:et|logg(?:en)?|patrulje(?:n)?|aksjon(?:en)?|bil(?:en)?)?\b/u,
       "politiaksjon",
       "ras",
       "redning",
@@ -154,24 +156,28 @@ const categoryRules: Array<[ArticleCategory, string[]]> = [
     [
       "atb",
       "bane",
-      "bru",
+      /\bbru(?:a|en)?\b/u,
       "buss",
       "e14",
       "e39",
       "e6",
+      "kollisjon",
       "metrobuss",
+      "påkjør",
+      "sammenstøt",
       "stengt",
+      "syklist",
       "sykkel",
       "tog",
       "trafikk",
-      "vei",
-      "veg",
+      /\bvei(?:en|er|ene)?\b/u,
+      /\bveg(?:en|er|ene)?\b/u,
     ],
   ],
   ["Byutvikling", ["bygg", "bolig", "regulering", "utbygg", "plan"]],
   ["Kultur", ["festival", "konsert", "olavsfest", "kultur", "museum", "samfundet"]],
   ["Politikk", ["byråd", "budsjett", "fylkesting", "formannskap", "kommunestyre", "politikk"]],
-  ["Vær", ["farevarsel", "flom", "regn", "uvær", "vær", "vind"]],
+  ["Vær", ["farevarsel", "flom", "regn", "uvær", /\bvær\b/u, "vind"]],
 ];
 
 function escapeRegex(value: string): string {
@@ -204,8 +210,11 @@ export function detectScope(text: string): GeographicScope | undefined {
 export function categorize(text: string): ArticleCategory {
   const normalized = text.toLocaleLowerCase("nb");
   return (
-    categoryRules.find(([, terms]) => terms.some((term) => normalized.includes(term)))?.[0] ??
-    "Nyheter"
+    categoryRules.find(([, terms]) =>
+      terms.some((term) =>
+        typeof term === "string" ? normalized.includes(term) : term.test(normalized),
+      ),
+    )?.[0] ?? "Nyheter"
   );
 }
 

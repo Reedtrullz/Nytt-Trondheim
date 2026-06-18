@@ -38,5 +38,6 @@ describe("TrafficFilterPanel semantic layers", () => {
     expect(html).not.toContain("Aktiveres når estimerte nyhetssteder tegnes i kartet.");
     expect(html).toContain("Avanserte filtre");
     expect(html).toContain("Ikke aktivt på /trafikk ennå");
+    expect(html).toContain('aria-pressed="true"');
   });
 });

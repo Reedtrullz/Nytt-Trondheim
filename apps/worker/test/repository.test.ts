@@ -276,6 +276,70 @@ describe("WorkerRepository", () => {
     expect(String(linkCalls[1]?.[0])).toContain("kind='official_event'");
   });
 
+  it("allows newer official active updates to reopen resolved situations", async () => {
+    const existing: Situation = {
+      id: "politiloggen-one",
+      type: "traffic",
+      title: "Trafikk: Trondheim, Kroppan Bru",
+      summary: "Tidligere avsluttet.",
+      status: "resolved",
+      verificationStatus: "Offentlig bekreftet",
+      importance: "normal",
+      updatedAt: "2026-05-28T10:00:00.000Z",
+      createdAt: "2026-05-28T09:00:00.000Z",
+      locationLabel: "Kroppan Bru",
+      officialSource: "politiloggen",
+      officialEventId: "one",
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["politiloggen"],
+        articleIds: ["politiloggen-one"],
+        activatedAt: "2026-05-28T09:00:00.000Z",
+      },
+      relatedArticleIds: ["politiloggen-one"],
+      evidence: [],
+      features: [],
+      timeline: [],
+    };
+    const incoming: Situation = {
+      ...existing,
+      status: "active",
+      summary: "Ny offisiell oppdatering.",
+      updatedAt: "2026-05-28T11:00:00.000Z",
+      evidence: [
+        {
+          id: "evidence-one",
+          situationId: existing.id,
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          sourceUrl: "https://example.test/politiloggen/one",
+          supportingSnippet: "Ny aktiv oppdatering.",
+          claim: "Trafikk: Trondheim, Kroppan Bru",
+          claimType: "official_police_log",
+          provenance: "official",
+          confidence: 1,
+          extractedAt: "2026-05-28T11:00:00.000Z",
+          publishedAt: "2026-05-28T11:00:00.000Z",
+        },
+      ],
+    };
+    const query = vi.fn(async (sql: string) =>
+      sql.includes("SELECT payload FROM situations")
+        ? { rows: [{ payload: existing }] }
+        : { rows: [] },
+    );
+    const repository = new WorkerRepository(transactionalPool(query));
+
+    await repository.upsertSituation(incoming);
+
+    const upsertCall = query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO situations"),
+    );
+    const payload = upsertCall?.[1]?.[6] as Situation | undefined;
+    expect(payload?.status).toBe("active");
+    expect(payload?.updatedAt).toBe("2026-05-28T11:00:00.000Z");
+  });
+
   it("cancels replaced official events before mirroring the source item", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
     const repository = new WorkerRepository(transactionalPool(query));

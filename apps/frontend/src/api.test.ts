@@ -182,6 +182,39 @@ describe("frontend source item API helpers", () => {
     });
   });
 
+  it("retries CSRF token lookup after a failed unsafe request setup", async () => {
+    vi.resetModules();
+    const { api: freshApi, ApiError: FreshApiError } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "midlertidig feil" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(okResponse({ csrfToken: "fresh-csrf" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(freshApi.saveArticle("article-one", true)).rejects.toBeInstanceOf(FreshApiError);
+    await freshApi.saveArticle("article-one", true);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/session",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/saved/articles/article-one",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({ "X-CSRF-Token": "fresh-csrf" }),
+      }),
+    );
+  });
+
   it("preserves non-429 server errors with status metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: "Kilden er midlertidig utilgjengelig." }), {

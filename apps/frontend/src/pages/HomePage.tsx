@@ -537,12 +537,16 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
       <div className="view-controls">
         <div className="scope-switch" aria-label="Geografisk visning">
           <button
+            type="button"
+            aria-pressed={scope === "trondheim"}
             className={scope === "trondheim" ? "selected" : ""}
             onClick={() => updateFilters({ scope: "trondheim" })}
           >
             Trondheim
           </button>
           <button
+            type="button"
+            aria-pressed={scope === "trondelag"}
             className={scope === "trondelag" ? "selected" : ""}
             onClick={() => updateFilters({ scope: "trondelag" })}
           >
@@ -552,6 +556,8 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
         <div className="filters" aria-label="Filtrer saker">
           {articleCategories.map((item: ArticleCategoryFilter) => (
             <button
+              type="button"
+              aria-pressed={category === item}
               className={category === item ? "selected" : ""}
               key={item}
               onClick={() => updateFilters({ category: item })}

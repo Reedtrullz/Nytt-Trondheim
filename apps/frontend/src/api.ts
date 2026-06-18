@@ -38,11 +38,39 @@ export class ApiError extends Error {
 }
 
 async function csrfToken(): Promise<string> {
-  csrfTokenPromise ??= fetch("/api/session", { credentials: "include" }).then(async (response) => {
-    if (!response.ok) throw new Error("Innlogging kreves");
-    return ((await response.json()) as SessionPayload).csrfToken;
-  });
+  csrfTokenPromise ??= fetch("/api/session", { credentials: "include" })
+    .then(async (response) => {
+      if (response.status === 401) {
+        redirectToLogin();
+        throw new ApiError("Innlogging kreves", 401);
+      }
+      if (!response.ok) {
+        throw await apiErrorFromResponse(response);
+      }
+      return ((await response.json()) as SessionPayload).csrfToken;
+    })
+    .catch((error) => {
+      csrfTokenPromise = undefined;
+      throw error;
+    });
   return csrfTokenPromise;
+}
+
+function redirectToLogin() {
+  if (typeof window !== "undefined") {
+    window.location.href = "/auth/github";
+  }
+}
+
+async function apiErrorFromResponse(response: Response): Promise<ApiError> {
+  const retryAfter = response.headers.get("Retry-After") ?? undefined;
+  if (response.status === 429) {
+    return new ApiError("For mange forespørsler. Prøv igjen om litt.", 429, retryAfter);
+  }
+  const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
+    error?: string;
+  };
+  return new ApiError(body.error ?? "Forespørselen feilet", response.status, retryAfter);
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -57,18 +85,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (response.status === 401) {
-    window.location.href = "/auth/github";
+    redirectToLogin();
     throw new ApiError("Innlogging kreves", 401);
   }
   if (!response.ok) {
-    const retryAfter = response.headers.get("Retry-After") ?? undefined;
-    if (response.status === 429) {
-      throw new ApiError("For mange forespørsler. Prøv igjen om litt.", 429, retryAfter);
-    }
-    const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
-      error?: string;
-    };
-    throw new ApiError(body.error ?? "Forespørselen feilet", response.status, retryAfter);
+    throw await apiErrorFromResponse(response);
   }
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }

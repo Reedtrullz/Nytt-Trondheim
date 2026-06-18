@@ -28,12 +28,19 @@ function sessionSecretForEnvironment(nodeEnv: string): string {
 
 export function loadConfig(): AppConfig {
   const nodeEnv = process.env.NODE_ENV ?? "development";
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (nodeEnv === "production" && !databaseUrl) {
+    throw new Error("DATABASE_URL is required in production");
+  }
+  if (nodeEnv === "production" && process.env.SEED_DEMO === "true") {
+    throw new Error("SEED_DEMO must not be enabled in production");
+  }
   return {
     port: Number(process.env.PORT ?? 8080),
     nodeEnv,
     publicOrigin: process.env.PUBLIC_ORIGIN ?? "http://127.0.0.1:5173",
-    databaseUrl: process.env.DATABASE_URL,
-    seedDemo: process.env.SEED_DEMO === "true" || !process.env.DATABASE_URL,
+    databaseUrl,
+    seedDemo: process.env.SEED_DEMO === "true" || !databaseUrl,
     devAuthBypass: nodeEnv !== "production" && process.env.DEV_AUTH_BYPASS !== "false",
     githubClientId: process.env.GITHUB_CLIENT_ID,
     githubClientSecret: process.env.GITHUB_CLIENT_SECRET,

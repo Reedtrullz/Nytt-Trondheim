@@ -315,6 +315,7 @@
       until:
         - canary_health.status | default(0) == 200
         - (canary_health.json | default({})).get('status') == "ok"
+        - (canary_health.json | default({})).get('storage') == "postgres"
       retries: 12
       delay: 5
 
@@ -413,7 +414,9 @@
             url: "https://nytt.reidar.tech/health"
             return_content: true
           register: production_health
-          until: (production_health.json | default({})).get('status') == "ok"
+          until:
+            - (production_health.json | default({})).get('status') == "ok"
+            - (production_health.json | default({})).get('storage') == "postgres"
           retries: 6
           delay: 5
 
@@ -585,7 +588,9 @@
             url: "https://nytt.reidar.tech/health"
             return_content: true
           register: rollback_health
-          until: (rollback_health.json | default({})).get('status') == "ok"
+          until:
+            - (rollback_health.json | default({})).get('status') == "ok"
+            - (rollback_health.json | default({})).get('storage') == "postgres"
           retries: 6
           delay: 5
 

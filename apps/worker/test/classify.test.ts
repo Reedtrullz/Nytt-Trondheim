@@ -56,6 +56,27 @@ describe("Trondheim relevance classification", () => {
     expect(categorize("Brann i Bymarka")).toBe("Hendelser");
   });
 
+  it("does not treat politics or ordinary være text as incidents or weather", () => {
+    expect(categorize("Politikk i Trondheim")).toBe("Politikk");
+    expect(categorize("Kommunen varsler ny politikk for sentrum")).toBe("Politikk");
+    expect(categorize("Dette skal være et åpent møte på biblioteket")).toBe("Nyheter");
+    expect(categorize("Han har vært i samtaler med Rosenborg")).toBe("Sport");
+    expect(categorize("Politiet rykker ut etter melding")).toBe("Hendelser");
+    expect(categorize("Farevarsel om vær i Trondheim")).toBe("Vær");
+  });
+
+  it("recognizes traffic collision wording beyond the word kollisjon", () => {
+    expect(categorize("Syklist og bil i sammenstøt på Tiller")).toBe("Transport");
+    expect(categorize("Fotgjenger påkjørt ved Elgeseter")).toBe("Transport");
+  });
+
+  it("does not classify Rosenborg district incidents or ordinary bruker text as sport or transport", () => {
+    expect(categorize("Brann på Rosenborg skole i Trondheim")).toBe("Hendelser");
+    expect(categorize("Skole stengt på Rosenborg")).toBe("Hendelser");
+    expect(categorize("Kommunen bruker nytt system")).toBe("Nyheter");
+    expect(categorize("Ny app bruker kunstig intelligens i Trondheim")).toBe("Nyheter");
+  });
+
   it("prefers a specific district over the generic city when placing a story", () => {
     expect(extractPlaces("Brann i Bymarka i Trondheim")).toEqual(["Bymarka", "Trondheim"]);
   });
@@ -382,6 +403,27 @@ describe("Trondheim relevance classification", () => {
     expect(situations).toHaveLength(1);
     expect(situations[0]?.incidentSignature).toBe("traffic:kroppan-bru");
     expect(situations[0]?.locationLabel).toBe("Kroppan Bru");
+  });
+
+  it("activates traffic situations from syklist and sammenstøt wording", () => {
+    const situations = detectPreliminarySituations([
+      incidentArticle("traffic-one", "nrk", "2026-06-02T10:30:00Z", {
+        title: "Syklist og bil i sammenstøt på Tiller",
+        excerpt: "Nødetatene er på stedet etter sammenstøt mellom syklist og bil.",
+        category: "Transport",
+        places: ["Tiller"],
+      }),
+      incidentArticle("traffic-two", "adressa", "2026-06-02T10:35:00Z", {
+        title: "Syklist påkjørt på Tiller",
+        excerpt: "Politiet omtaler en trafikkhendelse etter at en syklist ble påkjørt.",
+        category: "Transport",
+        places: ["Tiller"],
+      }),
+    ]);
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]?.type).toBe("traffic");
+    expect(situations[0]?.incidentSignature).toBe("traffic:tiller");
   });
 
   it("does not activate from a broad Trondheim-only incident mention", () => {
