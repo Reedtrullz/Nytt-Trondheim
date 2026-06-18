@@ -9,6 +9,7 @@ export interface HomeArticleGroup {
 
 const maxGroupAgeMs = 24 * 60 * 60 * 1000;
 const crossSourceIncidentWindowMs = 8 * 60 * 60 * 1000;
+const nearDuplicateTextWindowMs = 2 * 60 * 60 * 1000;
 const genericPlaceTokens = new Set(["trondheim", "trøndelag", "trondelag"]);
 const stopWords = new Set([
   "alle",
@@ -50,7 +51,7 @@ const stopWords = new Set([
 ]);
 const incidentSignals: Array<[string, RegExp]> = [
   ["innbrudd", /\binnbrudd\w*/iu],
-  ["tyveri", /\b(tyveri|tyvgods|stj(?:å|a)l\w*)\b/iu],
+  ["tyveri", /\b(tyveri|tyvgods|tyv\w*|tjuv\w*|stj(?:e|å|a)l\w*)\b/iu],
   ["brann", /\b(brann|røykutvikling)\b/iu],
   ["trafikk", /\b(trafikk|kollisjon|ulykke|påkjør\w*|bilstans)\b/iu],
   ["orden", /\b(ro og orden|ordensforstyrrelse)\b/iu],
@@ -143,6 +144,15 @@ function articlesSimilar(left: Article, right: Article): boolean {
   if (normalizeText(left.title) === normalizeText(right.title)) return true;
 
   const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
+  if (
+    publishedDistanceMs(left, right) <= nearDuplicateTextWindowMs &&
+    body.overlap >= 10 &&
+    body.score >= 0.5 &&
+    sameBroadCategory(left, right)
+  ) {
+    return true;
+  }
+
   const sharedPlace = hasSharedPlace(left, right);
   if (
     left.source !== right.source &&

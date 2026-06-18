@@ -177,6 +177,49 @@ describe("home article grouping", () => {
     ]);
   });
 
+  it("consolidates near-duplicate police updates even when RSS places are generic", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "nrk-arrestert",
+        title: "Hørte ikke på politiet - ble arrestert",
+        excerpt:
+          "En mann i slutten av 20-åra ble innbrakt til arresten etter å ha tilgriset en politibil på oppdrag i Trondheim sentrum. Han var i følge med en mann i 30-åra som anmeldes for å stjele alkohol på bakeriet Snurr. Tjuven ble bortvist fra Trondheim sentrum frem til i morgen tidlig. Men han klarte ikke å",
+        publishedAt: "2026-06-18T15:02:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "nrk-bortvist",
+        title: "Tjuv bortvist fra Trondheim sentrum",
+        excerpt:
+          "En mann i slutten av 20-åra ble innbrakt til arresten etter å ha tilgriset en politibil på oppdrag i Trondheim sentrum. Han var i følge med en mann i 30-åra som anmeldes for å stjele alkohol på bakeriet Snurr. Tyven blir bortvist fra Trondheim sentrum frem til i morgen tidlig.",
+        publishedAt: "2026-06-18T15:02:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "politiloggen-tyveri",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Tyveri: Trondheim",
+        excerpt:
+          "En mann i slutten av 20 - årene ble innbrakt til arresten etter å ha tilgriset en politibil på oppdrag i Trondheim sentrum. Han var i følge med en mann i 30 - årene som anmeldes for å stjele alkohol på bakeriet Snurr. Tyven blir bortvist fra Trondheim sentrum frem til i morgen tidlig. Mannen som ble bortvist fra Trondheim sentrum greide ikke å overholde dette pålegget og ble innbrakt til arresten kl 1930.",
+        publishedAt: "2026-06-18T14:59:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+        situationId: "politiloggen-tyveri",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "nrk-bortvist",
+      "nrk-arrestert",
+      "politiloggen-tyveri",
+    ]);
+    expect(groups[0]?.sourceLabels).toEqual(["NRK Trøndelag", "Politiloggen"]);
+  });
+
   it("does not consolidate unrelated city-wide stories just because both mention Trondheim", () => {
     const groups = groupHomeArticles([
       article({
