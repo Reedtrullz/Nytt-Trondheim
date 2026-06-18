@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import type { Article, EvidenceItem, MapFeature, OfficialEvent, Situation } from "@nytt/shared";
+import {
+  isFootballClubBrannContext,
+  type Article,
+  type EvidenceItem,
+  type MapFeature,
+  type OfficialEvent,
+  type Situation,
+} from "@nytt/shared";
 import { canonicalPlaceName } from "./classify.js";
 import { datexImpact } from "./datex.js";
 
@@ -616,7 +623,9 @@ function specificPlace(article: Article): string | undefined {
 function detectType(article: Article): Situation["type"] | undefined {
   const text = `${article.title} ${article.excerpt}`.toLocaleLowerCase("nb");
   if (incidentEventDescriptor(article)) return "fire";
-  if (/\b(brann|skogbrann|røykutvikling)\b/.test(text)) return "fire";
+  if (/\b(brann|skogbrann|røykutvikling)\b/.test(text) && !isFootballClubBrannContext(article)) {
+    return "fire";
+  }
   if (/\b(savnet|leteaksjon|forsvunnet)\b/.test(text)) return "missing_person";
   if (/\b(jordskred|ras)\b/.test(text)) return "landslide";
   if (/\bflom\b/.test(text)) return "flood";

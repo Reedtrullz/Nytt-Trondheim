@@ -1605,6 +1605,101 @@ describe("private situation API", () => {
     await agent.get("/api/articles?cursor=not-a-valid-cursor").expect(400);
   });
 
+  it("serves coverage bundle metadata through article APIs, pagination and saved overlays", async () => {
+    const { app, store } = await testApp();
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    const csrf = session.body.csrfToken as string;
+    const bundle = {
+      id: "coverage:api-contract",
+      kind: "topic" as const,
+      confidence: "high" as const,
+      reason: "Samme nyhetstema",
+      generatedAt: "2026-06-18T20:00:00.000Z",
+    };
+    const bundledArticles: Article[] = [
+      {
+        id: "api-bundle-new",
+        source: "vg",
+        sourceLabel: "VG",
+        title: "Freyr Alexandersson blir ny hovedtrener i Rosenborg",
+        excerpt: "I dag ble han presentert som Rosenborgs nye trener.",
+        url: "https://example.test/api-bundle-new",
+        publishedAt: "2026-06-18T23:59:00.000Z",
+        scope: "trondheim",
+        category: "Sport",
+        places: ["Trondheim"],
+        coverageBundle: bundle,
+      },
+      {
+        id: "api-bundle-old",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Han kan bli RBK-trener",
+        excerpt: "Freyr Alexandersson har vært i konkrete samtaler med Rosenborg.",
+        url: "https://example.test/api-bundle-old",
+        publishedAt: "2026-06-18T23:58:00.000Z",
+        scope: "trondheim",
+        category: "Sport",
+        places: ["Trondheim"],
+        coverageBundle: bundle,
+      },
+    ];
+    (store as unknown as { articles: Article[] }).articles.unshift(...bundledArticles);
+
+    await agent
+      .get("/api/bootstrap")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.articles).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "api-bundle-new",
+              coverageBundle: expect.objectContaining({ id: "coverage:api-contract" }),
+            }),
+          ]),
+        );
+      });
+    const first = await agent.get("/api/articles?limit=1").expect(200);
+    expect(first.body.items[0]).toMatchObject({
+      id: "api-bundle-new",
+      coverageBundle: { id: "coverage:api-contract" },
+    });
+    const second = await agent
+      .get(`/api/articles?limit=1&cursor=${encodeURIComponent(first.body.nextCursor as string)}`)
+      .expect(200);
+    expect(second.body.items[0]).toMatchObject({
+      id: "api-bundle-old",
+      coverageBundle: { id: "coverage:api-contract" },
+    });
+
+    await agent.put("/api/saved/articles/api-bundle-new").set("X-CSRF-Token", csrf).expect(204);
+    await agent
+      .get("/api/articles?limit=1")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.items[0]).toMatchObject({
+          id: "api-bundle-new",
+          saved: true,
+          coverageBundle: { id: "coverage:api-contract" },
+        });
+      });
+    await agent
+      .get("/api/saved/articles")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "api-bundle-new",
+              saved: true,
+              coverageBundle: expect.objectContaining({ reason: "Samme nyhetstema" }),
+            }),
+          ]),
+        );
+      });
+  });
+
   it("stores uploaded private attachment metadata with a content checksum", async () => {
     const { agent, csrf } = await ownerAgent();
     const bytes = Buffer.from("privat vedlegg");
@@ -2038,6 +2133,45 @@ describe("private situation API", () => {
       .expect(404);
   });
 
+  it("returns 404 when mutating workspace children under a missing situation", async () => {
+    const { agent, csrf } = await ownerAgent();
+    const missingId = "missing-situation-id";
+
+    await agent
+      .patch(`/api/situations/${missingId}/features/missing-feature`)
+      .set("X-CSRF-Token", csrf)
+      .send({ sourceItemIds: ["source:not-linked"] })
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
+    await agent
+      .delete(`/api/situations/${missingId}/features/missing-feature`)
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
+    await agent
+      .patch(`/api/situations/${missingId}/tasks/missing-task`)
+      .set("X-CSRF-Token", csrf)
+      .send({ completed: true })
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
+    await agent
+      .delete(`/api/situations/${missingId}/tasks/missing-task`)
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
+    await agent
+      .patch(`/api/situations/${missingId}/notes/missing-note`)
+      .set("X-CSRF-Token", csrf)
+      .send({ text: "Oppdatert" })
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
+    await agent
+      .delete(`/api/situations/${missingId}/notes/missing-note`)
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
+  });
+
   it("returns JSON 404 responses for unknown API routes", async () => {
     const { agent } = await ownerAgent();
     const response = await agent
@@ -2165,6 +2299,42 @@ describe("private situation API", () => {
       .delete(`/api/situations/skogbrann-bymarka/tasks/${task.body.id}`)
       .set("X-CSRF-Token", csrf)
       .expect(204);
+  });
+
+  it("returns 404 when saving or unsaving missing articles and situations", async () => {
+    const { agent, csrf } = await ownerAgent();
+
+    await agent
+      .put("/api/saved/missing-article")
+      .set("X-CSRF-Token", csrf)
+      .send({ saved: true })
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Saken finnes ikke."));
+    await agent
+      .delete("/api/saved/missing-article")
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Saken finnes ikke."));
+    await agent
+      .put("/api/saved/articles/missing-article")
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Saken finnes ikke."));
+    await agent
+      .delete("/api/saved/articles/missing-article")
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Saken finnes ikke."));
+    await agent
+      .put("/api/situations/missing-situation/saved")
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
+    await agent
+      .delete("/api/situations/missing-situation/saved")
+      .set("X-CSRF-Token", csrf)
+      .expect(404)
+      .expect(({ body }) => expect(body.error).toBe("Situasjonen finnes ikke."));
   });
 
   it("dismisses a false-positive situation while keeping it visible in history", async () => {

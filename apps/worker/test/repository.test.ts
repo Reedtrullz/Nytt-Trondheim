@@ -39,6 +39,8 @@ describe("WorkerRepository", () => {
     await repository.upsertArticles([article]);
 
     expect(query.mock.calls[0]?.[0]).toContain("payload ? 'situationId'");
+    expect(query.mock.calls[0]?.[0]).toContain("payload ? 'coverageBundle'");
+    expect(query.mock.calls[0]?.[0]).toContain("NOT ($8::jsonb ? 'coverageBundle')");
     expect(query.mock.calls[0]?.[0]).toContain("NOT EXISTS");
     expect(query.mock.calls[0]?.[1]?.[7]).toBe(article);
     expect(query).toHaveBeenCalledWith(

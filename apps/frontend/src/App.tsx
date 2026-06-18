@@ -18,7 +18,10 @@ function Header({ freshnessLabel }: { freshnessLabel: string }) {
   const [logoutError, setLogoutError] = useState<string>();
   const navigate = useNavigate();
   const location = useLocation();
-  const filters = useMemo(() => parseHomeFilters(location.search), [location.search]);
+  const filters = useMemo(
+    () => parseHomeFilters(location.pathname === "/" ? location.search : ""),
+    [location.pathname, location.search],
+  );
 
   function searchChanged(event: ChangeEvent<HTMLInputElement>) {
     const q = event.target.value;

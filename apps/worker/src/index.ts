@@ -10,6 +10,7 @@ import type {
   TrafficCounterSnapshot,
   WorkerCycleMetrics,
 } from "@nytt/shared";
+import { annotateArticleCoverageBundles } from "@nytt/shared";
 import { collectMunicipality, collectRss, probeOfficialSources, rssSources } from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
 import {
@@ -878,7 +879,10 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       detail: "Politiloggen-adapter er slått av med POLITILOGGEN_ENABLED=false",
     });
   }
-  const articles = [...(await geocodeArticles(articleSets.flat())), ...articlesWithoutGeocoding];
+  const articles = annotateArticleCoverageBundles([
+    ...(await geocodeArticles(articleSets.flat())),
+    ...articlesWithoutGeocoding,
+  ]);
   await repository.upsertArticles(articles);
   for (const status of await probeOfficialSources()) {
     if (status.source === "politiloggen") continue;

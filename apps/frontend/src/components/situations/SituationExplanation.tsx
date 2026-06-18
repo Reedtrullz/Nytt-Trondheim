@@ -1,4 +1,4 @@
-import type { SituationExplanation } from "@nytt/shared";
+import { sourceIdLabel, type SituationExplanation } from "@nytt/shared";
 
 const roleLabels: Record<SituationExplanation["sourceRoles"][number]["role"], string> = {
   evidence: "Hendelsesgrunnlag",
@@ -6,31 +6,6 @@ const roleLabels: Record<SituationExplanation["sourceRoles"][number]["role"], st
   telemetry: "Telemetri, ikke årsak",
   private: "Privat vurdering",
 };
-
-const sourceLabels: Partial<
-  Record<SituationExplanation["sourceRoles"][number]["provider"], string>
-> = {
-  nrk: "NRK",
-  adressa: "Adresseavisen",
-  vg: "VG",
-  dagbladet: "Dagbladet",
-  trondheim_kommune: "Trondheim kommune",
-  met: "MET",
-  nve: "NVE / Varsom",
-  datex: "Vegvesen DATEX",
-  datex_travel_time: "DATEX reisetid",
-  datex_weather: "Vegvesen værstasjoner",
-  datex_cctv: "Vegvesen kamera",
-  trafikkdata: "Trafikkdata",
-  entur_vehicle_positions: "Entur kjøretøyposisjoner",
-  entur_service_alerts: "Entur avvik",
-  politiloggen: "Politiloggen",
-  deepseek: "Privat AI-analyse",
-};
-
-function sourceLabel(provider: SituationExplanation["sourceRoles"][number]["provider"]): string {
-  return sourceLabels[provider] ?? provider;
-}
 
 const locationConfidenceLabels: Record<SituationExplanation["locationConfidence"], string> = {
   official: "Offisiell plassering",
@@ -70,7 +45,7 @@ export function SituationExplanationPanel({ explanation }: Props) {
         <ul>
           {explanation.sourceRoles.map((sourceRole) => (
             <li key={`${sourceRole.provider}:${sourceRole.role}`}>
-              <strong>{sourceLabel(sourceRole.provider)}</strong>: {roleLabels[sourceRole.role]}
+              <strong>{sourceIdLabel(sourceRole.provider)}</strong>: {roleLabels[sourceRole.role]}
             </li>
           ))}
         </ul>
@@ -80,7 +55,7 @@ export function SituationExplanationPanel({ explanation }: Props) {
       </p>
       {contextOnlyRoles.length ? (
         <p>
-          Kun kontekst: {contextOnlyRoles.map((role) => sourceLabel(role.provider)).join(", ")}{" "}
+          Kun kontekst: {contextOnlyRoles.map((role) => sourceIdLabel(role.provider)).join(", ")}{" "}
           brukes til situasjonsforståelse, ikke som årsak til at hendelsen ble opprettet.
         </p>
       ) : null}

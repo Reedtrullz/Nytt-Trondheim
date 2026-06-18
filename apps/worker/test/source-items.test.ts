@@ -17,6 +17,13 @@ describe("worker source item mapping", () => {
       category: "Hendelser",
       places: ["Bymarka"],
       location: { lat: 63.4, lng: 10.3, label: "Bymarka" },
+      coverageBundle: {
+        id: "coverage:test",
+        kind: "incident",
+        confidence: "high",
+        reason: "Samme hendelse på tvers av kilder",
+        generatedAt: "2026-06-18T10:00:00.000Z",
+      },
     };
 
     const item = articleSourceItemInput(article, "2026-05-28T10:01:00.000Z");
@@ -33,6 +40,8 @@ describe("worker source item mapping", () => {
     });
     expect(item.id).toMatch(/^source:/);
     expect(item.captureHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(item.rawPayload).not.toHaveProperty("coverageBundle");
+    expect(item.normalizedPayload).not.toHaveProperty("coverageBundle");
 
     const municipalityItem = articleSourceItemInput(
       { ...article, source: "trondheim_kommune", sourceLabel: "Trondheim kommune" },

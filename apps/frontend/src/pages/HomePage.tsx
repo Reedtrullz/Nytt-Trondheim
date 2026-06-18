@@ -102,6 +102,11 @@ function SituationBanner({
 }
 
 function sourceClusterLabel(group: HomeArticleGroup): string {
+  if (group.bundle?.reason) {
+    return group.sourceLabels.length > 1
+      ? `${group.sourceLabels.length} kilder · ${group.bundle.reason.toLocaleLowerCase("nb")}`
+      : `${group.articles.length} oppdateringer · ${group.bundle.reason.toLocaleLowerCase("nb")}`;
+  }
   if (group.sourceLabels.length > 1) return `${group.sourceLabels.length} kilder dekker samme sak`;
   return `${group.articles.length} oppdateringer samlet`;
 }
@@ -389,7 +394,9 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const { scope, category, q: query } = filters;
   const [articles, setArticles] = useState(initialData.articles);
   const [nextCursor, setNextCursor] = useState<string>();
-  const [situations, setSituations] = useState<BootstrapPayload["situations"]>([]);
+  const [situations, setSituations] = useState<BootstrapPayload["situations"]>(
+    initialData.situations,
+  );
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();

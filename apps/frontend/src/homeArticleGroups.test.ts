@@ -1,6 +1,6 @@
 import type { Article } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
-import { groupHomeArticles } from "./homeArticleGroups.js";
+import { annotateArticleCoverageBundles, groupHomeArticles } from "./homeArticleGroups.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -784,6 +784,211 @@ describe("home article grouping", () => {
     expect(groups.map((group) => group.primary.id)).toEqual([
       "rosenborg-trener-topic",
       "rosenborg-kamp",
+    ]);
+  });
+
+  it("annotates same-topic coverage with durable bundle metadata", () => {
+    const annotated = annotateArticleCoverageBundles(
+      [
+        article({
+          id: "vg-freyr-kan-bli",
+          source: "vg",
+          sourceLabel: "VG",
+          title: "Medier: Freyr Alexandersson kan bli ny Rosenborg-trener",
+          excerpt: "Islendingen er aktuell for trenerjobben i Rosenborg.",
+          publishedAt: "2026-06-18T13:57:00.000Z",
+          category: "Sport",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+        article({
+          id: "adressa-rbk-trener",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Han kan bli RBK-trener",
+          excerpt: "Freyr Alexandersson har vært i konkrete samtaler med Rosenborg.",
+          publishedAt: "2026-06-18T13:50:00.000Z",
+          category: "Sport",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+      ],
+      "2026-06-18T14:00:00.000Z",
+    );
+
+    expect(annotated[0]?.coverageBundle).toMatchObject({
+      kind: "topic",
+      confidence: "high",
+      reason: "Samme nyhetstema",
+      generatedAt: "2026-06-18T14:00:00.000Z",
+    });
+    expect(annotated[1]?.coverageBundle?.id).toBe(annotated[0]?.coverageBundle?.id);
+  });
+
+  it("does not mark football club Brann topic coverage as incident coverage", () => {
+    const annotated = annotateArticleCoverageBundles(
+      [
+        article({
+          id: "vg-freyr-hovedtrener",
+          source: "vg",
+          sourceLabel: "VG",
+          title: "Freyr Alexandersson blir ny hovedtrener i Rosenborg",
+          excerpt:
+            "For bare to og en halv uke siden var han ferdig i Brann. I dag ble han presentert som Rosenborgs nye trener.",
+          publishedAt: "2026-06-18T07:34:00.000Z",
+          category: "Sport",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+        article({
+          id: "adressa-rbk-trener",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Han kan bli RBK-trener",
+          excerpt: "Freyr Alexandersson har vært i konkrete samtaler med Rosenborg.",
+          publishedAt: "2026-06-18T07:20:00.000Z",
+          category: "Sport",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+      ],
+      "2026-06-18T08:00:00.000Z",
+    );
+
+    expect(annotated[0]?.coverageBundle).toMatchObject({
+      kind: "topic",
+      reason: "Samme nyhetstema",
+    });
+  });
+
+  it("keeps generated bundle ids stable when another provider joins later", () => {
+    const originalCoverage = [
+      article({
+        id: "vg-freyr-kan-bli",
+        source: "vg",
+        sourceLabel: "VG",
+        title: "Medier: Freyr Alexandersson kan bli ny Rosenborg-trener",
+        excerpt: "Islendingen er aktuell for trenerjobben i Rosenborg.",
+        publishedAt: "2026-06-18T13:57:00.000Z",
+        category: "Sport",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "adressa-rbk-trener",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Han kan bli RBK-trener",
+        excerpt: "Freyr Alexandersson har vært i konkrete samtaler med Rosenborg.",
+        publishedAt: "2026-06-18T13:50:00.000Z",
+        category: "Sport",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+    ];
+    const firstBundleId = annotateArticleCoverageBundles(
+      originalCoverage,
+      "2026-06-18T14:00:00.000Z",
+    )[0]?.coverageBundle?.id;
+
+    const expandedBundleId = annotateArticleCoverageBundles(
+      [
+        ...originalCoverage,
+        article({
+          id: "dagbladet-rbk",
+          source: "dagbladet",
+          sourceLabel: "Dagbladet",
+          title: "Rosenborg nær ny trener",
+          excerpt: "Freyr Alexandersson er aktuell som ny hovedtrener i Rosenborg.",
+          publishedAt: "2026-06-18T14:03:00.000Z",
+          category: "Sport",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+      ],
+      "2026-06-18T14:10:00.000Z",
+    )[0]?.coverageBundle?.id;
+
+    expect(expandedBundleId).toBe(firstBundleId);
+  });
+
+  it("uses persisted coverage bundle ids as the strongest grouping key", () => {
+    const bundle = {
+      id: "coverage:topic:manual",
+      kind: "topic" as const,
+      confidence: "high" as const,
+      reason: "Samme nyhetstema",
+      generatedAt: "2026-06-18T14:00:00.000Z",
+    };
+    const groups = groupHomeArticles([
+      article({
+        id: "topic-follow-up",
+        source: "vg",
+        sourceLabel: "VG",
+        title: "Ny trener presentert",
+        excerpt: "Kort oppdatering fra Lerkendal.",
+        publishedAt: "2026-06-18T14:05:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+        coverageBundle: bundle,
+      }),
+      article({
+        id: "topic-analysis",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Kommenterer valget",
+        excerpt: "Analyse fra sportsredaksjonen.",
+        publishedAt: "2026-06-18T14:00:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+        coverageBundle: bundle,
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.id).toBe("coverage:topic:manual");
+    expect(groups[0]?.bundle?.reason).toBe("Samme nyhetstema");
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "topic-follow-up",
+      "topic-analysis",
+    ]);
+  });
+
+  it("does not let stale persisted bundle ids overmerge distant articles", () => {
+    const bundle = {
+      id: "coverage:stale-manual",
+      kind: "topic" as const,
+      confidence: "high" as const,
+      reason: "Samme nyhetstema",
+      generatedAt: "2026-06-18T14:00:00.000Z",
+    };
+    const groups = groupHomeArticles([
+      article({
+        id: "current-topic",
+        title: "Ny trener presentert",
+        excerpt: "Kort oppdatering fra Lerkendal.",
+        publishedAt: "2026-06-18T14:05:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+        coverageBundle: bundle,
+      }),
+      article({
+        id: "old-topic",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Gammel kommentar om RBK",
+        excerpt: "En eldre analyse fra sportsredaksjonen.",
+        publishedAt: "2026-06-08T14:00:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+        coverageBundle: bundle,
+      }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.articles.map((item) => item.id))).toEqual([
+      ["current-topic"],
+      ["old-topic"],
     ]);
   });
 });

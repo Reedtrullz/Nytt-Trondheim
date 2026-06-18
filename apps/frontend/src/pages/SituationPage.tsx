@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { PrivateMapFeatureInput, SituationWorkspace, SourceItem } from "@nytt/shared";
+import {
+  sourceIdLabel,
+  sourceItemKindLabel,
+  sourceItemRelationshipLabel,
+  sourceReliabilityTierLabel,
+  type PrivateMapFeatureInput,
+  type SituationWorkspace,
+  type SourceItem,
+} from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
@@ -16,6 +24,17 @@ function formatTime(value: string) {
     minute: "2-digit",
     timeZone: "Europe/Oslo",
   }).format(new Date(value));
+}
+
+function sourceItemMeta(item: SourceItem): string {
+  return [
+    sourceIdLabel(item.provider),
+    sourceItemKindLabel(item.kind),
+    sourceReliabilityTierLabel(item.reliabilityTier),
+    item.relationship ? sourceItemRelationshipLabel(item.relationship) : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function SituationPage() {
@@ -447,9 +466,7 @@ export function SituationPage() {
                   return (
                     <li key={item.id}>
                       <strong>{item.title ?? item.externalId ?? item.id}</strong>
-                      <span>
-                        {item.provider} · {item.kind} · {item.reliabilityTier}
-                      </span>
+                      <span>{sourceItemMeta(item)}</span>
                       {item.summary ? <p>{item.summary}</p> : null}
                       {originalUrl ? (
                         <a href={originalUrl} target="_blank" rel="noreferrer noopener">

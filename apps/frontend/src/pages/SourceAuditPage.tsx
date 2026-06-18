@@ -1,10 +1,14 @@
 import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type {
+import {
+  provenanceLabels,
+  sourceIdLabel,
+  type Provenance,
+  type SourceStaleDataAlertStatus,
   IncidentSourceTraceabilitySummary,
-  SourceAuditSourceSummary,
-  SourceAuditWorkspaceResponse,
-  SourceCollectorRun,
+  type SourceAuditSourceSummary,
+  type SourceAuditWorkspaceResponse,
+  type SourceCollectorRun,
 } from "@nytt/shared";
 import { api } from "../api.js";
 import {
@@ -121,6 +125,19 @@ function reliabilityLabel(level: SourceAuditSourceSummary["reliability"][number]
     unknown: "Ukjent",
   };
   return labels[level];
+}
+
+function provenanceLabel(provenance: string): string {
+  return provenanceLabels[provenance as Provenance] ?? provenance;
+}
+
+function sourceAuditAlertStatusLabel(status: SourceStaleDataAlertStatus | string): string {
+  const labels: Record<SourceStaleDataAlertStatus, string> = {
+    open: "Åpen",
+    acknowledged: "Kvittert",
+    resolved: "Løst",
+  };
+  return labels[status as SourceStaleDataAlertStatus] ?? status;
 }
 
 function runStatusLabel(status: SourceCollectorRun["status"]) {
@@ -240,7 +257,7 @@ function SourceAuditDrawer({
         </div>
         <div>
           <dt>Proveniens</dt>
-          <dd>{source.provenance}</dd>
+          <dd>{provenanceLabel(source.provenance)}</dd>
         </div>
         <div>
           <dt>Pålitelighet</dt>
@@ -262,7 +279,7 @@ function SourceAuditDrawer({
             {alerts.map((alert) => (
               <article key={alert.id} className={`alert-${alert.severity}`}>
                 <strong>{alert.severity === "critical" ? "Kritisk" : "Tilsyn"}</strong>
-                <span>{alert.status === "open" ? "Åpen" : alert.status}</span>
+                <span>{sourceAuditAlertStatusLabel(alert.status)}</span>
                 <small>{alert.message}</small>
               </article>
             ))}
@@ -594,7 +611,7 @@ export function SourceAuditDashboard({
                     <div className="source-audit-trace-links">
                       {trace.links.slice(0, 5).map((link, index) => (
                         <span key={`${trace.situationId}-${link.source}-${index}`}>
-                          {link.source} · {traceRelationshipLabel(link.relationship)}
+                          {sourceIdLabel(link.source)} · {traceRelationshipLabel(link.relationship)}
                         </span>
                       ))}
                     </div>

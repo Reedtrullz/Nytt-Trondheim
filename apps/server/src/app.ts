@@ -973,7 +973,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.put("/api/saved/:articleId", async (req, res, next) => {
     try {
-      await store.setSaved(req.params.articleId, Boolean(req.body?.saved), currentLogin(req));
+      const saved = await store.setSaved(
+        req.params.articleId,
+        Boolean(req.body?.saved),
+        currentLogin(req),
+      );
+      if (!saved) return void res.status(404).json({ error: "Saken finnes ikke." });
       res.status(204).end();
     } catch (error) {
       next(error);
@@ -982,7 +987,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.put("/api/saved/articles/:articleId", async (req, res, next) => {
     try {
-      await store.setSaved(req.params.articleId, true, currentLogin(req));
+      const saved = await store.setSaved(req.params.articleId, true, currentLogin(req));
+      if (!saved) return void res.status(404).json({ error: "Saken finnes ikke." });
       res.status(204).end();
     } catch (error) {
       next(error);
@@ -991,7 +997,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.delete("/api/saved/:articleId", async (req, res, next) => {
     try {
-      await store.setSaved(req.params.articleId, false, currentLogin(req));
+      const saved = await store.setSaved(req.params.articleId, false, currentLogin(req));
+      if (!saved) return void res.status(404).json({ error: "Saken finnes ikke." });
       res.status(204).end();
     } catch (error) {
       next(error);
@@ -1000,7 +1007,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.delete("/api/saved/articles/:articleId", async (req, res, next) => {
     try {
-      await store.setSaved(req.params.articleId, false, currentLogin(req));
+      const saved = await store.setSaved(req.params.articleId, false, currentLogin(req));
+      if (!saved) return void res.status(404).json({ error: "Saken finnes ikke." });
       res.status(204).end();
     } catch (error) {
       next(error);
@@ -1180,7 +1188,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.put("/api/situations/:id/saved", async (req, res, next) => {
     try {
-      await store.setSavedSituation(req.params.id, true, currentLogin(req));
+      const saved = await store.setSavedSituation(req.params.id, true, currentLogin(req));
+      if (!saved) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.status(204).end();
     } catch (error) {
       next(error);
@@ -1189,7 +1198,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.delete("/api/situations/:id/saved", async (req, res, next) => {
     try {
-      await store.setSavedSituation(req.params.id, false, currentLogin(req));
+      const saved = await store.setSavedSituation(req.params.id, false, currentLogin(req));
+      if (!saved) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.status(204).end();
     } catch (error) {
       next(error);
@@ -1266,40 +1276,54 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.patch("/api/situations/:id/features/:featureId", async (req, res, next) => {
-    try {
-      const input = privateAnnotationUpdateRequestSchema.parse(req.body);
-      const login = currentLogin(req);
-      const situationId = String(req.params.id);
-      const invalidIds = await unlinkedPrivateAnnotationSourceItemIds(
-        situationId,
-        login,
-        input.sourceItemIds,
-      );
-      if (invalidIds.length) {
-        return void res.status(400).json({
-          error:
-            "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
-        });
+  app.patch(
+    "/api/situations/:id/features/:featureId",
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        const input = privateAnnotationUpdateRequestSchema.parse(req.body);
+        const login = currentLogin(req);
+        const situationId = String(req.params.id);
+        const invalidIds = await unlinkedPrivateAnnotationSourceItemIds(
+          situationId,
+          login,
+          input.sourceItemIds,
+        );
+        if (invalidIds.length) {
+          return void res.status(400).json({
+            error:
+              "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
+          });
+        }
+        const feature = await store.updatePrivateFeature(
+          situationId,
+          String(req.params.featureId),
+          input,
+        );
+        if (!feature) return void res.status(404).json({ error: "Markeringen finnes ikke." });
+        res.json(feature);
+      } catch (error) {
+        next(error);
       }
-      const feature = await store.updatePrivateFeature(situationId, req.params.featureId, input);
-      if (!feature) return void res.status(404).json({ error: "Markeringen finnes ikke." });
-      res.json(feature);
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
-  app.delete("/api/situations/:id/features/:featureId", async (req, res, next) => {
-    try {
-      if (!(await store.deletePrivateFeature(req.params.id, req.params.featureId))) {
-        return void res.status(404).json({ error: "Markeringen finnes ikke." });
+  app.delete(
+    "/api/situations/:id/features/:featureId",
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        if (
+          !(await store.deletePrivateFeature(String(req.params.id), String(req.params.featureId)))
+        ) {
+          return void res.status(404).json({ error: "Markeringen finnes ikke." });
+        }
+        res.status(204).end();
+      } catch (error) {
+        next(error);
       }
-      res.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
   app.post("/api/situations/:id/tasks", ensureSituationExists, async (req, res, next) => {
     try {
@@ -1310,16 +1334,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.patch("/api/situations/:id/tasks/:taskId", async (req, res, next) => {
+  app.patch("/api/situations/:id/tasks/:taskId", ensureSituationExists, async (req, res, next) => {
     try {
+      const situationId = String(req.params.id);
+      const taskId = String(req.params.taskId);
       const task =
         typeof req.body?.text === "string"
-          ? await store.updateTaskText(
-              req.params.id,
-              req.params.taskId,
-              taskInputSchema.parse(req.body).text,
-            )
-          : await store.toggleTask(req.params.id, req.params.taskId, Boolean(req.body?.completed));
+          ? await store.updateTaskText(situationId, taskId, taskInputSchema.parse(req.body).text)
+          : await store.toggleTask(situationId, taskId, Boolean(req.body?.completed));
       if (!task) {
         res.status(404).json({ error: "Oppgaven finnes ikke." });
         return;
@@ -1330,9 +1352,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.delete("/api/situations/:id/tasks/:taskId", async (req, res, next) => {
+  app.delete("/api/situations/:id/tasks/:taskId", ensureSituationExists, async (req, res, next) => {
     try {
-      if (!(await store.deleteTask(req.params.id, req.params.taskId))) {
+      if (!(await store.deleteTask(String(req.params.id), String(req.params.taskId)))) {
         return void res.status(404).json({ error: "Oppgaven finnes ikke." });
       }
       res.status(204).end();
@@ -1350,10 +1372,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.patch("/api/situations/:id/notes/:noteId", async (req, res, next) => {
+  app.patch("/api/situations/:id/notes/:noteId", ensureSituationExists, async (req, res, next) => {
     try {
       const { text } = noteInputSchema.parse(req.body);
-      const note = await store.updateNote(req.params.id, req.params.noteId, text);
+      const note = await store.updateNote(String(req.params.id), String(req.params.noteId), text);
       if (!note) return void res.status(404).json({ error: "Notatet finnes ikke." });
       res.json(note);
     } catch (error) {
@@ -1361,9 +1383,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.delete("/api/situations/:id/notes/:noteId", async (req, res, next) => {
+  app.delete("/api/situations/:id/notes/:noteId", ensureSituationExists, async (req, res, next) => {
     try {
-      if (!(await store.deleteNote(req.params.id, req.params.noteId))) {
+      if (!(await store.deleteNote(String(req.params.id), String(req.params.noteId)))) {
         return void res.status(404).json({ error: "Notatet finnes ikke." });
       }
       res.status(204).end();

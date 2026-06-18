@@ -189,6 +189,39 @@ describe("Trondheim relevance classification", () => {
     ).toHaveLength(0);
   });
 
+  it("does not open a fire situation from football club Brann coverage", () => {
+    const common = {
+      publishedAt: "2026-06-18T14:00:00Z",
+      scope: "trondheim" as const,
+      category: "Sport" as const,
+      places: ["Lerkendal", "Trondheim"],
+      location: { lat: 63.4125, lng: 10.405, label: "Lerkendal" },
+    };
+
+    expect(
+      detectPreliminarySituations([
+        {
+          ...common,
+          id: "rosenborg-brann-one",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Rosenborg møter Brann på Lerkendal",
+          excerpt: "Kampen spilles søndag kveld.",
+          url: "https://example.test/brann-one",
+        },
+        {
+          ...common,
+          id: "rosenborg-brann-two",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Brann kommer til Trondheim",
+          excerpt: "Rosenborg gjør seg klar til hjemmekamp mot Brann.",
+          url: "https://example.test/brann-two",
+        },
+      ]),
+    ).toHaveLength(0);
+  });
+
   it("does not turn unrelated building and burglary reporting into traffic disruption", () => {
     const common = {
       publishedAt: "2026-05-27T14:00:00Z",

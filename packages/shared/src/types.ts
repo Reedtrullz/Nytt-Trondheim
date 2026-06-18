@@ -106,6 +106,18 @@ export interface Article {
   saved?: boolean;
   situationId?: string;
   imageUrl?: string;
+  coverageBundle?: ArticleCoverageBundle;
+}
+
+export type ArticleCoverageBundleKind = "incident" | "topic" | "update";
+export type ArticleCoverageBundleConfidence = "high" | "medium";
+
+export interface ArticleCoverageBundle {
+  id: string;
+  kind: ArticleCoverageBundleKind;
+  confidence: ArticleCoverageBundleConfidence;
+  reason: string;
+  generatedAt: string;
 }
 
 export interface EvidenceItem {

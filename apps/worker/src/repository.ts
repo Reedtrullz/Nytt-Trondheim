@@ -71,9 +71,13 @@ export class WorkerRepository {
       const updated = await this.pool.query(
         `UPDATE articles SET canonical_url=$2, dedupe_key=$3, source=$4, published_at=$5,
          scope=$6, category=$7,
-         payload=CASE WHEN payload ? 'situationId'
-           THEN $8::jsonb || jsonb_build_object('situationId', payload->'situationId')
-           ELSE $8::jsonb END
+         payload=$8::jsonb
+           || CASE WHEN payload ? 'situationId'
+             THEN jsonb_build_object('situationId', payload->'situationId')
+             ELSE '{}'::jsonb END
+           || CASE WHEN NOT ($8::jsonb ? 'coverageBundle') AND payload ? 'coverageBundle'
+             THEN jsonb_build_object('coverageBundle', payload->'coverageBundle')
+             ELSE '{}'::jsonb END
          WHERE id=$1
          AND NOT EXISTS (
            SELECT 1 FROM articles duplicate
@@ -1142,6 +1146,8 @@ function sourceItemId(provider: string, kind: string, stableKey: string): string
 }
 
 export function articleSourceItemInput(article: Article, fetchedAt: string): SourceItemInput {
+  const rawPayload = { ...article };
+  delete rawPayload.coverageBundle;
   const normalizedPayload = {
     id: article.id,
     source: article.source,
@@ -1165,7 +1171,7 @@ export function articleSourceItemInput(article: Article, fetchedAt: string): Sou
     summary: article.excerpt,
     publishedAt: article.publishedAt,
     fetchedAt,
-    rawPayload: article,
+    rawPayload,
     normalizedPayload,
     captureHash: sourceItemHash([
       article.source,

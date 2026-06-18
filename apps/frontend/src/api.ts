@@ -272,7 +272,11 @@ export const api = {
       credentials: "include",
       headers: { "X-CSRF-Token": await csrfToken() },
     });
-    if (!response.ok) throw new Error("Eksporten kunne ikke opprettes");
+    if (response.status === 401) {
+      redirectToLogin();
+      throw new ApiError("Innlogging kreves", 401);
+    }
+    if (!response.ok) throw await apiErrorFromResponse(response);
     const blob = await response.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);

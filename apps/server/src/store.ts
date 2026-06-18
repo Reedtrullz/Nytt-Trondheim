@@ -170,9 +170,9 @@ export interface Store {
   ): Promise<SourceItem | undefined>;
   unlinkSourceItem(situationId: string, sourceItemId: string, login: string): Promise<boolean>;
   listSavedArticles(login: string): Promise<Article[]>;
-  setSaved(articleId: string, saved: boolean, login: string): Promise<void>;
+  setSaved(articleId: string, saved: boolean, login: string): Promise<boolean>;
   listSituations(filters: SituationFilters, login: string): Promise<SituationPage>;
-  setSavedSituation(situationId: string, saved: boolean, login: string): Promise<void>;
+  setSavedSituation(situationId: string, saved: boolean, login: string): Promise<boolean>;
   setSituationStatus(
     id: string,
     status: Situation["status"],
@@ -1752,9 +1752,11 @@ export class MemoryStore implements Store {
     return clone(this.articles.filter((article) => article.saved));
   }
 
-  async setSaved(articleId: string, saved: boolean): Promise<void> {
+  async setSaved(articleId: string, saved: boolean): Promise<boolean> {
     const article = this.articles.find((item) => item.id === articleId);
-    if (article) article.saved = saved;
+    if (!article) return false;
+    article.saved = saved;
+    return true;
   }
 
   async listSituations(filters: SituationFilters): Promise<SituationPage> {
@@ -1783,9 +1785,11 @@ export class MemoryStore implements Store {
     };
   }
 
-  async setSavedSituation(situationId: string, saved: boolean): Promise<void> {
+  async setSavedSituation(situationId: string, saved: boolean): Promise<boolean> {
+    if (!this.situations.has(situationId)) return false;
     if (saved) this.savedSituations.add(situationId);
     else this.savedSituations.delete(situationId);
+    return true;
   }
 
   async setSituationStatus(
@@ -2531,7 +2535,12 @@ export class PgStore implements Store {
     return result.rows.map((row) => ({ ...row.payload, saved: true }));
   }
 
-  async setSaved(articleId: string, saved: boolean, login: string) {
+  async setSaved(articleId: string, saved: boolean, login: string): Promise<boolean> {
+    const exists = await this.pool.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM articles WHERE id=$1) AS exists",
+      [articleId],
+    );
+    if (!exists.rows[0]?.exists) return false;
     if (saved) {
       await this.pool.query(
         "INSERT INTO saved_articles (github_login, article_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
@@ -2543,6 +2552,7 @@ export class PgStore implements Store {
         articleId,
       ]);
     }
+    return true;
   }
 
   async listSituations(filters: SituationFilters, login: string): Promise<SituationPage> {
@@ -2587,7 +2597,12 @@ export class PgStore implements Store {
     };
   }
 
-  async setSavedSituation(situationId: string, saved: boolean, login: string) {
+  async setSavedSituation(situationId: string, saved: boolean, login: string): Promise<boolean> {
+    const exists = await this.pool.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM situations WHERE id=$1) AS exists",
+      [situationId],
+    );
+    if (!exists.rows[0]?.exists) return false;
     if (saved) {
       await this.pool.query(
         "INSERT INTO saved_situations (github_login, situation_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
@@ -2599,6 +2614,7 @@ export class PgStore implements Store {
         [login, situationId],
       );
     }
+    return true;
   }
 
   async setSituationStatus(

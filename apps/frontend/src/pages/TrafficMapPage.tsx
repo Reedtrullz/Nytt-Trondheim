@@ -778,7 +778,7 @@ export function TrafficMapPage() {
               onSelectImpact={setSelectedCorridorId}
             />
           ) : null}
-          {visibleContextLayers.publicTransportDisruptions ? (
+          {publicTransportVisible ? (
             <PublicTransportSummary
               payload={publicTransportDisplayData}
               loading={publicTransportLoading}
