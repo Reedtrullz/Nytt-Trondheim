@@ -53,6 +53,13 @@ describe("Trondheim relevance classification", () => {
     expect(extractPlaces("Brann i Bymarka i Trondheim")).toEqual(["Bymarka", "Trondheim"]);
   });
 
+  it("extracts Trondheim sentrum as a specific place without accepting bare sentrum", () => {
+    expect(detectScope("Tyveri i Trondheim sentrum")).toBe("trondheim");
+    expect(extractPlaces("Tyveri i Trondheim sentrum")).toEqual(["Sentrum", "Trondheim"]);
+    expect(detectScope("Tyveri i Oslo sentrum")).toBeUndefined();
+    expect(extractPlaces("Tyveri i Oslo sentrum")).toEqual([]);
+  });
+
   it("opens only multi-source preliminary incident candidates", () => {
     const base: Article = {
       id: "one",

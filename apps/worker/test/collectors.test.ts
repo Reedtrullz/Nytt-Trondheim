@@ -47,6 +47,25 @@ describe("RSS collection policy", () => {
     expect(articles[0]?.category).toBe("Hendelser");
   });
 
+  it("keeps Trondheim sentrum as a specific RSS place for grouping and geocoding", async () => {
+    const sentrumRss = `<?xml version="1.0"?><rss><channel>
+      <item><title>Tyveri i Trondheim sentrum</title><description>Politiet undersøker saken.</description>
+      <link>https://example.test/sentrum</link><pubDate>Thu, 18 Jun 2026 05:34:00 GMT</pubDate></item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      { id: "nrk", label: "NRK Trøndelag", url: "https://example.test/rss" },
+      async () => new Response(sentrumRss, { status: 200 }),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Sentrum", "Trondheim"],
+    });
+  });
+
   it("deduplicates title/time variants consistently within a source", () => {
     const base = {
       id: "id",

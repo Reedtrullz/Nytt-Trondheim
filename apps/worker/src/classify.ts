@@ -44,6 +44,7 @@ const trondheimTerms = [
   "st olavs",
   "sverresborg",
   "tiller",
+  "trondheim sentrum",
   "trondheim",
   "trondheim s",
   "tyholt",
@@ -97,12 +98,14 @@ const displayLabels: Record<string, string> = {
   "ski-vm": "Ski-VM",
   "st olavs": "St. Olavs",
   "st. olavs": "St. Olavs",
+  "trondheim sentrum": "Sentrum",
   "trondheim s": "Trondheim S",
 };
 
 const placeAliases = new Map<string, string>([
   ["kroppanbrua", "Kroppan Bru"],
   ["kroppan bru", "Kroppan Bru"],
+  ["trondheim sentrum", "Sentrum"],
 ]);
 
 const categoryRules: Array<[ArticleCategory, string[]]> = [

@@ -147,6 +147,36 @@ describe("home article grouping", () => {
     ]);
   });
 
+  it("consolidates city-center RSS reporting with a Sentrum Politiloggen thread", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "nrk-sentrum",
+        title: "Tyveri i Trondheim sentrum",
+        excerpt: "Politiet undersøker et tyveri i Trondheim sentrum.",
+        publishedAt: "2026-06-18T05:34:00.000Z",
+        places: ["Sentrum", "Trondheim"],
+        location: { lat: 63.43209, lng: 10.3991, label: "Trondheim sentrum" },
+      }),
+      article({
+        id: "politiloggen-sentrum",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Tyveri: Trondheim, Sentrum",
+        excerpt: "Politiet har opprettet sak etter melding om tyveri i Sentrum.",
+        publishedAt: "2026-06-18T05:31:00.000Z",
+        places: ["Sentrum", "Trondheim"],
+        location: { lat: 63.43209, lng: 10.3991, label: "Trondheim sentrum" },
+        situationId: "politiloggen-sentrum",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "nrk-sentrum",
+      "politiloggen-sentrum",
+    ]);
+  });
+
   it("does not consolidate unrelated city-wide stories just because both mention Trondheim", () => {
     const groups = groupHomeArticles([
       article({
