@@ -10,7 +10,46 @@ export interface HomeArticleGroup {
 const maxGroupAgeMs = 24 * 60 * 60 * 1000;
 const crossSourceIncidentWindowMs = 8 * 60 * 60 * 1000;
 const nearDuplicateTextWindowMs = 2 * 60 * 60 * 1000;
+const genericPlaceIncidentSignalRules = new Map<
+  string,
+  { windowMs: number; minBodyOverlap: number; minDistinctiveOverlap: number }
+>([
+  ["slagsmal", { windowMs: 60 * 60 * 1000, minBodyOverlap: 1, minDistinctiveOverlap: 1 }],
+  [
+    "water_rescue",
+    { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 2, minDistinctiveOverlap: 1 },
+  ],
+  ["brann", { windowMs: nearDuplicateTextWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 1 }],
+  [
+    "innbrudd",
+    { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 2 },
+  ],
+  ["tyveri", { windowMs: nearDuplicateTextWindowMs, minBodyOverlap: 4, minDistinctiveOverlap: 2 }],
+]);
 const genericPlaceTokens = new Set(["trondheim", "trøndelag", "trondelag"]);
+const genericIncidentTokens = new Set([
+  ...genericPlaceTokens,
+  "badeulykke",
+  "brann",
+  "innbrudd",
+  "innbruddsforsøk",
+  "melding",
+  "meldinger",
+  "nødetatene",
+  "politiet",
+  "redningsaksjon",
+  "rykka",
+  "rykket",
+  "rykker",
+  "røyk",
+  "røykutvikling",
+  "slagsmål",
+  "sloss",
+  "slåss",
+  "slåssing",
+  "tyveri",
+  "ulykke",
+]);
 const stopWords = new Set([
   "alle",
   "and",
@@ -52,9 +91,14 @@ const stopWords = new Set([
 const incidentSignals: Array<[string, RegExp]> = [
   ["innbrudd", /\binnbrudd\w*/iu],
   ["tyveri", /\b(tyveri|tyvgods|tyv\w*|tjuv\w*|stj(?:e|å|a)l\w*)\b/iu],
-  ["brann", /\b(brann|røykutvikling)\b/iu],
+  ["brann", /\b(brann\w*|røyk\w*|slukk\w*)\b/iu],
   ["trafikk", /\b(trafikk|kollisjon|ulykke|påkjør\w*|bilstans)\b/iu],
   ["orden", /\b(ro og orden|ordensforstyrrelse)\b/iu],
+  ["slagsmal", /\b(slagsm[åa]l\w*|sl[åa]ss\w*|sloss\w*)\b/iu],
+  [
+    "water_rescue",
+    /\b(badeulykke\w*|drukn\w*|livl[øo]s\s+under\s+vann|hav(?:net|na)\s+under\s+vann|g[åa]tt\s+under\s+vann|under\s+vann|bading|hjerte\s*-?\s*og\s*lungeredning|redningsaksjon\b(?=.*\b(vann|bading|kyvannet)\b))/iu,
+  ],
 ];
 
 function normalizeText(value: string): string {
@@ -74,6 +118,12 @@ function tokens(value: string): Set<string> {
       .map((token) => token.trim())
       .filter((token) => token.length > 2 && !stopWords.has(token)),
   );
+}
+
+function distinctiveIncidentTokens(value: string): Set<string> {
+  const result = tokens(value);
+  genericIncidentTokens.forEach((token) => result.delete(token));
+  return result;
 }
 
 function tokenSimilarity(
@@ -128,10 +178,36 @@ function articleIncidentSignals(article: Article): Set<string> {
   );
 }
 
-function hasSharedIncidentSignal(left: Article, right: Article): boolean {
+function sharedIncidentSignals(left: Article, right: Article): Set<string> {
   const leftSignals = articleIncidentSignals(left);
-  if (leftSignals.size === 0) return false;
-  return [...articleIncidentSignals(right)].some((signal) => leftSignals.has(signal));
+  if (leftSignals.size === 0) return new Set();
+  return new Set([...articleIncidentSignals(right)].filter((signal) => leftSignals.has(signal)));
+}
+
+function hasSharedIncidentSignal(left: Article, right: Article): boolean {
+  return sharedIncidentSignals(left, right).size > 0;
+}
+
+function hasGenericPlaceIncidentMatch(
+  left: Article,
+  right: Article,
+  body: { overlap: number; score: number },
+): boolean {
+  if (!sameBroadCategory(left, right)) return false;
+  const distance = publishedDistanceMs(left, right);
+  const distinctive = tokenSimilarity(
+    distinctiveIncidentTokens(articleText(left)),
+    distinctiveIncidentTokens(articleText(right)),
+  );
+  return [...sharedIncidentSignals(left, right)].some((signal) => {
+    const rule = genericPlaceIncidentSignalRules.get(signal);
+    return Boolean(
+      rule &&
+      distance <= rule.windowMs &&
+      body.overlap >= rule.minBodyOverlap &&
+      distinctive.overlap >= rule.minDistinctiveOverlap,
+    );
+  });
 }
 
 function articlesSimilar(left: Article, right: Article): boolean {
@@ -150,6 +226,9 @@ function articlesSimilar(left: Article, right: Article): boolean {
     body.score >= 0.5 &&
     sameBroadCategory(left, right)
   ) {
+    return true;
+  }
+  if (hasGenericPlaceIncidentMatch(left, right, body)) {
     return true;
   }
 

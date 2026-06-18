@@ -220,6 +220,200 @@ describe("home article grouping", () => {
     expect(groups[0]?.sourceLabels).toEqual(["NRK Trøndelag", "Politiloggen"]);
   });
 
+  it("consolidates same fighting incident from news and Politiloggen phrasing", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "adressa-slagsmal",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Flere ungdommer i slagsmål i Trondheim",
+        excerpt: "",
+        publishedAt: "2026-06-18T10:40:00.000Z",
+        category: "Nyheter",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "nrk-slassing",
+        title: "Rykker ut til slåssing",
+        excerpt:
+          "Politiet er på vei til Saupstad i Trondheim hvor noen ungdommer slåss med hverandre. Det er ikke meldt om at noen er skadet.",
+        publishedAt: "2026-06-18T10:39:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "politiloggen-saupstad",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Ro og orden: Trondheim, Saupstad",
+        excerpt:
+          "Vi er på veg til Saupstad etter å ha fått melding om ungdommer som sloss. Det er ikke meldt om noen skadde. Slagsmålet har opphørt.",
+        publishedAt: "2026-06-18T10:37:00.000Z",
+        places: ["Trondheim", "Saupstad"],
+        location: { lat: 63.363, lng: 10.356, label: "Saupstad" },
+        situationId: "politiloggen-saupstad",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "adressa-slagsmal",
+      "nrk-slassing",
+      "politiloggen-saupstad",
+    ]);
+    expect(groups[0]?.sourceLabels).toEqual(["Adresseavisen", "NRK Trøndelag", "Politiloggen"]);
+  });
+
+  it("consolidates Kyvannet drowning and lifeless-under-water updates", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "dagbladet-badeulykke",
+        source: "dagbladet",
+        sourceLabel: "Dagbladet",
+        title: "Mann død i badeulykke",
+        excerpt:
+          "En mann i 20-åra har mistet livet i en badeulykke i Trondheim natt til onsdag. Hendelsen framstår som en ulykke, sier politiet.",
+        publishedAt: "2026-06-18T08:50:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "nrk-kyvannet",
+        title: "Redningsaksjon ved Kyvannet i Trondheim i natt",
+        excerpt:
+          "En person ble i natt henta opp av Kyvannet i Trondheim. Vedkommende skal ha havna under vann i forbindelse med bading og ble lokalisert av dykkere fra brannvesenet. Det ble starta hjerte- og lungeredning på stedet.",
+        publishedAt: "2026-06-18T04:03:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "adressa-livlos",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Person funnet livløs under vann i Trondheim",
+        excerpt:
+          "Nødetatene rykket natt til onsdag ut til Kyvannet i Trondheim etter melding om at en person var havnet under vann. Det ble gitt hjerte- og lungeredning, og politiet omtaler det som en alvorlig ulykke.",
+        publishedAt: "2026-06-18T02:05:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "politiloggen-kyvannet",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Redning: Trondheim, Kyvannet",
+        excerpt:
+          "Klokken 02:39 natt til onsdag ble det iverksatt en redningsaksjon ved Kyvannet. Meldingen var at en person hadde gått under vann i forbindelse med bading.",
+        publishedAt: "2026-06-18T01:31:00.000Z",
+        places: ["Trondheim", "Kyvannet"],
+        location: { lat: 63.419, lng: 10.333, label: "Kyvannet" },
+        situationId: "politiloggen-kyvannet",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "dagbladet-badeulykke",
+      "nrk-kyvannet",
+      "adressa-livlos",
+      "politiloggen-kyvannet",
+    ]);
+    expect(groups[0]?.sourceLabels).toEqual([
+      "Dagbladet",
+      "NRK Trøndelag",
+      "Adresseavisen",
+      "Politiloggen",
+    ]);
+  });
+
+  it("consolidates smoke-development updates when the specific place is only in text", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "nrk-flatåsen-røykutvikling",
+        title: "Rykka til Flatåsen etter røykutvikling",
+        excerpt:
+          "Nødetatene har rykka til Flatåsen i Trondheim etter meldinger om røyk fra en bygning. Det pågår evakuering fra leilighetsbygget. Få minutter senere opplyser politiet at brannen er slukka. Sannsynlig årsak er arbeid på stedet.",
+        publishedAt: "2026-06-18T08:50:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "nrk-flatåsen",
+        title: "Rykker til Flatåsen",
+        excerpt:
+          "Nødetatene har rykka til Flatåsen i Trondheim etter meldinger om røyk fra en bygning.",
+        publishedAt: "2026-06-18T08:50:00.000Z",
+        category: "Nyheter",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "politiloggen-flatåsen",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Brann: Trondheim",
+        excerpt:
+          "Nødetatene rykker kl 1046 ut til Øvre Flatåsveg 9a i Trondheim i forbindelse med melding om røyk fra bygning. Brannen er slukket. Sannsynlig årsak er arbeid på stedet.",
+        publishedAt: "2026-06-18T08:48:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+        situationId: "politiloggen-flatåsen",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "nrk-flatåsen-røykutvikling",
+      "nrk-flatåsen",
+      "politiloggen-flatåsen",
+    ]);
+    expect(groups[0]?.sourceLabels).toEqual(["NRK Trøndelag", "Politiloggen"]);
+  });
+
+  it("consolidates burglary-at-car-dealer updates with generic structured places", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "nrk-bilforhandler",
+        title: "Flere innbruddsforsøk hos bilforhandler",
+        excerpt:
+          "Politiet har vært hos Melhus bil på Tunga i Trondheim for å gjøre undersøkelser etter innbruddsforsøk i flere biler. I løpet av natta har noen prøvd å bryte seg inn i flere biler på tomta til forhandleren.",
+        publishedAt: "2026-06-18T08:30:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "nrk-skader",
+        title: "Skader for store summer hos bilforhandler i Trondheim",
+        excerpt:
+          "Politiet har vært hos Melhus bil på Tunga i Trondheim for å gjøre undersøkelser etter innbruddsforsøk i flere biler. Ifølge bedriften vil det bli dyrt å rette opp i skaden som er gjort.",
+        publishedAt: "2026-06-18T08:30:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "politiloggen-bilforhandler",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Innbrudd: Trondheim",
+        excerpt:
+          "En politipatrulje er på Melhus bil på Tunga i Trondheim for åstedsundersøkelser. Det er i løpet av natta vært innbruddsforsøk i flere biler på tomta til forhandleren.",
+        publishedAt: "2026-06-18T08:27:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+        situationId: "politiloggen-bilforhandler",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "nrk-skader",
+      "nrk-bilforhandler",
+      "politiloggen-bilforhandler",
+    ]);
+    expect(groups[0]?.sourceLabels).toEqual(["NRK Trøndelag", "Politiloggen"]);
+  });
+
   it("does not consolidate unrelated city-wide stories just because both mention Trondheim", () => {
     const groups = groupHomeArticles([
       article({
@@ -246,5 +440,34 @@ describe("home article grouping", () => {
 
     expect(groups).toHaveLength(2);
     expect(groups.map((group) => group.primary.id)).toEqual(["school-budget", "concert-update"]);
+  });
+
+  it("does not consolidate generic incident-keyword stories without a distinctive shared clue", () => {
+    const groups = groupHomeArticles([
+      article({
+        id: "generic-innbrudd-news",
+        title: "Innbrudd i Trondheim",
+        excerpt: "Politiet undersøker et innbrudd i Trondheim.",
+        publishedAt: "2026-06-18T07:00:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+      article({
+        id: "generic-innbrudd-log",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Innbrudd: Trondheim",
+        excerpt: "Politiet fikk melding om innbrudd i Trondheim.",
+        publishedAt: "2026-06-18T06:55:00.000Z",
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.primary.id)).toEqual([
+      "generic-innbrudd-news",
+      "generic-innbrudd-log",
+    ]);
   });
 });
