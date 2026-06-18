@@ -44,7 +44,11 @@ import {
   trafficFiltersForPreset,
   type TrafficMapFilters,
 } from "../trafficMapFilters.js";
-import { buildTrafficViewModel, visibleByDefault } from "../trafficViewModel.js";
+import {
+  buildTrafficViewModel,
+  visibleByDefault,
+  visibleInTrafficLayers,
+} from "../trafficViewModel.js";
 
 interface MapBounds {
   north: number;
@@ -134,6 +138,29 @@ function strongestRouteImpact(plan: TravelPlanPayload): TrafficEventSeverity | u
   return [...plan.trafficImpacts].sort(
     (left, right) => severityRank[right.severity] - severityRank[left.severity],
   )[0]?.severity;
+}
+
+function trafficEventListCopy(
+  selectedPreset: TrafficMapPreset,
+  showAll: boolean,
+): { heading: string; emptyMessage: string } {
+  if (selectedPreset === "planned") {
+    return {
+      heading: "Planlagte trafikksituasjoner",
+      emptyMessage: "Ingen planlagte hendelser i valgt kartutsnitt.",
+    };
+  }
+  if (showAll) {
+    return {
+      heading: "Alle trafikkmeldinger",
+      emptyMessage: "Ingen trafikkmeldinger i valgt kartutsnitt.",
+    };
+  }
+  return {
+    heading: "Aktive trafikksituasjoner",
+    emptyMessage:
+      "Ingen aktive hendelser i valgt kartutsnitt. Prøv å zoome ut eller slå på “Vis alle”.",
+  };
 }
 
 function TravelPlanLayer({ plan }: { plan?: TravelPlanPayload }) {
@@ -465,8 +492,9 @@ export function TrafficMapPage() {
         traffic: data,
         publicTransport: publicTransportDisplayData,
         showAll: visibleContextLayers.showAll,
+        visibleLayers: visibleContextLayers,
       }),
-    [data, publicTransportDisplayData, visibleContextLayers.showAll],
+    [data, publicTransportDisplayData, visibleContextLayers],
   );
 
   const summaryCardsForDisplay = data
@@ -478,13 +506,12 @@ export function TrafficMapPage() {
         detail: error ?? (loading ? "Henter trafikkdata ..." : "Ingen trafikkdata hentet ennå."),
         severity: "low" as const,
       }));
+  const trafficListCopy = trafficEventListCopy(selectedPreset, visibleContextLayers.showAll);
 
   const visibleTrafficEvents = useMemo(() => {
     const events = data?.events ?? [];
     return events.filter((event) => {
-      const isRoadwork = event.category === "roadworks";
-      if (isRoadwork && !visibleContextLayers.roadworks) return false;
-      if (!isRoadwork && !visibleContextLayers.incidents) return false;
+      if (!visibleInTrafficLayers(event, visibleContextLayers)) return false;
       if (!visibleContextLayers.showAll && !visibleByDefault(event)) return false;
       return true;
     });
@@ -746,7 +773,7 @@ export function TrafficMapPage() {
             <section className="traffic-event-list-card">
               <header>
                 <div>
-                  <h2>Aktive trafikksituasjoner</h2>
+                  <h2>{trafficListCopy.heading}</h2>
                   <span>0</span>
                 </div>
                 <button type="button" onClick={reload} disabled={loading}>
@@ -766,6 +793,8 @@ export function TrafficMapPage() {
               rankedEvents={rankedEventsForList}
               selectedEventId={selectedEventId}
               showAll={visibleContextLayers.showAll}
+              heading={trafficListCopy.heading}
+              emptyMessage={trafficListCopy.emptyMessage}
               onShowAllChange={handleShowAllChange}
               onSelectEvent={setSelectedEventId}
             />

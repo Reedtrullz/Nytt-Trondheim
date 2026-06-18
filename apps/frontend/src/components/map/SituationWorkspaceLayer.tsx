@@ -85,46 +85,41 @@ export function SituationWorkspaceLayer({
     <>
       {situations.flatMap((situation) => {
         const selected = situation.id === selectedSituationId;
-        const features = situation.features.length
-          ? situation.features
-          : situation.primaryFeature
-            ? [situation.primaryFeature]
-            : [];
-        return features.map((feature) => {
-          const point = pointFromGeometry(feature.geometry);
-          const pathOptions = pathOptionsForFeature(feature, situation, selected);
-          const key = `${situation.id}:${feature.id}`;
-          if (point) {
-            return (
-              <CircleMarker
-                key={key}
-                center={point}
-                radius={importanceRadius[situation.importance] + (selected ? 4 : 0)}
-                pathOptions={pathOptions}
-                eventHandlers={{ click: () => onSelectSituation(situation.id) }}
-              >
-                <SituationPopup situation={situation} feature={feature} />
-              </CircleMarker>
-            );
-          }
-
-          const geoJsonFeature: Feature<Geometry> = {
-            type: "Feature",
-            geometry: feature.geometry,
-            properties: { id: feature.id, situationId: situation.id },
-          };
-
+        const feature = situation.primaryFeature ?? situation.features[0];
+        if (!feature) return [];
+        const point = pointFromGeometry(feature.geometry);
+        const pathOptions = pathOptionsForFeature(feature, situation, selected);
+        const key = `${situation.id}:${feature.id}:overview`;
+        if (point) {
           return (
-            <GeoJSON
+            <CircleMarker
               key={key}
-              data={geoJsonFeature}
-              style={() => pathOptions}
+              center={point}
+              radius={importanceRadius[situation.importance] + (selected ? 4 : 0)}
+              pathOptions={pathOptions}
               eventHandlers={{ click: () => onSelectSituation(situation.id) }}
             >
               <SituationPopup situation={situation} feature={feature} />
-            </GeoJSON>
+            </CircleMarker>
           );
-        });
+        }
+
+        const geoJsonFeature: Feature<Geometry> = {
+          type: "Feature",
+          geometry: feature.geometry,
+          properties: { id: feature.id, situationId: situation.id },
+        };
+
+        return (
+          <GeoJSON
+            key={key}
+            data={geoJsonFeature}
+            style={() => pathOptions}
+            eventHandlers={{ click: () => onSelectSituation(situation.id) }}
+          >
+            <SituationPopup situation={situation} feature={feature} />
+          </GeoJSON>
+        );
       })}
     </>
   );

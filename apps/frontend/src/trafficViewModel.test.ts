@@ -190,6 +190,35 @@ describe("traffic view model", () => {
     expect(showAllIds).toContain("expired-medium");
   });
 
+  it("keeps summary cards aligned with hidden incident, roadwork, and travel-time layers", () => {
+    const model = buildTrafficViewModel({
+      traffic,
+      publicTransport,
+      showAll: false,
+      visibleLayers: {
+        incidents: false,
+        roadworks: false,
+        travelTime: false,
+      },
+    });
+
+    expect(model.rankedEvents).toEqual([]);
+    expect(model.delayCorridors).toEqual([]);
+    expect(model.summaryCards.find((card) => card.id === "critical")).toMatchObject({
+      title: "Rolig",
+      count: 0,
+      detail: "Ingen alvorlige aktive hendelser i kartutsnittet.",
+    });
+    expect(model.summaryCards.find((card) => card.id === "roadworks")).toMatchObject({
+      count: 0,
+      detail: "Ingen større planlagte arbeider i valgt område.",
+    });
+    expect(model.summaryCards.find((card) => card.id === "delays")).toMatchObject({
+      count: 0,
+      detail: "Ingen unormal reisetid i kjente korridorer.",
+    });
+  });
+
   it("does not describe non-ok sources as simply current", () => {
     const model = buildTrafficViewModel({
       traffic: {

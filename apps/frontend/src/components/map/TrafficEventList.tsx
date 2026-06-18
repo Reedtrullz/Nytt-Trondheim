@@ -5,6 +5,8 @@ interface TrafficEventListProps {
   rankedEvents: RankedTrafficEventModel[];
   selectedEventId?: string;
   showAll: boolean;
+  heading?: string;
+  emptyMessage?: string;
   onShowAllChange: (showAll: boolean) => void;
   onSelectEvent: (eventId: string) => void;
 }
@@ -38,6 +40,8 @@ export function TrafficEventList({
   rankedEvents,
   selectedEventId,
   showAll,
+  heading = "Aktive trafikksituasjoner",
+  emptyMessage = "Ingen aktive hendelser i valgt kartutsnitt. Prøv å zoome ut eller slå på “Vis alle”.",
   onShowAllChange,
   onSelectEvent,
 }: TrafficEventListProps) {
@@ -45,16 +49,14 @@ export function TrafficEventList({
     <section className="traffic-event-list-card">
       <header>
         <div>
-          <h2>Aktive trafikksituasjoner</h2>
+          <h2>{heading}</h2>
           <span>{rankedEvents.length}</span>
         </div>
         <button type="button" onClick={() => onShowAllChange(!showAll)}>
           {showAll ? "Skjul mindre" : "Vis alle"}
         </button>
       </header>
-      {rankedEvents.length === 0 ? (
-        <p>Ingen aktive hendelser i valgt kartutsnitt. Prøv å zoome ut eller slå på “Vis alle”.</p>
-      ) : null}
+      {rankedEvents.length === 0 ? <p>{emptyMessage}</p> : null}
       <ol className="traffic-event-list">
         {rankedEvents.map((row, index) => (
           <li key={row.id}>

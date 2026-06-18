@@ -41,6 +41,18 @@ export interface TrafficViewModel {
   sources: TrafficFreshnessSource[];
 }
 
+export interface TrafficViewLayerVisibility {
+  incidents: boolean;
+  roadworks: boolean;
+  travelTime: boolean;
+}
+
+const defaultVisibleLayers: TrafficViewLayerVisibility = {
+  incidents: true,
+  roadworks: true,
+  travelTime: true,
+};
+
 const severityRank: Record<TrafficEventSeverity, number> = {
   low: 1,
   medium: 2,
@@ -111,18 +123,31 @@ export function visibleByDefault(event: TrafficMapEvent): boolean {
   return true;
 }
 
+export function visibleInTrafficLayers(
+  event: TrafficMapEvent,
+  layers: TrafficViewLayerVisibility = defaultVisibleLayers,
+): boolean {
+  if (event.category === "roadworks") return layers.roadworks;
+  return layers.incidents;
+}
+
 export function buildTrafficViewModel({
   traffic,
   publicTransport,
   showAll,
+  visibleLayers = defaultVisibleLayers,
 }: {
   traffic?: TrafficMapPayload;
   publicTransport?: PublicTransportMapPayload;
   showAll: boolean;
+  visibleLayers?: TrafficViewLayerVisibility;
 }): TrafficViewModel {
   const events = traffic?.events ?? [];
-  const visibleEvents = showAll ? events : events.filter(visibleByDefault);
+  const visibleEvents = (showAll ? events : events.filter(visibleByDefault)).filter((event) =>
+    visibleInTrafficLayers(event, visibleLayers),
+  );
   const delayCorridors = (traffic?.corridorImpacts ?? [])
+    .filter(() => visibleLayers.travelTime)
     .filter((impact) => (impact.travelTime?.delaySeconds ?? 0) > 0)
     .sort(
       (left, right) => (right.travelTime?.delaySeconds ?? 0) - (left.travelTime?.delaySeconds ?? 0),

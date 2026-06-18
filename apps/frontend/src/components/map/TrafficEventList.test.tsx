@@ -41,4 +41,22 @@ describe("TrafficEventList", () => {
     expect(html).toContain("OFFISIELL");
     expect(html).toContain("Vis alle");
   });
+
+  it("accepts view-specific heading and empty-state copy", () => {
+    const html = renderToStaticMarkup(
+      <TrafficEventList
+        rankedEvents={[]}
+        selectedEventId={undefined}
+        onSelectEvent={vi.fn()}
+        showAll={false}
+        onShowAllChange={vi.fn()}
+        heading="Planlagte trafikksituasjoner"
+        emptyMessage="Ingen planlagte hendelser i valgt kartutsnitt."
+      />,
+    );
+
+    expect(html).toContain("Planlagte trafikksituasjoner");
+    expect(html).toContain("Ingen planlagte hendelser i valgt kartutsnitt.");
+    expect(html).not.toContain("Aktive trafikksituasjoner");
+  });
 });
