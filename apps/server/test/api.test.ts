@@ -1655,6 +1655,12 @@ describe("private situation API", () => {
     await agent.get("/api/articles?cursor=not-a-valid-cursor").expect(400);
   });
 
+  it("rejects unknown article category query values", async () => {
+    const { agent } = await ownerAgent();
+    await agent.get("/api/articles?category=Mat").expect(400);
+    await agent.get("/api/articles?category=Trafikk").expect(400);
+  });
+
   it("serves coverage bundle metadata through article APIs, pagination and saved overlays", async () => {
     const { app, store } = await testApp();
     const agent = request.agent(app);

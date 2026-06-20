@@ -29,6 +29,18 @@ export const sourceConfidenceLevelSchema = z.enum([
   "speculative",
 ]);
 
+export const articleCategorySchema = z.enum([
+  "Nyheter",
+  "Hendelser",
+  "Krim",
+  "Byutvikling",
+  "Kultur",
+  "Sport",
+  "Transport",
+  "Politikk",
+  "Vær",
+]);
+
 export const articleTopicSchema = z.enum(["rosenborg"]);
 
 export const sourceConfidenceSummarySchema = z
@@ -524,7 +536,7 @@ export const provenanceConfidenceSchema = z
 
 export const articleQuerySchema = z.object({
   scope: z.enum(["trondheim", "trondelag"]).optional(),
-  category: z.string().optional(),
+  category: articleCategorySchema.optional(),
   topic: articleTopicSchema.optional(),
   q: z.string().trim().max(120).optional(),
   cursor: z.string().trim().max(250).optional(),

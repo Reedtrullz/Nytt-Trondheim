@@ -107,4 +107,35 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Ingen dekningsgrupper matcher filteret.");
     expect(html).toContain("Ingen gruppe valgt");
   });
+
+  it("does not link unsafe persisted article URLs", () => {
+    const unsafePage: CoverageBundlePage = {
+      ...page,
+      items: [
+        {
+          ...page.items[0]!,
+          memberArticles: [
+            {
+              ...page.items[0]!.memberArticles[0]!,
+              title: "Utrygg lenke",
+              url: "javascript:alert(1)",
+            },
+          ],
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={unsafePage}
+          filters={{ limit: 30 }}
+          onFiltersChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Utrygg lenke");
+    expect(html).toContain("coverage-bundle-member-linkless");
+    expect(html).not.toContain("javascript:alert");
+  });
 });

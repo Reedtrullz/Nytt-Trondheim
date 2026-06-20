@@ -1888,9 +1888,26 @@ button {
   font: 28px/1.1 var(--serif);
 }
 
+.source-audit-heading-actions,
+.operations-timeline-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .source-audit-panel-heading time {
   color: var(--muted);
   font-size: 12px;
+}
+
+.source-audit-panel-heading button,
+.operations-timeline-list-heading button {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--blue);
+  font-weight: 800;
 }
 
 .source-audit-table {
@@ -2777,6 +2794,7 @@ button {
 }
 
 .coverage-bundle-member-list a,
+.coverage-bundle-member-linkless,
 .coverage-bundle-signal-list li {
   padding: 10px;
   border: 1px solid var(--line);

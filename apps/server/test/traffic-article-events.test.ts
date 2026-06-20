@@ -88,6 +88,46 @@ describe("article-derived traffic map events", () => {
     ).toMatchObject({ state: "expired" });
   });
 
+  it("groups same-bundle road-closing crash articles into one estimated traffic event", () => {
+    const coverageBundle = {
+      id: "coverage:e6-tiller-crash",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-20T10:15:00.000Z",
+    };
+    const first = article({ coverageBundle });
+    const second = article({
+      id: "article-e6-crash-nrk",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Kollisjon stenger E6 ved Tiller",
+      excerpt: "Trafikken dirigeres etter trafikkulykke på E6.",
+      url: "https://example.test/e6-crash-nrk",
+      publishedAt: "2026-06-20T10:12:00.000Z",
+      coverageBundle,
+    });
+
+    const [event] = roadClosingArticleTrafficEvents([first, second], {
+      now: new Date("2026-06-20T11:00:00.000Z"),
+    });
+
+    expect(event).toMatchObject({
+      id: "news-traffic:coverage:e6-tiller-crash",
+      sourceEventId: "coverage:e6-tiller-crash",
+      title: "Kollisjon stenger E6 ved Tiller",
+      description:
+        "Nyhetsrapportering fra flere kilder tyder på trafikkulykke med stengt eller sperret vei. Plasseringen er estimert fra sakene.",
+      validFrom: "2026-06-20T10:00:00.000Z",
+      updatedAt: "2026-06-20T10:12:00.000Z",
+      relatedArticles: [
+        expect.objectContaining({ id: "article-e6-crash-nrk" }),
+        expect.objectContaining({ id: "article-e6-crash" }),
+      ],
+    });
+    expect(roadClosingArticleTrafficEvents([first, second])).toHaveLength(1);
+  });
+
   it("does not duplicate a matching official traffic event", () => {
     expect(
       roadClosingArticleTrafficEvents([article()], {
@@ -95,5 +135,119 @@ describe("article-derived traffic map events", () => {
         now: new Date("2026-06-20T11:00:00.000Z"),
       }),
     ).toEqual([]);
+  });
+
+  it("does not let expired official events suppress fresh estimated news events", () => {
+    expect(
+      roadClosingArticleTrafficEvents([article()], {
+        officialEvents: [
+          officialEvent({
+            state: "expired",
+            validTo: "2026-06-20T09:00:00.000Z",
+          }),
+        ],
+        now: new Date("2026-06-20T11:00:00.000Z"),
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("does not let a nearby unrelated high-impact official event suppress estimated news", () => {
+    expect(
+      roadClosingArticleTrafficEvents([article()], {
+        officialEvents: [
+          officialEvent({
+            title: "Uhell ved Heimdal",
+            locationName: "Heimdal",
+            roadName: "Rv706",
+            geometry: { type: "Point", coordinates: [10.4, 63.394] },
+          }),
+        ],
+        now: new Date("2026-06-20T11:00:00.000Z"),
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("suppresses estimated news when a close official event shares a road or place", () => {
+    expect(
+      roadClosingArticleTrafficEvents([article()], {
+        officialEvents: [
+          officialEvent({
+            title: "Hendelse på E6",
+            locationName: "Sluppen",
+            roadName: "E6",
+            geometry: { type: "Point", coordinates: [10.4, 63.394] },
+          }),
+        ],
+        now: new Date("2026-06-20T11:00:00.000Z"),
+      }),
+    ).toEqual([]);
+  });
+
+  it("skips a bundled estimate when one member already matches an official traffic event", () => {
+    const coverageBundle = {
+      id: "coverage:e6-tiller-crash",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-20T10:15:00.000Z",
+    };
+
+    expect(
+      roadClosingArticleTrafficEvents(
+        [
+          article({ coverageBundle }),
+          article({
+            id: "article-e6-crash-nrk",
+            source: "nrk",
+            sourceLabel: "NRK Trøndelag",
+            url: "https://example.test/e6-crash-nrk",
+            coverageBundle,
+          }),
+        ],
+        {
+          officialEvents: [officialEvent()],
+          now: new Date("2026-06-20T11:00:00.000Z"),
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not suppress a bundled estimate from one loosely nearby unrelated official event", () => {
+    const coverageBundle = {
+      id: "coverage:e6-tiller-crash",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-20T10:15:00.000Z",
+    };
+
+    expect(
+      roadClosingArticleTrafficEvents(
+        [
+          article({ coverageBundle }),
+          article({
+            id: "article-e6-crash-nrk",
+            source: "nrk",
+            sourceLabel: "NRK Trøndelag",
+            title: "Kollisjon stenger E6 ved Tiller",
+            excerpt: "Trafikken dirigeres etter trafikkulykke på E6.",
+            url: "https://example.test/e6-crash-nrk",
+            publishedAt: "2026-06-20T10:12:00.000Z",
+            coverageBundle,
+          }),
+        ],
+        {
+          officialEvents: [
+            officialEvent({
+              title: "Uhell ved Heimdal",
+              locationName: "Heimdal",
+              roadName: "Rv706",
+              geometry: { type: "Point", coordinates: [10.4, 63.394] },
+            }),
+          ],
+          now: new Date("2026-06-20T11:00:00.000Z"),
+        },
+      ),
+    ).toHaveLength(1);
   });
 });

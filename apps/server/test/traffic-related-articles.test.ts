@@ -77,6 +77,29 @@ describe("relatedTrafficArticlesForEvent", () => {
     expect(relatedTrafficArticlesForEvent(event, [unrelated])).toEqual([]);
   });
 
+  it("keeps nearby high-impact articles as display context without shared text hints", () => {
+    const related = relatedTrafficArticlesForEvent(
+      trafficEvent({
+        severity: "high",
+        title: "Uhell ved Heimdal",
+        locationName: "Heimdal",
+        roadName: "Rv706",
+        geometry: { type: "Point", coordinates: [10.4, 63.394] },
+      }),
+      [
+        article({
+          id: "article-e6-tiller",
+          title: "Trafikkulykke stenger E6 ved Tiller",
+          places: ["Tiller"],
+          location: { lat: 63.39, lng: 10.39, label: "Tiller" },
+        }),
+      ],
+    );
+
+    expect(related).toHaveLength(1);
+    expect(related[0]).toMatchObject({ id: "article-e6-tiller" });
+  });
+
   it("relates a LineString event to a nearby article using segment distance", () => {
     const event = trafficEvent({
       category: "roadworks",

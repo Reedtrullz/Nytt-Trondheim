@@ -121,6 +121,7 @@ export function parseSourceAuditFilters(search: string): SourceAuditFilters {
     staleOnly: params.get("stale") === "true" || undefined,
     includeDiagnostics: params.get("diag") === "false" ? false : true,
     q: params.get("q")?.trim() || undefined,
+    cursor: params.get("cursor")?.trim() || undefined,
     selectedSource,
   };
 }
@@ -137,6 +138,7 @@ export function buildSourceAuditSearch(filters: SourceAuditFilters) {
   if (filters.staleOnly) params.set("stale", "true");
   if (filters.includeDiagnostics === false) params.set("diag", "false");
   if (filters.q) params.set("q", filters.q);
+  if (filters.cursor) params.set("cursor", filters.cursor);
   if (filters.selectedSource) params.set("detail", filters.selectedSource);
   return params.toString();
 }
@@ -153,6 +155,7 @@ export function sourceAuditQueryFromFilters(filters: SourceAuditFilters): Source
     staleOnly: filters.staleOnly,
     includeDiagnostics: filters.includeDiagnostics ?? true,
     q: filters.q,
+    cursor: filters.cursor,
     limit: 80,
   };
 }

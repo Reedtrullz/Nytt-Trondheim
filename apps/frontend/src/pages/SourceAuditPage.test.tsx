@@ -47,6 +47,30 @@ const audit: SourceAuditWorkspaceResponse = {
       contractStatus: "warn",
       lastIncidentTraceAt: "2026-06-15T06:50:00.000Z",
     },
+    {
+      source: "nrk",
+      label: "NRK Trøndelag",
+      group: "media",
+      role: "incident_source",
+      provenance: "reporting_estimate",
+      healthState: "ok",
+      freshness: {
+        state: "unknown",
+        checkedAt: "2026-06-15T07:00:00.000Z",
+      },
+      reliability: [
+        {
+          id: "nrk:health-reliability",
+          source: "nrk",
+          label: "Driftssignal",
+          level: "unknown",
+          updatedAt: "2026-06-15T07:00:00.000Z",
+        },
+      ],
+      openAlertCount: 0,
+      criticalAlertCount: 0,
+      contractStatus: "pass",
+    },
   ],
   collectorRuns: [
     {
@@ -129,7 +153,7 @@ describe("SourceAuditDashboard", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <SourceAuditDashboard
-          audit={audit}
+          audit={{ ...audit, nextCursor: "nrk" }}
           filters={{ includeDiagnostics: true }}
           onFiltersChange={vi.fn()}
         />
@@ -145,5 +169,7 @@ describe("SourceAuditDashboard", () => {
     expect(html).toContain("Trafikkhendelse på E6");
     expect(html).toContain("/situasjoner/datex-e6");
     expect(html).toContain("/drift/tidslinje");
+    expect(html).toContain("Ingen kjøring");
+    expect(html).toContain("Neste side");
   });
 });

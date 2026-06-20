@@ -76,9 +76,6 @@ export class WorkerRepository {
            || CASE WHEN payload ? 'situationId'
              THEN jsonb_build_object('situationId', payload->'situationId')
              ELSE '{}'::jsonb END
-           || CASE WHEN NOT ($8::jsonb ? 'coverageBundle') AND payload ? 'coverageBundle'
-             THEN jsonb_build_object('coverageBundle', payload->'coverageBundle')
-             ELSE '{}'::jsonb END
          WHERE id=$1
          AND NOT EXISTS (
            SELECT 1 FROM articles duplicate

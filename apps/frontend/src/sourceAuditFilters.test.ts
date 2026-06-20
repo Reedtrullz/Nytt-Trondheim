@@ -10,7 +10,7 @@ describe("source audit filters", () => {
   it("parses compact URL filters", () => {
     expect(
       parseSourceAuditFilters(
-        "sources=datex,entur&groups=datex&roles=telemetry_source&health=ok,degraded&fresh=stale&contract=warn&stale=true&q=reise&detail=datex",
+        "sources=datex,entur&groups=datex&roles=telemetry_source&health=ok,degraded&fresh=stale&contract=warn&stale=true&q=reise&cursor=datex_travel_time&detail=datex",
       ),
     ).toMatchObject({
       sources: ["datex", "entur"],
@@ -22,6 +22,7 @@ describe("source audit filters", () => {
       staleOnly: true,
       includeDiagnostics: true,
       q: "reise",
+      cursor: "datex_travel_time",
       selectedSource: "datex",
     });
   });
@@ -31,10 +32,11 @@ describe("source audit filters", () => {
       sources: ["nrk", "adressa"],
       freshnessStates: ["fresh"],
       includeDiagnostics: false,
+      cursor: "nrk",
       selectedSource: "nrk",
     });
 
-    expect(search).toBe("sources=nrk%2Cadressa&fresh=fresh&diag=false&detail=nrk");
+    expect(search).toBe("sources=nrk%2Cadressa&fresh=fresh&diag=false&cursor=nrk&detail=nrk");
   });
 
   it("keeps newer source providers selectable from URLs", () => {
@@ -61,12 +63,14 @@ describe("source audit filters", () => {
       sourceAuditQueryFromFilters({
         groups: ["private_annotation"],
         staleOnly: true,
+        cursor: "private_annotations",
         selectedSource: "private_annotations",
       }),
     ).toMatchObject({
       groups: ["private_annotation"],
       staleOnly: true,
       includeDiagnostics: true,
+      cursor: "private_annotations",
       limit: 80,
     });
   });

@@ -245,7 +245,12 @@ export function OperationsTimelineDashboard({
   const flatEvents = timeline.events;
 
   function update(next: Partial<OperationsTimelineFilters>) {
-    onFiltersChange({ ...filters, ...next });
+    const selectionOnly = Object.keys(next).length === 1 && "selectedEvent" in next;
+    onFiltersChange({
+      ...filters,
+      ...(selectionOnly ? {} : { cursor: undefined, selectedEvent: undefined }),
+      ...next,
+    });
   }
 
   return (
@@ -359,7 +364,23 @@ export function OperationsTimelineDashboard({
               <p className="label">Kronologi</p>
               <h2 id="operations-timeline-heading">Siste operative spor</h2>
             </div>
-            <time>{time(timeline.generatedAt)}</time>
+            <div className="operations-timeline-heading-actions">
+              <time>{time(timeline.generatedAt)}</time>
+              {timeline.nextCursor ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onFiltersChange({
+                      ...filters,
+                      cursor: timeline.nextCursor,
+                      selectedEvent: undefined,
+                    })
+                  }
+                >
+                  Neste side
+                </button>
+              ) : null}
+            </div>
           </div>
           {groups.length ? (
             groups.map((group) => (

@@ -125,7 +125,7 @@ const categoryRules: Array<[ArticleCategory, CategoryMatcher[]]> = [
       "kolstad håndball",
       "rbk",
       "ranheim fotball",
-      /\b(?:rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u,
+      /\b(?:rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u,
       "ski-vm",
       "trenerjobb",
       "vm-jubel",
@@ -211,7 +211,9 @@ const categoryRules: Array<[ArticleCategory, CategoryMatcher[]]> = [
 ];
 
 const rosenborgClubContext =
-  /\b(?:rbk|rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u;
+  /\b(?:rbk|rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u;
+const rosenborgDistrictContext =
+  /\b(?:(?:på|til|ved)\s+rosenborg|i\s+rosenborg\s+(?:bydel|området)|rosenborg\s+(?:barnehage|bydel|gate|kirke|området|park|skole))\b/u;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -264,5 +266,11 @@ export function extractPlaces(text: string): string[] {
   const normalized = text.toLocaleLowerCase("nb");
   return [...trondheimTerms, ...regionalTerms]
     .filter((term) => containsPlaceTerm(normalized, term))
+    .filter(
+      (term) =>
+        term !== "rosenborg" ||
+        !rosenborgClubContext.test(normalized) ||
+        rosenborgDistrictContext.test(normalized),
+    )
     .map(displayLabel);
 }

@@ -385,7 +385,12 @@ export function SourceAuditDashboard({
   const traceCount = audit.traceability.reduce((count, trace) => count + trace.links.length, 0);
 
   function update(next: Partial<SourceAuditFilters>) {
-    onFiltersChange({ ...filters, ...next });
+    const selectionOnly = Object.keys(next).length === 1 && "selectedSource" in next;
+    onFiltersChange({
+      ...filters,
+      ...(selectionOnly ? {} : { cursor: undefined, selectedSource: undefined }),
+      ...next,
+    });
   }
 
   return (
@@ -500,7 +505,23 @@ export function SourceAuditDashboard({
               <p className="label">Status per kilde</p>
               <h2 id="source-audit-table-heading">Revisjonskonsoll</h2>
             </div>
-            <time>{time(audit.generatedAt)}</time>
+            <div className="source-audit-heading-actions">
+              <time>{time(audit.generatedAt)}</time>
+              {audit.nextCursor ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onFiltersChange({
+                      ...filters,
+                      cursor: audit.nextCursor,
+                      selectedSource: undefined,
+                    })
+                  }
+                >
+                  Neste side
+                </button>
+              ) : null}
+            </div>
           </div>
           {audit.sources.length === 0 ? (
             <p className="source-audit-empty">Ingen kilder matcher filteret.</p>
@@ -544,7 +565,11 @@ export function SourceAuditDashboard({
                       {contractLabel(source.contractStatus)}
                     </span>
                     <span>
-                      <strong>{runStatusLabel(source.latestRun?.status ?? "skipped")}</strong>
+                      <strong>
+                        {source.latestRun
+                          ? runStatusLabel(source.latestRun.status)
+                          : "Ingen kjøring"}
+                      </strong>
                       <small>{duration(source.latestRun?.durationMs)}</small>
                     </span>
                     <span>

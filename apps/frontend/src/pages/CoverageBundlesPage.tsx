@@ -8,6 +8,7 @@ import type {
   CoverageBundleQueryInput,
 } from "@nytt/shared";
 import { api } from "../api.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
 
 interface CoverageBundleFilters extends CoverageBundleQueryInput {
   selectedBundle?: string;
@@ -137,15 +138,27 @@ function BundleDrawer({ bundle }: { bundle: CoverageBundleListItem | undefined }
       <section>
         <h3>Saker</h3>
         <div className="coverage-bundle-member-list">
-          {bundle.memberArticles.map((article) => (
-            <a href={article.url} key={article.id}>
-              <span>{article.sourceLabel}</span>
-              <strong>{article.title}</strong>
-              <small>
-                {time(article.publishedAt)} · {article.places.join(", ") || "Ukjent sted"}
-              </small>
-            </a>
-          ))}
+          {bundle.memberArticles.map((article) => {
+            const href = safeExternalUrl(article.url);
+            const content = (
+              <>
+                <span>{article.sourceLabel}</span>
+                <strong>{article.title}</strong>
+                <small>
+                  {time(article.publishedAt)} · {article.places.join(", ") || "Ukjent sted"}
+                </small>
+              </>
+            );
+            return href ? (
+              <a href={href} key={article.id}>
+                {content}
+              </a>
+            ) : (
+              <div className="coverage-bundle-member-linkless" key={article.id}>
+                {content}
+              </div>
+            );
+          })}
         </div>
       </section>
       <section>

@@ -91,7 +91,7 @@ describe("OperationsTimelineDashboard", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <OperationsTimelineDashboard
-          timeline={timeline}
+          timeline={{ ...timeline, nextCursor: "timeline-cursor-two" }}
           filters={{ includePrivateAnnotations: true, selectedEvent: "timeline:t1" }}
           onFiltersChange={vi.fn()}
         />
@@ -107,6 +107,7 @@ describe("OperationsTimelineDashboard", () => {
     expect(html).toContain("/situasjoner/skogbrann-bymarka");
     expect(html).toContain("Original kilde");
     expect(html).toContain("Privat notat lagt til");
+    expect(html).toContain("Neste side");
   });
 
   it("renders the empty state", () => {

@@ -92,6 +92,8 @@ function sourceLabel(source: TrafficMapEvent["source"]) {
   switch (source) {
     case "vegvesen_traffic_info":
       return "Statens vegvesen";
+    case "news_article":
+      return "Nyhetskilde (estimert)";
     case "datex":
     default:
       return "DATEX";

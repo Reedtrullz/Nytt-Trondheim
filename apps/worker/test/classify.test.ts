@@ -59,6 +59,7 @@ describe("Trondheim relevance classification", () => {
     expect(categorize("Freyr Alexandersson blir ny hovedtrener i Rosenborg")).toBe("Sport");
     expect(categorize("Han kan bli RBK-trener")).toBe("Sport");
     expect(categorize("Kolstad håndball møter europeisk motstand")).toBe("Sport");
+    expect(categorize("Rosenborg møter Brann på Lerkendal")).toBe("Sport");
     expect(categorize("Brann i Bymarka")).toBe("Hendelser");
     expect(articleTopics("Freyr Alexandersson blir ny hovedtrener i Rosenborg")).toEqual([
       "rosenborg",
@@ -105,6 +106,17 @@ describe("Trondheim relevance classification", () => {
     expect(articleTopics("Skole stengt på Rosenborg")).toEqual([]);
     expect(categorize("Kommunen bruker nytt system")).toBe("Nyheter");
     expect(categorize("Ny app bruker kunstig intelligens i Trondheim")).toBe("Nyheter");
+  });
+
+  it("does not geocode football-club-only Rosenborg mentions as the district", () => {
+    expect(extractPlaces("Freyr Alexandersson blir ny hovedtrener i Rosenborg")).toEqual([]);
+    expect(extractPlaces("Han kan bli RBK-trener")).toEqual([]);
+    expect(extractPlaces("Rosenborg møter Brann på Lerkendal")).toEqual(["Lerkendal"]);
+    expect(extractPlaces("Brann på Rosenborg skole i Trondheim")).toEqual([
+      "Rosenborg",
+      "Trondheim",
+    ]);
+    expect(extractPlaces("Skole stengt på Rosenborg")).toEqual(["Rosenborg"]);
   });
 
   it("prefers a specific district over the generic city when placing a story", () => {

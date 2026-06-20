@@ -66,4 +66,21 @@ describe("TrafficLayer semantic objects", () => {
     expect(html).toContain("traffic-estimated-news-location");
     expect(html).toContain("Estimert fra nyhetskilde: E6");
   });
+
+  it("labels article-derived traffic events as estimated news in the popup", () => {
+    const newsEvent: TrafficMapEvent = {
+      ...validLineEvent,
+      id: "news-traffic:coverage:e6",
+      source: "news_article",
+      sourceEventId: "coverage:e6",
+      category: "closure",
+      title: "Trafikkulykke stenger E6 ved Tiller",
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+    };
+
+    const html = renderToStaticMarkup(<TrafficLayer events={[newsEvent]} />);
+
+    expect(html).toContain("Nyhetskilde (estimert)");
+    expect(html).not.toContain("DATEX");
+  });
 });

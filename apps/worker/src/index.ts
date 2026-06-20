@@ -104,10 +104,21 @@ export async function prepareArticleCoverageAnalysis({
   generatedAt?: string;
   geocoder?: typeof geocodeArticles;
 }): Promise<ArticleCoverageAnalysis> {
+  const articlesForAnalysis = articlesForGeocoding.map(stripArticleCoverageBundle);
+  const fixedArticlesForAnalysis = articlesWithoutGeocoding.map(stripArticleCoverageBundle);
   return analyzeArticleCoverage(
-    [...(await geocoder(articlesForGeocoding)), ...articlesWithoutGeocoding],
+    [
+      ...(await geocoder(articlesForAnalysis)).map(stripArticleCoverageBundle),
+      ...fixedArticlesForAnalysis,
+    ],
     generatedAt,
   );
+}
+
+function stripArticleCoverageBundle(article: Article): Article {
+  const articleWithoutCoverageBundle = { ...article };
+  delete articleWithoutCoverageBundle.coverageBundle;
+  return articleWithoutCoverageBundle;
 }
 
 export function buildWorkerCycleMetrics({

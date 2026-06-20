@@ -112,6 +112,7 @@ export function parseOperationsTimelineFilters(search: string): OperationsTimeli
     includePrivateAnnotations: params.get("private") === "false" ? false : true,
     from: trimmedValue(params, "from"),
     to: trimmedValue(params, "to"),
+    cursor: trimmedValue(params, "cursor"),
     sort: params.get("sort") === "asc" ? "asc" : "desc",
     selectedSituation,
     selectedEvent: trimmedValue(params, "e"),
@@ -129,6 +130,7 @@ export function buildOperationsTimelineSearch(filters: OperationsTimelineFilters
   if (filters.includePrivateAnnotations === false) params.set("private", "false");
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
+  if (filters.cursor) params.set("cursor", filters.cursor);
   if (filters.q) params.set("q", filters.q);
   if (filters.selectedSituation) params.set("s", filters.selectedSituation);
   if (filters.selectedEvent) params.set("e", filters.selectedEvent);
@@ -151,6 +153,7 @@ export function operationsTimelineQueryFromFilters(
     from: filters.from,
     to: filters.to,
     q: filters.q,
+    cursor: filters.cursor,
     sort: filters.sort ?? "desc",
     limit: 100,
   };

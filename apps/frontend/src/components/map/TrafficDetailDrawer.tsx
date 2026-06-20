@@ -68,6 +68,11 @@ function distanceLabel(distanceMeters?: number): string | undefined {
     : `${Math.round(distanceMeters)} m unna`;
 }
 
+function locationEvidenceLabel(event: TrafficMapEvent): string {
+  if (event.source === "news_article") return "Estimert fra nyhetskilde";
+  return "Offisiell koordinat/geometri";
+}
+
 export function TrafficDetailDrawer({
   event,
   corridorImpacts,
@@ -121,7 +126,7 @@ export function TrafficDetailDrawer({
         </div>
         <div>
           <dt>Plassering</dt>
-          <dd>Offisiell koordinat/geometri</dd>
+          <dd>{locationEvidenceLabel(event)}</dd>
         </div>
         {confidence ? (
           <div>

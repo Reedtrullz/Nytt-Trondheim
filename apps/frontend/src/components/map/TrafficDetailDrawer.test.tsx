@@ -84,6 +84,26 @@ describe("TrafficDetailDrawer", () => {
     ).toBe("");
   });
 
+  it("does not describe article-derived event locations as official geometry", () => {
+    const html = renderToStaticMarkup(
+      <TrafficDetailDrawer
+        event={{
+          ...event,
+          id: "news-traffic:coverage:e6-sluppen",
+          source: "news_article",
+          sourceEventId: "coverage:e6-sluppen",
+          confidence: 0.62,
+        }}
+        corridorImpacts={[]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("Nyhetskilde (estimert)");
+    expect(html).toContain("Estimert fra nyhetskilde");
+    expect(html).not.toContain("Offisiell koordinat/geometri");
+  });
+
   it("suppresses unsafe URLs and invalid optional measurements", () => {
     const html = renderToStaticMarkup(
       <TrafficDetailDrawer

@@ -290,6 +290,57 @@ describe("worker lifecycle helpers", () => {
     );
   });
 
+  it("ignores stale input coverage bundle metadata before deriving decisions", async () => {
+    const staleBundle = {
+      id: "coverage:stale-old-decision",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Tidligere analyse",
+      generatedAt: "2026-06-18T09:00:00.000Z",
+    };
+    const burglaryArticle = newsArticle({
+      id: "politiloggen-tiller-burglary",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Innbrudd: Trondheim, Tiller",
+      excerpt: "Politiet undersøker et innbrudd på Tiller.",
+      url: "https://example.test/politiloggen-tiller-burglary",
+      publishedAt: "2026-06-18T10:27:00.000Z",
+      category: "Hendelser",
+      places: ["Tiller"],
+      coverageBundle: staleBundle,
+    });
+    const rosenborgArticle = newsArticle({
+      id: "vg-rosenborg-trainer",
+      source: "vg",
+      sourceLabel: "VG",
+      title: "Freyr Alexandersson blir ny hovedtrener i Rosenborg",
+      excerpt: "I dag ble han presentert som Rosenborgs nye trener.",
+      url: "https://example.test/vg-rosenborg-trainer",
+      publishedAt: "2026-06-18T10:31:00.000Z",
+      category: "Sport",
+      places: ["Lerkendal"],
+      coverageBundle: staleBundle,
+    });
+    const geocoder = vi.fn(async (articles: Article[]) => articles);
+
+    const analysis = await prepareArticleCoverageAnalysis({
+      articlesForGeocoding: [burglaryArticle],
+      articlesWithoutGeocoding: [rosenborgArticle],
+      generatedAt: "2026-06-18T10:45:00.000Z",
+      geocoder,
+    });
+
+    expect(geocoder).toHaveBeenCalledWith([
+      expect.not.objectContaining({ coverageBundle: expect.anything() }),
+    ]);
+    expect(analysis.bundles).toHaveLength(0);
+    expect(analysis.articles).toEqual([
+      expect.not.objectContaining({ coverageBundle: expect.anything() }),
+      expect.not.objectContaining({ coverageBundle: expect.anything() }),
+    ]);
+  });
+
   it("resolves missing DATEX situations only after a fresh snapshot", () => {
     expect(shouldResolveMissingDatexSituations(true)).toBe(true);
     expect(shouldResolveMissingDatexSituations(false)).toBe(false);
