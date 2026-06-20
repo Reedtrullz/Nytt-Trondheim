@@ -19,12 +19,15 @@ export function sourceDisplayLabel(source: TrafficMapEvent["source"]): string {
       return "Statens vegvesen TrafficInfo";
     case "datex":
       return "Statens vegvesen DATEX Situation";
+    case "news_article":
+      return "Nyhetskilde (estimert)";
     default:
       return source;
   }
 }
 
 export function badgesForTrafficEvent(event: TrafficMapEvent): TrafficTrustBadge[] {
+  if (event.source === "news_article") return ["ESTIMERT", "NYHETSKILDE"];
   const badges: TrafficTrustBadge[] = ["OFFISIELL"];
   if (event.relatedArticles?.some((article) => article.location)) {
     badges.push("ESTIMERT", "NYHETSKILDE");

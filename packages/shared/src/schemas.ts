@@ -29,6 +29,8 @@ export const sourceConfidenceLevelSchema = z.enum([
   "speculative",
 ]);
 
+export const articleTopicSchema = z.enum(["rosenborg"]);
+
 export const sourceConfidenceSummarySchema = z
   .object({
     level: sourceConfidenceLevelSchema,
@@ -523,6 +525,7 @@ export const provenanceConfidenceSchema = z
 export const articleQuerySchema = z.object({
   scope: z.enum(["trondheim", "trondelag"]).optional(),
   category: z.string().optional(),
+  topic: articleTopicSchema.optional(),
   q: z.string().trim().max(120).optional(),
   cursor: z.string().trim().max(250).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(40),
@@ -910,6 +913,10 @@ export const trafficMapQuerySchema = z
     categories: csvListSchema(trafficEventCategorySchema),
     severities: csvListSchema(trafficEventSeveritySchema),
     states: csvListSchema(trafficEventStateSchema),
+    estimatedNews: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
     from: z.string().datetime().optional(),
     to: z.string().datetime().optional(),
     north: coordinateParamSchema,

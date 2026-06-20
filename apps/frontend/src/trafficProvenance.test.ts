@@ -97,6 +97,18 @@ describe("traffic provenance labels", () => {
     ).toEqual(["OFFISIELL", "ESTIMERT", "NYHETSKILDE"]);
   });
 
+  it("labels article-derived traffic events as estimated news, not official", () => {
+    expect(
+      badgesForTrafficEvent({
+        ...event,
+        source: "news_article",
+        sourceEventId: "article-1",
+        confidence: 0.62,
+      }),
+    ).toEqual(["ESTIMERT", "NYHETSKILDE"]);
+    expect(sourceDisplayLabel("news_article")).toBe("Nyhetskilde (estimert)");
+  });
+
   it("labels traffic pulse, public transport alerts and vehicles distinctly", () => {
     expect(badgeForTrafficPulse(pulse)).toBe("REISETID");
     expect(badgeForPublicTransportAlert(alert)).toBe("KOLLEKTIV");

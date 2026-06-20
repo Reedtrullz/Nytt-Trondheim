@@ -1,6 +1,7 @@
 import type {
   Attachment,
   ArticlePage,
+  ArticleTopic,
   BootstrapPayload,
   CoverageBundlePage,
   CoverageBundleQueryInput,
@@ -103,7 +104,14 @@ function situationPath(id: string) {
 export const api = {
   bootstrap: () => request<BootstrapPayload>("/api/bootstrap"),
   articles: (
-    query: { scope?: string; category?: string; q?: string; cursor?: string; limit?: number } = {},
+    query: {
+      scope?: string;
+      category?: string;
+      topic?: ArticleTopic;
+      q?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
   ) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

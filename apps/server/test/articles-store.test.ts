@@ -35,4 +35,33 @@ describe("article store", () => {
     expect(page.items).toEqual([{ ...article, saved: false }]);
     expect(page.nextCursor).toBeUndefined();
   });
+
+  it("filters production articles by Rosenborg topic without requiring a category migration", async () => {
+    const article: Article = {
+      id: "rosenborg-trener",
+      source: "vg",
+      sourceLabel: "VG",
+      title: "Freyr Alexandersson blir ny hovedtrener i Rosenborg",
+      excerpt: "Han er presentert som Rosenborgs nye trener.",
+      url: "https://example.test/rosenborg",
+      publishedAt: "2026-06-18T09:34:00.000Z",
+      scope: "trondheim",
+      category: "Sport",
+      topics: ["rosenborg"],
+      places: ["Rosenborg"],
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      const normalized = sql.replace(/\s+/g, " ").trim();
+      expect(normalized).toContain("COALESCE(a.payload->'topics', '[]'::jsonb) ? $3");
+      expect(normalized).toContain("a.category = 'Sport'");
+      expect(normalized).toContain("a.payload->>'title' ILIKE '%rbk%'");
+      expect(params).toEqual(["Reedtrullz", "Sport", "rosenborg", 41]);
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ category: "Sport", topic: "rosenborg" }, "Reedtrullz");
+
+    expect(page.items).toEqual([{ ...article, saved: false }]);
+  });
 });

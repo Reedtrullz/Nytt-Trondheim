@@ -24,7 +24,7 @@ export const defaultTrafficLayers: TrafficLayerVisibility = {
   publicTransportDisruptions: true,
   publicTransportVehicles: false,
   weatherRisk: false,
-  estimatedNews: false,
+  estimatedNews: true,
   privateNotes: false,
   showAll: false,
 };

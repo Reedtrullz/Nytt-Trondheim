@@ -219,6 +219,52 @@ describe("traffic view model", () => {
     });
   });
 
+  it("keeps news-derived traffic estimates behind the estimated news layer", () => {
+    const newsEvent = {
+      id: "news-traffic:article-1",
+      source: "news_article" as const,
+      sourceEventId: "article-1",
+      category: "closure" as const,
+      severity: "high" as const,
+      state: "active" as const,
+      title: "Trafikkulykke stenger E6 ved Tiller",
+      updatedAt: "2026-06-01T16:44:00.000Z",
+      geometry: { type: "Point" as const, coordinates: [10.39, 63.39] },
+      confidence: 0.62,
+    };
+    const hidden = buildTrafficViewModel({
+      traffic: { ...traffic, events: [newsEvent] },
+      publicTransport,
+      showAll: false,
+      visibleLayers: {
+        incidents: true,
+        roadworks: true,
+        travelTime: true,
+        estimatedNews: false,
+      },
+    });
+    const visible = buildTrafficViewModel({
+      traffic: { ...traffic, events: [newsEvent] },
+      publicTransport,
+      showAll: false,
+      visibleLayers: {
+        incidents: true,
+        roadworks: true,
+        travelTime: true,
+        estimatedNews: true,
+      },
+    });
+
+    expect(hidden.rankedEvents).toEqual([]);
+    expect(visible.rankedEvents).toEqual([
+      expect.objectContaining({
+        id: "news-traffic:article-1",
+        badges: ["ESTIMERT", "NYHETSKILDE"],
+      }),
+    ]);
+    expect(visible.summaryCards[0]).toMatchObject({ title: "Kritisk", badge: "ESTIMERT" });
+  });
+
   it("does not describe non-ok sources as simply current", () => {
     const model = buildTrafficViewModel({
       traffic: {

@@ -26,7 +26,7 @@ export function trafficMapObjectsForEvent(
   const objects: TrafficMapObject[] = [
     { kind: "official-road-event", eventId: event.id, event, geometry: event.geometry },
   ];
-  if (options.estimatedNews) {
+  if (options.estimatedNews && event.source !== "news_article") {
     for (const article of event.relatedArticles ?? []) {
       const center = validLatLng(article.location?.lat, article.location?.lng);
       if (!center) continue;

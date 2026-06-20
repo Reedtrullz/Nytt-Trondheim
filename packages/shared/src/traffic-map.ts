@@ -28,7 +28,7 @@ export interface RelatedTrafficArticle {
 
 export interface TrafficMapEvent {
   id: string;
-  source: "datex" | "vegvesen_traffic_info";
+  source: "datex" | "vegvesen_traffic_info" | "news_article";
   sourceEventId: string;
   category: TrafficEventCategory;
   severity: TrafficEventSeverity;

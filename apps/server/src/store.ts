@@ -5,6 +5,7 @@ import type {
   ArticleCoverageBundleDecision,
   ArticleCoverageBundleKind,
   ArticlePage,
+  ArticleTopic,
   Attachment,
   BootstrapPayload,
   CoverageBundleArticleSummary,
@@ -69,6 +70,7 @@ import pg from "pg";
 export interface ArticleFilters {
   scope?: string;
   category?: string;
+  topic?: ArticleTopic;
   q?: string;
   cursor?: string;
   limit?: number;
@@ -135,6 +137,17 @@ function invalidSourceItemRelationshipError(): Error & { status: number } {
     new Error("Kontekst- og telemetrikilder må kobles som kontekst, ikke som hendelsesgrunnlag."),
     { status: 400 },
   );
+}
+
+function articleMatchesTopic(article: Article, topic: ArticleTopic): boolean {
+  if (article.topics?.includes(topic)) return true;
+  if (topic === "rosenborg") {
+    return (
+      article.category === "Sport" &&
+      /\b(?:rbk|rosenborgs?)\b/iu.test(`${article.title} ${article.excerpt}`)
+    );
+  }
+  return false;
 }
 
 export interface AttachmentRecord extends Attachment {
@@ -1753,6 +1766,7 @@ export class MemoryStore implements Store {
           (!filters.category ||
             filters.category === "Alle" ||
             article.category === filters.category) &&
+          (!filters.topic || articleMatchesTopic(article, filters.topic)) &&
           (!search ||
             `${article.title} ${article.excerpt} ${article.sourceLabel} ${article.category} ${article.places.join(" ")}`
               .toLocaleLowerCase("nb")
@@ -2266,6 +2280,22 @@ export class PgStore implements Store {
     if (filters.category && filters.category !== "Alle") {
       params.push(filters.category);
       where.push(`a.category = $${params.length}`);
+    }
+    if (filters.topic === "rosenborg") {
+      params.push(filters.topic);
+      const topicIndex = params.length;
+      where.push(
+        `(COALESCE(a.payload->'topics', '[]'::jsonb) ? $${topicIndex}
+          OR (
+            a.category = 'Sport'
+            AND (
+              a.payload->>'title' ILIKE '%rosenborg%'
+              OR a.payload->>'excerpt' ILIKE '%rosenborg%'
+              OR a.payload->>'title' ILIKE '%rbk%'
+              OR a.payload->>'excerpt' ILIKE '%rbk%'
+            )
+          ))`,
+      );
     }
     if (filters.q) {
       params.push(`%${filters.q}%`);

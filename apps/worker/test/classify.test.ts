@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { canonicalPlaceName, categorize, detectScope, extractPlaces } from "../src/classify.js";
+import {
+  articleTopics,
+  canonicalPlaceName,
+  categorize,
+  detectScope,
+  extractPlaces,
+} from "../src/classify.js";
 import { detectPreliminarySituations } from "../src/clusters.js";
 import type { Article } from "@nytt/shared";
 import type { OfficialEvent } from "@nytt/shared";
@@ -54,6 +60,11 @@ describe("Trondheim relevance classification", () => {
     expect(categorize("Han kan bli RBK-trener")).toBe("Sport");
     expect(categorize("Kolstad håndball møter europeisk motstand")).toBe("Sport");
     expect(categorize("Brann i Bymarka")).toBe("Hendelser");
+    expect(articleTopics("Freyr Alexandersson blir ny hovedtrener i Rosenborg")).toEqual([
+      "rosenborg",
+    ]);
+    expect(articleTopics("Han kan bli RBK-trener")).toEqual(["rosenborg"]);
+    expect(articleTopics("Kolstad håndball møter europeisk motstand")).toEqual([]);
   });
 
   it("separates police and crime items from generic incidents", () => {
@@ -91,6 +102,7 @@ describe("Trondheim relevance classification", () => {
   it("does not classify Rosenborg district incidents or ordinary bruker text as sport or transport", () => {
     expect(categorize("Brann på Rosenborg skole i Trondheim")).toBe("Hendelser");
     expect(categorize("Skole stengt på Rosenborg")).toBe("Hendelser");
+    expect(articleTopics("Skole stengt på Rosenborg")).toEqual([]);
     expect(categorize("Kommunen bruker nytt system")).toBe("Nyheter");
     expect(categorize("Ny app bruker kunstig intelligens i Trondheim")).toBe("Nyheter");
   });

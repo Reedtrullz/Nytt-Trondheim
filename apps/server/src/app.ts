@@ -51,6 +51,7 @@ import type { AppConfig } from "./config.js";
 import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from "./auth.js";
 import { buildWorkspaceExport, safeFilename } from "./export.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
+import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
 import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
@@ -846,6 +847,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       for (const event of officialEvents) {
         const trafficEvent = officialEventToTrafficMapEvent(event);
         if (trafficEvent) eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
+      }
+      if (query.estimatedNews) {
+        const estimatedEvents = roadClosingArticleTrafficEvents(articlesPage.items, {
+          officialEvents: [...eventsBySourceKey.values()],
+        });
+        for (const event of estimatedEvents) {
+          eventsBySourceKey.set(sourceKey(event), event);
+        }
       }
       const events = filterTrafficMapEvents([...eventsBySourceKey.values()], query).map((event) => {
         const relatedArticles = relatedTrafficArticlesForEvent(event, articlesPage.items);

@@ -47,6 +47,7 @@ describe("traffic map URL filters", () => {
       publicTransportDisruptions: false,
       publicTransportVehicles: true,
       privateNotes: false,
+      estimatedNews: false,
       showAll: true,
     });
     expect(buildTrafficMapSearch(filters)).toBe(

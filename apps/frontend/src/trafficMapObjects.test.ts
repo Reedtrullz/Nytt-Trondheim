@@ -48,6 +48,19 @@ describe("traffic map objects", () => {
     ]);
   });
 
+  it("does not duplicate article-derived news events as related estimated points", () => {
+    expect(
+      trafficMapObjectsForEvent(
+        {
+          ...event,
+          source: "news_article",
+          sourceEventId: "article-1",
+        },
+        { estimatedNews: true },
+      ),
+    ).toEqual([expect.objectContaining({ kind: "official-road-event" })]);
+  });
+
   it("ignores invalid estimated article coordinates", () => {
     const objects = trafficMapObjectsForEvent(
       {

@@ -45,6 +45,7 @@ export interface TrafficViewLayerVisibility {
   incidents: boolean;
   roadworks: boolean;
   travelTime: boolean;
+  estimatedNews?: boolean;
 }
 
 const defaultVisibleLayers: TrafficViewLayerVisibility = {
@@ -127,6 +128,7 @@ export function visibleInTrafficLayers(
   event: TrafficMapEvent,
   layers: TrafficViewLayerVisibility = defaultVisibleLayers,
 ): boolean {
+  if (event.source === "news_article") return layers.estimatedNews ?? true;
   if (event.category === "roadworks") return layers.roadworks;
   return layers.incidents;
 }
@@ -180,7 +182,7 @@ export function buildTrafficViewModel({
         title: critical.length ? "Kritisk" : "Rolig",
         count: critical.length,
         detail: critical[0]?.title ?? "Ingen alvorlige aktive hendelser i kartutsnittet.",
-        badge: "OFFISIELL",
+        badge: critical[0] ? badgesForTrafficEvent(critical[0])[0] : "OFFISIELL",
         severity: critical[0]?.severity ?? "low",
       },
       {

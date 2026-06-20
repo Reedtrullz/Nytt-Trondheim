@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   articleCategories,
   articleCategoryLabels,
+  articleTopicLabels,
   buildHomeSearch,
   parseHomeFilters,
   searchSummary,
@@ -33,6 +34,14 @@ describe("home filter query params", () => {
     expect(buildHomeSearch({ q: "", scope: "trondheim", category: "Sport" })).toBe(
       "?category=Sport",
     );
+    expect(
+      buildHomeSearch({
+        q: "",
+        scope: "trondheim",
+        category: "Sport",
+        topic: "rosenborg",
+      }),
+    ).toBe("?category=Sport&topic=rosenborg");
   });
 
   it("keeps API category values separate from home filter labels", () => {
@@ -50,7 +59,27 @@ describe("home filter query params", () => {
     expect(articleCategoryLabels.Transport).toBe("Trafikk");
     expect(articleCategoryLabels.Krim).toBe("Krim");
     expect(articleCategoryLabels.Vær).toBe("Vær");
+    expect(articleTopicLabels.rosenborg).toBe("Rosenborg");
     expect(parseHomeFilters("?category=Transport").category).toBe("Transport");
+  });
+
+  it("parses Rosenborg as a Sport subcategory only", () => {
+    expect(parseHomeFilters("?category=Sport&topic=rosenborg")).toEqual({
+      q: "",
+      scope: "trondheim",
+      category: "Sport",
+      topic: "rosenborg",
+    });
+    expect(parseHomeFilters("?category=Sport&topic=unknown")).toEqual({
+      q: "",
+      scope: "trondheim",
+      category: "Sport",
+    });
+    expect(parseHomeFilters("?category=Nyheter&topic=rosenborg")).toEqual({
+      q: "",
+      scope: "trondheim",
+      category: "Nyheter",
+    });
   });
 
   it("keeps Vær out of article category filters because it has its own page", () => {
@@ -73,5 +102,8 @@ describe("home filter query params", () => {
     expect(searchSummary({ q: "RBK", scope: "trondheim", category: "Sport" })).toBe(
       '"RBK" Sport i Trondheim',
     );
+    expect(
+      searchSummary({ q: "", scope: "trondheim", category: "Sport", topic: "rosenborg" }),
+    ).toBe("Rosenborg Sport i Trondheim");
   });
 });

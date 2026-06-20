@@ -1273,6 +1273,55 @@ describe("private situation API", () => {
     );
   });
 
+  it("surfaces road-closing crash articles as estimated traffic events only when requested", async () => {
+    const { app, store } = await testApp();
+    const crashArticle: Article = {
+      id: "article-e6-crash",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Trafikkulykke stenger E6 ved Tiller",
+      excerpt: "Politiet melder at veien er stengt etter en kollisjon.",
+      url: "https://example.test/e6-crash",
+      publishedAt: new Date().toISOString(),
+      scope: "trondheim",
+      category: "Transport",
+      places: ["Tiller"],
+      location: { lat: 63.39, lng: 10.39, label: "Tiller" },
+    };
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: [crashArticle] });
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const hidden = await agent
+      .get("/api/map/traffic-events?categories=closure&north=63.5&south=63.3&east=10.5&west=10.2")
+      .expect(200);
+    const visible = await agent
+      .get(
+        "/api/map/traffic-events?estimatedNews=true&categories=closure&north=63.5&south=63.3&east=10.5&west=10.2",
+      )
+      .expect(200);
+
+    expect(hidden.body.events).toEqual([]);
+    expect(visible.body.events).toEqual([
+      expect.objectContaining({
+        id: "news-traffic:article-e6-crash",
+        source: "news_article",
+        category: "closure",
+        severity: "high",
+        state: "active",
+        relatedArticles: [
+          expect.objectContaining({
+            id: "article-e6-crash",
+            distanceMeters: 0,
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("does not fall back from DATEX source_items into active traffic map events", async () => {
     const { app, store } = await testApp();
     vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);

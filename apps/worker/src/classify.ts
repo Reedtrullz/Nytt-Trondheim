@@ -1,4 +1,4 @@
-import type { ArticleCategory, GeographicScope } from "@nytt/shared";
+import type { ArticleCategory, ArticleTopic, GeographicScope } from "@nytt/shared";
 
 const trondheimTerms = [
   "kroppanbrua",
@@ -210,6 +210,9 @@ const categoryRules: Array<[ArticleCategory, CategoryMatcher[]]> = [
   ["Vær", ["farevarsel", "flom", "regn", "uvær", /\bvær\b/u, "vind"]],
 ];
 
+const rosenborgClubContext =
+  /\b(?:rbk|rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|presentert|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u;
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -246,6 +249,15 @@ export function categorize(text: string): ArticleCategory {
       ),
     )?.[0] ?? "Nyheter"
   );
+}
+
+export function articleTopics(
+  text: string,
+  category: ArticleCategory = categorize(text),
+): ArticleTopic[] {
+  if (category !== "Sport") return [];
+  const normalized = text.toLocaleLowerCase("nb");
+  return rosenborgClubContext.test(normalized) ? ["rosenborg"] : [];
 }
 
 export function extractPlaces(text: string): string[] {

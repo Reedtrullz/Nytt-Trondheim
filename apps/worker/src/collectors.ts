@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { XMLParser } from "fast-xml-parser";
 import type { Article, SourceId } from "@nytt/shared";
-import { categorize, detectScope, extractPlaces } from "./classify.js";
+import { articleTopics, categorize, detectScope, extractPlaces } from "./classify.js";
 import {
   defaultDatexSituationEndpoint,
   normalizeDatexSituationEndpoint,
@@ -102,6 +102,7 @@ export async function collectRss(
     }
     const scope = detectScope(`${title} ${excerpt}`);
     if (!scope && !source.retainRegionalUnmatched) return [];
+    const category = categorize(`${title} ${excerpt}`);
     return [
       {
         id: stableId(source.id, url),
@@ -112,7 +113,8 @@ export async function collectRss(
         url,
         publishedAt: feedPublishedAt(item.pubDate),
         scope: scope ?? "trondelag",
-        category: categorize(`${title} ${excerpt}`),
+        category,
+        topics: articleTopics(`${title} ${excerpt}`, category),
         places: extractPlaces(`${title} ${excerpt}`),
       },
     ];
@@ -177,6 +179,7 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
       return;
     }
     const excerpt = $(element).text().replace(title, "").replace(/\s+/g, " ").trim();
+    const category = categorize(`${title} ${excerpt}`);
     candidates.push({
       id: stableId("trondheim_kommune", canonical),
       source: "trondheim_kommune",
@@ -185,7 +188,8 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
       excerpt: excerpt.slice(0, 300),
       url: canonical,
       scope: "trondheim",
-      category: categorize(`${title} ${excerpt}`),
+      category,
+      topics: articleTopics(`${title} ${excerpt}`, category),
       places: extractPlaces(`${title} ${excerpt}`),
     });
   });

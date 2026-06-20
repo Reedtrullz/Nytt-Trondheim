@@ -202,12 +202,14 @@ button {
 }
 
 .scope-switch,
-.filters {
+.filters,
+.topic-filters {
   display: flex;
   gap: 23px;
 }
 
-.filters {
+.filters,
+.topic-filters {
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
@@ -215,7 +217,8 @@ button {
 }
 
 .scope-switch button,
-.filters button {
+.filters button,
+.topic-filters button {
   flex: 0 0 auto;
   padding: 16px 2px;
   border: 0;
@@ -231,9 +234,16 @@ button {
   border-bottom: 2px solid var(--blue);
 }
 
-.filters button.selected {
+.filters button.selected,
+.topic-filters button.selected {
   color: var(--blue);
   font-weight: 600;
+}
+
+.topic-filters {
+  gap: 12px;
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
 }
 
 .situation-banner {
@@ -5361,9 +5371,15 @@ button {
     gap: 2px;
   }
 
-  .filters {
+  .filters,
+  .topic-filters {
     overflow-x: auto;
     max-width: 100%;
+  }
+
+  .topic-filters {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .masthead nav {

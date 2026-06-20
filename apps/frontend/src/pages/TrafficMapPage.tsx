@@ -454,6 +454,7 @@ export function TrafficMapPage() {
     categories: selectedCategories,
     severities: selectedSeverities,
     states: requestedTrafficStates,
+    estimatedNews: visibleContextLayers.estimatedNews,
     from: timeWindow.from,
     to: timeWindow.to,
     bounds: stableBounds,
@@ -517,6 +518,7 @@ export function TrafficMapPage() {
     });
   }, [
     data?.events,
+    visibleContextLayers.estimatedNews,
     visibleContextLayers.incidents,
     visibleContextLayers.roadworks,
     visibleContextLayers.showAll,

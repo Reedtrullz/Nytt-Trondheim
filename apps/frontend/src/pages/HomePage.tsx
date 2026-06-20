@@ -7,6 +7,7 @@ import { NewsMap } from "../components/MapViews.js";
 import {
   articleCategories,
   articleCategoryLabels,
+  articleTopicLabels,
   buildHomeSearch,
   parseHomeFilters,
   searchSummary,
@@ -396,7 +397,7 @@ const savedOverrideTtlMs = 60_000;
 export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
-  const { scope, category, q: query } = filters;
+  const { scope, category, topic, q: query } = filters;
   const [articles, setArticles] = useState(initialData.articles);
   const [nextCursor, setNextCursor] = useState<string>();
   const [situations, setSituations] = useState<BootstrapPayload["situations"]>(
@@ -408,14 +409,17 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
   const articleSavedOverridesRef = useRef<Map<string, SavedOverride>>(new Map());
-  const feedKey = `${scope}\u0000${category}\u0000${query}`;
+  const feedKey = `${scope}\u0000${category}\u0000${topic ?? ""}\u0000${query}`;
   const feedKeyRef = useRef(feedKey);
   const loadMoreRequestIdRef = useRef(0);
   feedKeyRef.current = feedKey;
   const [saveError, setSaveError] = useState<string>();
 
   function updateFilters(next: Partial<HomeFilters>) {
-    setSearchParams(searchParamsFor({ ...filters, ...next }));
+    const merged: HomeFilters = { ...filters, ...next };
+    if (next.topic) merged.category = "Sport";
+    if (merged.category !== "Sport") delete merged.topic;
+    setSearchParams(searchParamsFor(merged));
   }
 
   useEffect(() => {
@@ -428,7 +432,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
     const timeout = window.setTimeout(
       () => {
         void api
-          .articles({ scope, category, q: query })
+          .articles({ scope, category, topic, q: query })
           .then((page) => {
             if (!cancelled) {
               setArticles(() => {
@@ -464,7 +468,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [category, query, scope]);
+  }, [category, query, scope, topic]);
 
   useEffect(() => {
     void api
@@ -524,7 +528,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
     setLoadingMore(true);
     setFeedError(undefined);
     try {
-      const page = await api.articles({ scope, category, q: query, cursor: requestCursor });
+      const page = await api.articles({ scope, category, topic, q: query, cursor: requestCursor });
       if (loadMoreRequestIdRef.current !== requestId || feedKeyRef.current !== requestFeedKey) {
         return;
       }
@@ -578,6 +582,20 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
             </button>
           ))}
         </div>
+        {category === "Sport" ? (
+          <div className="topic-filters" aria-label="Sportskategorier">
+            <button
+              type="button"
+              aria-pressed={topic === "rosenborg"}
+              className={topic === "rosenborg" ? "selected" : ""}
+              onClick={() =>
+                updateFilters({ topic: topic === "rosenborg" ? undefined : "rosenborg" })
+              }
+            >
+              {articleTopicLabels.rosenborg}
+            </button>
+          </div>
+        ) : null}
       </div>
       {!isTextSearch ? <SituationBanner situations={situations} /> : null}
       <div className="home-grid">

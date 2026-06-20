@@ -36,6 +36,8 @@ export type ArticleCategory =
   | "Politikk"
   | "Vær";
 
+export type ArticleTopic = "rosenborg";
+
 export type SituationType =
   | "fire"
   | "missing_person"
@@ -102,6 +104,7 @@ export interface Article {
   publishedAt: string;
   scope: GeographicScope;
   category: ArticleCategory;
+  topics?: ArticleTopic[];
   places: string[];
   location?: { lat: number; lng: number; label: string };
   saved?: boolean;

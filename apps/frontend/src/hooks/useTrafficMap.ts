@@ -11,6 +11,7 @@ export interface UseTrafficMapOptions {
   categories: TrafficEventCategory[];
   severities: TrafficEventSeverity[];
   states?: TrafficEventState[];
+  estimatedNews?: boolean;
   from?: string;
   to?: string;
   bounds?: {
@@ -71,12 +72,19 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
   const categoriesKey = options.categories.join(",");
   const severitiesKey = options.severities.join(",");
   const statesKey = options.states?.join(",") ?? "";
+  const estimatedNewsKey = options.estimatedNews ? "true" : "false";
   const fromKey = options.from ?? "";
   const toKey = options.to ?? "";
   const currentBoundsKey = boundsKey(options.bounds);
-  const queryKey = [categoriesKey, severitiesKey, statesKey, fromKey, toKey, currentBoundsKey].join(
-    "|",
-  );
+  const queryKey = [
+    categoriesKey,
+    severitiesKey,
+    statesKey,
+    estimatedNewsKey,
+    fromKey,
+    toKey,
+    currentBoundsKey,
+  ].join("|");
 
   const reload = useCallback(async () => {
     requestIdRef.current += 1;
@@ -96,6 +104,7 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
           categories: categoriesFromKey(categoriesKey),
           severities: severitiesFromKey(severitiesKey),
           states: statesFromKey(statesKey),
+          estimatedNews: estimatedNewsKey === "true",
           from: fromKey || undefined,
           to: toKey || undefined,
           bounds: boundsFromKey(currentBoundsKey),
@@ -118,7 +127,16 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
         abortRef.current = undefined;
       }
     }
-  }, [categoriesKey, currentBoundsKey, fromKey, queryKey, severitiesKey, statesKey, toKey]);
+  }, [
+    categoriesKey,
+    currentBoundsKey,
+    estimatedNewsKey,
+    fromKey,
+    queryKey,
+    severitiesKey,
+    statesKey,
+    toKey,
+  ]);
 
   useEffect(() => {
     void reload();

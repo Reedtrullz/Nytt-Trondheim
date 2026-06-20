@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Article, EvidenceItem, MapFeature, Situation } from "@nytt/shared";
-import { categorize } from "./classify.js";
+import { articleTopics, categorize } from "./classify.js";
 import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export interface PolitiloggenThreadMessage {
@@ -185,16 +185,20 @@ function shouldPromoteThread(
 function articleForThread(thread: PolitiloggenThread): Article | undefined {
   if (!thread.id) return undefined;
   const firstMessageAt = orderedMessages(thread)[0]?.createdOn;
+  const title = titleForThread(thread);
+  const excerpt = excerptForThread(thread);
+  const category = categoryForThread(thread);
   return {
     id: `politiloggen-${thread.id}`,
     source: "politiloggen",
     sourceLabel: "Politiloggen",
-    title: titleForThread(thread),
-    excerpt: excerptForThread(thread),
+    title,
+    excerpt,
     url: sourceUrl(thread),
     publishedAt: toIso(thread.createdOn, toIso(firstMessageAt)),
     scope: "trondheim",
-    category: categoryForThread(thread),
+    category,
+    topics: articleTopics(`${thread.category ?? ""} ${title} ${excerpt}`, category),
     places: compact([thread.area ?? undefined, thread.municipality ?? undefined]),
   };
 }

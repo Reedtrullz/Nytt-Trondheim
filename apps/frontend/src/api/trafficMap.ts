@@ -9,6 +9,7 @@ export interface TrafficMapRequest {
   categories?: TrafficEventCategory[];
   severities?: TrafficEventSeverity[];
   states?: TrafficEventState[];
+  estimatedNews?: boolean;
   from?: string;
   to?: string;
   bounds?: {
@@ -27,6 +28,8 @@ export async function fetchTrafficMap(
   if (request.categories !== undefined) params.set("categories", request.categories.join(","));
   if (request.severities !== undefined) params.set("severities", request.severities.join(","));
   if (request.states !== undefined) params.set("states", request.states.join(","));
+  if (request.estimatedNews !== undefined)
+    params.set("estimatedNews", String(request.estimatedNews));
   if (request.from) params.set("from", request.from);
   if (request.to) params.set("to", request.to);
   if (request.bounds) {
