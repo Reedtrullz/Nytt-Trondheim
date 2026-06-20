@@ -99,4 +99,40 @@ describe("article coverage analysis", () => {
       }),
     ]);
   });
+
+  it("keeps crime and generic incident categories compatible for one reported case", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-slag",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Flere ungdommer i slagsmål i Trondheim",
+          excerpt: "Ungdommer sloss på Saupstad i Trondheim. Ingen er meldt skadet.",
+          category: "Krim",
+        }),
+        article({
+          id: "nrk-slag",
+          title: "Rykker ut til slåssing",
+          excerpt:
+            "Politiet er på vei til Saupstad i Trondheim hvor noen ungdommer slåss med hverandre.",
+          category: "Hendelser",
+          publishedAt: "2026-06-18T10:37:00.000Z",
+        }),
+      ],
+      "2026-06-18T11:00:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "incident",
+      memberArticleIds: ["adressa-slag", "nrk-slag"],
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "slagsmal",
+        }),
+      ]),
+    });
+  });
 });

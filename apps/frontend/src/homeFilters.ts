@@ -1,17 +1,31 @@
-import type { GeographicScope } from "@nytt/shared";
+import type { ArticleCategory, GeographicScope } from "@nytt/shared";
 
 export const articleCategories = [
   "Alle",
-  "Nyheter",
   "Hendelser",
+  "Krim",
+  "Transport",
+  "Sport",
+  "Politikk",
   "Byutvikling",
   "Kultur",
-  "Sport",
-  "Transport",
-  "Politikk",
+  "Nyheter",
 ] as const;
 
 export type ArticleCategoryFilter = (typeof articleCategories)[number];
+
+export const articleCategoryLabels = {
+  Alle: "Alle",
+  Nyheter: "Nyheter",
+  Hendelser: "Hendelser",
+  Krim: "Krim",
+  Byutvikling: "Byutvikling",
+  Kultur: "Kultur",
+  Sport: "Sport",
+  Transport: "Trafikk",
+  Politikk: "Politikk",
+  Vær: "Vær",
+} as const satisfies Record<ArticleCategory | "Alle", string>;
 
 export interface HomeFilters {
   q: string;
@@ -48,7 +62,7 @@ export function searchSummary(filters: HomeFilters): string {
   const place = filters.scope === "trondheim" ? "Trondheim" : "Trøndelag";
   const parts: string[] = [];
   if (filters.q.trim()) parts.push(`"${filters.q.trim()}"`);
-  if (filters.category !== "Alle") parts.push(filters.category);
+  if (filters.category !== "Alle") parts.push(articleCategoryLabels[filters.category]);
   parts.push(`i ${place}`);
   return parts.join(" ");
 }

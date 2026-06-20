@@ -278,7 +278,7 @@ function hasConflictingSpecificPlaces(left: Article, right: Article): boolean {
 
 function sameBroadCategory(left: Article, right: Article): boolean {
   if (left.category === right.category) return true;
-  const eventLike = new Set(["Hendelser", "Nyheter"]);
+  const eventLike = new Set(["Hendelser", "Krim", "Nyheter"]);
   return eventLike.has(left.category) && eventLike.has(right.category);
 }
 

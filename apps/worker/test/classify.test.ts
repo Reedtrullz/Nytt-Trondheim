@@ -40,7 +40,7 @@ describe("Trondheim relevance classification", () => {
 
   it("does not keep national road-number stories without a local anchor", () => {
     expect(detectScope("E6 stengt etter ulykke i Gudbrandsdalen")).toBeUndefined();
-    expect(categorize("E6 stengt etter ulykke i Gudbrandsdalen")).toBe("Hendelser");
+    expect(categorize("E6 stengt etter ulykke i Gudbrandsdalen")).toBe("Transport");
   });
 
   it("categorizes incident stories and extracts public place names", () => {
@@ -56,6 +56,13 @@ describe("Trondheim relevance classification", () => {
     expect(categorize("Brann i Bymarka")).toBe("Hendelser");
   });
 
+  it("separates police and crime items from generic incidents", () => {
+    expect(categorize("Innbrudd: Trondheim, Tiller")).toBe("Krim");
+    expect(categorize("Tyveri: Trondheim")).toBe("Krim");
+    expect(categorize("Ro og orden: Trondheim, Saupstad")).toBe("Krim");
+    expect(categorize("Hørte ikke på politiet - ble arrestert")).toBe("Krim");
+  });
+
   it("does not treat politics or ordinary være text as incidents or weather", () => {
     expect(categorize("Politikk i Trondheim")).toBe("Politikk");
     expect(categorize("Kommunen varsler ny politikk for sentrum")).toBe("Politikk");
@@ -66,8 +73,19 @@ describe("Trondheim relevance classification", () => {
   });
 
   it("recognizes traffic collision wording beyond the word kollisjon", () => {
+    expect(categorize("Trafikkulykke på Kroppanbrua")).toBe("Transport");
     expect(categorize("Syklist og bil i sammenstøt på Tiller")).toBe("Transport");
     expect(categorize("Fotgjenger påkjørt ved Elgeseter")).toBe("Transport");
+  });
+
+  it("keeps non-transport closures and smoke reports in incidents", () => {
+    expect(categorize("Skole stengt på Rosenborg")).toBe("Hendelser");
+    expect(categorize("Rykker til Flatåsen etter røykutvikling")).toBe("Hendelser");
+  });
+
+  it("requires planning context before classifying byutvikling", () => {
+    expect(categorize("Planen bak treneransettelsen er umulig")).toBe("Nyheter");
+    expect(categorize("Ny reguleringsplan for Sluppen")).toBe("Byutvikling");
   });
 
   it("does not classify Rosenborg district incidents or ordinary bruker text as sport or transport", () => {

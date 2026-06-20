@@ -92,6 +92,38 @@ describe("Politiloggen ingestion", () => {
     expect(result.articles).toEqual([]);
   });
 
+  it("classifies police order and crime threads as Krim articles", async () => {
+    const orderThread: PolitiloggenThread = {
+      ...activeThread,
+      id: "order-1",
+      category: "Ro og orden",
+      area: "Saupstad",
+      messages: [
+        {
+          id: "order-1-0",
+          text: "Politiet er på Saupstad etter melding om ungdommer som sloss.",
+          createdOn: "2026-05-29T14:48:31.5544696+00:00",
+          type: "Published",
+        },
+      ],
+    };
+
+    const result = await collectPolitiloggen(
+      async () =>
+        new Response(JSON.stringify({ messageThreads: [orderThread], count: 1 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    expect(result.articles[0]).toMatchObject({
+      id: "politiloggen-order-1",
+      title: "Ro og orden: Trondheim, Saupstad",
+      category: "Krim",
+      places: ["Saupstad", "Trondheim"],
+    });
+  });
+
   it("promotes active Politiloggen threads to official situations", () => {
     const activeIncidentThread = {
       ...activeThread,

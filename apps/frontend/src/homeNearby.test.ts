@@ -80,6 +80,31 @@ describe("home nearby story model", () => {
     );
   });
 
+  it("labels located crime stories separately from generic local news", () => {
+    const items = nearbyStoryItems([
+      article({
+        id: "theft",
+        title: "Tyveri på Solsiden",
+        category: "Krim",
+        location: { lat: 63.436, lng: 10.414, label: "Solsiden" },
+      }),
+      article({
+        id: "meeting",
+        title: "Åpent møte på biblioteket",
+        category: "Nyheter",
+        publishedAt: "2026-06-01T18:00:00.000Z",
+        location: { lat: 63.43, lng: 10.39, label: "Midtbyen" },
+      }),
+    ]);
+
+    expect(items[0]).toMatchObject({
+      id: "theft",
+      kind: "crime",
+      relevanceLabel: "Politi og kriminalitet",
+      locationLabel: "Solsiden",
+    });
+  });
+
   it("uses one nearby marker for a grouped case covered by multiple providers", () => {
     const primary = article({
       id: "nrk-tiller",

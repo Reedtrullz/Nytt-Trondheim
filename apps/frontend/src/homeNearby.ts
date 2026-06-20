@@ -3,6 +3,7 @@ import { latLngFromLonLat } from "./mapCoordinates.js";
 
 export type NearbyStoryKind =
   | "situation"
+  | "crime"
   | "traffic"
   | "weather"
   | "municipal"
@@ -35,6 +36,7 @@ interface NearbyArticleGroup {
 
 const categoryPriority = {
   Hendelser: 60,
+  Krim: 54,
   Transport: 48,
   Vær: 44,
   Byutvikling: 34,
@@ -47,6 +49,7 @@ const categoryPriority = {
 function nearbyKind(article: Article): NearbyStoryKind {
   if (article.situationId) return "situation";
   if (article.source === "trondheim_kommune") return "municipal";
+  if (article.category === "Krim") return "crime";
   if (article.category === "Transport") return "traffic";
   if (article.category === "Vær") return "weather";
   if (article.category === "Byutvikling") return "development";
@@ -66,6 +69,11 @@ function relevanceCopy(
       return {
         relevanceLabel: "Påvirker ferdsel",
         relevanceDetail: "Stedsfestet transport- eller framkommelighetssak i nyhetslisten.",
+      };
+    case "crime":
+      return {
+        relevanceLabel: "Politi og kriminalitet",
+        relevanceDetail: "Stedsfestet politi- eller kriminalitetssak fra nyhetslisten.",
       };
     case "weather":
       return {

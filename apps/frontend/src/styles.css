@@ -207,13 +207,22 @@ button {
   gap: 23px;
 }
 
+.filters {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
 .scope-switch button,
 .filters button {
+  flex: 0 0 auto;
   padding: 16px 2px;
   border: 0;
   color: var(--muted);
   background: transparent;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .scope-switch button.selected {

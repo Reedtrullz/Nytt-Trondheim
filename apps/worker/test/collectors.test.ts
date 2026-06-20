@@ -61,7 +61,7 @@ describe("RSS collection policy", () => {
     expect(articles).toHaveLength(1);
     expect(articles[0]).toMatchObject({
       scope: "trondheim",
-      category: "Hendelser",
+      category: "Krim",
       places: ["Sentrum", "Trondheim"],
     });
   });

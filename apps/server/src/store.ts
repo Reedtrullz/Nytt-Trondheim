@@ -1754,7 +1754,7 @@ export class MemoryStore implements Store {
             filters.category === "Alle" ||
             article.category === filters.category) &&
           (!search ||
-            `${article.title} ${article.excerpt} ${article.places.join(" ")}`
+            `${article.title} ${article.excerpt} ${article.sourceLabel} ${article.category} ${article.places.join(" ")}`
               .toLocaleLowerCase("nb")
               .includes(search)) &&
           beforeCursor(article.publishedAt, article.id, cursor),
@@ -2270,7 +2270,15 @@ export class PgStore implements Store {
     if (filters.q) {
       params.push(`%${filters.q}%`);
       where.push(
-        `(a.payload->>'title' ILIKE $${params.length} OR a.payload->>'excerpt' ILIKE $${params.length})`,
+        `(a.payload->>'title' ILIKE $${params.length}
+          OR a.payload->>'excerpt' ILIKE $${params.length}
+          OR a.payload->>'sourceLabel' ILIKE $${params.length}
+          OR a.category ILIKE $${params.length}
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(COALESCE(a.payload->'places', '[]'::jsonb)) place_name(value)
+            WHERE place_name.value ILIKE $${params.length}
+          ))`,
       );
     }
     if (filters.cursor) {

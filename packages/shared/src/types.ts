@@ -28,6 +28,7 @@ export type GeographicScope = "trondheim" | "trondelag";
 export type ArticleCategory =
   | "Nyheter"
   | "Hendelser"
+  | "Krim"
   | "Byutvikling"
   | "Kultur"
   | "Sport"

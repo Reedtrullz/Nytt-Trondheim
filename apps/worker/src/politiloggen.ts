@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Article, EvidenceItem, MapFeature, Situation } from "@nytt/shared";
+import { categorize } from "./classify.js";
 import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export interface PolitiloggenThreadMessage {
@@ -138,7 +139,8 @@ function categoryForThread(thread: PolitiloggenThread): Article["category"] {
   const category = `${thread.category ?? ""}`.toLocaleLowerCase("nb");
   if (category.includes("trafikk")) return "Transport";
   if (category.includes("vær")) return "Vær";
-  return "Hendelser";
+  const inferred = categorize(`${thread.category ?? ""} ${excerptForThread(thread)}`);
+  return inferred === "Nyheter" ? "Hendelser" : inferred;
 }
 
 function typeForThread(thread: PolitiloggenThread): Situation["type"] {

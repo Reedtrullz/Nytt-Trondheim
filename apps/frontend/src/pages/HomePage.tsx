@@ -6,6 +6,7 @@ import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
 import { NewsMap } from "../components/MapViews.js";
 import {
   articleCategories,
+  articleCategoryLabels,
   buildHomeSearch,
   parseHomeFilters,
   searchSummary,
@@ -172,7 +173,9 @@ function LeadStory({
         <p>{article.excerpt}</p>
         <SourceCluster group={group} />
         <div className="lead-footer">
-          <span className={`topic ${article.category.toLowerCase()}`}>{article.category}</span>
+          <span className={`topic ${article.category.toLowerCase()}`}>
+            {articleCategoryLabels[article.category]}
+          </span>
           {articleUrl ? (
             <a href={articleUrl} target="_blank" rel="noreferrer noopener">
               Les mer <ArrowIcon />
@@ -211,7 +214,9 @@ function NewsRow({
         <p className="excerpt">{article.excerpt}</p>
         <SourceCluster group={group} />
       </div>
-      <span className={`topic ${article.category.toLowerCase()}`}>{article.category}</span>
+      <span className={`topic ${article.category.toLowerCase()}`}>
+        {articleCategoryLabels[article.category]}
+      </span>
       <SaveButton article={article} saving={saving} onUpdate={onSave} />
     </article>
   );
@@ -569,7 +574,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
               key={item}
               onClick={() => updateFilters({ category: item })}
             >
-              {item}
+              {articleCategoryLabels[item]}
             </button>
           ))}
         </div>
