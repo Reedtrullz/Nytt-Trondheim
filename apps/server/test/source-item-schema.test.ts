@@ -79,6 +79,8 @@ describe("source item schema", () => {
     expect(schema).toContain("source_items_no_health_only_provider_check");
     expect(schema).toContain("source_health_source_id_check");
     expect(schema).toContain("source_health_state_check");
+    expect(schema).toContain("traffic_map_events_source_check");
+    expect(schema).toContain("CHECK (source IN ('vegvesen_traffic_info'))");
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
     expect(schema).toContain("source_items_entur_official_event_service_alert_check");
     expect(schema).toContain("situations_official_source_check");

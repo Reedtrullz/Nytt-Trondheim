@@ -197,13 +197,15 @@ export function TrafficLayer({
           }
 
           const highlighted = highlightedIds.has(event.id);
+          const estimatedNewsEvent = object.kind === "estimated-news-event";
           const point = pointFromGeometry(object.geometry);
-          const eventClassName = `traffic-event traffic-event-${event.source} traffic-event-${event.category} traffic-event-${event.severity} traffic-event-${event.state}${highlighted ? " traffic-event-highlighted" : ""}`;
+          const eventClassName = `traffic-event traffic-event-${event.source} traffic-event-${event.category} traffic-event-${event.severity} traffic-event-${event.state}${estimatedNewsEvent ? " traffic-estimated-news-event" : ""}${highlighted ? " traffic-event-highlighted" : ""}`;
           const pathOptions = {
             className: eventClassName,
             weight: severityWeight[event.severity] + (highlighted ? 3 : 0),
             opacity: highlighted ? 1 : event.state === "planned" ? 0.65 : 0.95,
             fillOpacity: highlighted ? 0.45 : event.state === "planned" ? 0.2 : 0.3,
+            ...(estimatedNewsEvent ? { dashArray: "4 4" } : {}),
           };
 
           if (point) {

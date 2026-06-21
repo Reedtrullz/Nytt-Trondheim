@@ -294,9 +294,37 @@ describe("private situation API", () => {
       linkedSituationIds: [sampleSituation.id],
     };
 
+    const trafficInfoSourceItem: SourceItem = {
+      id: "source:vegvesen_traffic_info:official_event:NPRA_HBT_1",
+      provider: "vegvesen_traffic_info",
+      kind: "official_event",
+      externalId: "NPRA_HBT_1",
+      title: "Vegarbeid på E6",
+      summary: "TrafficInfo row is operational map context, not causal incident evidence.",
+      fetchedAt: "2026-06-02T10:00:00.000Z",
+      captureHash: "sha256:trafficinfo",
+      reliabilityTier: "official",
+      linkedSituationIds: [sampleSituation.id],
+    };
+
+    const railContextSourceItem: SourceItem = {
+      id: "source:bane_nor:official_event:rail-message",
+      provider: "bane_nor",
+      kind: "official_event",
+      externalId: "rail-message",
+      title: "Togtrafikkmelding",
+      summary: "Bane NOR message is mobility context, not causal incident evidence.",
+      fetchedAt: "2026-06-02T10:00:00.000Z",
+      captureHash: "sha256:bane-nor",
+      reliabilityTier: "official",
+      linkedSituationIds: [sampleSituation.id],
+    };
+
     const explanation = buildSituationExplanation(sampleSituation, [
       telemetrySourceItem,
       serviceAlertSourceItem,
+      trafficInfoSourceItem,
+      railContextSourceItem,
     ]);
 
     expect(explanation.sourceRoles).toContainEqual({
@@ -305,12 +333,22 @@ describe("private situation API", () => {
     });
     expect(explanation.sourceRoles).toContainEqual({ provider: "met", role: "context" });
     expect(explanation.sourceRoles).toContainEqual({ provider: "entur", role: "context" });
+    expect(explanation.sourceRoles).toContainEqual({
+      provider: "vegvesen_traffic_info",
+      role: "context",
+    });
+    expect(explanation.sourceRoles).toContainEqual({ provider: "bane_nor", role: "context" });
     expect(explanation.sourceRoles).not.toContainEqual({
       provider: "datex_travel_time",
       role: "evidence",
     });
     expect(explanation.sourceRoles).not.toContainEqual({ provider: "met", role: "evidence" });
     expect(explanation.sourceRoles).not.toContainEqual({ provider: "entur", role: "evidence" });
+    expect(explanation.sourceRoles).not.toContainEqual({
+      provider: "vegvesen_traffic_info",
+      role: "evidence",
+    });
+    expect(explanation.sourceRoles).not.toContainEqual({ provider: "bane_nor", role: "evidence" });
   });
 
   it("shows telemetry stale warnings as operations context, not evidence", async () => {
@@ -1273,6 +1311,39 @@ describe("private situation API", () => {
     );
   });
 
+  it("keeps active open-ended traffic map events visible in future time windows", async () => {
+    const { app, store } = await testApp();
+    const openEndedEvent: TrafficMapEvent = {
+      id: "vegvesen-traffic-info:NPRA_OPEN",
+      source: "vegvesen_traffic_info",
+      sourceEventId: "NPRA_OPEN",
+      category: "closure",
+      severity: "high",
+      state: "active",
+      title: "E6 er stengt",
+      updatedAt: "2026-05-29T08:05:00.000Z",
+      geometry: { type: "Point", coordinates: [10.39, 63.39] },
+    };
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([openEndedEvent]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: [] });
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get(
+        "/api/map/traffic-events?states=active&from=2026-05-29T10:00:00.000Z&to=2026-05-30T10:00:00.000Z",
+      )
+      .expect(200);
+
+    expect(response.body.events).toEqual([
+      expect.objectContaining({
+        id: "vegvesen-traffic-info:NPRA_OPEN",
+        state: "active",
+      }),
+    ]);
+  });
+
   it("surfaces road-closing crash articles as estimated traffic events only when requested", async () => {
     const { app, store } = await testApp();
     const crashArticle: Article = {
@@ -1909,7 +1980,9 @@ describe("private situation API", () => {
     expect(capturedSql).toContain("category = ANY($3::text[])");
     expect(capturedSql).toContain("severity = ANY($4::text[])");
     expect(capturedSql).toContain("geometry && ST_MakeEnvelope($5, $6, $7, $8, 4326)");
-    expect(capturedSql).toContain("COALESCE(valid_to, updated_at) >= $9");
+    expect(capturedSql).toContain(
+      "((state = 'active' AND valid_to IS NULL) OR COALESCE(valid_to, updated_at) >= $9)",
+    );
     expect(capturedSql).toContain("COALESCE(valid_from, updated_at) <= $10");
     expect(capturedSql).toContain("ORDER BY updated_at DESC LIMIT 1000");
     expect(capturedSql.indexOf("category = ANY($3::text[])")).toBeLessThan(

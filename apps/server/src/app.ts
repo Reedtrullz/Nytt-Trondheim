@@ -91,7 +91,14 @@ const telemetrySourceIds = new Set<SourceId>([
   "trafikkdata",
   "entur_vehicle_positions",
 ]);
-const contextSourceIds = new Set<SourceId>(["met", "nve", "entur_service_alerts"]);
+const contextSourceIds = new Set<SourceId>([
+  "met",
+  "nve",
+  "entur_service_alerts",
+  "bane_nor",
+  "vegvesen_traffic_info",
+  "dsb",
+]);
 
 function sourceRole(
   provider: SourceId,
@@ -355,7 +362,10 @@ function eventIntersectsTimeRange(event: TrafficMapEvent, from?: string, to?: st
   const fromMs = from ? Date.parse(from) : Number.NaN;
   const toMs = to ? Date.parse(to) : Number.NaN;
   const startMs = Date.parse(event.validFrom ?? event.updatedAt);
-  const endMs = Date.parse(event.validTo ?? event.validFrom ?? event.updatedAt);
+  const endMs =
+    event.state === "active" && !event.validTo
+      ? Number.POSITIVE_INFINITY
+      : Date.parse(event.validTo ?? event.validFrom ?? event.updatedAt);
 
   if (Number.isFinite(fromMs) && Number.isFinite(endMs) && endMs < fromMs) return false;
   if (Number.isFinite(toMs) && Number.isFinite(startMs) && startMs > toMs) return false;

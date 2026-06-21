@@ -692,6 +692,9 @@ CREATE TABLE IF NOT EXISTS traffic_map_events (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (source, source_event_id)
 );
+ALTER TABLE traffic_map_events DROP CONSTRAINT IF EXISTS traffic_map_events_source_check;
+ALTER TABLE traffic_map_events ADD CONSTRAINT traffic_map_events_source_check
+  CHECK (source IN ('vegvesen_traffic_info'));
 
 CREATE INDEX IF NOT EXISTS traffic_map_events_source_state_idx
   ON traffic_map_events (source, state, updated_at DESC);

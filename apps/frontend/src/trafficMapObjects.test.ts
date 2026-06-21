@@ -58,7 +58,7 @@ describe("traffic map objects", () => {
         },
         { estimatedNews: true },
       ),
-    ).toEqual([expect.objectContaining({ kind: "official-road-event" })]);
+    ).toEqual([expect.objectContaining({ kind: "estimated-news-event" })]);
   });
 
   it("ignores invalid estimated article coordinates", () => {

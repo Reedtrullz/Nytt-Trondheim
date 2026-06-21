@@ -5,6 +5,8 @@ import type {
   Article,
   ArticleCoverageBundleDecision,
   OfficialEvent,
+  PersistedTrafficMapEvent,
+  PersistedTrafficMapEventSource,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
   RoadCamera,
@@ -22,12 +24,12 @@ import type {
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
 
 export interface TrafficMapEventUpsertOptions {
-  source: TrafficMapEvent["source"];
+  source: PersistedTrafficMapEventSource;
   fetchedAt: string;
 }
 
 export interface TrafficMapEventListFilters {
-  source?: TrafficMapEvent["source"];
+  source?: PersistedTrafficMapEventSource;
   states?: TrafficMapEvent["state"][];
 }
 
@@ -440,10 +442,17 @@ export class WorkerRepository {
   }
 
   async upsertTrafficMapEvents(
-    events: TrafficMapEvent[],
+    events: PersistedTrafficMapEvent[],
     options: TrafficMapEventUpsertOptions,
   ): Promise<void> {
     if (events.length === 0) return;
+    for (const event of events) {
+      if (event.source !== options.source) {
+        throw new Error(
+          `Traffic map event source mismatch: expected ${options.source}, got ${event.source}`,
+        );
+      }
+    }
 
     for (const event of events) {
       const eventPayloadHash = createHash("sha256").update(JSON.stringify(event)).digest("hex");
@@ -794,7 +803,9 @@ export class WorkerRepository {
     }
   }
 
-  async listTrafficMapEvents(filters: TrafficMapEventListFilters = {}): Promise<TrafficMapEvent[]> {
+  async listTrafficMapEvents(
+    filters: TrafficMapEventListFilters = {},
+  ): Promise<PersistedTrafficMapEvent[]> {
     const where: string[] = [];
     const params: unknown[] = [];
 
@@ -808,7 +819,7 @@ export class WorkerRepository {
     }
 
     const result = await this.pool.query<{
-      payload: TrafficMapEvent;
+      payload: PersistedTrafficMapEvent;
       state: TrafficMapEvent["state"];
     }>(
       `SELECT payload, state FROM traffic_map_events${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY updated_at DESC`,
@@ -818,7 +829,7 @@ export class WorkerRepository {
   }
 
   async markMissingTrafficMapEventsExpired(
-    source: TrafficMapEvent["source"],
+    source: PersistedTrafficMapEventSource,
     activeSourceEventIds: string[],
     fetchedAt: string,
   ): Promise<number> {
@@ -836,7 +847,7 @@ export class WorkerRepository {
   }
 
   async expireStaleOpenEndedTrafficMapEvents(
-    source: TrafficMapEvent["source"],
+    source: PersistedTrafficMapEventSource,
     now: string,
     maxAgeHours: number,
   ): Promise<number> {

@@ -80,6 +80,7 @@ describe("TrafficLayer semantic objects", () => {
 
     const html = renderToStaticMarkup(<TrafficLayer events={[newsEvent]} />);
 
+    expect(html).toContain("traffic-estimated-news-event");
     expect(html).toContain("Nyhetskilde (estimert)");
     expect(html).not.toContain("DATEX");
   });

@@ -53,6 +53,7 @@ describe("article store", () => {
     const query = vi.fn(async (sql: string, params?: unknown[]) => {
       const normalized = sql.replace(/\s+/g, " ").trim();
       expect(normalized).toContain("COALESCE(a.payload->'topics', '[]'::jsonb) ? $3");
+      expect(normalized).toContain("NOT (a.payload ? 'topics')");
       expect(normalized).toContain("a.category = 'Sport'");
       expect(normalized).toContain("a.payload->>'title' ILIKE '%rbk%'");
       expect(params).toEqual(["Reedtrullz", "Sport", "rosenborg", 41]);

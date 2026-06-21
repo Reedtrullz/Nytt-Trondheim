@@ -314,4 +314,35 @@ FROM (
   SELECT 'ci-source-entur-official'
 ) AS allowed_context;
 
+SELECT pg_temp.expect_check_violation(
+  'derived news traffic events must not be persisted in traffic_map_events',
+  $$INSERT INTO traffic_map_events (
+      id,
+      source,
+      source_event_id,
+      category,
+      severity,
+      state,
+      title,
+      updated_at,
+      geometry,
+      payload,
+      source_payload_hash
+    ) VALUES (
+      'ci-news-traffic-event',
+      'news_article',
+      'ci-news-traffic-event',
+      'closure',
+      'high',
+      'active',
+      'Nyhetsbasert estimert trafikkhendelse',
+      now(),
+      ST_SetSRID(ST_MakePoint(10.4, 63.4), 4326),
+      '{"source":"news_article"}'::jsonb,
+      'ci-news-traffic-hash'
+    )$$,
+  'traffic_map_events_source_check',
+  NULL
+);
+
 ROLLBACK;

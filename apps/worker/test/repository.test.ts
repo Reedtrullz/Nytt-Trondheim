@@ -4,6 +4,7 @@ import type {
   AiProcessingRun,
   Article,
   OfficialEvent,
+  PersistedTrafficMapEvent,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
   RoadCamera,
@@ -917,6 +918,23 @@ describe("WorkerRepository", () => {
     expect(query.mock.calls[2]?.[1]).toEqual(["vegvesen_traffic_info"]);
   });
 
+  it("rejects traffic map events that do not match the batch source", async () => {
+    const query = vi.fn();
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const invalidEvent = {
+      ...trafficMapEvent({ id: "news-traffic:article-one" }),
+      source: "news_article" as const,
+    };
+
+    await expect(
+      repository.upsertTrafficMapEvents([invalidEvent as unknown as PersistedTrafficMapEvent], {
+        source: "vegvesen_traffic_info",
+        fetchedAt: "2026-05-29T11:00:00.000Z",
+      }),
+    ).rejects.toThrow(/Traffic map event source mismatch/);
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("expires traffic map events missing from a successful snapshot", async () => {
     const event = trafficMapEvent();
     const query = vi
@@ -1312,7 +1330,9 @@ function enturServiceAlert(
   };
 }
 
-function trafficMapEvent(overrides: Partial<TrafficMapEvent> = {}): TrafficMapEvent {
+function trafficMapEvent(
+  overrides: Partial<PersistedTrafficMapEvent> = {},
+): PersistedTrafficMapEvent {
   return {
     id: "vegvesen-traffic-info:NPRA_HBT_1",
     source: "vegvesen_traffic_info",

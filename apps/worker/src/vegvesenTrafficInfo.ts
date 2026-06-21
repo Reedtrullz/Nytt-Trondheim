@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Point } from "geojson";
 import type {
+  PersistedTrafficMapEvent,
   SourceItemInput,
   TrafficEventCategory,
   TrafficEventSeverity,
   TrafficEventState,
-  TrafficMapEvent,
 } from "@nytt/shared";
 import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
@@ -62,7 +62,7 @@ export function pointGeometry(message: TrafficInfoObject): Point | undefined {
 }
 
 export function trafficInfoSourceItemInput(
-  event: TrafficMapEvent,
+  event: PersistedTrafficMapEvent,
   options: { fetchedAt: string; rawMessage: unknown },
 ): SourceItemInput {
   const captureHash = sha256(
@@ -208,7 +208,7 @@ export interface TrafficInfoParseOptions {
 }
 
 export interface TrafficInfoParseResult {
-  events: TrafficMapEvent[];
+  events: PersistedTrafficMapEvent[];
   rawMessagesById: Map<string, TrafficInfoObject>;
   sourcePayloadHash: string;
   totalMessages: number;
@@ -224,7 +224,7 @@ export function parseTrafficInfoMessages(
     throw new Error("TrafficInfo payload mangler trafficMessages[]");
   }
 
-  const events: TrafficMapEvent[] = [];
+  const events: PersistedTrafficMapEvent[] = [];
   const rawMessagesById = new Map<string, TrafficInfoObject>();
 
   for (const message of parsed.trafficMessages) {

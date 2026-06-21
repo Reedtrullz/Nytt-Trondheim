@@ -3,6 +3,7 @@ import type { TrafficMapEvent } from "@nytt/shared";
 
 export type TrafficMapObject =
   | { kind: "official-road-event"; eventId: string; event: TrafficMapEvent; geometry: Geometry }
+  | { kind: "estimated-news-event"; eventId: string; event: TrafficMapEvent; geometry: Geometry }
   | {
       kind: "estimated-news-location";
       eventId: string;
@@ -24,7 +25,12 @@ export function trafficMapObjectsForEvent(
   options: { estimatedNews: boolean },
 ): TrafficMapObject[] {
   const objects: TrafficMapObject[] = [
-    { kind: "official-road-event", eventId: event.id, event, geometry: event.geometry },
+    {
+      kind: event.source === "news_article" ? "estimated-news-event" : "official-road-event",
+      eventId: event.id,
+      event,
+      geometry: event.geometry,
+    },
   ];
   if (options.estimatedNews && event.source !== "news_article") {
     for (const article of event.relatedArticles ?? []) {

@@ -218,6 +218,7 @@ FROM source_health
 WHERE source IN ('vegvesen_traffic_info','datex','datex_travel_time','datex_weather','datex_cctv','trafikkdata')
 ORDER BY source;
 SELECT source, state, count(*) FROM traffic_map_events GROUP BY source, state ORDER BY source, state;
+SELECT source, count(*) FROM traffic_map_events WHERE source <> 'vegvesen_traffic_info' GROUP BY source ORDER BY source;
 SELECT provider, kind, count(*) FROM source_items WHERE provider='vegvesen_traffic_info' GROUP BY provider, kind;
 SELECT count(*) FROM traffic_map_events WHERE source='vegvesen_traffic_info' AND state IN ('active','planned');
 SELECT count(*) FROM datex_travel_times WHERE state <> 'stale';
@@ -237,6 +238,7 @@ Expected live results:
 - `/trafikk` returns `200` and the built asset contains the current traffic-map UI strings, including the route planner controls.
 - Anonymous `/api/map/traffic-events` and `/api/map/travel-plan` return `401`; this is expected for protected map APIs and is not a zero-event or route-planner failure.
 - `source_health.source='vegvesen_traffic_info'` is `ok`, `traffic_map_events` has non-zero `vegvesen_traffic_info` rows, and active/planned count is non-zero when Vegvesen has visible Trøndelag messages.
+- `traffic_map_events WHERE source <> 'vegvesen_traffic_info'` returns zero rows. DATEX and news-derived map objects are read-time API composition, not persisted table rows.
 - `datex_travel_times` and `traffic_counter_snapshots` are non-zero when the upstream feeds are available. DATEX weather/CCTV rows may legitimately be zero if the current bounded endpoints have no matching observations/status updates; rely on `source_health` and freshness labels rather than treating zero rows as an automatic deployment failure.
 - `source_items` has `vegvesen_traffic_info | official_event` provenance rows, but context telemetry providers (`datex_weather`, `datex_cctv`, `trafikkdata`, `datex_travel_time`) have zero `source_items` rows.
 - `official_events` and `situations` have no rows promoted from map-only or context-only sources.

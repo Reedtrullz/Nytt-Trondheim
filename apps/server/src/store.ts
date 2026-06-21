@@ -140,7 +140,7 @@ function invalidSourceItemRelationshipError(): Error & { status: number } {
 }
 
 function articleMatchesTopic(article: Article, topic: ArticleTopic): boolean {
-  if (article.topics?.includes(topic)) return true;
+  if (article.topics !== undefined) return article.topics.includes(topic);
   if (topic === "rosenborg") {
     return (
       article.category === "Sport" &&
@@ -2287,6 +2287,8 @@ export class PgStore implements Store {
       where.push(
         `(COALESCE(a.payload->'topics', '[]'::jsonb) ? $${topicIndex}
           OR (
+            NOT (a.payload ? 'topics')
+            AND
             a.category = 'Sport'
             AND (
               a.payload->>'title' ILIKE '%rosenborg%'
@@ -2605,7 +2607,9 @@ export class PgStore implements Store {
     }
     if (filters.from) {
       params.push(filters.from);
-      where.push(`COALESCE(valid_to, updated_at) >= $${params.length}`);
+      where.push(
+        `((state = 'active' AND valid_to IS NULL) OR COALESCE(valid_to, updated_at) >= $${params.length})`,
+      );
     }
     if (filters.to) {
       params.push(filters.to);

@@ -1,9 +1,9 @@
 import type {
   Article,
+  PersistedTrafficMapEvent,
   RoadCamera,
   RoadWeatherObservation,
   TrafficCounterSnapshot,
-  TrafficMapEvent,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
 } from "@nytt/shared";
@@ -47,7 +47,9 @@ function newsArticle(overrides: Partial<Article> = {}): Article {
   };
 }
 
-function trafficInfoEvent(overrides: Partial<TrafficMapEvent> = {}): TrafficMapEvent {
+function trafficInfoEvent(
+  overrides: Partial<PersistedTrafficMapEvent> = {},
+): PersistedTrafficMapEvent {
   return {
     id: "vegvesen-traffic-info:NPRA_HBT_1",
     source: "vegvesen_traffic_info",

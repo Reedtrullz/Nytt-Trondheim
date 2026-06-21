@@ -8,7 +8,7 @@
 
 ## Boundaries
 
-- May write `traffic_map_events` for active/planned map overlays.
+- May write `traffic_map_events` for active/planned map overlays. In the current schema this is the only source permitted to persist traffic map events; derived DATEX/news map objects must stay read-time API composition.
 - May mirror relevant public messages into `source_items` as official-event traceability.
 - Must not automatically create or activate situations from every TrafficInfo row; promotion requires a future explicit activation rule.
 - Expiration must follow successful snapshots; failed snapshots must not erase current map state.

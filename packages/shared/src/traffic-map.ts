@@ -26,9 +26,12 @@ export interface RelatedTrafficArticle {
   };
 }
 
+export type TrafficMapEventSource = "datex" | "vegvesen_traffic_info" | "news_article";
+export type PersistedTrafficMapEventSource = "vegvesen_traffic_info";
+
 export interface TrafficMapEvent {
   id: string;
-  source: "datex" | "vegvesen_traffic_info" | "news_article";
+  source: TrafficMapEventSource;
   sourceEventId: string;
   category: TrafficEventCategory;
   severity: TrafficEventSeverity;
@@ -46,6 +49,10 @@ export interface TrafficMapEvent {
   confidence?: number;
   relatedArticles?: RelatedTrafficArticle[];
 }
+
+export type PersistedTrafficMapEvent = TrafficMapEvent & {
+  source: PersistedTrafficMapEventSource;
+};
 
 export interface TrafficMapFilters {
   categories?: TrafficEventCategory[];
