@@ -113,6 +113,42 @@ SELECT pg_temp.expect_check_violation(
 );
 
 SELECT pg_temp.expect_check_violation(
+  'confidence_score must stay within 0..1',
+  $$INSERT INTO situations (
+      id, type, status, verification_status, importance, updated_at, confidence_score, payload
+    ) VALUES (
+      'ci-invalid-confidence-score',
+      'ci',
+      'active',
+      'unverified',
+      'low',
+      now(),
+      1.5,
+      '{}'::jsonb
+    )$$,
+  'situations_confidence_score_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
+  'activation_rule_id must be from deterministic policy',
+  $$INSERT INTO situations (
+      id, type, status, verification_status, importance, updated_at, activation_rule_id, payload
+    ) VALUES (
+      'ci-invalid-activation-rule',
+      'ci',
+      'active',
+      'unverified',
+      'low',
+      now(),
+      'ai_made_a_guess',
+      '{}'::jsonb
+    )$$,
+  'situations_activation_rule_id_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
   'DATEX context sources must not enter situation_activations',
   $$INSERT INTO situation_activations (
       situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at
@@ -125,6 +161,25 @@ SELECT pg_temp.expect_check_violation(
       now()
     )$$,
   'situation_activations_source_ids_no_context_source_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
+  'evidence role must be policy role',
+  $$INSERT INTO evidence_items (
+      id, situation_id, source, source_url, provenance, confidence, payload, extracted_at, role
+    ) VALUES (
+      'ci-evidence-invalid-role',
+      'ci-guardrail-situation',
+      'nrk',
+      'https://example.invalid/ci',
+      'reporting_estimate',
+      0.5,
+      '{}'::jsonb,
+      now(),
+      'activating_telepathy'
+    )$$,
+  'evidence_items_role_check',
   NULL
 );
 
@@ -174,6 +229,25 @@ FROM unnest(ARRAY[
   'trafikkdata',
   'entur_vehicle_positions'
 ]::text[]) AS forbidden(source_id);
+
+SELECT pg_temp.expect_check_violation(
+  'source item role must be policy role',
+  $$INSERT INTO source_items (
+      id, provider, kind, fetched_at, raw_payload, normalized_payload, capture_hash, reliability_tier, role
+    ) VALUES (
+      'ci-source-invalid-role',
+      'nrk',
+      'article',
+      now(),
+      '{}'::jsonb,
+      '{}'::jsonb,
+      'ci-hash-invalid-role',
+      'trusted_media',
+      'hearsay'
+    )$$,
+  'source_items_role_check',
+  NULL
+);
 
 SELECT pg_temp.expect_check_violation(
   'DSB must stay out of source_items',
@@ -226,6 +300,23 @@ SELECT pg_temp.expect_check_violation(
       'official'
     )$$,
   'source_items_entur_official_event_service_alert_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
+  'decision audit action must be explicit',
+  $$INSERT INTO situation_decision_audit (
+      id, situation_id, action, source_item_ids, evidence_item_ids, actor, payload
+    ) VALUES (
+      'ci-invalid-audit-action',
+      'ci-guardrail-situation',
+      'maybe_activate_from_ai',
+      ARRAY[]::text[],
+      ARRAY[]::text[],
+      'ci',
+      '{}'::jsonb
+    )$$,
+  'situation_decision_audit_action_check',
   NULL
 );
 
@@ -344,5 +435,70 @@ SELECT pg_temp.expect_check_violation(
   'traffic_map_events_source_check',
   NULL
 );
+
+INSERT INTO source_items (
+  id,
+  provider,
+  kind,
+  fetched_at,
+  raw_payload,
+  normalized_payload,
+  capture_hash,
+  reliability_tier
+) VALUES (
+  'ci-source-trigger-fill',
+  'nrk',
+  'article',
+  now(),
+  '{}'::jsonb,
+  '{}'::jsonb,
+  'ci-hash-source-trigger-fill',
+  'trusted_media'
+);
+
+INSERT INTO evidence_items (
+  id,
+  situation_id,
+  source,
+  source_url,
+  provenance,
+  confidence,
+  payload,
+  extracted_at
+) VALUES (
+  'ci-evidence-trigger-fill',
+  'ci-guardrail-situation',
+  'nrk',
+  'https://example.invalid/evidence-trigger',
+  'reporting_estimate',
+  0.5,
+  '{}'::jsonb,
+  now()
+);
+
+DO $$
+DECLARE
+  source_role text;
+  source_hash text;
+  evidence_role text;
+  evidence_hash text;
+BEGIN
+  SELECT role, input_hash INTO source_role, source_hash
+  FROM source_items
+  WHERE id = 'ci-source-trigger-fill';
+
+  IF source_role IS DISTINCT FROM 'reporting' OR source_hash IS NULL THEN
+    RAISE EXCEPTION 'source_items decision metadata trigger did not fill role/input_hash';
+  END IF;
+
+  SELECT role, input_hash INTO evidence_role, evidence_hash
+  FROM evidence_items
+  WHERE id = 'ci-evidence-trigger-fill';
+
+  IF evidence_role IS DISTINCT FROM 'reporting' OR evidence_hash IS NULL THEN
+    RAISE EXCEPTION 'evidence_items decision metadata trigger did not fill role/input_hash';
+  END IF;
+END;
+$$;
 
 ROLLBACK;

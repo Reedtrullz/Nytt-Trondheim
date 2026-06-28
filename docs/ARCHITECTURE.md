@@ -25,6 +25,11 @@ Article coverage grouping is derived analysis, not upstream evidence. The worker
 
 Source contracts define what each upstream may write before adapter code is enabled. Bane NOR RSS is a phase-1 rail/mobility context source: it may write `source_items` provider `bane_nor`, kind `official_event`, and `source_health` source `bane_nor`, but it must not create `official_events`, `traffic_map_events` or `situations` without a separate promotion plan.
 
+The deterministic situation-activation contract lives in `docs/situation-activation-framework.md`.
+That framework is the source of truth for source roles, DATEX promotion classes, activation rule
+IDs, fixture coverage, audit fields and user-facing provenance copy. Adapter code may summarize or
+enrich after those rules pass, but it must not replace the deterministic evidence checks.
+
 ## AI Boundary
 
 The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only public feed excerpts and public official data may enter that process. Private annotations, attachments, tasks and notes are excluded.

@@ -8,6 +8,7 @@ import type {
 export const sourceIdLabels = {
   nrk: "NRK",
   adressa: "Adresseavisen",
+  avisa_st: "Avisa Sør-Trøndelag",
   vg: "VG",
   dagbladet: "Dagbladet",
   trondheim_kommune: "Trondheim kommune",

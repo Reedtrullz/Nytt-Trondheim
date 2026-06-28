@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Sources: `nrk`, `adressa`, `vg`, `dagbladet`
+- Sources: `nrk`, `adressa`, `avisa_st`, `vg`, `dagbladet`
 - Upstream type: public editorial RSS/feed or public article metadata used by the worker collectors.
 - Purpose: Trondheim/Trøndelag news discovery, candidate incident clustering and source-item provenance.
 
@@ -18,6 +18,7 @@
 
 - Durable upstream identity: canonical article URL plus source-local IDs when available.
 - Raw payload retention: limited public feed/article fields only; never credentials, cookies or paywalled body text.
+- Avisa Sør-Trøndelag uses RSS `https://www.avisa-st.no/rss`; public feed categories may be used for Trondheim/Trøndelag relevance and place hints, but full article bodies are not retained.
 - Provenance: usually `reporting_estimate`.
 
 ## Verification

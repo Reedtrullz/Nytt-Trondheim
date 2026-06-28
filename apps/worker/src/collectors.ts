@@ -31,6 +31,12 @@ export const rssSources: FeedSource[] = [
     url: "https://www.adressa.no/rss/nyheter",
     retainRegionalUnmatched: true,
   },
+  {
+    id: "avisa_st",
+    label: "Avisa Sør-Trøndelag",
+    url: "https://www.avisa-st.no/rss",
+    retainRegionalUnmatched: true,
+  },
   { id: "vg", label: "VG", url: "https://www.vg.no/rss/feed/" },
   { id: "dagbladet", label: "Dagbladet", url: "https://www.dagbladet.no/rss/nyheter.xml" },
 ];
@@ -73,6 +79,41 @@ function feedPublishedAt(value: unknown): string {
   return new Date(Number.isFinite(parsed) ? parsed : Date.now()).toISOString();
 }
 
+function itemCategories(item: Record<string, unknown>): string[] {
+  return asArray(item.category)
+    .map((category) => textValue(category).trim())
+    .filter(Boolean);
+}
+
+function shouldFetchArticleExcerpt(
+  source: FeedSource,
+  url: string,
+  categories: string[],
+  excerpt: string,
+): boolean {
+  if (source.id !== "adressa") return false;
+  if (!url.includes("/nyhetsstudio/")) return false;
+  if (excerpt.length >= 80) return false;
+  return categories.some((category) => category.toLocaleLowerCase("nb") === "nyhetsstudio");
+}
+
+async function articlePageExcerpt(url: string, fetcher: typeof fetch): Promise<string | undefined> {
+  try {
+    const response = await fetchWithSourcePolicy(fetcher, url);
+    if (!response.ok) return undefined;
+    const $ = cheerio.load(await response.text());
+    const paragraphs = $("p")
+      .toArray()
+      .map((element) => $(element).text().replace(/\s+/g, " ").trim())
+      .filter((text) => text.length >= 40 && !/^foto:/i.test(text))
+      .slice(0, 4);
+    const excerpt = paragraphs.join(" ").replace(/\s+/g, " ").trim();
+    return excerpt ? excerpt.slice(0, 600) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function collectRss(
   source: FeedSource,
   fetcher: typeof fetch = fetch,
@@ -86,39 +127,50 @@ export async function collectRss(
   if (!feed.rss?.channel) {
     throw new Error(`${source.label} RSS-format mangler kanal`);
   }
-  return asArray(feed.rss?.channel?.item).flatMap((item) => {
+  const articles: Article[] = [];
+  let detailFetches = 0;
+  const maxDetailFetches = source.id === "adressa" ? 12 : 0;
+  for (const item of asArray(feed.rss?.channel?.item)) {
     const title = textValue(item.title).trim();
-    const excerpt = textValue(item.description)
+    let excerpt = textValue(item.description)
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
     const link = textValue(item.link).trim();
-    if (!title || !link) return [];
+    if (!title || !link) continue;
     let url: string;
     try {
       url = canonicalUrl(link, source.url);
     } catch {
-      return [];
+      continue;
     }
-    const scope = detectScope(`${title} ${excerpt}`);
-    if (!scope && !source.retainRegionalUnmatched) return [];
-    const category = categorize(`${title} ${excerpt}`);
-    return [
-      {
-        id: stableId(source.id, url),
-        source: source.id,
-        sourceLabel: source.label,
-        title,
-        excerpt: excerpt.slice(0, 300),
-        url,
-        publishedAt: feedPublishedAt(item.pubDate),
-        scope: scope ?? "trondelag",
-        category,
-        topics: articleTopics(`${title} ${excerpt}`, category),
-        places: extractPlaces(`${title} ${excerpt}`),
-      },
-    ];
-  });
+    const categories = itemCategories(item);
+    if (
+      detailFetches < maxDetailFetches &&
+      shouldFetchArticleExcerpt(source, url, categories, excerpt)
+    ) {
+      detailFetches += 1;
+      excerpt = (await articlePageExcerpt(url, fetcher)) ?? excerpt;
+    }
+    const articleText = `${title} ${excerpt} ${categories.join(" ")}`;
+    const scope = detectScope(articleText);
+    if (!scope && !source.retainRegionalUnmatched) continue;
+    const category = categorize(articleText);
+    articles.push({
+      id: stableId(source.id, url),
+      source: source.id,
+      sourceLabel: source.label,
+      title,
+      excerpt: excerpt.slice(0, 300),
+      url,
+      publishedAt: feedPublishedAt(item.pubDate),
+      scope: scope ?? "trondelag",
+      category,
+      topics: articleTopics(articleText, category),
+      places: extractPlaces(articleText),
+    });
+  }
+  return articles;
 }
 
 function parseNorwegianDate(value: string): string | undefined {

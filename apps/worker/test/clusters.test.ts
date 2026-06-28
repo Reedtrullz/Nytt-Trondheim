@@ -138,6 +138,95 @@ describe("official traffic situation promotion", () => {
     ]);
   });
 
+  it("links matching article progress to long-running DATEX road closures", () => {
+    const gangasDatex: OfficialEvent = {
+      ...datexEvent,
+      id: "datex-gangas-landslide",
+      title: "Steinskred/steinsprang, vegen er stengt",
+      detail: "Steinskred/steinsprang, vegen er stengt.",
+      areaLabel: "Gangåsvegen",
+      publishedAt: "2026-06-28T13:48:09.000Z",
+      validFrom: "2026-03-26T10:31:13.000Z",
+      validTo: "2026-07-08T07:00:00.000Z",
+      raw: {
+        datex: {
+          promoteToSituation: true,
+          impact: "high",
+          version: "8",
+          situationId: "NPRA_HBT_26-03-2026.53267",
+          recordKind: "ns12:EnvironmentalObstruction",
+          roadName: "Gangåsvegen",
+          roadNumber: "K1810",
+          situationRecordVersionTime: "2026-06-08T06:48:12.327Z",
+          publicationTime: "2026-06-28T13:48:09.000Z",
+        },
+      },
+    };
+    const article: Article = {
+      id: "adressa-gangas",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Ti meter stort ras - kan bli stengt i flere uker",
+      excerpt:
+        "Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland. Nå er en strekning på cirka 100 meter stengt.",
+      url: "https://www.adressa.no/nyhetsstudio/i/k00ejA/ti-meter-stort-ras-kan-bli-stengt-i-flere-uker",
+      publishedAt: "2026-03-28T20:28:47.000Z",
+      scope: "trondelag",
+      category: "Transport",
+      places: ["Gangåsvegen", "Orkland"],
+    };
+
+    const [situation] = officialTrafficSituationsFromEvents([gangasDatex], [], [article]);
+
+    expect(situation?.relatedArticleIds).toEqual(["adressa-gangas"]);
+    expect(situation?.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "adressa",
+          claim: "Ti meter stort ras - kan bli stengt i flere uker",
+          provenance: "reporting_estimate",
+        }),
+      ]),
+    );
+    expect(situation?.timeline).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "timeline-related-adressa-gangas",
+          title: "Ti meter stort ras - kan bli stengt i flere uker",
+          official: false,
+        }),
+        expect.objectContaining({
+          kind: "official_update",
+          source: "datex",
+          official: true,
+        }),
+      ]),
+    );
+    expect(situation?.timeline[0]?.id).not.toBe("timeline-datex-gangas-landslide");
+  });
+
+  it("does not link generic slide reporting without a shared official road or place", () => {
+    const article: Article = {
+      id: "adressa-other-slide",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Ti meter stort ras - kan bli stengt i flere uker",
+      excerpt: "Raset gikk på en kommunal vei i en annen del av Trøndelag.",
+      url: "https://example.test/other",
+      publishedAt: "2026-03-28T20:28:47.000Z",
+      scope: "trondelag",
+      category: "Transport",
+      places: ["Orkland"],
+    };
+
+    const [situation] = officialTrafficSituationsFromEvents([datexEvent], [], [article]);
+
+    expect(situation?.relatedArticleIds).toEqual([]);
+    expect(
+      situation?.timeline.some((entry) => entry.id === "timeline-related-adressa-other-slide"),
+    ).toBe(false);
+  });
+
   it("resolves legacy DATEX record-level duplicates after merging by upstream situation", () => {
     const legacy = (id: string, officialEventId: string): Situation => ({
       id,

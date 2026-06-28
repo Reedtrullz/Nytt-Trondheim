@@ -66,6 +66,68 @@ describe("RSS collection policy", () => {
     });
   });
 
+  it("enriches sparse Adresseavisen Nyhetsstudio items with public article text", async () => {
+    const adressaRss = `<?xml version="1.0"?><rss><channel>
+      <item>
+        <title>Ti meter stort ras - kan bli stengt i flere uker</title>
+        <link>https://www.adressa.no/nyhetsstudio/i/k00ejA/ti-meter-stort-ras-kan-bli-stengt-i-flere-uker</link>
+        <pubDate>Sat, 28 Mar 2026 20:28:47 GMT</pubDate>
+        <category>Nyhetsstudio</category>
+      </item>
+    </channel></rss>`;
+    const detail = `
+      <html><body>
+        <p>Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland.</p>
+        <p>Nå er en strekning på cirka 100 meter stengt.</p>
+      </body></html>
+    `;
+    const fetcher = vi.fn(async (url: string | URL | Request) =>
+      String(url).includes("/nyhetsstudio/")
+        ? new Response(detail)
+        : new Response(adressaRss, { status: 200 }),
+    );
+
+    const articles = await collectRss(
+      { id: "adressa", label: "Adresseavisen", url: "https://www.adressa.no/rss/nyheter" },
+      fetcher,
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      scope: "trondelag",
+      places: ["Gangåsvegen", "Orkland"],
+    });
+    expect(articles[0]?.excerpt).toContain("Gangåsveien");
+  });
+
+  it("uses Avisa Sør-Trøndelag RSS categories as regional place hints", async () => {
+    const avisaStRss = `<?xml version="1.0"?><rss><channel>
+      <item>
+        <title>Trøbbel i tunnel - vei åpnet igjen</title>
+        <description>Trafikken går som normalt etter berging.</description>
+        <link>https://www.avisa-st.no/nyheter/n/ArGWMr/troebbel-i-tunnel-vei-stengt</link>
+        <pubDate>Sat, 27 Jun 2026 14:00:00 GMT</pubDate>
+        <category>Nyheter</category>
+        <category>Orkanger</category>
+      </item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      { id: "avisa_st", label: "Avisa Sør-Trøndelag", url: "https://www.avisa-st.no/rss" },
+      async () => new Response(avisaStRss, { status: 200 }),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      source: "avisa_st",
+      sourceLabel: "Avisa Sør-Trøndelag",
+      scope: "trondelag",
+      places: ["Orkanger"],
+      category: "Transport",
+    });
+  });
+
   it("deduplicates title/time variants consistently within a source", () => {
     const base = {
       id: "id",

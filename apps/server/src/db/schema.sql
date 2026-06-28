@@ -59,6 +59,58 @@ CREATE TABLE IF NOT EXISTS situations (
   updated_at timestamptz NOT NULL,
   payload jsonb NOT NULL
 );
+ALTER TABLE situations ADD COLUMN IF NOT EXISTS confidence_score real;
+ALTER TABLE situations ADD COLUMN IF NOT EXISTS activation_rule_id text;
+ALTER TABLE situations ADD COLUMN IF NOT EXISTS resolved_by text;
+ALTER TABLE situations ADD COLUMN IF NOT EXISTS dismissed_reason text;
+ALTER TABLE situations DROP CONSTRAINT IF EXISTS situations_confidence_score_check;
+ALTER TABLE situations ADD CONSTRAINT situations_confidence_score_check
+  CHECK (confidence_score IS NULL OR (confidence_score >= 0 AND confidence_score <= 1));
+ALTER TABLE situations DROP CONSTRAINT IF EXISTS situations_activation_rule_id_check;
+ALTER TABLE situations ADD CONSTRAINT situations_activation_rule_id_check
+  CHECK (
+    activation_rule_id IS NULL
+    OR activation_rule_id IN (
+      'two_independent_reporting_sources',
+      'official_high_impact_exception',
+      'official_corroboration',
+      'official_resolution',
+      'context_only_source',
+      'telemetry_only_source',
+      'place_too_generic',
+      'place_outside_aoi',
+      'stale_or_duplicate',
+      'official_denial',
+      'private_not_causal',
+      'ai_not_causal',
+      'source_health_only'
+    )
+  );
+ALTER TABLE situations DROP CONSTRAINT IF EXISTS situations_resolved_by_check;
+ALTER TABLE situations ADD CONSTRAINT situations_resolved_by_check
+  CHECK (
+    resolved_by IS NULL
+    OR resolved_by IN (
+      'official_update',
+      'fresh_snapshot_missing',
+      'timeout',
+      'manual_review',
+      'merged_duplicate'
+    )
+  );
+ALTER TABLE situations DROP CONSTRAINT IF EXISTS situations_dismissed_reason_column_check;
+ALTER TABLE situations ADD CONSTRAINT situations_dismissed_reason_column_check
+  CHECK (
+    dismissed_reason IS NULL
+    OR dismissed_reason IN (
+      'false_positive',
+      'owner_dismissed',
+      'official_denial',
+      'place_ambiguous',
+      'stale_or_duplicate',
+      'outside_aoi'
+    )
+  );
 DO $$
 BEGIN
   IF EXISTS (
@@ -191,6 +243,46 @@ CREATE TABLE IF NOT EXISTS evidence_items (
   payload jsonb NOT NULL,
   extracted_at timestamptz NOT NULL
 );
+ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS role text;
+ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS input_hash text;
+UPDATE evidence_items
+SET role = CASE
+    WHEN provenance = 'official' THEN 'official'
+    WHEN provenance = 'reporting_estimate' THEN 'reporting'
+    WHEN provenance = 'preparedness_context' THEN 'context'
+    ELSE role
+  END,
+  input_hash = COALESCE(input_hash, encode(digest(jsonb_build_array(source, source_url, payload)::text, 'sha256'), 'hex'))
+WHERE role IS NULL OR input_hash IS NULL;
+ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_role_check;
+ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_role_check
+  CHECK (role IS NULL OR role IN ('official', 'reporting', 'context', 'private', 'ai_summary'));
+CREATE UNIQUE INDEX IF NOT EXISTS evidence_items_input_hash_unique
+  ON evidence_items (input_hash)
+  WHERE input_hash IS NOT NULL;
+CREATE OR REPLACE FUNCTION fill_evidence_item_decision_metadata()
+RETURNS trigger AS $$
+BEGIN
+  NEW.role = COALESCE(
+    NEW.role,
+    CASE
+      WHEN NEW.provenance = 'official' THEN 'official'
+      WHEN NEW.provenance = 'reporting_estimate' THEN 'reporting'
+      WHEN NEW.provenance = 'preparedness_context' THEN 'context'
+      ELSE NULL
+    END
+  );
+  NEW.input_hash = COALESCE(
+    NEW.input_hash,
+    encode(digest(jsonb_build_array(NEW.source, NEW.source_url, NEW.payload)::text, 'sha256'), 'hex')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS evidence_items_decision_metadata_fill ON evidence_items;
+CREATE TRIGGER evidence_items_decision_metadata_fill
+  BEFORE INSERT OR UPDATE OF source, source_url, provenance, payload, role, input_hash ON evidence_items
+  FOR EACH ROW EXECUTE FUNCTION fill_evidence_item_decision_metadata();
 DO $$
 BEGIN
   IF EXISTS (
@@ -231,7 +323,7 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM evidence_items
     WHERE source NOT IN (
-      'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+      'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
       'private_annotations','deepseek'
@@ -244,7 +336,7 @@ $$;
 ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_source_id_check;
 ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_source_id_check
   CHECK (source IN (
-    'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
     'private_annotations','deepseek'
@@ -295,6 +387,79 @@ CREATE TABLE IF NOT EXISTS source_items (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (kind IN ('article', 'official_event', 'warning', 'reporter_note', 'reader_tip', 'media_asset'))
 );
+ALTER TABLE source_items ADD COLUMN IF NOT EXISTS role text;
+ALTER TABLE source_items ADD COLUMN IF NOT EXISTS input_hash text;
+UPDATE source_items
+SET role = CASE
+    WHEN provider IN ('datex', 'politiloggen') THEN 'official'
+    WHEN provider IN ('nrk', 'adressa', 'avisa_st', 'vg', 'dagbladet') THEN 'reporting'
+    WHEN provider IN (
+      'trondheim_kommune',
+      'met',
+      'nve',
+      'vegvesen_traffic_info',
+      'entur',
+      'entur_service_alerts',
+      'bane_nor'
+    ) THEN 'context'
+    WHEN provider IN (
+      'datex_travel_time',
+      'datex_weather',
+      'datex_cctv',
+      'trafikkdata',
+      'entur_vehicle_positions',
+      'dsb'
+    ) THEN 'telemetry'
+    WHEN provider = 'private_annotations' THEN 'private'
+    WHEN provider = 'deepseek' THEN 'ai_summary'
+    ELSE role
+  END,
+  input_hash = COALESCE(input_hash, capture_hash)
+WHERE role IS NULL OR input_hash IS NULL;
+ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_role_check;
+ALTER TABLE source_items ADD CONSTRAINT source_items_role_check
+  CHECK (role IS NULL OR role IN ('official', 'reporting', 'context', 'telemetry', 'private', 'ai_summary', 'ignored'));
+CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_input_hash_unique
+  ON source_items (provider, input_hash)
+  WHERE input_hash IS NOT NULL;
+CREATE OR REPLACE FUNCTION fill_source_item_decision_metadata()
+RETURNS trigger AS $$
+BEGIN
+  NEW.role = COALESCE(
+    NEW.role,
+    CASE
+      WHEN NEW.provider IN ('datex', 'politiloggen') THEN 'official'
+      WHEN NEW.provider IN ('nrk', 'adressa', 'avisa_st', 'vg', 'dagbladet') THEN 'reporting'
+      WHEN NEW.provider IN (
+        'trondheim_kommune',
+        'met',
+        'nve',
+        'vegvesen_traffic_info',
+        'entur',
+        'entur_service_alerts',
+        'bane_nor'
+      ) THEN 'context'
+      WHEN NEW.provider IN (
+        'datex_travel_time',
+        'datex_weather',
+        'datex_cctv',
+        'trafikkdata',
+        'entur_vehicle_positions',
+        'dsb'
+      ) THEN 'telemetry'
+      WHEN NEW.provider = 'private_annotations' THEN 'private'
+      WHEN NEW.provider = 'deepseek' THEN 'ai_summary'
+      ELSE 'ignored'
+    END
+  );
+  NEW.input_hash = COALESCE(NEW.input_hash, NEW.capture_hash);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS source_items_decision_metadata_fill ON source_items;
+CREATE TRIGGER source_items_decision_metadata_fill
+  BEFORE INSERT OR UPDATE OF provider, capture_hash, role, input_hash ON source_items
+  FOR EACH ROW EXECUTE FUNCTION fill_source_item_decision_metadata();
 ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_entur_vehicle_positions_kind_check;
 DO $$
 BEGIN
@@ -328,7 +493,7 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM source_items
     WHERE provider NOT IN (
-      'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+      'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
       'private_annotations','deepseek'
@@ -341,7 +506,7 @@ $$;
 ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_provider_source_id_check;
 ALTER TABLE source_items ADD CONSTRAINT source_items_provider_source_id_check
   CHECK (provider IN (
-    'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
     'private_annotations','deepseek'
@@ -380,6 +545,36 @@ CREATE INDEX IF NOT EXISTS situation_source_items_source_item_idx
   ON situation_source_items (source_item_id);
 CREATE INDEX IF NOT EXISTS situation_source_items_situation_idx
   ON situation_source_items (situation_id);
+
+CREATE TABLE IF NOT EXISTS situation_decision_audit (
+  id text PRIMARY KEY,
+  situation_id text REFERENCES situations(id) ON DELETE SET NULL,
+  action text NOT NULL CHECK (action IN (
+    'candidate_seen',
+    'activated',
+    'dismissed',
+    'resolved',
+    'merged',
+    'split',
+    'context_attached',
+    'source_health_changed',
+    'ai_summary_generated'
+  )),
+  activation_rule_id text,
+  source_item_ids text[] NOT NULL DEFAULT ARRAY[]::text[],
+  evidence_item_ids text[] NOT NULL DEFAULT ARRAY[]::text[],
+  actor text NOT NULL DEFAULT 'system',
+  reason text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(payload) = 'object')
+);
+CREATE INDEX IF NOT EXISTS situation_decision_audit_situation_created_idx
+  ON situation_decision_audit (situation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS situation_decision_audit_action_created_idx
+  ON situation_decision_audit (action, created_at DESC);
+CREATE INDEX IF NOT EXISTS situation_decision_audit_source_item_ids_gin_idx
+  ON situation_decision_audit USING gin (source_item_ids);
 
 DO $$
 BEGIN
@@ -838,7 +1033,7 @@ ALTER TABLE source_health ADD COLUMN IF NOT EXISTS next_poll_at timestamptz;
 ALTER TABLE source_health DROP CONSTRAINT IF EXISTS source_health_source_id_check;
 ALTER TABLE source_health ADD CONSTRAINT source_health_source_id_check
   CHECK (source IN (
-    'nrk','adressa','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
     'private_annotations','deepseek'

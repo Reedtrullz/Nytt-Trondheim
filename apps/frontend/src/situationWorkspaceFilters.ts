@@ -16,6 +16,7 @@ export const workspaceStatusOptions: Array<{ value: SituationLifecycle; label: s
 export const workspaceSourceOptions: Array<{ value: SourceId; label: string }> = [
   { value: "nrk", label: "NRK" },
   { value: "adressa", label: "Adresseavisen" },
+  { value: "avisa_st", label: "Avisa Sør-Trøndelag" },
   { value: "trondheim_kommune", label: "Trondheim kommune" },
   { value: "met", label: "MET" },
   { value: "nve", label: "NVE" },

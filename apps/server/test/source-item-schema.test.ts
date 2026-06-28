@@ -15,6 +15,12 @@ describe("source item schema", () => {
     expect(schema).toContain("source_items_provider_kind_external_id_unique");
     expect(schema).toContain("WHERE external_id IS NOT NULL");
     expect(schema).toContain("source_items_capture_hash_unique");
+    expect(schema).toContain("role text");
+    expect(schema).toContain("input_hash text");
+    expect(schema).toContain("source_items_role_check");
+    expect(schema).toContain("source_items_provider_input_hash_unique");
+    expect(schema).toContain("fill_source_item_decision_metadata");
+    expect(schema).toContain("source_items_decision_metadata_fill");
     expect(schema).toContain("CREATE TABLE IF NOT EXISTS situation_source_items");
     expect(schema).toContain("relationship text NOT NULL DEFAULT 'supports'");
     expect(schema).toContain("situation_source_items_source_item_idx");
@@ -84,8 +90,16 @@ describe("source item schema", () => {
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
     expect(schema).toContain("source_items_entur_official_event_service_alert_check");
     expect(schema).toContain("situations_official_source_check");
+    expect(schema).toContain("situations_confidence_score_check");
+    expect(schema).toContain("situations_activation_rule_id_check");
+    expect(schema).toContain("'two_independent_reporting_sources'");
+    expect(schema).toContain("'official_high_impact_exception'");
     expect(schema).toContain("situations_activation_sources_no_context_source_check");
     expect(schema).toContain("situation_activations_source_ids_no_context_source_check");
+    expect(schema).toContain("evidence_items_role_check");
+    expect(schema).toContain("evidence_items_input_hash_unique");
+    expect(schema).toContain("fill_evidence_item_decision_metadata");
+    expect(schema).toContain("evidence_items_decision_metadata_fill");
     expect(schema).toContain(
       "(normalized_payload->>'source') IS NOT DISTINCT FROM 'entur_service_alerts'",
     );
@@ -96,6 +110,23 @@ describe("source item schema", () => {
     expect(schema).toContain("enforce_situation_source_item_relationship");
     expect(schema).toContain("relationship = 'supports'");
     expect(schema).toContain("RAISE EXCEPTION");
+  });
+
+  it("stores append-only situation decision audit entries outside upstream evidence", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS situation_decision_audit");
+    expect(schema).toContain("action text NOT NULL CHECK");
+    expect(schema).toContain("source_item_ids text[] NOT NULL DEFAULT ARRAY[]::text[]");
+    expect(schema).toContain("evidence_item_ids text[] NOT NULL DEFAULT ARRAY[]::text[]");
+    expect(schema).toContain("situation_decision_audit_situation_created_idx");
+    expect(schema).toContain("situation_decision_audit_action_created_idx");
+    expect(schema).toContain("situation_decision_audit_source_item_ids_gin_idx");
+    const auditTable = schema.slice(
+      schema.indexOf("CREATE TABLE IF NOT EXISTS situation_decision_audit"),
+      schema.indexOf("CREATE INDEX IF NOT EXISTS situation_decision_audit_situation_created_idx"),
+    );
+    expect(auditTable).not.toContain("raw_payload");
   });
 
   it("stores worker cycle metrics in an operational table outside source_items", async () => {

@@ -12,6 +12,7 @@ import type {
 export const sourceAuditSourceOptions = [
   { value: "nrk", label: "NRK" },
   { value: "adressa", label: "Adressa" },
+  { value: "avisa_st", label: "Avisa-ST" },
   { value: "vg", label: "VG" },
   { value: "dagbladet", label: "Dagbladet" },
   { value: "trondheim_kommune", label: "Trondheim kommune" },

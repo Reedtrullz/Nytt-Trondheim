@@ -1,16 +1,21 @@
 # Data Sources And Limits
 
-See also `docs/plans/2026-06-02-source-bank-review.md` for reviewed future source candidates, source-contract rules, and the implementation priority order.
+See also `docs/plans/2026-06-02-source-bank-review.md` for reviewed future source candidates,
+source-contract rules and the implementation priority order. `docs/situation-activation-framework.md`
+defines the deterministic activation framework, source-role matrix, DATEX promotion matrix and
+60+ regression fixture manifest used to decide whether a source may create or only contextualize a
+situation.
 
 ## Collected News
 
-| Source            | Method                                         | Frequency | Data retained                     |
-| ----------------- | ---------------------------------------------- | --------- | --------------------------------- |
-| NRK Trøndelag     | RSS `https://www.nrk.no/trondelag/siste.rss`   | 10 min    | Headline, excerpt, URL, timestamp |
-| Adresseavisen     | RSS `https://www.adressa.no/rss/nyheter`       | 10 min    | Headline, excerpt, URL, timestamp |
-| VG                | RSS `https://www.vg.no/rss/feed/`              | 10 min    | Trondheim/Trøndelag matches only  |
-| Dagbladet         | RSS `https://www.dagbladet.no/rss/nyheter.xml` | 10 min    | Trondheim/Trøndelag matches only  |
-| Trondheim kommune | Public Aktuelt HTML listing                    | Hourly    | Headline, excerpt, URL            |
+| Source              | Method                                         | Frequency | Data retained                     |
+| ------------------- | ---------------------------------------------- | --------- | --------------------------------- |
+| NRK Trøndelag       | RSS `https://www.nrk.no/trondelag/siste.rss`   | 10 min    | Headline, excerpt, URL, timestamp |
+| Adresseavisen       | RSS `https://www.adressa.no/rss/nyheter`       | 10 min    | Headline, excerpt, URL, timestamp |
+| Avisa Sør-Trøndelag | RSS `https://www.avisa-st.no/rss`              | 10 min    | Headline, excerpt, URL, timestamp |
+| VG                  | RSS `https://www.vg.no/rss/feed/`              | 10 min    | Trondheim/Trøndelag matches only  |
+| Dagbladet           | RSS `https://www.dagbladet.no/rss/nyheter.xml` | 10 min    | Trondheim/Trøndelag matches only  |
+| Trondheim kommune   | Public Aktuelt HTML listing                    | Hourly    | Headline, excerpt, URL            |
 
 Articles link to the publisher; this application does not republish complete articles. Nidaros is excluded until a suitable permitted collection route is confirmed.
 Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, including daylight-saving transitions. When a still-visible collected article is fetched again, corrected public classification and geocoding metadata are refreshed without removing an established situation link.

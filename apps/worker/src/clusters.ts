@@ -19,7 +19,54 @@ interface CandidateGroup {
 
 const clusterWindowMs = 12 * 60 * 60 * 1000;
 const continuationWindowMs = 72 * 60 * 60 * 1000;
+const officialTrafficArticleLeadMs = 24 * 60 * 60 * 1000;
+const officialTrafficArticleGraceMs = 14 * 24 * 60 * 60 * 1000;
 const genericPlaces = new Set(["trondheim", "trøndelag"]);
+const genericOfficialTrafficTokens = new Set([
+  "anslag",
+  "arbeid",
+  "arbeidet",
+  "blir",
+  "cirka",
+  "den",
+  "det",
+  "etter",
+  "flere",
+  "for",
+  "fra",
+  "fylkesveg",
+  "fylkesvei",
+  "hendelse",
+  "hendelsen",
+  "ikke",
+  "kan",
+  "kommune",
+  "meter",
+  "natt",
+  "offentlig",
+  "og",
+  "om",
+  "omkjøring",
+  "på",
+  "rundt",
+  "sier",
+  "skal",
+  "skiltet",
+  "snakk",
+  "stengt",
+  "til",
+  "trafikk",
+  "trøndelag",
+  "uker",
+  "veg",
+  "vegen",
+  "vegvesen",
+  "vei",
+  "veien",
+  "ved",
+]);
+const officialTrafficIncidentPattern =
+  /\b(?:jordskred|løsmass\w*|omkjør\w*|ras(?:et)?|skred|stein(?:skred|sprang)|steng\w*)\b/iu;
 const eventDescriptorRules: Array<{ descriptor: string; pattern: RegExp }> = [
   { descriptor: "garasjebrann", pattern: /\b(?:garasjebrann|brann\s+i\s+garasje)\b/i },
   { descriptor: "bodbrann", pattern: /\b(?:bodbrann|brann\s+i\s+bod)\b/i },
@@ -90,8 +137,104 @@ function orderedDatexGroup(events: OfficialEvent[]): OfficialEvent[] {
   });
 }
 
+function datexTimelineEntryId(event: OfficialEvent): string {
+  const raw = rawDatex(event);
+  const versionKey = [raw.version, raw.situationRecordVersionTime, raw.publicationTime]
+    .map((value) => (typeof value === "string" || typeof value === "number" ? String(value) : ""))
+    .filter(Boolean)
+    .join(":");
+  const fingerprint = createHash("sha1")
+    .update(versionKey || event.publishedAt)
+    .digest("hex")
+    .slice(0, 8);
+  return `timeline-${event.id}-${fingerprint}`;
+}
+
 function uniqueTexts(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function normalizedOfficialToken(token: string): string {
+  return token
+    .toLocaleLowerCase("nb")
+    .normalize("NFC")
+    .replace(/\b(?:fv|kv)\.?\s*(\d+)/u, "k$1")
+    .replace(/ve(?:g|i)en$/u, "veg")
+    .trim();
+}
+
+function officialTrafficTokens(parts: string[]): Set<string> {
+  const text = parts.join(" ").toLocaleLowerCase("nb").normalize("NFC");
+  const tokens = new Set<string>();
+  for (const match of text.matchAll(/\b(?:e|rv|fv|kv|k)\.?\s*\d+[a-z]?\b/giu)) {
+    tokens.add(normalizedOfficialToken(match[0].replace(/\s+/gu, "")));
+  }
+  for (const match of text.matchAll(/[\p{L}\p{N}]+/gu)) {
+    const token = normalizedOfficialToken(match[0]);
+    if (token.length >= 4 && !genericOfficialTrafficTokens.has(token)) {
+      tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+function datexTextParts(event: OfficialEvent): string[] {
+  const raw = rawDatex(event);
+  return [
+    event.title,
+    event.detail,
+    event.areaLabel,
+    typeof raw.roadName === "string" ? raw.roadName : "",
+    typeof raw.roadNumber === "string" ? raw.roadNumber : "",
+    ...(Array.isArray(raw.comments)
+      ? raw.comments.map((comment) => (typeof comment === "string" ? comment : ""))
+      : []),
+  ];
+}
+
+function articleText(article: Article): string {
+  return [
+    article.title,
+    article.excerpt,
+    article.url,
+    ...article.places,
+    article.location?.label ?? "",
+  ].join(" ");
+}
+
+function articleMatchesOfficialTrafficGroup(article: Article, events: OfficialEvent[]): boolean {
+  const text = articleText(article);
+  if (!officialTrafficIncidentPattern.test(text)) return false;
+  const eventTokens = officialTrafficTokens(events.flatMap(datexTextParts));
+  if (eventTokens.size === 0) return false;
+  const articleTokens = officialTrafficTokens([text]);
+  for (const token of articleTokens) {
+    if (eventTokens.has(token)) return true;
+  }
+  return false;
+}
+
+function isArticleInOfficialTrafficWindow(article: Article, events: OfficialEvent[]): boolean {
+  const articleTime = Date.parse(article.publishedAt);
+  if (!Number.isFinite(articleTime)) return false;
+  const starts = events.map((event) => Date.parse(event.validFrom)).filter(Number.isFinite);
+  const ends = events.map((event) => Date.parse(event.validTo ?? "")).filter(Number.isFinite);
+  const published = events.map((event) => Date.parse(event.publishedAt)).filter(Number.isFinite);
+  const earliestStart = Math.min(...(starts.length ? starts : published));
+  const latestEnd = ends.length ? Math.max(...ends) : Math.max(...published);
+  if (!Number.isFinite(earliestStart) || !Number.isFinite(latestEnd)) return false;
+  return (
+    articleTime >= earliestStart - officialTrafficArticleLeadMs &&
+    articleTime <= latestEnd + officialTrafficArticleGraceMs
+  );
+}
+
+function officialTrafficRelatedArticles(events: OfficialEvent[], articles: Article[]): Article[] {
+  return articles
+    .filter((article) => isArticleInOfficialTrafficWindow(article, events))
+    .filter((article) => articleMatchesOfficialTrafficGroup(article, events))
+    .sort((left, right) => right.publishedAt.localeCompare(left.publishedAt))
+    .slice(0, 8);
 }
 
 function incidentEventDescriptor(article: Article): string | undefined {
@@ -111,6 +254,7 @@ function warningSourceLabel(event: OfficialEvent): string {
 export function officialTrafficSituationsFromEvents(
   events: OfficialEvent[],
   existingSituations: Situation[] = [],
+  articles: Article[] = [],
 ): Situation[] {
   const existingByOfficialEventId = new Map(
     existingSituations
@@ -181,16 +325,58 @@ export function officialTrafficSituationsFromEvents(
           ]
         : [],
     );
-    const timeline = ordered.map((event) => ({
-      id: `timeline-${event.id}`,
+    const relatedArticles = officialTrafficRelatedArticles(ordered, articles);
+    const relatedArticleIds = [
+      ...new Set([
+        ...(existing?.relatedArticleIds ?? []),
+        ...relatedArticles.map((article) => article.id),
+      ]),
+    ];
+    const articleEvidence: EvidenceItem[] = relatedArticles.map((article) => ({
+      id: createHash("sha1")
+        .update(`${id}:related-article:${article.id}`)
+        .digest("hex")
+        .slice(0, 18),
       situationId: id,
-      timestamp: event.publishedAt,
-      title: event.title,
-      detail: event.detail,
-      sourceLabel,
-      sourceUrl: event.sourceUrl,
-      official: true,
+      source: article.source,
+      sourceLabel: article.sourceLabel,
+      sourceUrl: article.url,
+      supportingSnippet: article.excerpt,
+      claim: article.title,
+      claimType: "reporting_match",
+      provenance: "reporting_estimate",
+      confidence: 0.72,
+      extractedAt,
+      publishedAt: article.publishedAt,
     }));
+    const timeline = [
+      ...ordered.map((event) => ({
+        id: datexTimelineEntryId(event),
+        situationId: id,
+        timestamp: event.publishedAt,
+        kind: "official_update" as const,
+        title: event.title,
+        detail: event.detail,
+        sourceLabel,
+        source: "datex" as const,
+        sourceUrl: event.sourceUrl,
+        official: true,
+        provenance: "official" as const,
+      })),
+      ...relatedArticles.map((article) => ({
+        id: `timeline-related-${article.id}`,
+        situationId: id,
+        timestamp: article.publishedAt,
+        kind: "source_update" as const,
+        title: article.title,
+        detail: article.excerpt,
+        sourceLabel: article.sourceLabel,
+        source: article.source,
+        sourceUrl: article.url,
+        official: false,
+        provenance: "reporting_estimate" as const,
+      })),
+    ];
 
     return {
       id,
@@ -213,8 +399,8 @@ export function officialTrafficSituationsFromEvents(
         articleIds: [],
         activatedAt: latestPublishedAt,
       },
-      relatedArticleIds: existing?.relatedArticleIds ?? [],
-      evidence,
+      relatedArticleIds,
+      evidence: [...evidence, ...articleEvidence],
       features,
       timeline,
     } satisfies Situation;

@@ -3,6 +3,7 @@ import type { Feature, Geometry, LineString, Point, Polygon } from "geojson";
 export type SourceId =
   | "nrk"
   | "adressa"
+  | "avisa_st"
   | "vg"
   | "dagbladet"
   | "trondheim_kommune"
@@ -279,6 +280,14 @@ export type SourceItemKind =
 
 export type SourceReliabilityTier = "official" | "trusted_media" | "internal" | "unverified";
 export type SourceItemRelationship = "supports" | "contradicts" | "context" | "duplicate";
+export type SourceItemRole =
+  | "official"
+  | "reporting"
+  | "context"
+  | "telemetry"
+  | "private"
+  | "ai_summary"
+  | "ignored";
 
 export interface SourceItem {
   id: string;
@@ -292,8 +301,10 @@ export interface SourceItem {
   publishedAt?: string;
   fetchedAt: string;
   captureHash: string;
+  inputHash?: string;
   geoHint?: MapFeature["geometry"];
   reliabilityTier: SourceReliabilityTier;
+  role?: SourceItemRole;
   confidence?: SourceConfidenceSummary;
   linkedSituationIds: string[];
   relationship?: SourceItemRelationship;

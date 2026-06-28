@@ -137,6 +137,10 @@ describe("Trondheim relevance classification", () => {
       "Kyvannet",
       "Trondheim",
     ]);
+    expect(extractPlaces("Ras med steiner og løsmasser på Gangåsveien i Orkland")).toEqual([
+      "Gangåsvegen",
+      "Orkland",
+    ]);
     expect(extractPlaces("Tyveri ved Solsiden i Trondheim")).toEqual(["Solsiden", "Trondheim"]);
   });
 

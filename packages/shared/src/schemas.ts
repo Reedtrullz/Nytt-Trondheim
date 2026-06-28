@@ -129,6 +129,7 @@ export const noteInputSchema = z.object({
 export const sourceIdSchema = z.enum([
   "nrk",
   "adressa",
+  "avisa_st",
   "vg",
   "dagbladet",
   "trondheim_kommune",

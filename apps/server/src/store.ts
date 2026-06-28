@@ -58,6 +58,7 @@ import type {
 } from "@nytt/shared";
 import {
   analyzeArticleCoverage,
+  activationPolicyForSource,
   sampleArticles,
   sampleBootstrap,
   sampleNotes,
@@ -332,10 +333,23 @@ function memorySourceItemFromArticle(article: Article): SourceItem {
       article.publishedAt,
       normalizedPayload,
     ]),
+    inputHash: sourceItemHash([article.source, "article", article.id]),
     geoHint,
     reliabilityTier: article.source === "trondheim_kommune" ? "official" : "trusted_media",
+    role: sourceItemRoleForProvider(article.source),
     linkedSituationIds: [],
   };
+}
+
+function sourceItemRoleForProvider(provider: SourceId): SourceItem["role"] {
+  const role = activationPolicyForSource(provider).role;
+  if (role === "activating_official" || role === "corroborating_official") return "official";
+  if (role === "reporting") return "reporting";
+  if (role === "context") return "context";
+  if (role === "telemetry") return "telemetry";
+  if (role === "private") return "private";
+  if (provider === "deepseek") return "ai_summary";
+  return "ignored";
 }
 
 interface SourceItemRow {
@@ -351,8 +365,10 @@ interface SourceItemRow {
   fetched_at: Date | string;
   fetched_at_cursor: string;
   capture_hash: string;
+  input_hash: string | null;
   geo_hint: SourceItem["geoHint"] | null;
   reliability_tier: SourceItem["reliabilityTier"];
+  role: SourceItem["role"] | null;
   linked_situation_ids: string[] | null;
   relationship?: SourceItemRelationship | null;
 }
@@ -387,8 +403,10 @@ function sourceItemFromRow(row: SourceItemRow): SourceItem {
     publishedAt: row.published_at ? new Date(row.published_at).toISOString() : undefined,
     fetchedAt: new Date(row.fetched_at).toISOString(),
     captureHash: row.capture_hash,
+    inputHash: row.input_hash ?? undefined,
     geoHint: row.geo_hint ?? undefined,
     reliabilityTier: row.reliability_tier,
+    role: row.role ?? undefined,
     linkedSituationIds: row.linked_situation_ids ?? [],
     ...(row.relationship ? { relationship: row.relationship } : {}),
   };
@@ -398,8 +416,8 @@ function sourceItemSelectColumns(alias = "si"): string {
   return `${alias}.id, ${alias}.provider, ${alias}.kind, ${alias}.external_id, ${alias}.original_url,
        ${alias}.title, ${alias}.summary, ${alias}.author, ${alias}.published_at, ${alias}.fetched_at,
        to_char(${alias}.fetched_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fetched_at_cursor,
-       ${alias}.capture_hash,
-       ST_AsGeoJSON(${alias}.geo_hint)::json AS geo_hint, ${alias}.reliability_tier,
+       ${alias}.capture_hash, ${alias}.input_hash,
+       ST_AsGeoJSON(${alias}.geo_hint)::json AS geo_hint, ${alias}.reliability_tier, ${alias}.role,
        links.linked_situation_ids`;
 }
 
@@ -518,6 +536,7 @@ function coverageBundleItemFromRow(
 const sourceAuditRequiredSources: SourceId[] = [
   "nrk",
   "adressa",
+  "avisa_st",
   "vg",
   "dagbladet",
   "trondheim_kommune",
@@ -543,6 +562,7 @@ const sourceAuditRequiredSources: SourceId[] = [
 const sourceAuditLabelFallbacks: Record<SourceId, string> = {
   nrk: "NRK Trøndelag",
   adressa: "Adresseavisen",
+  avisa_st: "Avisa Sør-Trøndelag",
   vg: "VG",
   dagbladet: "Dagbladet",
   trondheim_kommune: "Trondheim kommune",
@@ -568,6 +588,7 @@ const sourceAuditLabelFallbacks: Record<SourceId, string> = {
 const sourceAuditContractPaths: Partial<Record<SourceId, string>> = {
   nrk: "docs/source-contracts/media-rss.md",
   adressa: "docs/source-contracts/media-rss.md",
+  avisa_st: "docs/source-contracts/media-rss.md",
   vg: "docs/source-contracts/media-rss.md",
   dagbladet: "docs/source-contracts/media-rss.md",
   bane_nor: "docs/source-contracts/bane-nor-rss.md",
@@ -604,7 +625,7 @@ function sourceAuditGroup(source: SourceId): SourceAuditProviderGroup {
   if (source === "politiloggen") return "politiloggen";
   if (source === "internal" || source === "deepseek") return "internal";
   if (source === "private_annotations") return "private_annotation";
-  if (["nrk", "adressa", "vg", "dagbladet"].includes(source)) return "media";
+  if (["nrk", "adressa", "avisa_st", "vg", "dagbladet"].includes(source)) return "media";
   return "other";
 }
 

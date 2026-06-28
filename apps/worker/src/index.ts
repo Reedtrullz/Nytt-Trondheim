@@ -1107,6 +1107,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   }
   const recentArticles = await repository.recentArticles(12);
   const situationUpdateArticles = await repository.recentArticles(72);
+  const officialTrafficArticleCandidates = await repository.recentArticles(24 * 180);
   const currentOfficialEvents = await repository.currentOfficialEvents();
   const currentWarnings = currentOfficialEvents.filter(
     (event) => event.source === "met" || event.source === "nve",
@@ -1141,6 +1142,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const officialTrafficSituations = officialTrafficSituationsFromEvents(
     currentDatexEvents,
     trackedSituations,
+    officialTrafficArticleCandidates,
   );
   const politiloggenSituations = politiloggenSituationsFromThreads(
     politiloggenThreads,

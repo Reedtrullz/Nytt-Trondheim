@@ -22,8 +22,10 @@ const publicItem: SourceItem = {
   publishedAt: "2026-05-28T10:00:00.000Z",
   fetchedAt: "2026-05-28T10:01:00.000Z",
   captureHash: "a".repeat(64),
+  inputHash: "b".repeat(64),
   geoHint: { type: "Point", coordinates: [10.3, 63.4] },
   reliabilityTier: reliability,
+  role: "reporting",
   linkedSituationIds: ["skogbrann-bymarka"],
 };
 
@@ -46,8 +48,10 @@ const input: SourceItemInput = {
   rawPayload: internalRecord.rawPayload,
   normalizedPayload: internalRecord.normalizedPayload,
   captureHash: internalRecord.captureHash,
+  inputHash: internalRecord.inputHash,
   geoHint: internalRecord.geoHint,
   reliabilityTier: internalRecord.reliabilityTier,
+  role: internalRecord.role,
 };
 
 void relationship;

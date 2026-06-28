@@ -2,6 +2,10 @@
 
 Every new external source must have a source contract before adapter code.
 
+Use `docs/situation-activation-framework.md` for the required activation-role table, source role
+definitions, DATEX promotion matrix and regression fixture expectations before deciding whether a
+source can write `source_items`, `official_events`, `traffic_map_events` or `situations`.
+
 Internal API/workspace features that only compose existing persisted Nytt data do not need a
 source contract; document their data contract, privacy boundaries and verification plan in
 `docs/ARCHITECTURE.md` or a dated `docs/plans/` note instead. If an internal feature starts

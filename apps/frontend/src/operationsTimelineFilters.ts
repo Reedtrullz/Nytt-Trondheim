@@ -24,6 +24,7 @@ export const operationsTimelineKindOptions = [
 export const operationsTimelineSourceOptions = [
   { value: "nrk", label: "NRK" },
   { value: "adressa", label: "Adressa" },
+  { value: "avisa_st", label: "Avisa-ST" },
   { value: "datex", label: "DATEX" },
   { value: "datex_travel_time", label: "Reisetid" },
   { value: "datex_weather", label: "Værstasjoner" },

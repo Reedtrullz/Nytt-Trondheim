@@ -110,8 +110,17 @@ const genericPlaceIncidentSignalRules = new Map<
   ],
   ["brann", { windowMs: nearDuplicateTextWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 1 }],
   [
+    "fallulykke",
+    { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 2, minDistinctiveOverlap: 1 },
+  ],
+  [
     "innbrudd",
     { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 2 },
+  ],
+  ["vold", { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 2 }],
+  [
+    "bryllup_uro",
+    { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 2, minDistinctiveOverlap: 1 },
   ],
   ["tyveri", { windowMs: nearDuplicateTextWindowMs, minBodyOverlap: 4, minDistinctiveOverlap: 2 }],
 ]);
@@ -120,6 +129,8 @@ const genericIncidentTokens = new Set([
   ...genericPlaceTokens,
   "badeulykke",
   "brann",
+  "bryllup",
+  "fallulykke",
   "innbrudd",
   "innbruddsforsøk",
   "melding",
@@ -138,6 +149,8 @@ const genericIncidentTokens = new Set([
   "slåssing",
   "tyveri",
   "ulykke",
+  "vold",
+  "voldshendelse",
 ]);
 const stopWords = new Set([
   "alle",
@@ -184,9 +197,18 @@ const incidentSignals: Array<[string, RegExp]> = [
   ],
   ["tyveri", /\b(tyveri|tyvgods|tyv\w*|tjuv\w*|stj(?:e|å|a)l\w*)\b/iu],
   ["brann", /\b(brann\w*|røyk\w*|slukk\w*)\b/iu],
+  [
+    "fallulykke",
+    /\b(fallulykke\w*|falt\s+(?:ned|ca|cirka)|fall(?:et)?\s+(?:p[åa]|fra)|rop\s+om\s+hjelp)\b/iu,
+  ],
   ["trafikk", /\b(trafikk|kollisjon|ulykke|påkjør\w*|bilstans)\b/iu],
   ["orden", /\b(ro og orden|ordensforstyrrelse)\b/iu],
   ["slagsmal", /\b(slagsm[åa]l\w*|sl[åa]ss\w*|sloss\w*)\b/iu],
+  ["vold", /\b(vold\w*|kroppsskade\w*|kritisk\s+skad\w*|siktet\s+for\s+grov)\b/iu],
+  [
+    "bryllup_uro",
+    /\b(?=.*\bbryllup\w*\b)(?:ampert|kamp\w*|slagsm[åa]l\w*|sl[åa]ss\w*|sloss\w*|uenighet\w*|politiet|roet\s+seg)\b/iu,
+  ],
   [
     "water_rescue",
     /\b(badeulykke\w*|drukn\w*|livl[øo]s\s+under\s+vann|hav(?:net|na)\s+under\s+vann|g[åa]tt\s+under\s+vann|under\s+vann|bading|hjerte\s*-?\s*og\s*lungeredning|redningsaksjon\b(?=.*\b(vann|bading|kyvannet)\b))/iu,
@@ -250,6 +272,9 @@ function articlePlaceTokens(article: Article): Set<string> {
     }
     if (normalized === "trondheim s") {
       placeTokens.add("trondheim-s");
+    }
+    if (["fanrem", "orkdal", "orkland"].includes(normalized)) {
+      placeTokens.add("orkland-area");
     }
   });
   genericPlaceTokens.forEach((token) => placeTokens.delete(token));

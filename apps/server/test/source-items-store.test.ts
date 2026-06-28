@@ -18,8 +18,10 @@ const sourceItemRow = (overrides: Record<string, unknown> = {}) => ({
   fetched_at: new Date("2026-05-28T10:01:00.123Z"),
   fetched_at_cursor: "2026-05-28T10:01:00.123000Z",
   capture_hash: "a".repeat(64),
+  input_hash: "b".repeat(64),
   geo_hint: { type: "Point", coordinates: [10.3, 63.4] },
   reliability_tier: "trusted_media",
+  role: "reporting",
   linked_situation_ids: [],
   ...overrides,
 });
@@ -81,10 +83,17 @@ describe("source item store", () => {
     });
 
     expect(page.items).toHaveLength(1);
-    expect(page.items[0]).toMatchObject({ id: "source:one", externalId: "article-one" });
+    expect(page.items[0]).toMatchObject({
+      id: "source:one",
+      externalId: "article-one",
+      inputHash: "b".repeat(64),
+      role: "reporting",
+    });
     const sql = query.mock.calls[0]?.[0] as string;
     expect(sql).toContain("FROM source_items si");
     expect(sql).toContain("ST_AsGeoJSON(si.geo_hint)::json AS geo_hint");
+    expect(sql).toContain("si.input_hash");
+    expect(sql).toContain("si.role");
     expect(sql).toContain("ORDER BY si.fetched_at DESC, si.id DESC");
     expect(sql).toContain("LIMIT");
     expect(sql).toContain("si.provider =");
