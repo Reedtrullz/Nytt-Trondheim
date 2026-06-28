@@ -125,6 +125,7 @@ const genericPlaceIncidentSignalRules = new Map<
   ["tyveri", { windowMs: nearDuplicateTextWindowMs, minBodyOverlap: 4, minDistinctiveOverlap: 2 }],
 ]);
 const genericPlaceTokens = new Set(["trondheim", "trøndelag", "trondelag"]);
+const nonIncidentPlaceTokens = new Set(["olavs"]);
 const genericIncidentTokens = new Set([
   ...genericPlaceTokens,
   "badeulykke",
@@ -278,6 +279,7 @@ function articlePlaceTokens(article: Article): Set<string> {
     }
   });
   genericPlaceTokens.forEach((token) => placeTokens.delete(token));
+  nonIncidentPlaceTokens.forEach((token) => placeTokens.delete(token));
   return placeTokens;
 }
 

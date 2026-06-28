@@ -181,6 +181,98 @@ describe("article coverage analysis", () => {
     });
   });
 
+  it("merges compatible violence bundles when later updates split across rows", () => {
+    const generatedAt = "2026-06-28T17:10:00.000Z";
+    const firstBundle = {
+      id: "coverage:violence:first",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt,
+    };
+    const secondBundle = {
+      id: "coverage:violence:second",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt,
+    };
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-mindrearige-siktet",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Flere mindreårige siktet",
+          excerpt: "En 19 år gammel mann ligger kritisk skadet på St. Olavs hospital.",
+          publishedAt: "2026-06-28T16:59:00.000Z",
+          category: "Nyheter",
+          places: ["St. Olavs", "Trondheim"],
+          location: undefined,
+          coverageBundle: firstBundle,
+        }),
+        article({
+          id: "nrk-kritisk-skadet-trondheim",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Én person kritisk skadet etter voldshendelse i Trondheim",
+          excerpt: "Politiet opplyser at en person er kritisk skadet etter en voldshendelse.",
+          publishedAt: "2026-06-28T16:45:00.000Z",
+          category: "Krim",
+          places: ["Trondheim"],
+          location: undefined,
+          coverageBundle: firstBundle,
+        }),
+        article({
+          id: "adressa-navngitte",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ung mann kritisk skadd - politiet leter etter flere navngitte personer",
+          excerpt:
+            "En ung mann er kritisk skadet etter en voldshendelse på Lade i Trondheim. Politiet leter etter flere navngitte personer.",
+          publishedAt: "2026-06-28T16:59:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+          coverageBundle: secondBundle,
+        }),
+        article({
+          id: "politiloggen-lade",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Voldshendelse: Trondheim, Lade",
+          excerpt:
+            "En ung mann er kritisk skadet etter en voldshendelse på Lade. Politiet leter etter flere personer.",
+          publishedAt: "2026-06-28T16:34:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+          situationId: "politiloggen-lade-vold",
+          coverageBundle: secondBundle,
+        }),
+      ],
+      generatedAt,
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "incident",
+      confidence: "high",
+      memberArticleIds: expect.arrayContaining([
+        "adressa-mindrearige-siktet",
+        "adressa-navngitte",
+        "nrk-kritisk-skadet-trondheim",
+        "politiloggen-lade",
+      ]),
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "vold",
+        }),
+      ]),
+    });
+  });
+
   it("bundles fall accident reports when one source has sparse follow-up wording", () => {
     const analysis = analyzeArticleCoverage(
       [
