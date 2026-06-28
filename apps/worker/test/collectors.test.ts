@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   canonicalUrl,
+  collectFrontpage,
   collectMunicipality,
   collectRss,
   probeOfficialSources,
@@ -125,6 +126,117 @@ describe("RSS collection policy", () => {
       scope: "trondelag",
       places: ["Orkanger"],
       category: "Transport",
+    });
+  });
+
+  it("parses regional Atom feeds", async () => {
+    const atom = `<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <title>Vannlekkasje i Namsos sentrum</title>
+        <summary>Kommunen ber folk i området følge med.</summary>
+        <link href="https://www.ytringen.no/vannlekkasje-i-namsos-sentrum" rel="alternate" />
+        <updated>2026-06-28T12:30:00+02:00</updated>
+        <category term="Nyheter" />
+      </entry>
+    </feed>`;
+
+    const articles = await collectRss(
+      {
+        id: "ytringen",
+        label: "Ytringen",
+        url: "https://ytringen.no/atom.xml",
+        format: "atom",
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(atom, { status: 200 }),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      source: "ytringen",
+      sourceLabel: "Ytringen",
+      title: "Vannlekkasje i Namsos sentrum",
+      publishedAt: "2026-06-28T10:30:00.000Z",
+      scope: "trondelag",
+      places: ["Namsos"],
+    });
+  });
+
+  it("collects Amedia public frontpage teasers with embedded stable timestamps", async () => {
+    const html = `
+      <html><body>
+        <a href="/en-person-mottar-helsehjelp-etter-voldshendelse/s/30-113-18203">
+          Artikkelen er for abonnenter Mann (19) kritisk skadet:
+          Nyhetsvarsel Fire siktet for grov kroppsskade i Trondheim
+        </a>
+        <script type="application/json">
+          {"type":"story","id":"30-113-18203","articleLastModified":"2026-06-28T18:45:00.000+0200"}
+        </script>
+      </body></html>
+    `;
+    const fetcher = vi.fn(async () => new Response(html, { status: 200 }));
+
+    const articles = await collectFrontpage(
+      {
+        id: "nidaros",
+        label: "Nidaros",
+        url: "https://www.nidaros.no/",
+        retainRegionalUnmatched: true,
+      },
+      fetcher,
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      publishedAt: "2026-06-28T16:45:00.000Z",
+      scope: "trondheim",
+      category: "Nyheter",
+    });
+    expect(articles[0]?.title).toContain("Fire siktet");
+  });
+
+  it("collects public JSON-LD frontpage teasers with article-page date metadata", async () => {
+    const frontpage = `<html><head>
+      <script type="application/ld+json">
+        [{"@context":"https://schema.org","@type":"WebPage","mainEntity":{"@type":"ItemList","itemListElement":[
+          {"@type":"ListItem","position":1,"item":{"@type":"NewsArticle","headline":"Kokevarselet i Tydal er opphevet","url":"/kokevarselet-i-tydal-er-opphevet/295674"}}
+        ]}}]
+      </script>
+    </head><body></body></html>`;
+    const detail = `<html><head>
+      <meta property="og:title" content="Kokevarselet i Tydal er opphevet">
+      <meta property="og:description" content="Kommunen opplyser at vannet kan brukes som normalt igjen.">
+      <meta property="article:published_time" content="2026-06-28T09:15:00.000Z">
+      <meta property="article:tag" content="Tydal">
+    </head></html>`;
+    const fetcher = vi.fn(async (url: string | URL | Request) =>
+      String(url).includes("/kokevarselet")
+        ? new Response(detail, { status: 200 })
+        : new Response(frontpage, { status: 200 }),
+    );
+
+    const articles = await collectFrontpage(
+      {
+        id: "selbyggen",
+        label: "Selbyggen",
+        url: "https://www.selbyggen.no/",
+        detailFetchLimit: 1,
+        retainRegionalUnmatched: true,
+      },
+      fetcher,
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      source: "selbyggen",
+      sourceLabel: "Selbyggen",
+      title: "Kokevarselet i Tydal er opphevet",
+      publishedAt: "2026-06-28T09:15:00.000Z",
+      scope: "trondelag",
     });
   });
 

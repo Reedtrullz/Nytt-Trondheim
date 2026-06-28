@@ -15,6 +15,17 @@ interface FeedSource {
   id: SourceId;
   label: string;
   url: string;
+  format?: "rss" | "atom";
+  maxItems?: number;
+  retainRegionalUnmatched?: boolean;
+}
+
+interface FrontpageSource {
+  id: SourceId;
+  label: string;
+  url: string;
+  maxArticles?: number;
+  detailFetchLimit?: number;
   retainRegionalUnmatched?: boolean;
 }
 
@@ -35,10 +46,113 @@ export const rssSources: FeedSource[] = [
     id: "avisa_st",
     label: "Avisa Sør-Trøndelag",
     url: "https://www.avisa-st.no/rss",
+    maxItems: 50,
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "ytringen",
+    label: "Ytringen",
+    url: "https://ytringen.no/atom.xml",
+    format: "atom",
+    maxItems: 40,
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "innherred",
+    label: "Innherred",
+    url: "https://www.innherred.no/rss",
+    maxItems: 40,
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "malviknytt",
+    label: "Malviknytt",
+    url: "https://www.malviknytt.no/rss",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "hitra_froya",
+    label: "Hitra-Frøya",
+    url: "https://www.hitra-froya.no/rss",
+    maxItems: 40,
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "tronderbladet",
+    label: "Trønderbladet",
+    url: "https://www.tronderbladet.no/rss",
+    maxItems: 40,
     retainRegionalUnmatched: true,
   },
   { id: "vg", label: "VG", url: "https://www.vg.no/rss/feed/" },
   { id: "dagbladet", label: "Dagbladet", url: "https://www.dagbladet.no/rss/nyheter.xml" },
+];
+
+export const frontpageSources: FrontpageSource[] = [
+  {
+    id: "snasningen",
+    label: "Snåsningen",
+    url: "https://www.snasningen.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "merakerposten",
+    label: "Meråkerposten",
+    url: "https://www.merakerposten.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "frostingen",
+    label: "Frostingen",
+    url: "https://www.frostingen.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "steinkjer_avisa",
+    label: "Steinkjer-Avisa",
+    url: "https://www.steinkjer-avisa.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "namdalsavisa",
+    label: "Namdalsavisa",
+    url: "https://www.namdalsavisa.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "retten",
+    label: "Arbeidets Rett",
+    url: "https://www.retten.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "nidaros",
+    label: "Nidaros",
+    url: "https://www.nidaros.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "t_a",
+    label: "Trønder-Avisa",
+    url: "https://www.t-a.no/",
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "selbyggen",
+    label: "Selbyggen",
+    url: "https://www.selbyggen.no/",
+    maxArticles: 12,
+    detailFetchLimit: 12,
+    retainRegionalUnmatched: true,
+  },
+  {
+    id: "fjell_ljom",
+    label: "Fjell-Ljom",
+    url: "https://www.fjell-ljom.no/",
+    maxArticles: 12,
+    detailFetchLimit: 12,
+    retainRegionalUnmatched: true,
+  },
 ];
 
 function asArray<T>(value: T | T[] | undefined): T[] {
@@ -79,9 +193,43 @@ function feedPublishedAt(value: unknown): string {
   return new Date(Number.isFinite(parsed) ? parsed : Date.now()).toISOString();
 }
 
+function parsePublishedAt(value: unknown): string | undefined {
+  const rawValue = textValue(value).trim();
+  if (!rawValue) return undefined;
+  const normalized = rawValue.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+}
+
 function itemCategories(item: Record<string, unknown>): string[] {
   return asArray(item.category)
     .map((category) => textValue(category).trim())
+    .filter(Boolean);
+}
+
+function atomLink(value: unknown, base: string): string {
+  const candidates = asArray(value as Record<string, unknown> | Record<string, unknown>[] | string);
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") return candidate;
+    if (!candidate || typeof candidate !== "object") continue;
+    const rel = textValue(candidate["@_rel"]).trim();
+    const href = textValue(candidate["@_href"]).trim();
+    if (href && (!rel || rel === "alternate")) return canonicalUrl(href, base);
+  }
+  return "";
+}
+
+function atomCategories(item: Record<string, unknown>): string[] {
+  return asArray(item.category)
+    .map((category) => {
+      if (typeof category === "string") return category;
+      if (category && typeof category === "object") {
+        const record = category as Record<string, unknown>;
+        return textValue(record["@_label"]) || textValue(record["@_term"]);
+      }
+      return "";
+    })
+    .map((category) => category.trim())
     .filter(Boolean);
 }
 
@@ -123,20 +271,28 @@ export async function collectRss(
   const xml = await response.text();
   const feed = new XMLParser({ ignoreAttributes: false }).parse(xml) as {
     rss?: { channel?: { item?: Array<Record<string, unknown>> | Record<string, unknown> } };
+    feed?: { entry?: Array<Record<string, unknown>> | Record<string, unknown> };
   };
-  if (!feed.rss?.channel) {
+  if ((source.format ?? "rss") === "rss" && !feed.rss?.channel) {
     throw new Error(`${source.label} RSS-format mangler kanal`);
+  }
+  if (source.format === "atom" && !feed.feed) {
+    throw new Error(`${source.label} Atom-format mangler feed`);
   }
   const articles: Article[] = [];
   let detailFetches = 0;
   const maxDetailFetches = source.id === "adressa" ? 12 : 0;
-  for (const item of asArray(feed.rss?.channel?.item)) {
+  const items = (
+    source.format === "atom" ? asArray(feed.feed?.entry) : asArray(feed.rss?.channel?.item)
+  ).slice(0, source.maxItems ?? 60);
+  for (const item of items) {
     const title = textValue(item.title).trim();
-    let excerpt = textValue(item.description)
+    let excerpt = textValue(item.description || item.summary || item.content)
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    const link = textValue(item.link).trim();
+    const link =
+      source.format === "atom" ? atomLink(item.link, source.url) : textValue(item.link).trim();
     if (!title || !link) continue;
     let url: string;
     try {
@@ -144,7 +300,7 @@ export async function collectRss(
     } catch {
       continue;
     }
-    const categories = itemCategories(item);
+    const categories = source.format === "atom" ? atomCategories(item) : itemCategories(item);
     if (
       detailFetches < maxDetailFetches &&
       shouldFetchArticleExcerpt(source, url, categories, excerpt)
@@ -163,7 +319,231 @@ export async function collectRss(
       title,
       excerpt: excerpt.slice(0, 300),
       url,
-      publishedAt: feedPublishedAt(item.pubDate),
+      publishedAt:
+        parsePublishedAt(item.pubDate || item.published || item.updated) ?? feedPublishedAt(""),
+      scope: scope ?? "trondelag",
+      category,
+      topics: articleTopics(articleText, category),
+      places: extractPlaces(articleText),
+    });
+  }
+  return articles;
+}
+
+interface FrontpageCandidate {
+  title: string;
+  excerpt: string;
+  url: string;
+  categories: string[];
+  publishedAt?: string;
+}
+
+interface ArticlePageMetadata {
+  title?: string;
+  excerpt?: string;
+  categories: string[];
+  publishedAt?: string;
+}
+
+function normalizeArticleText(value: string): string {
+  return value
+    .replace(/\u00a0/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanFrontpageTitle(value: string): string {
+  return normalizeArticleText(value)
+    .replace(/\bArtikkelen er for abonnenter\b/gi, " ")
+    .replace(/\bNyhetsvarsel\b/gi, " ")
+    .replace(/\bVideoartikkel\b/gi, " ")
+    .replace(/\bBildeserie\b/gi, " ")
+    .replace(/\bVideo\s+\d{1,2}:\d{2}\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
+function samePublicHostname(left: string, right: string): boolean {
+  const normalize = (value: string) => new URL(value).hostname.replace(/^www\./, "");
+  return normalize(left) === normalize(right);
+}
+
+function frontpageStoryId(url: string): string | undefined {
+  return /(?:^|\/)(\d+-\d+-\d+)(?:$|[/?#])/.exec(new URL(url).pathname)?.[1];
+}
+
+function amediaTimestampMap(html: string): Map<string, string> {
+  const timestamps = new Map<string, string>();
+  for (const match of html.matchAll(
+    /"id":"(\d+-\d+-\d+)"[\s\S]{0,700}?"articleLastModified":"([^"]+)"/g,
+  )) {
+    const [, id, timestamp] = match;
+    const publishedAt = parsePublishedAt(timestamp);
+    if (id && publishedAt) timestamps.set(id, publishedAt);
+  }
+  return timestamps;
+}
+
+function frontpageJsonLdCandidates($: cheerio.CheerioAPI, source: FrontpageSource) {
+  const candidates: FrontpageCandidate[] = [];
+  const addNewsArticle = (item: unknown) => {
+    if (!item || typeof item !== "object") return;
+    const record = item as Record<string, unknown>;
+    const type = record["@type"];
+    const typeValues = Array.isArray(type) ? type : [type];
+    if (!typeValues.includes("NewsArticle")) return;
+    const headline = normalizeArticleText(textValue(record.headline));
+    const rawUrl = textValue(record.url);
+    if (!headline || !rawUrl) return;
+    try {
+      const url = canonicalUrl(rawUrl, source.url);
+      if (!samePublicHostname(url, source.url)) return;
+      candidates.push({
+        title: headline.slice(0, 180),
+        excerpt: normalizeArticleText(textValue(record.description)).slice(0, 300),
+        url,
+        categories: [],
+        publishedAt: parsePublishedAt(record.datePublished || record.dateModified),
+      });
+    } catch {
+      return;
+    }
+  };
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    addNewsArticle(record);
+    for (const nested of Object.values(record)) walk(nested);
+  };
+  $("script[type='application/ld+json']").each((_index, element) => {
+    try {
+      walk(JSON.parse($(element).text()));
+    } catch {
+      return;
+    }
+  });
+  return candidates;
+}
+
+function frontpageAnchorCandidates(
+  $: cheerio.CheerioAPI,
+  source: FrontpageSource,
+): FrontpageCandidate[] {
+  const candidates: FrontpageCandidate[] = [];
+  $("a[href]").each((_index, element) => {
+    const rawTitle = cleanFrontpageTitle($(element).text());
+    if (rawTitle.length < 20) return;
+    const href = $(element).attr("href");
+    if (!href) return;
+    try {
+      const url = canonicalUrl(href, source.url);
+      if (!samePublicHostname(url, source.url)) return;
+      const path = new URL(url).pathname;
+      if (
+        path === "/" ||
+        path.startsWith("/vis/") ||
+        path.startsWith("/tilgang/") ||
+        path.includes("annonse")
+      ) {
+        return;
+      }
+      candidates.push({ title: rawTitle, excerpt: "", url, categories: [] });
+    } catch {
+      return;
+    }
+  });
+  return candidates;
+}
+
+async function articlePageMetadata(
+  url: string,
+  fetcher: typeof fetch,
+): Promise<ArticlePageMetadata | undefined> {
+  try {
+    const response = await fetchWithSourcePolicy(fetcher, url);
+    if (!response.ok) return undefined;
+    const $ = cheerio.load(await response.text());
+    const title = normalizeArticleText(
+      $("meta[property='og:title']").attr("content") ?? $("h1").first().text(),
+    );
+    const excerpt = normalizeArticleText(
+      $("meta[property='og:description']").attr("content") ??
+        $("meta[name='description']").attr("content") ??
+        "",
+    ).slice(0, 300);
+    const categories = $("meta[property='article:tag']")
+      .toArray()
+      .map((element) => normalizeArticleText($(element).attr("content") ?? ""))
+      .filter(Boolean);
+    const publishedAt = parsePublishedAt(
+      $("meta[property='article:published_time']").attr("content") ??
+        $("time[datetime]").first().attr("datetime") ??
+        "",
+    );
+    return {
+      ...(title ? { title: title.slice(0, 180) } : {}),
+      ...(excerpt ? { excerpt } : {}),
+      categories,
+      ...(publishedAt ? { publishedAt } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function collectFrontpage(
+  source: FrontpageSource,
+  fetcher: typeof fetch = fetch,
+): Promise<Article[]> {
+  const response = await fetchWithSourcePolicy(fetcher, source.url);
+  if (!response.ok) throw new Error(`${source.label} returned ${response.status}`);
+  const html = await response.text();
+  const $ = cheerio.load(html);
+  const timestampByStoryId = amediaTimestampMap(html);
+  const byUrl = new Map<string, FrontpageCandidate>();
+  for (const candidate of [
+    ...frontpageJsonLdCandidates($, source),
+    ...frontpageAnchorCandidates($, source),
+  ]) {
+    if (!byUrl.has(candidate.url)) byUrl.set(candidate.url, candidate);
+  }
+
+  const articles: Article[] = [];
+  let detailFetches = 0;
+  for (const candidate of [...byUrl.values()].slice(0, source.maxArticles ?? 24)) {
+    const storyId = frontpageStoryId(candidate.url);
+    let publishedAt =
+      candidate.publishedAt ?? (storyId ? timestampByStoryId.get(storyId) : undefined);
+    let title = candidate.title;
+    let excerpt = candidate.excerpt;
+    let categories = candidate.categories;
+    if (!publishedAt && detailFetches < (source.detailFetchLimit ?? 8)) {
+      detailFetches += 1;
+      const detail = await articlePageMetadata(candidate.url, fetcher);
+      publishedAt = detail?.publishedAt ?? publishedAt;
+      title = detail?.title ?? title;
+      excerpt = detail?.excerpt ?? excerpt;
+      categories = [...new Set([...categories, ...(detail?.categories ?? [])])];
+    }
+    if (!publishedAt) continue;
+    const articleText = `${title} ${excerpt} ${categories.join(" ")}`;
+    const scope = detectScope(articleText);
+    if (!scope && !source.retainRegionalUnmatched) continue;
+    const category = categorize(articleText);
+    articles.push({
+      id: stableId(source.id, candidate.url),
+      source: source.id,
+      sourceLabel: source.label,
+      title,
+      excerpt: excerpt.slice(0, 300),
+      url: candidate.url,
+      publishedAt,
       scope: scope ?? "trondelag",
       category,
       topics: articleTopics(articleText, category),

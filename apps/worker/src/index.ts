@@ -12,7 +12,14 @@ import type {
   WorkerCycleMetrics,
 } from "@nytt/shared";
 import { analyzeArticleCoverage } from "@nytt/shared";
-import { collectMunicipality, collectRss, probeOfficialSources, rssSources } from "./collectors.js";
+import {
+  collectFrontpage,
+  collectMunicipality,
+  collectRss,
+  frontpageSources,
+  probeOfficialSources,
+  rssSources,
+} from "./collectors.js";
 import { createAnalyzer, enhanceSituations } from "./ai.js";
 import {
   collectDatexTravelTimePulse,
@@ -811,7 +818,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
           state: "ok",
           lastCheckedAt: new Date().toISOString(),
           nextPollAt,
-          detail: `${articles.length} relevante saker hentet via RSS`,
+          detail: `${articles.length} relevante saker hentet via ${
+            source.format === "atom" ? "Atom" : "RSS"
+          }`,
         });
         return articles;
       } catch (error) {
@@ -828,6 +837,38 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
         return [];
       }
     }),
+  );
+  articleSets.push(
+    ...(await Promise.all(
+      frontpageSources.map(async (source) => {
+        const sourceStartedAtMs = Date.now();
+        try {
+          const articles = await collectFrontpage(source);
+          recordSourceMetric(source.id, sourceStartedAtMs, { sourceItemCount: articles.length });
+          await repository.setHealth({
+            source: source.id,
+            label: source.label,
+            state: "ok",
+            lastCheckedAt: new Date().toISOString(),
+            nextPollAt,
+            detail: `${articles.length} relevante saker hentet fra offentlig forside`,
+          });
+          return articles;
+        } catch (error) {
+          recordSourceMetric(source.id, sourceStartedAtMs, { parseFailures: 1 });
+          await repository.setHealth({
+            source: source.id,
+            label: source.label,
+            state: "degraded",
+            lastCheckedAt: new Date().toISOString(),
+            lastFailureAt: new Date().toISOString(),
+            nextPollAt,
+            detail: String(error),
+          });
+          return [];
+        }
+      }),
+    )),
   );
   const articlesWithoutGeocoding: Article[] = [];
   if (once || Date.now() - lastMunicipalityCollection >= municipalityIntervalMs) {

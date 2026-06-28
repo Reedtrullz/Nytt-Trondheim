@@ -13,11 +13,26 @@ situation.
 | NRK Trøndelag       | RSS `https://www.nrk.no/trondelag/siste.rss`   | 10 min    | Headline, excerpt, URL, timestamp |
 | Adresseavisen       | RSS `https://www.adressa.no/rss/nyheter`       | 10 min    | Headline, excerpt, URL, timestamp |
 | Avisa Sør-Trøndelag | RSS `https://www.avisa-st.no/rss`              | 10 min    | Headline, excerpt, URL, timestamp |
+| Ytringen            | Atom `https://ytringen.no/atom.xml`            | 10 min    | Headline, excerpt, URL, timestamp |
+| Innherred           | RSS `https://www.innherred.no/rss`             | 10 min    | Headline, excerpt, URL, timestamp |
+| Malviknytt          | RSS `https://www.malviknytt.no/rss`            | 10 min    | Headline, excerpt, URL, timestamp |
+| Hitra-Frøya         | RSS `https://www.hitra-froya.no/rss`           | 10 min    | Headline, excerpt, URL, timestamp |
+| Trønderbladet       | RSS `https://www.tronderbladet.no/rss`         | 10 min    | Headline, excerpt, URL, timestamp |
+| Snåsningen          | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Meråkerposten       | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Frostingen          | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Steinkjer-Avisa     | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Namdalsavisa        | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Selbyggen           | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Fjell-Ljom          | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Arbeidets Rett      | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Nidaros             | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
+| Trønder-Avisa       | Public frontpage + metadata                    | 10 min    | Headline, excerpt, URL, timestamp |
 | VG                  | RSS `https://www.vg.no/rss/feed/`              | 10 min    | Trondheim/Trøndelag matches only  |
 | Dagbladet           | RSS `https://www.dagbladet.no/rss/nyheter.xml` | 10 min    | Trondheim/Trøndelag matches only  |
 | Trondheim kommune   | Public Aktuelt HTML listing                    | Hourly    | Headline, excerpt, URL            |
 
-Articles link to the publisher; this application does not republish complete articles. Nidaros is excluded until a suitable permitted collection route is confirmed.
+Articles link to the publisher; this application does not republish complete articles.
 Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, including daylight-saving transitions. When a still-visible collected article is fetched again, corrected public classification and geocoding metadata are refreshed without removing an established situation link.
 
 Articles and official MET/NVE/DATEX/Politiloggen situation events, Entur service alerts, Bane NOR rail/mobility messages and Vegvesen TrafficInfo records are mirrored into the internal `source_items` ledger when their source contracts permit it. DATEX TravelTime, DATEX Weather, DATEX CCTV, Trafikkdata counters and Entur vehicle positions are explicitly excluded from the editorial source stream and remain telemetry/context tables plus `source_health` only.
