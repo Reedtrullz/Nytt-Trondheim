@@ -338,6 +338,13 @@ function emailLoginMessage(
   };
 }
 
+function logPublicEmailDeliveryError(context: string, error: unknown) {
+  console.error("Public auth email delivery failed", {
+    context,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
 interface RateLimitRule {
   name: string;
   max: number;
@@ -860,7 +867,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const result = await store.requestEmailLogin(input.email);
       if (result.login) {
         const message = emailLoginMessage(config, result.login);
-        await emailSender.send({ to: result.login.email, ...message });
+        try {
+          await emailSender.send({ to: result.login.email, ...message });
+        } catch (error) {
+          logPublicEmailDeliveryError("email_login", error);
+        }
       }
       res.status(202).json({ status: "received" });
     } catch (error) {
@@ -891,7 +902,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const result = await store.createAccessRequest(input);
       if (result.verification) {
         const message = accessVerificationEmail(config, result.verification);
-        await emailSender.send({ to: result.verification.email, ...message });
+        try {
+          await emailSender.send({ to: result.verification.email, ...message });
+        } catch (error) {
+          logPublicEmailDeliveryError("access_verification", error);
+        }
       }
       res.status(202).json({ status: "received" });
     } catch (error) {

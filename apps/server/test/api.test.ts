@@ -267,6 +267,43 @@ describe("private situation API", () => {
     ).rejects.toThrow(/E-post må verifiseres/);
   });
 
+  it("keeps public email endpoints generic when email delivery fails", async () => {
+    const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
+    const runtime = await createApp({
+      port: 0,
+      nodeEnv: "development",
+      publicOrigin: "http://localhost",
+      seedDemo: true,
+      devAuthBypass: true,
+      githubAllowedLogin: "Reedtrullz",
+      sessionSecret: "test-only-secret",
+      uploadDir,
+      runtimeStatusDir: uploadDir,
+      rateLimitEnabled: true,
+      emailSender: {
+        async send() {
+          throw new Error("SMTP rejected sender domain");
+        },
+      },
+    });
+
+    await request(runtime.app)
+      .post("/api/access-requests")
+      .send({
+        displayName: "Ine Test",
+        email: "ine-delivery-fail@example.test",
+        message: "Vil følge Trondheim-beredskap uten GitHub.",
+      })
+      .expect(202)
+      .expect({ status: "received" });
+
+    await request(runtime.app)
+      .post("/auth/email/request")
+      .send({ email: "ine-delivery-fail@example.test" })
+      .expect(202)
+      .expect({ status: "received" });
+  });
+
   it("verifies access requests, lets the owner approve, and logs in approved viewers by email", async () => {
     const { app, store, sentEmails } = await testAppWithEmail(false);
 
