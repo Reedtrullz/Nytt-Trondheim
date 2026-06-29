@@ -85,6 +85,46 @@ describe("source item schema", () => {
     expect(schema).toContain("source_items_no_health_only_provider_check");
     expect(schema).toContain("source_health_source_id_check");
     expect(schema).toContain("source_health_state_check");
+    const regionalReportingSources = [
+      "snasningen",
+      "merakerposten",
+      "frostingen",
+      "ytringen",
+      "steinkjer_avisa",
+      "innherred",
+      "namdalsavisa",
+      "malviknytt",
+      "selbyggen",
+      "fjell_ljom",
+      "retten",
+      "hitra_froya",
+      "tronderbladet",
+      "nidaros",
+      "t_a",
+    ];
+    const sourceHealthConstraint = schema.slice(
+      schema.indexOf("ALTER TABLE source_health ADD CONSTRAINT source_health_source_id_check"),
+      schema.indexOf(
+        "ALTER TABLE source_health DROP CONSTRAINT IF EXISTS source_health_state_check",
+      ),
+    );
+    const evidenceSourceConstraint = schema.slice(
+      schema.indexOf("ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_source_id_check"),
+      schema.indexOf("CREATE TABLE IF NOT EXISTS timeline_entries"),
+    );
+    const sourceItemProviderConstraint = schema.slice(
+      schema.indexOf(
+        "ALTER TABLE source_items ADD CONSTRAINT source_items_provider_source_id_check",
+      ),
+      schema.indexOf(
+        "ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_no_health_only_provider_check",
+      ),
+    );
+    for (const provider of regionalReportingSources) {
+      expect(sourceHealthConstraint).toContain(provider);
+      expect(evidenceSourceConstraint).toContain(provider);
+      expect(sourceItemProviderConstraint).toContain(provider);
+    }
     expect(schema).toContain("traffic_map_events_source_check");
     expect(schema).toContain("CHECK (source IN ('vegvesen_traffic_info'))");
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");

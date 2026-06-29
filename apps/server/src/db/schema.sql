@@ -324,6 +324,9 @@ BEGIN
     SELECT 1 FROM evidence_items
     WHERE source NOT IN (
       'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+      'snasningen','merakerposten','frostingen','ytringen','steinkjer_avisa','innherred',
+      'namdalsavisa','malviknytt','selbyggen','fjell_ljom','retten','hitra_froya',
+      'tronderbladet','nidaros','t_a',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
       'private_annotations','deepseek'
@@ -337,6 +340,9 @@ ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_source_id_ch
 ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_source_id_check
   CHECK (source IN (
     'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'snasningen','merakerposten','frostingen','ytringen','steinkjer_avisa','innherred',
+    'namdalsavisa','malviknytt','selbyggen','fjell_ljom','retten','hitra_froya',
+    'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
     'private_annotations','deepseek'
@@ -392,7 +398,12 @@ ALTER TABLE source_items ADD COLUMN IF NOT EXISTS input_hash text;
 UPDATE source_items
 SET role = CASE
     WHEN provider IN ('datex', 'politiloggen') THEN 'official'
-    WHEN provider IN ('nrk', 'adressa', 'avisa_st', 'vg', 'dagbladet') THEN 'reporting'
+    WHEN provider IN (
+      'nrk', 'adressa', 'avisa_st', 'vg', 'dagbladet',
+      'snasningen', 'merakerposten', 'frostingen', 'ytringen', 'steinkjer_avisa',
+      'innherred', 'namdalsavisa', 'malviknytt', 'selbyggen', 'fjell_ljom',
+      'retten', 'hitra_froya', 'tronderbladet', 'nidaros', 't_a'
+    ) THEN 'reporting'
     WHEN provider IN (
       'trondheim_kommune',
       'met',
@@ -429,7 +440,12 @@ BEGIN
     NEW.role,
     CASE
       WHEN NEW.provider IN ('datex', 'politiloggen') THEN 'official'
-      WHEN NEW.provider IN ('nrk', 'adressa', 'avisa_st', 'vg', 'dagbladet') THEN 'reporting'
+      WHEN NEW.provider IN (
+        'nrk', 'adressa', 'avisa_st', 'vg', 'dagbladet',
+        'snasningen', 'merakerposten', 'frostingen', 'ytringen', 'steinkjer_avisa',
+        'innherred', 'namdalsavisa', 'malviknytt', 'selbyggen', 'fjell_ljom',
+        'retten', 'hitra_froya', 'tronderbladet', 'nidaros', 't_a'
+      ) THEN 'reporting'
       WHEN NEW.provider IN (
         'trondheim_kommune',
         'met',
@@ -494,6 +510,9 @@ BEGIN
     SELECT 1 FROM source_items
     WHERE provider NOT IN (
       'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+      'snasningen','merakerposten','frostingen','ytringen','steinkjer_avisa','innherred',
+      'namdalsavisa','malviknytt','selbyggen','fjell_ljom','retten','hitra_froya',
+      'tronderbladet','nidaros','t_a',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
       'private_annotations','deepseek'
@@ -507,6 +526,9 @@ ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_provider_source_
 ALTER TABLE source_items ADD CONSTRAINT source_items_provider_source_id_check
   CHECK (provider IN (
     'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'snasningen','merakerposten','frostingen','ytringen','steinkjer_avisa','innherred',
+    'namdalsavisa','malviknytt','selbyggen','fjell_ljom','retten','hitra_froya',
+    'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
     'private_annotations','deepseek'
@@ -1034,6 +1056,9 @@ ALTER TABLE source_health DROP CONSTRAINT IF EXISTS source_health_source_id_chec
 ALTER TABLE source_health ADD CONSTRAINT source_health_source_id_check
   CHECK (source IN (
     'nrk','adressa','avisa_st','vg','dagbladet','trondheim_kommune','bane_nor','met','nve','datex',
+    'snasningen','merakerposten','frostingen','ytringen','steinkjer_avisa','innherred',
+    'namdalsavisa','malviknytt','selbyggen','fjell_ljom','retten','hitra_froya',
+    'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
     'private_annotations','deepseek'
