@@ -79,4 +79,51 @@ describe("loadConfig session secret policy", () => {
       },
     );
   });
+
+  it("allows development without SMTP configuration", () => {
+    withEnv({ NODE_ENV: "development", SMTP_HOST: undefined, SMTP_FROM: undefined }, () => {
+      expect(loadConfig().smtp).toBeUndefined();
+    });
+  });
+
+  it("requires SMTP in production for email login links", () => {
+    withEnv(
+      {
+        NODE_ENV: "production",
+        SESSION_SECRET: "x".repeat(32),
+        DATABASE_URL: "postgres://nytt:test@localhost:5432/nytt",
+        SMTP_HOST: undefined,
+        SMTP_FROM: undefined,
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(/SMTP_HOST and SMTP_FROM are required/);
+      },
+    );
+  });
+
+  it("loads SMTP transport settings in production", () => {
+    withEnv(
+      {
+        NODE_ENV: "production",
+        SESSION_SECRET: "x".repeat(32),
+        DATABASE_URL: "postgres://nytt:test@localhost:5432/nytt",
+        SMTP_HOST: "smtp.example.test",
+        SMTP_PORT: "587",
+        SMTP_SECURE: "false",
+        SMTP_FROM: "Nytt Trondheim <nytt@example.test>",
+        SMTP_USER: "smtp-user",
+        SMTP_PASSWORD: "smtp-password",
+      },
+      () => {
+        expect(loadConfig().smtp).toEqual({
+          host: "smtp.example.test",
+          port: 587,
+          secure: false,
+          from: "Nytt Trondheim <nytt@example.test>",
+          user: "smtp-user",
+          password: "smtp-password",
+        });
+      },
+    );
+  });
 });

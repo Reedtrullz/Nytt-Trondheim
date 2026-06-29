@@ -283,13 +283,14 @@ export function SituationMap({
   onDeleteFeature,
 }: {
   situation: Situation;
-  onCreateFeature: (
+  onCreateFeature?: (
     geometry: PrivateMapFeatureInput["geometry"],
     properties: PrivateFeatureProperties,
   ) => Promise<boolean>;
-  onUpdateFeature: (id: string, label: string) => Promise<void>;
-  onDeleteFeature: (id: string) => Promise<void>;
+  onUpdateFeature?: (id: string, label: string) => Promise<void>;
+  onDeleteFeature?: (id: string) => Promise<void>;
 }) {
+  const canEditPrivateFeatures = Boolean(onCreateFeature && onUpdateFeature && onDeleteFeature);
   const [layers, setLayers] = useState({
     warning: true,
     dsbStations: false,
@@ -359,6 +360,7 @@ export function SituationMap({
     geometry: PrivateMapFeatureInput["geometry"],
     properties: PrivateFeatureProperties,
   ): Promise<boolean> {
+    if (!onCreateFeature) return false;
     if (creatingFeatureRef.current) return false;
     creatingFeatureRef.current = true;
     setCreatingFeature(true);
@@ -568,7 +570,9 @@ export function SituationMap({
           visible={layers.publicTransport}
           context
         />
-        <CaptureClicks mode={creatingFeature ? null : mode} onClick={capture} />
+        {canEditPrivateFeatures ? (
+          <CaptureClicks mode={creatingFeature ? null : mode} onClick={capture} />
+        ) : null}
       </MapContainer>
       {layers.publicTransport ? (
         <PublicTransportSummary
@@ -590,110 +594,114 @@ export function SituationMap({
           Ingen relevante offentlige farevarsler er koblet til situasjonen.
         </p>
       ) : null}
-      <section className="drawing-tools" aria-label="Mine markeringer">
-        <div>
-          <h3>
-            Mine markeringer <span>Privat</span>
-          </h3>
-          <p>Kun synlig for deg</p>
-          <p className="private-analysis-warning">Private analyser – ikke offentlig verifisert</p>
-        </div>
-        <input
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-          aria-label="Etikett for markering"
-          disabled={creatingFeature}
-        />
-        <label className="tool-number-input">
-          Radius
+      {canEditPrivateFeatures ? (
+        <section className="drawing-tools" aria-label="Mine markeringer">
+          <div>
+            <h3>
+              Mine markeringer <span>Privat</span>
+            </h3>
+            <p>Kun synlig for deg</p>
+            <p className="private-analysis-warning">Private analyser – ikke offentlig verifisert</p>
+          </div>
           <input
-            type="number"
-            min={minToolRadiusMeters}
-            max={maxToolRadiusMeters}
-            step={25}
-            value={radiusMeters}
-            onChange={(event) => setRadiusMeters(clampRadiusMeters(Number(event.target.value)))}
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+            aria-label="Etikett for markering"
             disabled={creatingFeature}
           />
-        </label>
-        {selectedPreset.geometryMode === "sector" ? (
-          <>
-            <label className="tool-number-input">
-              Fra
-              <input
-                type="number"
-                min={0}
-                max={360}
-                value={startBearing}
-                onChange={(event) =>
-                  setStartBearing(clampBearingDegrees(Number(event.target.value)))
-                }
-                disabled={creatingFeature}
-              />
-            </label>
-            <label className="tool-number-input">
-              Til
-              <input
-                type="number"
-                min={0}
-                max={360}
-                value={endBearing}
-                onChange={(event) => setEndBearing(clampBearingDegrees(Number(event.target.value)))}
-                disabled={creatingFeature}
-              />
-            </label>
-          </>
-        ) : null}
-        {mapToolPresets.map((preset) => (
+          <label className="tool-number-input">
+            Radius
+            <input
+              type="number"
+              min={minToolRadiusMeters}
+              max={maxToolRadiusMeters}
+              step={25}
+              value={radiusMeters}
+              onChange={(event) => setRadiusMeters(clampRadiusMeters(Number(event.target.value)))}
+              disabled={creatingFeature}
+            />
+          </label>
+          {selectedPreset.geometryMode === "sector" ? (
+            <>
+              <label className="tool-number-input">
+                Fra
+                <input
+                  type="number"
+                  min={0}
+                  max={360}
+                  value={startBearing}
+                  onChange={(event) =>
+                    setStartBearing(clampBearingDegrees(Number(event.target.value)))
+                  }
+                  disabled={creatingFeature}
+                />
+              </label>
+              <label className="tool-number-input">
+                Til
+                <input
+                  type="number"
+                  min={0}
+                  max={360}
+                  value={endBearing}
+                  onChange={(event) =>
+                    setEndBearing(clampBearingDegrees(Number(event.target.value)))
+                  }
+                  disabled={creatingFeature}
+                />
+              </label>
+            </>
+          ) : null}
+          {mapToolPresets.map((preset) => (
+            <button
+              key={preset.id}
+              className={
+                selectedPreset.id === preset.id && mode === preset.geometryMode ? "selected" : ""
+              }
+              aria-pressed={selectedPreset.id === preset.id && mode === preset.geometryMode}
+              onClick={() => choosePreset(preset)}
+              disabled={creatingFeature}
+            >
+              {preset.label}
+            </button>
+          ))}
           <button
-            key={preset.id}
-            className={
-              selectedPreset.id === preset.id && mode === preset.geometryMode ? "selected" : ""
-            }
-            aria-pressed={selectedPreset.id === preset.id && mode === preset.geometryMode}
-            onClick={() => choosePreset(preset)}
+            aria-pressed={selectedPreset.id === "freehand_note" && mode === "point"}
             disabled={creatingFeature}
+            onClick={() =>
+              choosePreset({
+                id: "freehand_note",
+                label: "Notat",
+                scenario: "general",
+                geometryMode: "point",
+                defaultConfidence: "speculative",
+                defaultLabel: "Planområde – privat notat",
+                styleKey: "private-note",
+              })
+            }
           >
-            {preset.label}
+            Notat
           </button>
-        ))}
-        <button
-          aria-pressed={selectedPreset.id === "freehand_note" && mode === "point"}
-          disabled={creatingFeature}
-          onClick={() =>
-            choosePreset({
-              id: "freehand_note",
-              label: "Notat",
-              scenario: "general",
-              geometryMode: "point",
-              defaultConfidence: "speculative",
-              defaultLabel: "Planområde – privat notat",
-              styleKey: "private-note",
-            })
-          }
-        >
-          Notat
-        </button>
-        {draft.length > 0 ? (
-          <button
-            className="finish"
-            onClick={() => void finishDrawing()}
-            disabled={!canFinishDraft || creatingFeature}
-            title={canFinishDraft ? undefined : "Legg til flere punkter før du fullfører"}
-            aria-busy={creatingFeature}
-          >
-            Fullfør
-          </button>
-        ) : null}
-      </section>
-      {privateFeatures.length > 0 ? (
+          {draft.length > 0 ? (
+            <button
+              className="finish"
+              onClick={() => void finishDrawing()}
+              disabled={!canFinishDraft || creatingFeature}
+              title={canFinishDraft ? undefined : "Legg til flere punkter før du fullfører"}
+              aria-busy={creatingFeature}
+            >
+              Fullfør
+            </button>
+          ) : null}
+        </section>
+      ) : null}
+      {canEditPrivateFeatures && privateFeatures.length > 0 ? (
         <ul className="private-features">
           {privateFeatures.map((feature) => (
             <PrivateFeatureRow
               key={feature.id}
               feature={feature}
-              onSave={onUpdateFeature}
-              onDelete={onDeleteFeature}
+              onSave={onUpdateFeature!}
+              onDelete={onDeleteFeature!}
             />
           ))}
         </ul>

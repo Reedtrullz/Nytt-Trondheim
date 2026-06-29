@@ -2,9 +2,13 @@
 
 ## Boundaries
 
-`frontend` consumes authenticated API resources only. `server` owns identity, persistence, exports and access control. `worker` is the only scheduled ingestion/analysis process. `shared` defines API-safe types and validation.
+`frontend` consumes authenticated API resources except the public access-request and email-login request endpoints. `server` owns identity, persistence, exports and access control. `worker` is the only scheduled ingestion/analysis process. `shared` defines API-safe types and validation.
 
 PostgreSQL/PostGIS stores articles, situations, workspace content and geometry. Production attachments are stored on a persisted Docker volume with metadata and SHA-256 checksums in PostgreSQL.
+
+Restricted-beta auth is administrative application data, not upstream evidence. `access_requests` stores request state (`unverified`, `pending`, `approved`, `rejected`) and email verification timestamps. `users` stores owner/viewer accounts, `user_identities` maps GitHub and email identities, and `auth_tokens` stores hashed one-time verification, invite and login tokens. None of these tables may create `source_items`, evidence, situations or coverage bundles.
+
+GitHub remains the owner/admin login. Approved non-GitHub accounts are `viewer` users: they can read the main dashboard, situation, traffic and weather surfaces, but Drift/operations, saved items, source audit/source linking, private workspace mutations, notes, drawings, attachments and exports require owner role.
 
 Normalized incident records are authoritative: situation/article associations, evidence, timeline entries, official events, AI processing runs, saved situations and export manifests are stored separately from the summary payload returned for the dashboard.
 

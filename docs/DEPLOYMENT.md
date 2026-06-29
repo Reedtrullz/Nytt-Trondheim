@@ -8,7 +8,7 @@ The repository follows the RFMC release pattern:
 4. GitHub Actions connects to the VPS as `deploy` and runs `ansible-playbook.yml`; the VPS uses its own repository-scoped read-only deploy key at `~/.ssh/nytt_github_deploy` to clone this private repository.
 5. Ansible checks out the exact CI-verified commit, installs/configures backup tooling, pulls/builds fresh Docker images, verifies an encrypted pre-migration backup, applies locked transactional migrations, health-checks a canary API container on a separate localhost port, promotes API/worker only after the canary is healthy, validates and reloads Caddy, then runs production health, worker, source-health and source-item sanity checks. The current production API/worker stay up through backup and canary, but migrations run before canary against the production database, so application migrations must be expand/contract-compatible with the previous release; destructive schema changes must be split into a later deploy or paired with an explicit restore/rollback procedure.
 
-The deploy workflow fails before SSH/Ansible if any required SSH, application, GitHub authentication, AI, DATEX or backup secret is absent; the playbook repeats the required-value check before writing runtime secrets. Automatic deploys set `NYTT_DEPLOY_REF` from the successful CI workflow run SHA so the VPS checkout matches the commit CI verified; manual dispatch falls back to the dispatch SHA. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
+The deploy workflow fails before SSH/Ansible if any required SSH, application, GitHub authentication, SMTP, AI, DATEX or backup secret is absent; the playbook repeats the required-value check before writing runtime secrets. Automatic deploys set `NYTT_DEPLOY_REF` from the successful CI workflow run SHA so the VPS checkout matches the commit CI verified; manual dispatch falls back to the dispatch SHA. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
 
 ## Production Services
 
@@ -34,6 +34,8 @@ The weekly restore check validates archive readability only. Run [Full Restore R
 ## First Deployment Prerequisites
 
 - Create a GitHub App with callback `https://nytt.reidar.tech/auth/github/callback`, generate a Client Secret, and configure its Client ID and Client Secret as `NYTT_GITHUB_CLIENT_ID` and `NYTT_GITHUB_CLIENT_SECRET`. The App ID and downloaded private key are not required for the user-login flow.
+- The public `/logg-inn` and `/registrer` pages support restricted-beta access: request access, verify email, wait for owner approval, then log in with a one-time email link as a read-only viewer.
+- Configure SMTP secrets as described in [SMTP Email Auth](#smtp-email-auth). Production refuses to start email auth without `NYTT_SMTP_HOST` and `NYTT_SMTP_FROM`.
 - Add the listed repository secrets, including `NYTT_REPO_DEPLOY_KEY` for the repository-scoped read-only checkout key.
 - Authorize an `rclone` Google Drive remote for the dedicated encrypted backup folder and configure `NYTT_RESTIC_REPOSITORY=rclone:nytt_drive:nytt-trondheim/restic`.
 - Run `Provision Origin` once using an already-authorized VPS SSH key; it installs the dedicated Actions and repository checkout keys and configures the Caddy hostname. After it succeeds, rotate `SSH_PRIVATE_KEY` to the dedicated Actions key.
@@ -42,6 +44,26 @@ The weekly restore check validates archive readability only. Run [Full Restore R
 - Run origin provisioning to repair TLS/Cloudflare routing before release; the endpoint returned HTTP `525` before the `nytt.reidar.tech` Caddy hostname existed.
 - Confirm Docker, Caddy and the `deploy` SSH key are available on the same VPS used by RFMC.
 - Configure DATEX Basic Auth secrets as described in [DATEX Credentials](#datex-credentials). Production currently treats `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD` as required deployment secrets because the Drift/source-health and traffic-pulse surfaces depend on Vegvesen access.
+
+## SMTP Email Auth
+
+Restricted-beta viewer login depends on one-time email links. Store SMTP settings as GitHub Actions secrets:
+
+```bash
+gh secret set NYTT_SMTP_HOST --repo Reedtrullz/Nytt-Trondheim
+gh secret set NYTT_SMTP_FROM --repo Reedtrullz/Nytt-Trondheim
+gh secret set NYTT_SMTP_API_KEY --repo Reedtrullz/Nytt-Trondheim
+```
+
+Optional SMTP settings:
+
+```bash
+gh secret set NYTT_SMTP_PORT --repo Reedtrullz/Nytt-Trondheim
+gh secret set NYTT_SMTP_SECURE --repo Reedtrullz/Nytt-Trondheim
+gh secret set NYTT_SMTP_USER --repo Reedtrullz/Nytt-Trondheim
+```
+
+`NYTT_SMTP_PORT` defaults to `465`. Set `NYTT_SMTP_SECURE=false` when using STARTTLS on port `587`. `NYTT_SMTP_API_KEY` is written to the runtime `SMTP_PASSWORD` environment variable. If `NYTT_SMTP_USER` is configured, `NYTT_SMTP_API_KEY` must also be configured. Local development may omit SMTP; the server logs email links to the console instead.
 
 ## DATEX Credentials
 
@@ -242,6 +264,33 @@ Expected live results:
 - `datex_travel_times` and `traffic_counter_snapshots` are non-zero when the upstream feeds are available. DATEX weather/CCTV rows may legitimately be zero if the current bounded endpoints have no matching observations/status updates; rely on `source_health` and freshness labels rather than treating zero rows as an automatic deployment failure.
 - `source_items` has `vegvesen_traffic_info | official_event` provenance rows, but context telemetry providers (`datex_weather`, `datex_cctv`, `trafikkdata`, `datex_travel_time`) have zero `source_items` rows.
 - `official_events` and `situations` have no rows promoted from map-only or context-only sources.
+
+## Restricted-Beta Auth Production Verification
+
+After a CI-verified SHA deploys, verify the auth schema, anonymous boundaries and owner/viewer flow:
+
+```bash
+curl -fsS https://nytt.reidar.tech/health
+curl -sS -o /tmp/bootstrap.json -w '%{http_code}\n' https://nytt.reidar.tech/api/bootstrap
+
+ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -P pager=off -F ' | ' -At" <<'SQL'
+SELECT status, count(*) FROM access_requests GROUP BY status ORDER BY status;
+SELECT role, status, count(*) FROM users GROUP BY role, status ORDER BY role, status;
+SELECT kind, count(*) FROM auth_tokens GROUP BY kind ORDER BY kind;
+SELECT count(*) AS accidental_auth_source_items
+FROM source_items
+WHERE provider IN ('access_requests','users','auth_tokens')
+   OR kind IN ('access_request','auth_token','user');
+SQL
+```
+
+Expected results:
+
+- `/health` returns `200` with Postgres-backed `status: ok`.
+- Anonymous `/api/bootstrap` returns `401`.
+- `accidental_auth_source_items` is zero. Auth and access-review data are administrative application data, not upstream evidence.
+- In an authenticated owner browser session, verify `/drift/tilgang` shows unverified/pending/approved/rejected filters and user controls. Approving a verified request should create/reactivate a viewer and send an invite/login email.
+- In a viewer browser session, verify `/` and public situation pages load, while `/drift`, `/lagret`, source audit/linking, private workspace mutations, attachments and exports return an owner-only 403.
 
 ## Coverage Bundle Production Verification
 

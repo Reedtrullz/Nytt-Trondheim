@@ -128,9 +128,11 @@ function FilterCheckbox({
 function SituationFilterPanel({
   filters,
   onChange,
+  canSeePrivate,
 }: {
   filters: SituationWorkspaceFilters;
   onChange: (filters: SituationWorkspaceFilters) => void;
+  canSeePrivate: boolean;
 }) {
   function patch(next: Partial<SituationWorkspaceFilters>) {
     onChange({ ...filters, ...next, selectedSituationId: undefined });
@@ -200,14 +202,16 @@ function SituationFilterPanel({
           />
         ))}
       </details>
-      <label className="workspace-private-toggle">
-        <input
-          type="checkbox"
-          checked={filters.includePrivateAnnotations}
-          onChange={(event) => patch({ includePrivateAnnotations: event.target.checked })}
-        />
-        Vis private markeringer
-      </label>
+      {canSeePrivate ? (
+        <label className="workspace-private-toggle">
+          <input
+            type="checkbox"
+            checked={filters.includePrivateAnnotations}
+            onChange={(event) => patch({ includePrivateAnnotations: event.target.checked })}
+          />
+          Vis private markeringer
+        </label>
+      ) : null}
       <button
         type="button"
         onClick={() =>
@@ -217,7 +221,7 @@ function SituationFilterPanel({
             sources: [],
             provenances: [],
             confidenceLevels: [],
-            includePrivateAnnotations: true,
+            includePrivateAnnotations: canSeePrivate,
           })
         }
       >
@@ -357,11 +361,13 @@ function SituationDetailDrawer({
   situation,
   selectionMissing,
   selectedFromUrl,
+  canSeePrivate,
   onClose,
 }: {
   situation?: MapFirstSituation;
   selectionMissing: boolean;
   selectedFromUrl: boolean;
+  canSeePrivate: boolean;
   onClose: () => void;
 }) {
   if (!situation) {
@@ -451,20 +457,26 @@ function SituationDetailDrawer({
       <Link className="primary-link" to={`/situasjoner/${situation.id}`}>
         Åpne arbeidsrom
       </Link>
-      <Link
-        className="secondary-link"
-        to={`/drift/tidslinje?s=${encodeURIComponent(situation.id)}`}
-      >
-        Se i operasjonstidslinje
-      </Link>
+      {canSeePrivate ? (
+        <Link
+          className="secondary-link"
+          to={`/drift/tidslinje?s=${encodeURIComponent(situation.id)}`}
+        >
+          Se i operasjonstidslinje
+        </Link>
+      ) : null}
     </aside>
   );
 }
 
-export function SituationsPage() {
+export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boolean }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchText = searchParams.toString();
-  const filters = useMemo(() => parseSituationWorkspaceFilters(searchText), [searchText]);
+  const parsedFilters = useMemo(() => parseSituationWorkspaceFilters(searchText), [searchText]);
+  const filters = useMemo(
+    () => (canSeePrivate ? parsedFilters : { ...parsedFilters, includePrivateAnnotations: false }),
+    [canSeePrivate, parsedFilters],
+  );
   const statusKey = filters.statuses.join(",");
   const sourceKey = filters.sources.join(",");
   const provenanceKey = filters.provenances.join(",");
@@ -536,7 +548,11 @@ export function SituationsPage() {
         <div>
           <p className="label">Situasjonsrom</p>
           <h1>Trondheim situasjonskart</h1>
-          <p>Privat arbeidsflate for hendelser, kildegrunnlag, tidslinje og egne markeringer.</p>
+          <p>
+            {canSeePrivate
+              ? "Privat arbeidsflate for hendelser, kildegrunnlag, tidslinje og egne markeringer."
+              : "Kartvisning for offentlige situasjoner, kildegrunnlag og siste utvikling."}
+          </p>
         </div>
         <div className="situation-workspace-metrics" aria-label="Situasjonsstatus">
           <article>
@@ -547,10 +563,12 @@ export function SituationsPage() {
             <strong>{loading ? "–" : highPriorityCount}</strong>
             <span>Høy viktighet</span>
           </article>
-          <article>
-            <strong>{loading ? "–" : (workspace?.privateAnnotations.length ?? 0)}</strong>
-            <span>Private markeringer</span>
-          </article>
+          {canSeePrivate ? (
+            <article>
+              <strong>{loading ? "–" : (workspace?.privateAnnotations.length ?? 0)}</strong>
+              <span>Private markeringer</span>
+            </article>
+          ) : null}
           <article>
             <strong>{loading ? "–" : (workspace?.timeline.length ?? 0)}</strong>
             <span>Tidslinjepunkt</span>
@@ -560,7 +578,11 @@ export function SituationsPage() {
 
       <section className="situation-workspace-grid" aria-label="Situasjonskart og filtre">
         <div className="situation-workspace-sidebar">
-          <SituationFilterPanel filters={filters} onChange={updateFilters} />
+          <SituationFilterPanel
+            filters={filters}
+            onChange={updateFilters}
+            canSeePrivate={canSeePrivate}
+          />
           <SituationList
             situations={situations}
             selectedId={selectedSituation?.id}
@@ -614,6 +636,7 @@ export function SituationsPage() {
           situation={selectedSituation}
           selectionMissing={selectionMissing}
           selectedFromUrl={Boolean(filters.selectedSituationId)}
+          canSeePrivate={canSeePrivate}
           onClose={clearSelectedSituation}
         />
       </section>

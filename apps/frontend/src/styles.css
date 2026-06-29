@@ -138,6 +138,14 @@ button {
   white-space: nowrap;
 }
 
+.session-role {
+  max-width: 180px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
 .logout {
   padding: 8px 12px;
   color: var(--muted);
@@ -182,10 +190,150 @@ button {
   font-size: 12px;
 }
 
+.access-page {
+  min-height: 100vh;
+  padding: 58px 22px;
+  display: grid;
+  place-items: center;
+  background: var(--page);
+}
+
+.access-panel {
+  width: min(100%, 760px);
+  padding: 34px;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--terracotta);
+  background: var(--paper);
+}
+
+.access-kicker {
+  margin: 0 0 8px;
+  color: var(--terracotta);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.access-panel h1 {
+  margin: 0 0 12px;
+  font: 46px/1.04 var(--serif);
+}
+
+.access-copy,
+.access-request-section > p {
+  max-width: 620px;
+  margin: 0 0 18px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.access-options {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1.2fr);
+  gap: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.access-options h2,
+.access-request-section h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.access-github,
+.access-form button {
+  width: 100%;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--blue);
+  background: var(--blue);
+  color: white;
+  font-weight: 750;
+}
+
+.access-form {
+  margin-top: 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.access-form.compact {
+  margin-top: 0;
+}
+
+.access-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.access-form input,
+.access-form textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 11px 12px;
+}
+
+.access-form textarea {
+  resize: vertical;
+}
+
+.access-form button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.access-alert,
+.access-success {
+  margin: 0;
+  padding: 11px 12px;
+  font-size: 13px;
+}
+
+.access-alert {
+  color: #8a2f21;
+  background: #fff1ed;
+  border: 1px solid #ead8cf;
+}
+
+.access-success {
+  color: var(--green);
+  background: var(--green-soft);
+  border: 1px solid #c9dfd2;
+}
+
+.access-home-link {
+  display: inline-flex;
+  margin-top: 20px;
+  color: var(--blue);
+  font-weight: 750;
+}
+
+.access-request-section {
+  padding-top: 24px;
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.access-honey {
+  position: absolute;
+  left: -10000px;
+}
+
 .home,
 .situation-page,
 .situations-index,
 .operations-page,
+.access-requests-page,
+.forbidden-page,
 .saved-page,
 .weather-page {
   max-width: 1376px;
@@ -958,6 +1106,208 @@ button {
 .situation-filters button.selected {
   color: var(--blue);
   border-color: var(--blue);
+}
+
+.access-request-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.access-request-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-bottom: 18px;
+}
+
+.access-request-filters button {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.access-request-filters button.selected {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.access-request-summary article,
+.access-request-row {
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.access-request-summary article {
+  padding: 18px;
+}
+
+.access-request-summary strong {
+  display: block;
+  font: 38px/1 var(--serif);
+}
+
+.access-request-summary span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.access-request-list {
+  display: grid;
+  gap: 14px;
+}
+
+.access-request-row {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(240px, 1fr) minmax(160px, 0.7fr) auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.access-request-row h2 {
+  margin: 4px 0;
+  font: 30px/1.05 var(--serif);
+}
+
+.access-request-row a {
+  color: var(--blue);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.access-request-row p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.access-request-row time,
+.access-request-row dd {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.access-request-row dl,
+.user-admin-row dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.access-request-row dt,
+.user-admin-row dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.access-request-row dd,
+.user-admin-row dd {
+  margin: 2px 0 0;
+}
+
+.access-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.access-request-actions button {
+  min-height: 36px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  color: var(--blue);
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.access-request-actions button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.65;
+}
+
+.user-admin-list {
+  margin-top: 34px;
+  display: grid;
+  gap: 12px;
+}
+
+.user-admin-list > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: end;
+}
+
+.user-admin-list h2 {
+  margin: 2px 0 0;
+  font: 30px/1.05 var(--serif);
+}
+
+.user-admin-list > header span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.user-admin-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) auto;
+  gap: 18px;
+  align-items: start;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.user-admin-row h3 {
+  margin: 3px 0 4px;
+  font-size: 18px;
+}
+
+.user-admin-row a {
+  color: var(--blue);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.floating-error {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  max-width: 1376px;
+  margin: 0 auto 12px;
+  padding: 11px 14px;
+  color: #8a2f21;
+  border: 1px solid #ead8cf;
+  background: #fff1ed;
+  font-size: 13px;
+}
+
+.forbidden-page {
+  display: grid;
+  gap: 12px;
+}
+
+.forbidden-page h1 {
+  margin: 0;
+  font: 48px/1.04 var(--serif);
+}
+
+.forbidden-page p:not(.label) {
+  max-width: 620px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .situation-cards {
@@ -5205,6 +5555,7 @@ button {
   .situation-page,
   .situations-index,
   .operations-page,
+  .access-requests-page,
   .source-audit-page,
   .operations-timeline-page,
   .coverage-bundles-page,
@@ -5321,6 +5672,10 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .access-request-row {
+    grid-template-columns: 1fr;
+  }
+
   .traffic-workspace,
   .traffic-bottom-panel {
     grid-template-columns: 1fr;
@@ -5368,6 +5723,23 @@ button {
     width: 100%;
   }
 
+  .access-panel {
+    padding: 24px;
+  }
+
+  .access-panel h1 {
+    font-size: 36px;
+  }
+
+  .access-options,
+  .user-admin-row {
+    grid-template-columns: 1fr;
+  }
+
+  .access-request-summary {
+    grid-template-columns: 1fr;
+  }
+
   .search {
     order: 4;
     height: 38px;
@@ -5375,6 +5747,10 @@ button {
   }
 
   .refreshed {
+    display: none;
+  }
+
+  .session-role {
     display: none;
   }
 

@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
+  AccessRequest,
+  AccessRequestDecisionInput,
+  AccessRequestInput,
+  AccessRequestPage,
+  AccessRequestQueryInput,
+  AccessRequestSubmissionResponse,
+  AppUser,
   Article,
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleDecision,
@@ -48,6 +55,8 @@ import type {
   SourceItemRelationship,
   SourceHealth,
   SourceId,
+  UserUpdateInput,
+  UserPage,
   TimelineEntry,
   TrafficCounterSnapshot,
   TrafficMapEvent,
@@ -67,6 +76,8 @@ import {
   sampleWorkspace,
 } from "@nytt/shared";
 import pg from "pg";
+import type { Profile } from "passport-github2";
+import type { AuthUser } from "./auth.js";
 
 export interface ArticleFilters {
   scope?: string;
@@ -165,6 +176,19 @@ export interface ExportRecord {
 }
 
 export interface Store {
+  createAccessRequest(input: AccessRequestInput): Promise<AccessRequestSubmissionResult>;
+  verifyAccessRequestToken(token: string): Promise<"verified" | "invalid">;
+  listAccessRequests(filters: AccessRequestQueryInput, login: string): Promise<AccessRequestPage>;
+  decideAccessRequest(
+    id: string,
+    input: AccessRequestDecisionInput,
+    login: string,
+  ): Promise<AccessRequestDecisionResult>;
+  requestEmailLogin(email: string): Promise<EmailLoginRequestResult>;
+  consumeEmailLoginToken(token: string): Promise<AuthUser | undefined>;
+  listUsers(login: string): Promise<UserPage>;
+  updateUser(id: string, input: UserUpdateInput, login: string): Promise<UserUpdateResult>;
+  ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false>;
   getBootstrap(login: string): Promise<BootstrapPayload>;
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
   listCoverageBundles(
@@ -283,6 +307,179 @@ function beforeCursor(
     timestamp < cursor.timestamp ||
     (timestamp === cursor.timestamp && Boolean(cursor.id && id < cursor.id))
   );
+}
+
+function normalizeAccessRequestEmail(email: string): string {
+  return email.trim().toLocaleLowerCase("nb");
+}
+
+const accessVerificationTtlMs = 24 * 60 * 60 * 1000;
+const inviteTtlMs = 7 * 24 * 60 * 60 * 1000;
+const loginTtlMs = 15 * 60 * 1000;
+
+type AuthTokenKind = "access_verify" | "invite" | "login";
+
+export interface TokenDelivery {
+  email: string;
+  displayName: string;
+  token: string;
+}
+
+export interface AccessRequestSubmissionResult extends AccessRequestSubmissionResponse {
+  verification?: TokenDelivery;
+}
+
+export interface EmailLoginRequestResult extends AccessRequestSubmissionResponse {
+  login?: TokenDelivery;
+}
+
+export interface AccessRequestDecisionResult {
+  request: AccessRequest;
+  invite?: TokenDelivery;
+}
+
+export interface UserUpdateResult {
+  user: AppUser;
+  invite?: TokenDelivery;
+}
+
+function newAuthToken(): string {
+  return randomUUID() + "." + randomUUID();
+}
+
+function hashAuthToken(token: string): string {
+  return sha256(token);
+}
+
+function expiresAt(ms: number): string {
+  return new Date(Date.now() + ms).toISOString();
+}
+
+type AccessRequestRow = {
+  id: string;
+  displayName: string;
+  email: string;
+  message?: string | null;
+  status: AccessRequest["status"];
+  requestedAt: Date | string;
+  updatedAt: Date | string;
+  emailVerifiedAt?: Date | string | null;
+  reviewedAt?: Date | string | null;
+  reviewedBy?: string | null;
+  reviewerNote?: string | null;
+};
+
+type UserRow = {
+  id: string;
+  displayName: string;
+  email?: string | null;
+  role: AppUser["role"];
+  status: AppUser["status"];
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  lastLoginAt?: Date | string | null;
+};
+
+type MemoryUserIdentity = {
+  id: string;
+  userId: string;
+  provider: "github" | "email";
+  providerSubject: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type MemoryAuthToken = {
+  id: string;
+  tokenHash: string;
+  kind: AuthTokenKind;
+  accessRequestId?: string;
+  userId?: string;
+  email?: string;
+  emailNormalized?: string;
+  expiresAt: string;
+  consumedAt?: string;
+  createdAt: string;
+  createdBy?: string;
+};
+
+function isoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function accessRequestFromRow(row: AccessRequestRow): AccessRequest {
+  return {
+    id: row.id,
+    displayName: row.displayName,
+    email: row.email,
+    ...(row.message ? { message: row.message } : {}),
+    status: row.status,
+    requestedAt: isoString(row.requestedAt),
+    updatedAt: isoString(row.updatedAt),
+    ...(row.emailVerifiedAt ? { emailVerifiedAt: isoString(row.emailVerifiedAt) } : {}),
+    ...(row.reviewedAt ? { reviewedAt: isoString(row.reviewedAt) } : {}),
+    ...(row.reviewedBy ? { reviewedBy: row.reviewedBy } : {}),
+    ...(row.reviewerNote ? { reviewerNote: row.reviewerNote } : {}),
+  };
+}
+
+function summarizeAccessRequests(items: AccessRequest[]): AccessRequestPage["summary"] {
+  return {
+    total: items.length,
+    unverified: items.filter((item) => item.status === "unverified").length,
+    pending: items.filter((item) => item.status === "pending").length,
+    approved: items.filter((item) => item.status === "approved").length,
+    rejected: items.filter((item) => item.status === "rejected").length,
+  };
+}
+
+function appUserFromRow(row: UserRow): AppUser {
+  return {
+    id: row.id,
+    displayName: row.displayName,
+    role: row.role,
+    status: row.status,
+    createdAt: isoString(row.createdAt),
+    updatedAt: isoString(row.updatedAt),
+    ...(row.email ? { email: row.email } : {}),
+    ...(row.lastLoginAt ? { lastLoginAt: isoString(row.lastLoginAt) } : {}),
+  };
+}
+
+function authUserFromAppUser(user: AppUser): AuthUser {
+  return {
+    id: user.id,
+    login: user.email ?? user.id,
+    displayName: user.displayName,
+    role: user.role,
+    status: user.status,
+    ...(user.email ? { email: user.email } : {}),
+  };
+}
+
+function authorizeGitHubProfileForStore(
+  profile: Pick<Profile, "username" | "displayName" | "photos">,
+  allowedLogin: string,
+): AuthUser | false {
+  if (profile.username?.toLocaleLowerCase() !== allowedLogin.toLocaleLowerCase()) return false;
+  return {
+    id: `github:${profile.username.toLocaleLowerCase()}`,
+    login: profile.username,
+    displayName: profile.displayName || profile.username,
+    role: "owner",
+    status: "active",
+    avatarUrl: profile.photos?.[0]?.value,
+  };
+}
+
+function summarizeUsers(items: AppUser[]): UserPage["summary"] {
+  return {
+    total: items.length,
+    owner: items.filter((item) => item.role === "owner").length,
+    viewer: items.filter((item) => item.role === "viewer").length,
+    active: items.filter((item) => item.status === "active").length,
+    revoked: items.filter((item) => item.status === "revoked").length,
+  };
 }
 
 function sha256(value: string): string {
@@ -1792,6 +1989,10 @@ export class MemoryStore implements Store {
   private notes = clone(sampleNotes);
   private attachments: AttachmentRecord[] = [];
   private exports: ExportRecord[] = [];
+  private accessRequests: AccessRequest[] = [];
+  private users: AppUser[] = [];
+  private userIdentities: MemoryUserIdentity[] = [];
+  private authTokens: MemoryAuthToken[] = [];
   private savedSituations = new Set<string>();
   private sourceItems = new Map<string, SourceItem>(
     sampleArticles.map((article) => {
@@ -1835,6 +2036,313 @@ export class MemoryStore implements Store {
       .filter((link) => link.sourceItemId === sourceItemId)
       .map((link) => link.situationId)
       .sort();
+  }
+
+  private issueMemoryToken(
+    kind: AuthTokenKind,
+    ttlMs: number,
+    input: {
+      accessRequestId?: string;
+      userId?: string;
+      email?: string;
+      createdBy?: string;
+    },
+  ): string {
+    const token = newAuthToken();
+    const now = new Date().toISOString();
+    this.authTokens.push({
+      id: randomUUID(),
+      tokenHash: hashAuthToken(token),
+      kind,
+      expiresAt: expiresAt(ttlMs),
+      createdAt: now,
+      ...(input.accessRequestId ? { accessRequestId: input.accessRequestId } : {}),
+      ...(input.userId ? { userId: input.userId } : {}),
+      ...(input.email
+        ? { email: input.email, emailNormalized: normalizeAccessRequestEmail(input.email) }
+        : {}),
+      ...(input.createdBy ? { createdBy: input.createdBy } : {}),
+    });
+    return token;
+  }
+
+  private consumeMemoryToken(kind: AuthTokenKind | AuthTokenKind[], token: string) {
+    const kinds = Array.isArray(kind) ? kind : [kind];
+    const row = this.authTokens.find(
+      (candidate) =>
+        candidate.tokenHash === hashAuthToken(token) &&
+        kinds.includes(candidate.kind) &&
+        !candidate.consumedAt,
+    );
+    if (!row || Date.parse(row.expiresAt) <= Date.now()) return undefined;
+    row.consumedAt = new Date().toISOString();
+    return row;
+  }
+
+  private findUserByEmail(email: string): AppUser | undefined {
+    const normalizedEmail = normalizeAccessRequestEmail(email);
+    return this.users.find(
+      (user) => user.email && normalizeAccessRequestEmail(user.email) === normalizedEmail,
+    );
+  }
+
+  private ensureEmailIdentity(user: AppUser): void {
+    if (!user.email) return;
+    const providerSubject = normalizeAccessRequestEmail(user.email);
+    const existing = this.userIdentities.find(
+      (identity) => identity.provider === "email" && identity.providerSubject === providerSubject,
+    );
+    const now = new Date().toISOString();
+    if (existing) {
+      existing.userId = user.id;
+      existing.updatedAt = now;
+    } else {
+      this.userIdentities.push({
+        id: randomUUID(),
+        userId: user.id,
+        provider: "email",
+        providerSubject,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
+
+  private createOrReactivateViewer(request: AccessRequest): AppUser {
+    const now = new Date().toISOString();
+    const existing = this.findUserByEmail(request.email);
+    if (existing) {
+      existing.displayName = request.displayName;
+      existing.role = "viewer";
+      existing.status = "active";
+      existing.updatedAt = now;
+      this.ensureEmailIdentity(existing);
+      return existing;
+    }
+    const user: AppUser = {
+      id: randomUUID(),
+      displayName: request.displayName,
+      email: request.email,
+      role: "viewer",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.users.push(user);
+    this.ensureEmailIdentity(user);
+    return user;
+  }
+
+  async createAccessRequest(input: AccessRequestInput): Promise<AccessRequestSubmissionResult> {
+    const now = new Date().toISOString();
+    const normalizedEmail = normalizeAccessRequestEmail(input.email);
+    const existing = this.accessRequests.find(
+      (request) => normalizeAccessRequestEmail(request.email) === normalizedEmail,
+    );
+    let request: AccessRequest;
+    if (existing) {
+      existing.displayName = input.displayName;
+      existing.email = input.email;
+      if (input.message) existing.message = input.message;
+      else delete existing.message;
+      if (existing.status !== "approved" && existing.emailVerifiedAt) {
+        existing.requestedAt = now;
+      } else if (existing.status !== "approved") {
+        existing.status = "unverified";
+        delete existing.emailVerifiedAt;
+        delete existing.reviewedAt;
+        delete existing.reviewedBy;
+        delete existing.reviewerNote;
+        existing.requestedAt = now;
+      }
+      existing.updatedAt = now;
+      request = existing;
+    } else {
+      request = {
+        id: randomUUID(),
+        displayName: input.displayName,
+        email: input.email,
+        ...(input.message ? { message: input.message } : {}),
+        status: "unverified",
+        requestedAt: now,
+        updatedAt: now,
+      };
+      this.accessRequests.push(request);
+    }
+    if (request.status === "approved" || request.emailVerifiedAt) return { status: "received" };
+    const token = this.issueMemoryToken("access_verify", accessVerificationTtlMs, {
+      accessRequestId: request.id,
+      email: request.email,
+    });
+    return {
+      status: "received",
+      verification: { email: request.email, displayName: request.displayName, token },
+    };
+  }
+
+  async verifyAccessRequestToken(token: string): Promise<"verified" | "invalid"> {
+    const row = this.consumeMemoryToken("access_verify", token);
+    const request = row?.accessRequestId
+      ? this.accessRequests.find((item) => item.id === row.accessRequestId)
+      : undefined;
+    if (!row || !request) return "invalid";
+    const now = new Date().toISOString();
+    request.emailVerifiedAt = now;
+    if (request.status === "unverified") request.status = "pending";
+    request.updatedAt = now;
+    return "verified";
+  }
+
+  async listAccessRequests(filters: AccessRequestQueryInput): Promise<AccessRequestPage> {
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const limit = filters.limit ?? 50;
+    const filtered = this.accessRequests
+      .filter(
+        (request) =>
+          (!filters.status || request.status === filters.status) &&
+          beforeCursor(request.requestedAt, request.id, cursor),
+      )
+      .sort(
+        (left, right) =>
+          right.requestedAt.localeCompare(left.requestedAt) || right.id.localeCompare(left.id),
+      );
+    const allForSummary = this.accessRequests.filter(
+      (request) => !filters.status || request.status === filters.status,
+    );
+    const page = filtered.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: clone(page),
+      summary: summarizeAccessRequests(allForSummary),
+      nextCursor:
+        filtered.length > limit && last ? encodeCursor(last.requestedAt, last.id) : undefined,
+    };
+  }
+
+  async decideAccessRequest(
+    id: string,
+    input: AccessRequestDecisionInput,
+    login: string,
+  ): Promise<AccessRequestDecisionResult> {
+    const request = this.accessRequests.find((item) => item.id === id);
+    if (!request)
+      throw Object.assign(new Error("Tilgangsforespørselen finnes ikke."), { status: 404 });
+    if (input.status === "approved" && !request.emailVerifiedAt) {
+      throw Object.assign(new Error("E-post må verifiseres før godkjenning."), { status: 400 });
+    }
+    const now = new Date().toISOString();
+    request.status = input.status;
+    request.reviewedAt = now;
+    request.reviewedBy = login;
+    request.updatedAt = now;
+    if (input.reviewerNote) request.reviewerNote = input.reviewerNote;
+    else delete request.reviewerNote;
+    if (input.status === "rejected") return { request: clone(request) };
+    const user = this.createOrReactivateViewer(request);
+    const token = this.issueMemoryToken("invite", inviteTtlMs, {
+      userId: user.id,
+      email: user.email,
+      createdBy: login,
+    });
+    return {
+      request: clone(request),
+      invite: { email: request.email, displayName: request.displayName, token },
+    };
+  }
+
+  async requestEmailLogin(email: string): Promise<EmailLoginRequestResult> {
+    const user = this.findUserByEmail(email);
+    if (!user || user.status !== "active") return { status: "received" };
+    const token = this.issueMemoryToken("login", loginTtlMs, {
+      userId: user.id,
+      email: user.email,
+    });
+    return {
+      status: "received",
+      login: { email: user.email ?? email, displayName: user.displayName, token },
+    };
+  }
+
+  async consumeEmailLoginToken(token: string): Promise<AuthUser | undefined> {
+    const row = this.consumeMemoryToken(["invite", "login"], token);
+    const user = row?.userId ? this.users.find((item) => item.id === row.userId) : undefined;
+    if (!row || !user || user.status !== "active") return undefined;
+    const now = new Date().toISOString();
+    user.lastLoginAt = now;
+    user.updatedAt = now;
+    return authUserFromAppUser(user);
+  }
+
+  async listUsers(): Promise<UserPage> {
+    const items = clone(
+      [...this.users].sort(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+      ),
+    );
+    return { items, summary: summarizeUsers(items) };
+  }
+
+  async updateUser(id: string, input: UserUpdateInput, login: string): Promise<UserUpdateResult> {
+    const user = this.users.find((item) => item.id === id);
+    if (!user) throw Object.assign(new Error("Brukeren finnes ikke."), { status: 404 });
+    if (user.role === "owner" && input.status === "revoked") {
+      throw Object.assign(new Error("Eierkontoen kan ikke tilbakekalles her."), { status: 400 });
+    }
+    if (input.status) user.status = input.status;
+    user.updatedAt = new Date().toISOString();
+    if (!input.resendInvite || !user.email || user.status !== "active")
+      return { user: clone(user) };
+    const token = this.issueMemoryToken("invite", inviteTtlMs, {
+      userId: user.id,
+      email: user.email,
+      createdBy: login,
+    });
+    return {
+      user: clone(user),
+      invite: { email: user.email, displayName: user.displayName, token },
+    };
+  }
+
+  async ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false> {
+    const authorized = authorizeGitHubProfileForStore(profile, allowedLogin);
+    if (!authorized) return false;
+    const subject = authorized.login.toLocaleLowerCase("nb");
+    const now = new Date().toISOString();
+    const identity = this.userIdentities.find(
+      (item) => item.provider === "github" && item.providerSubject === subject,
+    );
+    let user = identity ? this.users.find((item) => item.id === identity.userId) : undefined;
+    if (!user) {
+      user = {
+        id: randomUUID(),
+        displayName: authorized.displayName,
+        role: "owner",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.users.push(user);
+      this.userIdentities.push({
+        id: randomUUID(),
+        userId: user.id,
+        provider: "github",
+        providerSubject: subject,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else {
+      user.displayName = authorized.displayName;
+      user.role = "owner";
+      user.status = "active";
+      user.lastLoginAt = now;
+      user.updatedAt = now;
+    }
+    return {
+      ...authUserFromAppUser(user),
+      login: authorized.login,
+      avatarUrl: authorized.avatarUrl,
+    };
   }
 
   async getBootstrap(): Promise<BootstrapPayload> {
@@ -2309,6 +2817,488 @@ export class MemoryStore implements Store {
 
 export class PgStore implements Store {
   constructor(private readonly pool: pg.Pool) {}
+
+  private async issuePgAuthToken(
+    client: Pick<pg.Pool, "query"> | pg.PoolClient,
+    kind: AuthTokenKind,
+    ttlMs: number,
+    input: {
+      accessRequestId?: string;
+      userId?: string;
+      email?: string;
+      createdBy?: string;
+    },
+  ): Promise<string> {
+    const token = newAuthToken();
+    await client.query(
+      `INSERT INTO auth_tokens (
+         id, token_hash, kind, access_request_id, user_id, email, email_normalized,
+         expires_at, created_by
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        randomUUID(),
+        hashAuthToken(token),
+        kind,
+        input.accessRequestId ?? null,
+        input.userId ?? null,
+        input.email ?? null,
+        input.email ? normalizeAccessRequestEmail(input.email) : null,
+        expiresAt(ttlMs),
+        input.createdBy ?? null,
+      ],
+    );
+    return token;
+  }
+
+  private async rowForUserId(
+    client: Pick<pg.Pool, "query"> | pg.PoolClient,
+    id: string,
+  ): Promise<AppUser | undefined> {
+    const result = await client.query<UserRow>(
+      `SELECT id, display_name AS "displayName", email, role, status,
+              created_at AS "createdAt", updated_at AS "updatedAt",
+              last_login_at AS "lastLoginAt"
+       FROM users
+       WHERE id = $1`,
+      [id],
+    );
+    return result.rows[0] ? appUserFromRow(result.rows[0]) : undefined;
+  }
+
+  async createAccessRequest(input: AccessRequestInput): Promise<AccessRequestSubmissionResult> {
+    const result = await this.pool.query<AccessRequestRow>(
+      `INSERT INTO access_requests (id, email, email_normalized, display_name, message, status)
+       VALUES ($1,$2,$3,$4,$5,'unverified')
+       ON CONFLICT (email_normalized) DO UPDATE SET
+         email = EXCLUDED.email,
+         display_name = EXCLUDED.display_name,
+         message = EXCLUDED.message,
+         status = CASE
+           WHEN access_requests.status = 'approved' THEN access_requests.status
+           WHEN access_requests.email_verified_at IS NOT NULL THEN 'pending'
+           ELSE 'unverified'
+         END,
+         email_verified_at = CASE
+           WHEN access_requests.status = 'approved' THEN access_requests.email_verified_at
+           WHEN access_requests.email_verified_at IS NOT NULL THEN access_requests.email_verified_at
+           ELSE NULL
+         END,
+         requested_at = CASE
+           WHEN access_requests.status = 'approved' THEN access_requests.requested_at
+           ELSE now()
+         END,
+         reviewed_at = CASE
+           WHEN access_requests.status = 'approved' THEN access_requests.reviewed_at
+           ELSE NULL
+         END,
+         reviewed_by = CASE
+           WHEN access_requests.status = 'approved' THEN access_requests.reviewed_by
+           ELSE NULL
+         END,
+         reviewer_note = CASE
+           WHEN access_requests.status = 'approved' THEN access_requests.reviewer_note
+           ELSE NULL
+         END,
+         updated_at = now()
+       RETURNING id, display_name AS "displayName", email, message, status,
+                 requested_at AS "requestedAt", updated_at AS "updatedAt",
+                 email_verified_at AS "emailVerifiedAt",
+                 reviewed_at AS "reviewedAt", reviewed_by AS "reviewedBy",
+                 reviewer_note AS "reviewerNote"`,
+      [
+        randomUUID(),
+        input.email,
+        normalizeAccessRequestEmail(input.email),
+        input.displayName,
+        input.message ?? null,
+      ],
+    );
+    const request = accessRequestFromRow(result.rows[0]!);
+    if (request.status !== "unverified") return { status: "received" };
+    const token = await this.issuePgAuthToken(this.pool, "access_verify", accessVerificationTtlMs, {
+      accessRequestId: request.id,
+      email: request.email,
+    });
+    return {
+      status: "received",
+      verification: { email: request.email, displayName: request.displayName, token },
+    };
+  }
+
+  async verifyAccessRequestToken(token: string): Promise<"verified" | "invalid"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const tokenResult = await client.query<{ access_request_id: string }>(
+        `UPDATE auth_tokens
+         SET consumed_at = now()
+         WHERE token_hash = $1
+           AND kind = 'access_verify'
+           AND consumed_at IS NULL
+           AND expires_at > now()
+         RETURNING access_request_id`,
+        [hashAuthToken(token)],
+      );
+      const requestId = tokenResult.rows[0]?.access_request_id;
+      if (!requestId) {
+        await client.query("ROLLBACK");
+        return "invalid";
+      }
+      await client.query(
+        `UPDATE access_requests
+         SET email_verified_at = COALESCE(email_verified_at, now()),
+             status = CASE WHEN status = 'unverified' THEN 'pending' ELSE status END,
+             updated_at = now()
+         WHERE id = $1`,
+        [requestId],
+      );
+      await client.query("COMMIT");
+      return "verified";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listAccessRequests(filters: AccessRequestQueryInput): Promise<AccessRequestPage> {
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.status) {
+      params.push(filters.status);
+      where.push(`status = $${params.length}`);
+    }
+    if (cursor) {
+      params.push(cursor.timestamp, cursor.id ?? "");
+      const timestampIndex = params.length - 1;
+      const idIndex = params.length;
+      where.push(
+        `(requested_at < $${timestampIndex}::timestamptz OR (requested_at = $${timestampIndex}::timestamptz AND id < $${idIndex}))`,
+      );
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const limit = filters.limit ?? 50;
+    params.push(limit + 1);
+    const limitIndex = params.length;
+    const [rows, summary] = await Promise.all([
+      this.pool.query<AccessRequestRow>(
+        `SELECT id, display_name AS "displayName", email, message, status,
+                requested_at AS "requestedAt", updated_at AS "updatedAt",
+                email_verified_at AS "emailVerifiedAt",
+                reviewed_at AS "reviewedAt", reviewed_by AS "reviewedBy",
+                reviewer_note AS "reviewerNote"
+         FROM access_requests
+         ${whereSql}
+         ORDER BY requested_at DESC, id DESC
+         LIMIT $${limitIndex}`,
+        params,
+      ),
+      this.pool.query<{
+        total: string;
+        unverified: string;
+        pending: string;
+        approved: string;
+        rejected: string;
+      }>(
+        `SELECT
+           count(*)::text AS total,
+           count(*) FILTER (WHERE status = 'unverified')::text AS unverified,
+           count(*) FILTER (WHERE status = 'pending')::text AS pending,
+           count(*) FILTER (WHERE status = 'approved')::text AS approved,
+           count(*) FILTER (WHERE status = 'rejected')::text AS rejected
+         FROM access_requests
+         ${filters.status ? "WHERE status = $1" : ""}`,
+        filters.status ? [filters.status] : [],
+      ),
+    ]);
+    const hasNextPage = rows.rows.length > limit;
+    const items = rows.rows.slice(0, limit).map(accessRequestFromRow);
+    const last = items.at(-1);
+    return {
+      items,
+      summary: {
+        total: Number(summary.rows[0]?.total ?? 0),
+        unverified: Number(summary.rows[0]?.unverified ?? 0),
+        pending: Number(summary.rows[0]?.pending ?? 0),
+        approved: Number(summary.rows[0]?.approved ?? 0),
+        rejected: Number(summary.rows[0]?.rejected ?? 0),
+      },
+      nextCursor: hasNextPage && last ? encodeCursor(last.requestedAt, last.id) : undefined,
+    };
+  }
+
+  async decideAccessRequest(
+    id: string,
+    input: AccessRequestDecisionInput,
+    login: string,
+  ): Promise<AccessRequestDecisionResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query<AccessRequestRow>(
+        `SELECT id, display_name AS "displayName", email, message, status,
+                requested_at AS "requestedAt", updated_at AS "updatedAt",
+                email_verified_at AS "emailVerifiedAt",
+                reviewed_at AS "reviewedAt", reviewed_by AS "reviewedBy",
+                reviewer_note AS "reviewerNote"
+         FROM access_requests
+         WHERE id = $1
+         FOR UPDATE`,
+        [id],
+      );
+      const existing = current.rows[0] ? accessRequestFromRow(current.rows[0]) : undefined;
+      if (!existing) {
+        await client.query("ROLLBACK");
+        throw Object.assign(new Error("Tilgangsforespørselen finnes ikke."), { status: 404 });
+      }
+      if (input.status === "approved" && !existing.emailVerifiedAt) {
+        await client.query("ROLLBACK");
+        throw Object.assign(new Error("E-post må verifiseres før godkjenning."), { status: 400 });
+      }
+      const updated = await client.query<AccessRequestRow>(
+        `UPDATE access_requests
+         SET status = $2, reviewed_at = now(), reviewed_by = $3,
+             reviewer_note = $4, updated_at = now()
+         WHERE id = $1
+         RETURNING id, display_name AS "displayName", email, message, status,
+                   requested_at AS "requestedAt", updated_at AS "updatedAt",
+                   email_verified_at AS "emailVerifiedAt",
+                   reviewed_at AS "reviewedAt", reviewed_by AS "reviewedBy",
+                   reviewer_note AS "reviewerNote"`,
+        [id, input.status, login, input.reviewerNote ?? null],
+      );
+      const request = accessRequestFromRow(updated.rows[0]!);
+      if (input.status === "rejected") {
+        await client.query("COMMIT");
+        return { request };
+      }
+      const userResult = await client.query<UserRow>(
+        `INSERT INTO users (id, email, email_normalized, display_name, role, status)
+         VALUES ($1,$2,$3,$4,'viewer','active')
+         ON CONFLICT (email_normalized) WHERE email_normalized IS NOT NULL DO UPDATE SET
+           display_name = EXCLUDED.display_name,
+           role = 'viewer',
+           status = 'active',
+           updated_at = now()
+         RETURNING id, display_name AS "displayName", email, role, status,
+                   created_at AS "createdAt", updated_at AS "updatedAt",
+                   last_login_at AS "lastLoginAt"`,
+        [
+          randomUUID(),
+          request.email,
+          normalizeAccessRequestEmail(request.email),
+          request.displayName,
+        ],
+      );
+      const user = appUserFromRow(userResult.rows[0]!);
+      await client.query(
+        `INSERT INTO user_identities (id, user_id, provider, provider_subject)
+         VALUES ($1,$2,'email',$3)
+         ON CONFLICT (provider, provider_subject) DO UPDATE SET
+           user_id = EXCLUDED.user_id,
+           updated_at = now()`,
+        [randomUUID(), user.id, normalizeAccessRequestEmail(request.email)],
+      );
+      const token = await this.issuePgAuthToken(client, "invite", inviteTtlMs, {
+        userId: user.id,
+        email: request.email,
+        createdBy: login,
+      });
+      await client.query("COMMIT");
+      return {
+        request,
+        invite: { email: request.email, displayName: request.displayName, token },
+      };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Preserve the original failure.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async requestEmailLogin(email: string): Promise<EmailLoginRequestResult> {
+    const result = await this.pool.query<UserRow>(
+      `SELECT id, display_name AS "displayName", email, role, status,
+              created_at AS "createdAt", updated_at AS "updatedAt",
+              last_login_at AS "lastLoginAt"
+       FROM users
+       WHERE email_normalized = $1 AND status = 'active'
+       LIMIT 1`,
+      [normalizeAccessRequestEmail(email)],
+    );
+    const user = result.rows[0] ? appUserFromRow(result.rows[0]) : undefined;
+    if (!user || !user.email) return { status: "received" };
+    const token = await this.issuePgAuthToken(this.pool, "login", loginTtlMs, {
+      userId: user.id,
+      email: user.email,
+    });
+    return {
+      status: "received",
+      login: { email: user.email, displayName: user.displayName, token },
+    };
+  }
+
+  async consumeEmailLoginToken(token: string): Promise<AuthUser | undefined> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const tokenResult = await client.query<{ user_id: string }>(
+        `UPDATE auth_tokens
+         SET consumed_at = now()
+         WHERE token_hash = $1
+           AND kind = ANY($2::text[])
+           AND consumed_at IS NULL
+           AND expires_at > now()
+         RETURNING user_id`,
+        [hashAuthToken(token), ["invite", "login"]],
+      );
+      const userId = tokenResult.rows[0]?.user_id;
+      if (!userId) {
+        await client.query("ROLLBACK");
+        return undefined;
+      }
+      const userResult = await client.query<UserRow>(
+        `UPDATE users
+         SET last_login_at = now(), updated_at = now()
+         WHERE id = $1 AND status = 'active'
+         RETURNING id, display_name AS "displayName", email, role, status,
+                   created_at AS "createdAt", updated_at AS "updatedAt",
+                   last_login_at AS "lastLoginAt"`,
+        [userId],
+      );
+      const user = userResult.rows[0] ? appUserFromRow(userResult.rows[0]) : undefined;
+      if (!user) {
+        await client.query("ROLLBACK");
+        return undefined;
+      }
+      await client.query("COMMIT");
+      return authUserFromAppUser(user);
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Preserve the original failure.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listUsers(): Promise<UserPage> {
+    const result = await this.pool.query<UserRow>(
+      `SELECT id, display_name AS "displayName", email, role, status,
+              created_at AS "createdAt", updated_at AS "updatedAt",
+              last_login_at AS "lastLoginAt"
+       FROM users
+       ORDER BY created_at DESC, id DESC`,
+    );
+    const items = result.rows.map(appUserFromRow);
+    return { items, summary: summarizeUsers(items) };
+  }
+
+  async updateUser(id: string, input: UserUpdateInput, login: string): Promise<UserUpdateResult> {
+    const current = await this.rowForUserId(this.pool, id);
+    if (!current) throw Object.assign(new Error("Brukeren finnes ikke."), { status: 404 });
+    if (current.role === "owner" && input.status === "revoked") {
+      throw Object.assign(new Error("Eierkontoen kan ikke tilbakekalles her."), { status: 400 });
+    }
+    const result = await this.pool.query<UserRow>(
+      `UPDATE users
+       SET status = COALESCE($2, status), updated_at = now()
+       WHERE id = $1
+       RETURNING id, display_name AS "displayName", email, role, status,
+                 created_at AS "createdAt", updated_at AS "updatedAt",
+                 last_login_at AS "lastLoginAt"`,
+      [id, input.status ?? null],
+    );
+    const user = appUserFromRow(result.rows[0]!);
+    if (!input.resendInvite || !user.email || user.status !== "active") return { user };
+    const token = await this.issuePgAuthToken(this.pool, "invite", inviteTtlMs, {
+      userId: user.id,
+      email: user.email,
+      createdBy: login,
+    });
+    return {
+      user,
+      invite: { email: user.email, displayName: user.displayName, token },
+    };
+  }
+
+  async ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false> {
+    const authorized = authorizeGitHubProfileForStore(profile, allowedLogin);
+    if (!authorized) return false;
+    const subject = authorized.login.toLocaleLowerCase("nb");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const existing = await client.query<UserRow & { login: string }>(
+        `SELECT u.id, u.display_name AS "displayName", u.email, u.role, u.status,
+                u.created_at AS "createdAt", u.updated_at AS "updatedAt",
+                u.last_login_at AS "lastLoginAt", ui.provider_subject AS login
+         FROM user_identities ui
+         JOIN users u ON u.id = ui.user_id
+         WHERE ui.provider = 'github' AND ui.provider_subject = $1
+         FOR UPDATE`,
+        [subject],
+      );
+      let user = existing.rows[0] ? appUserFromRow(existing.rows[0]) : undefined;
+      if (!user) {
+        const inserted = await client.query<UserRow>(
+          `INSERT INTO users (id, display_name, role, status)
+           VALUES ($1,$2,'owner','active')
+           RETURNING id, display_name AS "displayName", email, role, status,
+                     created_at AS "createdAt", updated_at AS "updatedAt",
+                     last_login_at AS "lastLoginAt"`,
+          [randomUUID(), authorized.displayName],
+        );
+        user = appUserFromRow(inserted.rows[0]!);
+        await client.query(
+          `INSERT INTO user_identities (id, user_id, provider, provider_subject)
+           VALUES ($1,$2,'github',$3)
+           ON CONFLICT (provider, provider_subject) DO UPDATE SET
+             user_id = EXCLUDED.user_id,
+             updated_at = now()`,
+          [randomUUID(), user.id, subject],
+        );
+      } else {
+        const updated = await client.query<UserRow>(
+          `UPDATE users
+           SET display_name = $2, role = 'owner', status = 'active',
+               last_login_at = now(), updated_at = now()
+           WHERE id = $1
+           RETURNING id, display_name AS "displayName", email, role, status,
+                     created_at AS "createdAt", updated_at AS "updatedAt",
+                     last_login_at AS "lastLoginAt"`,
+          [user.id, authorized.displayName],
+        );
+        user = appUserFromRow(updated.rows[0]!);
+      }
+      await client.query("COMMIT");
+      return {
+        ...authUserFromAppUser(user),
+        login: authorized.login,
+        avatarUrl: authorized.avatarUrl,
+      };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Preserve the original failure.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 
   async seedDevelopmentData(): Promise<void> {
     for (const article of sampleArticles) {

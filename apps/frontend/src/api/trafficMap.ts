@@ -45,7 +45,7 @@ export async function fetchTrafficMap(
     signal: options.signal,
   });
   if (response.status === 401) {
-    window.location.href = "/auth/github";
+    window.location.href = "/logg-inn";
     throw new Error("Innlogging kreves");
   }
   if (!response.ok) {

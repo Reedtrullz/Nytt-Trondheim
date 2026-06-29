@@ -37,7 +37,7 @@ function sourceItemMeta(item: SourceItem): string {
     .join(" · ");
 }
 
-export function SituationPage() {
+export function SituationPage({ canManage = true }: { canManage?: boolean }) {
   const { id = "" } = useParams();
   const [workspace, setWorkspace] = useState<SituationWorkspace>();
   const [sourceItems, setSourceItems] = useState<SourceItem[]>([]);
@@ -391,16 +391,20 @@ export function SituationPage() {
           <strong>Sist oppdatert {formatSituationTimestamp(situation.updatedAt)}</strong>
           <small>Hendelsen startet {formatSituationTimestamp(situation.createdAt)}</small>
           <small>{situation.verificationStatus}</small>
-          <button onClick={() => void saveSituation()} disabled={savingSituation}>
-            {situation.saved ? "Fjern lagring" : "Lagre situasjon"}
-          </button>
-          {situation.status !== "resolved" && situation.status !== "dismissed" ? (
-            <button onClick={() => void resolveSituation()}>Marker avsluttet</button>
-          ) : null}
-          {situation.status !== "dismissed" ? (
-            <button className="dismiss" onClick={() => void dismissSituation()}>
-              Avvis feilkobling
-            </button>
+          {canManage ? (
+            <>
+              <button onClick={() => void saveSituation()} disabled={savingSituation}>
+                {situation.saved ? "Fjern lagring" : "Lagre situasjon"}
+              </button>
+              {situation.status !== "resolved" && situation.status !== "dismissed" ? (
+                <button onClick={() => void resolveSituation()}>Marker avsluttet</button>
+              ) : null}
+              {situation.status !== "dismissed" ? (
+                <button className="dismiss" onClick={() => void dismissSituation()}>
+                  Avvis feilkobling
+                </button>
+              ) : null}
+            </>
           ) : null}
           {situation.dismissalReason ? (
             <small>Begrunnelse: Feilkobling i automatisk gruppering</small>
@@ -411,9 +415,9 @@ export function SituationPage() {
       <div className="situation-layout">
         <SituationMap
           situation={situation}
-          onCreateFeature={createFeature}
-          onUpdateFeature={updateFeature}
-          onDeleteFeature={deleteFeature}
+          onCreateFeature={canManage ? createFeature : undefined}
+          onUpdateFeature={canManage ? updateFeature : undefined}
+          onDeleteFeature={canManage ? deleteFeature : undefined}
         />
         <aside className="intelligence">
           <section>
@@ -502,74 +506,76 @@ export function SituationPage() {
           </section>
         </aside>
       </div>
-      <section className="workspace-panel">
-        {actionError ? <p className="workspace-error">{actionError}</p> : null}
-        {actionMessage ? <p className="workspace-success">{actionMessage}</p> : null}
-        <div className="tasks">
-          <h2>Oppgaver</h2>
-          {workspace.tasks.map((task) => (
-            <TaskRow
-              key={task.id}
-              task={task}
-              onToggle={toggleTask}
-              onUpdate={updateTask}
-              onDelete={deleteTask}
-            />
-          ))}
-          <div className="inline-form">
-            <input
-              value={taskText}
-              onChange={(event) => setTaskText(event.target.value)}
-              placeholder="Ny oppgave"
-            />
-            <button onClick={() => void createTask()}>Legg til</button>
+      {canManage ? (
+        <section className="workspace-panel">
+          {actionError ? <p className="workspace-error">{actionError}</p> : null}
+          {actionMessage ? <p className="workspace-success">{actionMessage}</p> : null}
+          <div className="tasks">
+            <h2>Oppgaver</h2>
+            {workspace.tasks.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                onToggle={toggleTask}
+                onUpdate={updateTask}
+                onDelete={deleteTask}
+              />
+            ))}
+            <div className="inline-form">
+              <input
+                value={taskText}
+                onChange={(event) => setTaskText(event.target.value)}
+                placeholder="Ny oppgave"
+              />
+              <button onClick={() => void createTask()}>Legg til</button>
+            </div>
           </div>
-        </div>
-        <div className="notes">
-          <h2>Notater</h2>
-          {workspace.notes.map((note) => (
-            <NoteRow key={note.id} note={note} onUpdate={updateNote} onDelete={deleteNote} />
-          ))}
-          <textarea
-            value={noteText}
-            onChange={(event) => setNoteText(event.target.value)}
-            placeholder="Skriv privat notat..."
-          />
-          <button onClick={() => void addNote()}>Legg til notat</button>
-        </div>
-        <div className="attachments">
-          <h2>Vedlegg</h2>
-          {workspace.attachments.length ? (
-            workspace.attachments.map((attachment) => (
-              <div className="workspace-item" key={attachment.id}>
-                <a
-                  className="muted"
-                  href={`/api/situations/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachment.id)}`}
-                >
-                  {attachment.filename}
-                </a>
-                <button className="remove" onClick={() => void deleteAttachment(attachment.id)}>
-                  Slett
-                </button>
-              </div>
-            ))
-          ) : (
-            <p className="muted">Ingen vedlegg lastet opp</p>
-          )}
-          <label className="upload">
-            {uploading ? "Laster opp..." : "Legg til vedlegg"}
-            <input
-              type="file"
-              disabled={uploading}
-              onChange={(event) => void uploadAttachment(event.target.files?.[0])}
+          <div className="notes">
+            <h2>Notater</h2>
+            {workspace.notes.map((note) => (
+              <NoteRow key={note.id} note={note} onUpdate={updateNote} onDelete={deleteNote} />
+            ))}
+            <textarea
+              value={noteText}
+              onChange={(event) => setNoteText(event.target.value)}
+              placeholder="Skriv privat notat..."
             />
-          </label>
-          <button className="export" onClick={() => void exportWorkspace()}>
-            Eksporter arbeidsmappe <ArrowIcon />
-          </button>
-          <p className="private-note">Privat eksport med PDF, GeoJSON og kildedata.</p>
-        </div>
-      </section>
+            <button onClick={() => void addNote()}>Legg til notat</button>
+          </div>
+          <div className="attachments">
+            <h2>Vedlegg</h2>
+            {workspace.attachments.length ? (
+              workspace.attachments.map((attachment) => (
+                <div className="workspace-item" key={attachment.id}>
+                  <a
+                    className="muted"
+                    href={`/api/situations/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachment.id)}`}
+                  >
+                    {attachment.filename}
+                  </a>
+                  <button className="remove" onClick={() => void deleteAttachment(attachment.id)}>
+                    Slett
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="muted">Ingen vedlegg lastet opp</p>
+            )}
+            <label className="upload">
+              {uploading ? "Laster opp..." : "Legg til vedlegg"}
+              <input
+                type="file"
+                disabled={uploading}
+                onChange={(event) => void uploadAttachment(event.target.files?.[0])}
+              />
+            </label>
+            <button className="export" onClick={() => void exportWorkspace()}>
+              Eksporter arbeidsmappe <ArrowIcon />
+            </button>
+            <p className="private-note">Privat eksport med PDF, GeoJSON og kildedata.</p>
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }

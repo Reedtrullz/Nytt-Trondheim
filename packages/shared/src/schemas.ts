@@ -126,6 +126,65 @@ export const noteInputSchema = z.object({
   text: z.string().trim().min(1).max(5000),
 });
 
+export const accessRequestInputSchema = z
+  .object({
+    displayName: z.string().trim().min(2).max(120),
+    email: z.string().trim().email().max(254).toLowerCase(),
+    message: z.string().trim().max(1000).optional(),
+    website: z.string().trim().max(0).optional(),
+  })
+  .strict()
+  .transform((value) => ({
+    displayName: value.displayName,
+    email: value.email,
+    ...(value.message ? { message: value.message } : {}),
+  }));
+
+export type AccessRequestInputPayload = z.infer<typeof accessRequestInputSchema>;
+
+export const accessRequestQuerySchema = z.object({
+  status: z.enum(["unverified", "pending", "approved", "rejected"]).optional(),
+  cursor: z.string().trim().max(250).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export type AccessRequestQueryInput = z.infer<typeof accessRequestQuerySchema>;
+
+export const emailLoginRequestSchema = z
+  .object({
+    email: z.string().trim().email().max(254).toLowerCase(),
+    website: z.string().trim().max(0).optional(),
+  })
+  .strict()
+  .transform((value) => ({ email: value.email }));
+
+export type EmailLoginRequestPayload = z.infer<typeof emailLoginRequestSchema>;
+
+export const accessRequestDecisionSchema = z
+  .object({
+    status: z.enum(["approved", "rejected"]),
+    reviewerNote: z.string().trim().max(1000).optional(),
+  })
+  .strict()
+  .transform((value) => ({
+    status: value.status,
+    ...(value.reviewerNote ? { reviewerNote: value.reviewerNote } : {}),
+  }));
+
+export type AccessRequestDecisionPayload = z.infer<typeof accessRequestDecisionSchema>;
+
+export const userUpdateSchema = z
+  .object({
+    status: z.enum(["active", "revoked"]).optional(),
+    resendInvite: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => value.status !== undefined || value.resendInvite === true, {
+    message: "Status eller resendInvite må oppgis.",
+  });
+
+export type UserUpdatePayload = z.infer<typeof userUpdateSchema>;
+
 export const sourceIdSchema = z.enum([
   "nrk",
   "adressa",

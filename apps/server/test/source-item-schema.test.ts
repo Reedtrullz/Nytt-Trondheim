@@ -170,4 +170,37 @@ describe("source item schema", () => {
     expect(schema).not.toMatch(/coverage_bundles[\s\S]{0,120}source_items/);
     expect(schema).not.toContain("'coverage_bundles'");
   });
+
+  it("stores access requests outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS access_requests");
+    expect(schema).toContain("email_normalized text NOT NULL");
+    expect(schema).toContain("status text NOT NULL DEFAULT 'unverified'");
+    expect(schema).toContain("email_verified_at timestamptz");
+    expect(schema).toContain("access_requests_email_normalized_unique");
+    expect(schema).toContain("access_requests_status_requested_idx");
+    expect(schema).toContain("011_access_requests");
+    expect(schema).not.toMatch(/access_requests[\s\S]{0,120}source_items/);
+  });
+
+  it("stores restricted-beta auth users and tokens outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS users");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS user_identities");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS auth_tokens");
+    expect(schema).toContain("token_hash text NOT NULL UNIQUE");
+    expect(schema).toContain(
+      "kind text NOT NULL CHECK (kind IN ('access_verify', 'invite', 'login'))",
+    );
+    expect(schema).toContain("role text NOT NULL CHECK (role IN ('owner', 'viewer'))");
+    expect(schema).toContain("status text NOT NULL DEFAULT 'active' CHECK");
+    expect(schema).toContain("UNIQUE (provider, provider_subject)");
+    expect(schema).toContain("auth_tokens_kind_expires_idx");
+    expect(schema).toContain("012_restricted_beta_auth");
+    expect(schema).not.toMatch(/CREATE TABLE IF NOT EXISTS auth_tokens[\s\S]*raw_payload/);
+    expect(schema).not.toMatch(/auth_tokens[\s\S]{0,120}source_items/);
+    expect(schema).not.toMatch(/user_identities[\s\S]{0,120}source_items/);
+  });
 });

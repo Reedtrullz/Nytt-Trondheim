@@ -1,10 +1,17 @@
 import type {
+  AccessRequestDecisionInput,
+  AccessRequestInput,
+  AccessRequestPage,
+  AccessRequestQueryInput,
+  AccessRequestSubmissionResponse,
+  AppUser,
   Attachment,
   ArticlePage,
   ArticleTopic,
   BootstrapPayload,
   CoverageBundlePage,
   CoverageBundleQueryInput,
+  EmailLoginRequestInput,
   MapFeature,
   OperationsTimelineQuery,
   OperationsTimelineResponse,
@@ -22,6 +29,8 @@ import type {
   SourceItemFilters,
   SourceItemPage,
   SourceItemRelationship,
+  UserPage,
+  UserUpdateInput,
   WorkspaceNote,
   WorkspaceTask,
 } from "@nytt/shared";
@@ -61,7 +70,7 @@ async function csrfToken(): Promise<string> {
 
 function redirectToLogin() {
   if (typeof window !== "undefined") {
-    window.location.href = "/auth/github";
+    window.location.href = "/logg-inn";
   }
 }
 
@@ -97,11 +106,60 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
+async function publicJsonRequest<T>(url: string, init: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...init.headers,
+    },
+    ...init,
+  });
+  if (!response.ok) {
+    throw await apiErrorFromResponse(response);
+  }
+  return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+}
+
 function situationPath(id: string) {
   return `/api/situations/${encodeURIComponent(id)}`;
 }
 
 export const api = {
+  requestAccess: (input: AccessRequestInput & { website?: string }) =>
+    publicJsonRequest<AccessRequestSubmissionResponse>("/api/access-requests", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  requestEmailLogin: (input: EmailLoginRequestInput & { website?: string }) =>
+    publicJsonRequest<AccessRequestSubmissionResponse>("/auth/email/request", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  accessRequests: (query: AccessRequestQueryInput = { limit: 50 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<AccessRequestPage>(`/api/access-requests${search ? `?${search}` : ""}`);
+  },
+  decideAccessRequest: (id: string, input: AccessRequestDecisionInput) =>
+    request<AccessRequestPage["items"][number]>(`/api/access-requests/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  users: () => request<UserPage>("/api/users"),
+  updateUser: (id: string, input: UserUpdateInput) =>
+    request<AppUser>(`/api/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  session: () => request<SessionPayload>("/api/session"),
   bootstrap: () => request<BootstrapPayload>("/api/bootstrap"),
   articles: (
     query: {
@@ -308,5 +366,8 @@ export const api = {
     link.click();
     URL.revokeObjectURL(link.href);
   },
-  logout: () => request<void>("/auth/logout", { method: "POST" }),
+  logout: async () => {
+    await request<void>("/auth/logout", { method: "POST" });
+    csrfTokenPromise = undefined;
+  },
 };

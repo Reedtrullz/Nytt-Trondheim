@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildSituationExplanation, createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, type EmailMessage } from "../src/config.js";
 import { PgStore } from "../src/store.js";
 import { sampleSituation } from "@nytt/shared";
 import type {
@@ -76,6 +76,42 @@ async function testAppWithRateLimit(rateLimitEnabled: boolean) {
     rateLimitEnabled,
   });
   return { ...runtime, uploadDir };
+}
+
+async function testAppWithEmail(devAuthBypass = true) {
+  const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
+  const sentEmails: EmailMessage[] = [];
+  const runtime = await createApp({
+    port: 0,
+    nodeEnv: "development",
+    publicOrigin: "http://localhost",
+    seedDemo: true,
+    devAuthBypass,
+    githubClientId: devAuthBypass ? undefined : "test-client",
+    githubClientSecret: devAuthBypass ? undefined : "test-secret",
+    githubAllowedLogin: "Reedtrullz",
+    sessionSecret: "test-only-secret",
+    uploadDir,
+    runtimeStatusDir: uploadDir,
+    rateLimitEnabled: true,
+    emailSender: {
+      async send(message) {
+        sentEmails.push(message);
+      },
+    },
+  });
+  return { ...runtime, uploadDir, sentEmails };
+}
+
+function tokenFromEmail(
+  message: EmailMessage,
+  route: "/auth/access/verify" | "/auth/email/callback",
+) {
+  const match = message.text.match(
+    new RegExp(`http://localhost${route.replace("/", "\\/")}\\?token=([^\\s]+)`),
+  );
+  if (!match?.[1]) throw new Error(`Missing ${route} token in email: ${message.text}`);
+  return decodeURIComponent(match[1]);
 }
 
 function withEnvValue<T>(key: string, value: string | undefined, run: () => T): T {
@@ -168,6 +204,158 @@ describe("private situation API", () => {
     });
     await request(app).get("/api/bootstrap").expect(401);
     await request(app).get("/api/operations/coverage-bundles").expect(401);
+    await request(app).get("/api/access-requests").expect(401);
+    await request(app)
+      .post("/api/access-requests")
+      .send({
+        displayName: "Ine Test",
+        email: "ine@example.test",
+        message: "Vil følge Trondheim-beredskap uten GitHub.",
+      })
+      .expect(202)
+      .expect({ status: "received" });
+  });
+
+  it("stores public access requests as unverified until email confirmation", async () => {
+    const { app, store, sentEmails } = await testAppWithEmail();
+    await request(app)
+      .post("/api/access-requests")
+      .send({
+        displayName: "Første Navn",
+        email: "Person@Example.test",
+        message: "Første melding.",
+      })
+      .expect(202);
+    expect(sentEmails).toHaveLength(1);
+    await request(app)
+      .post("/api/access-requests")
+      .send({
+        displayName: "Oppdatert Navn",
+        email: "person@example.test",
+        message: "Oppdatert melding.",
+      })
+      .expect(202);
+    expect(sentEmails).toHaveLength(2);
+    await request(app)
+      .post("/api/access-requests")
+      .send({
+        displayName: "Spam",
+        email: "spam@example.test",
+        website: "https://bot.example",
+      })
+      .expect(400);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    await agent
+      .get("/api/access-requests")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.summary).toMatchObject({ total: 1, unverified: 1, pending: 0 });
+        expect(response.body.items).toHaveLength(1);
+        expect(response.body.items[0]).toMatchObject({
+          displayName: "Oppdatert Navn",
+          email: "person@example.test",
+          message: "Oppdatert melding.",
+          status: "unverified",
+        });
+        expect(response.body.items[0].emailVerifiedAt).toBeUndefined();
+      });
+    const unverified = await store.listAccessRequests({ status: "unverified", limit: 10 }, "owner");
+    await expect(
+      store.decideAccessRequest(unverified.items[0]!.id, { status: "approved" }, "owner"),
+    ).rejects.toThrow(/E-post må verifiseres/);
+  });
+
+  it("verifies access requests, lets the owner approve, and logs in approved viewers by email", async () => {
+    const { app, store, sentEmails } = await testAppWithEmail(false);
+
+    await request(app)
+      .post("/api/access-requests")
+      .send({
+        displayName: "Ine Viewer",
+        email: "viewer@example.test",
+        message: "Vil lese Trondheim-nyheter.",
+      })
+      .expect(202)
+      .expect({ status: "received" });
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0]!.subject).toContain("Bekreft");
+    const verifyToken = tokenFromEmail(sentEmails[0]!, "/auth/access/verify");
+
+    await request(app)
+      .get(`/auth/access/verify?token=${encodeURIComponent(verifyToken)}`)
+      .expect(302)
+      .expect("Location", "/logg-inn?access=verified");
+    await request(app)
+      .get(`/auth/access/verify?token=${encodeURIComponent(verifyToken)}`)
+      .expect(302)
+      .expect("Location", "/logg-inn?access=invalid");
+
+    const pending = await store.listAccessRequests({ status: "pending", limit: 10 }, "owner");
+    expect(pending.items).toHaveLength(1);
+    const decision = await store.decideAccessRequest(
+      pending.items[0]!.id,
+      { status: "approved" },
+      "owner",
+    );
+    expect(decision.request.status).toBe("approved");
+    expect(decision.invite).toBeDefined();
+
+    const viewerAgent = request.agent(app);
+    await viewerAgent
+      .get(`/auth/email/callback?token=${encodeURIComponent(decision.invite!.token)}`)
+      .expect(302)
+      .expect("Location", "/");
+    const session = await viewerAgent.get("/api/session").expect(200);
+    expect(session.body.user).toMatchObject({
+      email: "viewer@example.test",
+      role: "viewer",
+      status: "active",
+    });
+    await viewerAgent.get("/api/bootstrap").expect(200);
+    await viewerAgent.get("/api/situations/skogbrann-bymarka").expect(200);
+    await viewerAgent.get("/api/operations/status").expect(403);
+    await viewerAgent.get("/api/saved/articles").expect(403);
+    await viewerAgent.get("/api/source-items?limit=1").expect(403);
+    await viewerAgent
+      .post("/api/situations/skogbrann-bymarka/exports")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .expect(403);
+  });
+
+  it("sends generic email-login responses and refuses revoked viewers", async () => {
+    const { app, store, sentEmails } = await testAppWithEmail(false);
+    const requestResult = await store.createAccessRequest({
+      displayName: "Revoked Viewer",
+      email: "revoked@example.test",
+    });
+    await store.verifyAccessRequestToken(requestResult.verification!.token);
+    const pending = await store.listAccessRequests({ status: "pending", limit: 10 }, "owner");
+    const approved = await store.decideAccessRequest(
+      pending.items[0]!.id,
+      { status: "approved" },
+      "owner",
+    );
+    const login = await store.consumeEmailLoginToken(approved.invite!.token);
+    expect(login).toMatchObject({ role: "viewer", status: "active" });
+
+    const users = await store.listUsers("owner");
+    const viewer = users.items.find((user) => user.email === "revoked@example.test");
+    expect(viewer).toBeDefined();
+    await store.updateUser(viewer!.id, { status: "revoked" }, "owner");
+
+    await request(app)
+      .post("/auth/email/request")
+      .send({ email: "revoked@example.test" })
+      .expect(202)
+      .expect({ status: "received" });
+    await request(app)
+      .post("/auth/email/request")
+      .send({ email: "unknown@example.test" })
+      .expect(202)
+      .expect({ status: "received" });
+    expect(sentEmails).toHaveLength(0);
   });
 
   it("includes a provenance explanation for situation workspaces", async () => {

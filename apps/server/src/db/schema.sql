@@ -1078,6 +1078,96 @@ CREATE INDEX IF NOT EXISTS collector_runs_source_started_idx
 CREATE INDEX IF NOT EXISTS collector_runs_started_idx
   ON collector_runs (started_at DESC);
 
+CREATE TABLE IF NOT EXISTS access_requests (
+  id text PRIMARY KEY,
+  email text NOT NULL,
+  email_normalized text NOT NULL,
+  display_name text NOT NULL,
+  message text,
+  status text NOT NULL DEFAULT 'unverified' CHECK (status IN ('unverified', 'pending', 'approved', 'rejected')),
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  email_verified_at timestamptz,
+  reviewed_at timestamptz,
+  reviewed_by text,
+  reviewer_note text,
+  CHECK (length(trim(email)) > 3),
+  CHECK (length(trim(email_normalized)) > 3),
+  CHECK (length(trim(display_name)) >= 2)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS access_requests_email_normalized_unique
+  ON access_requests (email_normalized);
+CREATE INDEX IF NOT EXISTS access_requests_status_requested_idx
+  ON access_requests (status, requested_at DESC);
+CREATE INDEX IF NOT EXISTS access_requests_requested_idx
+  ON access_requests (requested_at DESC);
+
+ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+ALTER TABLE access_requests ALTER COLUMN status SET DEFAULT 'unverified';
+DO $$
+BEGIN
+  ALTER TABLE access_requests DROP CONSTRAINT IF EXISTS access_requests_status_check;
+  ALTER TABLE access_requests
+    ADD CONSTRAINT access_requests_status_check
+    CHECK (status IN ('unverified', 'pending', 'approved', 'rejected'));
+END $$;
+
+CREATE TABLE IF NOT EXISTS users (
+  id text PRIMARY KEY,
+  email text,
+  email_normalized text,
+  display_name text NOT NULL,
+  role text NOT NULL CHECK (role IN ('owner', 'viewer')),
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  last_login_at timestamptz,
+  CHECK (role = 'owner' OR length(trim(coalesce(email_normalized, ''))) > 3),
+  CHECK (length(trim(display_name)) >= 2)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_normalized_unique
+  ON users (email_normalized)
+  WHERE email_normalized IS NOT NULL;
+CREATE INDEX IF NOT EXISTS users_role_status_idx
+  ON users (role, status);
+
+CREATE TABLE IF NOT EXISTS user_identities (
+  id text PRIMARY KEY,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider text NOT NULL CHECK (provider IN ('github', 'email')),
+  provider_subject text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (provider, provider_subject),
+  UNIQUE (user_id, provider)
+);
+CREATE INDEX IF NOT EXISTS user_identities_user_idx
+  ON user_identities (user_id);
+
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  id text PRIMARY KEY,
+  token_hash text NOT NULL UNIQUE,
+  kind text NOT NULL CHECK (kind IN ('access_verify', 'invite', 'login')),
+  access_request_id text REFERENCES access_requests(id) ON DELETE CASCADE,
+  user_id text REFERENCES users(id) ON DELETE CASCADE,
+  email text,
+  email_normalized text,
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text,
+  CHECK (
+    (kind = 'access_verify' AND access_request_id IS NOT NULL) OR
+    (kind IN ('invite', 'login') AND user_id IS NOT NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS auth_tokens_kind_expires_idx
+  ON auth_tokens (kind, expires_at DESC);
+CREATE INDEX IF NOT EXISTS auth_tokens_access_request_idx
+  ON auth_tokens (access_request_id);
+CREATE INDEX IF NOT EXISTS auth_tokens_user_idx
+  ON auth_tokens (user_id);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "sid" varchar NOT NULL PRIMARY KEY,
   "sess" json NOT NULL,
@@ -1095,3 +1185,5 @@ INSERT INTO schema_migrations (version) VALUES ('007_entur_public_transport') ON
 INSERT INTO schema_migrations (version) VALUES ('008_worker_cycle_metrics') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('009_collector_runs') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('010_coverage_bundles') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('011_access_requests') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('012_restricted_beta_auth') ON CONFLICT DO NOTHING;

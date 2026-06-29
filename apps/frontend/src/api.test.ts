@@ -146,6 +146,124 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("submits public access requests without an authenticated CSRF lookup", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "received" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.requestAccess({
+      displayName: "Ine Test",
+      email: "ine@example.test",
+      message: "Trenger tilgang uten GitHub.",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/access-requests",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({
+          displayName: "Ine Test",
+          email: "ine@example.test",
+          message: "Trenger tilgang uten GitHub.",
+        }),
+      }),
+    );
+  });
+
+  it("requests owner access request pages with filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        items: [],
+        summary: { total: 0, unverified: 0, pending: 0, approved: 0, rejected: 0 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.accessRequests({ status: "pending", cursor: "cursor:one", limit: 25 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/access-requests?status=pending&cursor=cursor%3Aone&limit=25",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests email login links without authenticated CSRF lookup", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "received" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.requestEmailLogin({ email: "ine@example.test" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/email/request",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ email: "ine@example.test" }),
+      }),
+    );
+  });
+
+  it("submits owner access decisions with CSRF protection", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(
+        okResponse({
+          id: "request-one",
+          status: "approved",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.decideAccessRequest("request one", { status: "approved" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/access-requests/request%20one",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify({ status: "approved" }),
+      }),
+    );
+  });
+
+  it("updates users through owner API helpers", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(okResponse({ id: "viewer-one", status: "revoked" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.updateUser("viewer one", { status: "revoked" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/users/viewer%20one",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify({ status: "revoked" }),
+      }),
+    );
+  });
+
   it("encodes reserved characters in situation source item paths", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse([]));
     vi.stubGlobal("fetch", fetchMock);

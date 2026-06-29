@@ -973,7 +973,94 @@ export interface OperationsStatus {
   restoreCheck?: RuntimeFreshness;
 }
 
+export type UserRole = "owner" | "viewer";
+export type UserStatus = "active" | "revoked";
+
+export interface SessionUser {
+  id: string;
+  login: string;
+  displayName: string;
+  role: UserRole;
+  status: UserStatus;
+  email?: string;
+  avatarUrl?: string;
+}
+
 export interface SessionPayload {
-  user: { login: string; displayName: string; avatarUrl?: string };
+  user: SessionUser;
   csrfToken: string;
+}
+
+export type AccessRequestStatus = "unverified" | "pending" | "approved" | "rejected";
+
+export interface AccessRequestInput {
+  displayName: string;
+  email: string;
+  message?: string;
+}
+
+export interface AccessRequest {
+  id: string;
+  displayName: string;
+  email: string;
+  message?: string;
+  status: AccessRequestStatus;
+  requestedAt: string;
+  updatedAt: string;
+  emailVerifiedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewerNote?: string;
+}
+
+export interface AccessRequestSubmissionResponse {
+  status: "received";
+}
+
+export interface AccessRequestPage {
+  items: AccessRequest[];
+  summary: {
+    total: number;
+    unverified: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
+  nextCursor?: string;
+}
+
+export interface EmailLoginRequestInput {
+  email: string;
+}
+
+export interface AccessRequestDecisionInput {
+  status: "approved" | "rejected";
+  reviewerNote?: string;
+}
+
+export interface AppUser {
+  id: string;
+  displayName: string;
+  role: UserRole;
+  status: UserStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+  email?: string;
+}
+
+export interface UserPage {
+  items: AppUser[];
+  summary: {
+    total: number;
+    owner: number;
+    viewer: number;
+    active: number;
+    revoked: number;
+  };
+}
+
+export interface UserUpdateInput {
+  status?: UserStatus;
+  resendInvite?: boolean;
 }

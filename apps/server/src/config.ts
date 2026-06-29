@@ -14,6 +14,27 @@ export interface AppConfig {
   uploadDir: string;
   runtimeStatusDir: string;
   rateLimitEnabled: boolean;
+  smtp?: SmtpConfig;
+  emailSender?: EmailSender;
+}
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  from: string;
+  user?: string;
+  password?: string;
+}
+
+export interface EmailMessage {
+  to: string;
+  subject: string;
+  text: string;
+}
+
+export interface EmailSender {
+  send(message: EmailMessage): Promise<void>;
 }
 
 function sessionSecretForEnvironment(nodeEnv: string): string {
@@ -24,6 +45,34 @@ function sessionSecretForEnvironment(nodeEnv: string): string {
     throw new Error("SESSION_SECRET must be at least 32 characters in production");
   }
   return configured;
+}
+
+function smtpConfigForEnvironment(nodeEnv: string): SmtpConfig | undefined {
+  const host = process.env.SMTP_HOST?.trim();
+  const from = process.env.SMTP_FROM?.trim();
+  const port = Number(process.env.SMTP_PORT ?? (process.env.SMTP_SECURE === "false" ? 587 : 465));
+  const user = process.env.SMTP_USER?.trim();
+  const password = process.env.SMTP_PASSWORD;
+  const secure = process.env.SMTP_SECURE ? process.env.SMTP_SECURE !== "false" : port === 465;
+
+  if (!host && !from && nodeEnv !== "production") return undefined;
+  if (!host || !from) {
+    throw new Error("SMTP_HOST and SMTP_FROM are required in production.");
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("SMTP_PORT must be a valid TCP port.");
+  }
+  if ((user && !password) || (!user && password)) {
+    throw new Error("SMTP_USER and SMTP_PASSWORD must be configured together.");
+  }
+  return {
+    host,
+    port,
+    secure,
+    from,
+    ...(user ? { user } : {}),
+    ...(password ? { password } : {}),
+  };
 }
 
 export function loadConfig(): AppConfig {
@@ -49,5 +98,6 @@ export function loadConfig(): AppConfig {
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
+    smtp: smtpConfigForEnvironment(nodeEnv),
   };
 }

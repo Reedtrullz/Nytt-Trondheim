@@ -9,9 +9,17 @@ import type pg from "pg";
 import type { AppConfig } from "./config.js";
 
 export interface AuthUser {
+  id: string;
   login: string;
   displayName: string;
+  role: "owner" | "viewer";
+  status: "active" | "revoked";
+  email?: string;
   avatarUrl?: string;
+}
+
+export interface AuthAccountStore {
+  ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false>;
 }
 
 export function authorizeGitHubProfile(
@@ -20,8 +28,11 @@ export function authorizeGitHubProfile(
 ): AuthUser | false {
   if (profile.username?.toLocaleLowerCase() !== allowedLogin.toLocaleLowerCase()) return false;
   return {
+    id: `github:${profile.username.toLocaleLowerCase()}`,
     login: profile.username,
     displayName: profile.displayName || profile.username,
+    role: "owner",
+    status: "active",
     avatarUrl: profile.photos?.[0]?.value,
   };
 }
@@ -31,8 +42,12 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface User {
+      id: string;
       login: string;
       displayName: string;
+      role: "owner" | "viewer";
+      status: "active" | "revoked";
+      email?: string;
       avatarUrl?: string;
     }
   }
@@ -44,7 +59,12 @@ declare module "express-session" {
   }
 }
 
-export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): void {
+export function configureAuth(
+  app: Express,
+  config: AppConfig,
+  accountStore: AuthAccountStore,
+  pool?: pg.Pool,
+): void {
   const PgSessionStore = connectPgSimple(session);
   app.use(
     session({
@@ -65,7 +85,13 @@ export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): 
 
   if (config.devAuthBypass) {
     app.use((req, _res, next) => {
-      req.user = { login: config.githubAllowedLogin, displayName: "Utviklingsbruker" };
+      req.user = {
+        id: "dev-owner",
+        login: config.githubAllowedLogin,
+        displayName: "Utviklingsbruker",
+        role: "owner",
+        status: "active",
+      };
       next();
     });
     return;
@@ -92,7 +118,10 @@ export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): 
         profile: Profile,
         done: (error: Error | null, user?: AuthUser | false) => void,
       ) => {
-        done(null, authorizeGitHubProfile(profile, config.githubAllowedLogin));
+        accountStore
+          .ensureGitHubOwner(profile, config.githubAllowedLogin)
+          .then((user) => done(null, user))
+          .catch((error: Error) => done(error));
       },
     ),
   );
@@ -102,7 +131,7 @@ export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): 
   app.get("/auth/github", passport.authenticate("github"));
   app.get(
     "/auth/github/callback",
-    passport.authenticate("github", { failureRedirect: "/?auth=denied" }),
+    passport.authenticate("github", { failureRedirect: "/logg-inn?auth=denied" }),
     (_req, res) => res.redirect("/"),
   );
   app.post("/auth/logout", requireUser, requireCsrf(config), (req, res, next) => {
@@ -114,11 +143,25 @@ export function configureAuth(app: Express, config: AppConfig, pool?: pg.Pool): 
 }
 
 export function requireUser(req: Request, res: Response, next: NextFunction): void {
-  if (req.user) {
+  if (req.user?.status === "active") {
     next();
     return;
   }
-  res.status(401).json({ error: "Innlogging kreves.", loginUrl: "/auth/github" });
+  if (req.user?.status === "revoked") {
+    res.status(403).json({ error: "Tilgangen er tilbakekalt." });
+    return;
+  }
+  res.status(401).json({ error: "Innlogging kreves.", loginUrl: "/logg-inn" });
+}
+
+export function requireOwner(req: Request, res: Response, next: NextFunction): void {
+  requireUser(req, res, () => {
+    if (req.user?.role === "owner") {
+      next();
+      return;
+    }
+    res.status(403).json({ error: "Dette krever eiertilgang." });
+  });
 }
 
 export function csrfToken(req: Request): string {

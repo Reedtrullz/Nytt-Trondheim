@@ -155,10 +155,12 @@ function LeadStory({
   group,
   saving,
   onSave,
+  canSave,
 }: {
   group: HomeArticleGroup;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
+  canSave: boolean;
 }) {
   const article = group.primary;
   const articleUrl = safeExternalUrl(article.url);
@@ -169,7 +171,7 @@ function LeadStory({
         <div className="metadata">
           {article.sourceLabel} · {formatTime(article.publishedAt)}
         </div>
-        <SaveButton article={article} saving={saving} onUpdate={onSave} />
+        {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
         <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
         <SourceCluster group={group} />
@@ -192,10 +194,12 @@ function NewsRow({
   group,
   saving,
   onSave,
+  canSave,
 }: {
   group: HomeArticleGroup;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
+  canSave: boolean;
 }) {
   const article = group.primary;
   const articleUrl = safeExternalUrl(article.url);
@@ -218,7 +222,7 @@ function NewsRow({
       <span className={`topic ${article.category.toLowerCase()}`}>
         {articleCategoryLabels[article.category]}
       </span>
-      <SaveButton article={article} saving={saving} onUpdate={onSave} />
+      {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
     </article>
   );
 }
@@ -394,7 +398,13 @@ interface SavedOverride {
 
 const savedOverrideTtlMs = 60_000;
 
-export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
+export function HomePage({
+  initialData,
+  canSave = true,
+}: {
+  initialData: BootstrapPayload;
+  canSave?: boolean;
+}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
   const { scope, category, topic, q: query } = filters;
@@ -615,6 +625,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
               group={leadGroup}
               saving={savingArticleIds.has(leadGroup.primary.id)}
               onSave={updateSaved}
+              canSave={canSave}
             />
           ) : null}
           {!loading && !leadGroup ? (
@@ -627,6 +638,7 @@ export function HomePage({ initialData }: { initialData: BootstrapPayload }) {
                 group={group}
                 saving={savingArticleIds.has(group.primary.id)}
                 onSave={updateSaved}
+                canSave={canSave}
               />
             ))}
           </div>

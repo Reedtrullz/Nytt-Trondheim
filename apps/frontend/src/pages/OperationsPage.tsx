@@ -103,6 +103,9 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
         <h1>Kilder og systemstatus</h1>
         <p>Sist innhenting {time(status.latestCollectionAt)}</p>
         <div className="operations-page-actions">
+          <a className="operations-audit-link" href="/drift/tilgang">
+            Åpne tilgangsforespørsler
+          </a>
           <a className="operations-audit-link" href="/drift/dekning">
             Åpne dekningsgrupper
           </a>

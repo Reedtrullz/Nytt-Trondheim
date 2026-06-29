@@ -21,6 +21,9 @@
         - NYTT_SESSION_SECRET
         - NYTT_GITHUB_CLIENT_ID
         - NYTT_GITHUB_CLIENT_SECRET
+        - NYTT_SMTP_HOST
+        - NYTT_SMTP_FROM
+        - NYTT_SMTP_API_KEY
         - NYTT_DEEPSEEK_API_KEY
         - NYTT_DATEX_USERNAME
         - NYTT_DATEX_PASSWORD
@@ -109,6 +112,12 @@
           GITHUB_CLIENT_ID={{ lookup('env', 'NYTT_GITHUB_CLIENT_ID') }}
           GITHUB_CLIENT_SECRET={{ lookup('env', 'NYTT_GITHUB_CLIENT_SECRET') }}
           GITHUB_ALLOWED_LOGIN=Reedtrullz
+          SMTP_HOST={{ lookup('env', 'NYTT_SMTP_HOST') }}
+          SMTP_PORT={{ lookup('env', 'NYTT_SMTP_PORT') | default('465', true) }}
+          SMTP_SECURE={{ lookup('env', 'NYTT_SMTP_SECURE') | default('', true) }}
+          SMTP_FROM={{ lookup('env', 'NYTT_SMTP_FROM') }}
+          SMTP_USER={{ lookup('env', 'NYTT_SMTP_USER') | default('', true) }}
+          SMTP_PASSWORD={{ lookup('env', 'NYTT_SMTP_API_KEY') }}
           DEEPSEEK_API_KEY={{ lookup('env', 'NYTT_DEEPSEEK_API_KEY') }}
           DEEPSEEK_MODEL=deepseek-v4-flash
           POLITILOGGEN_ENABLED={{ lookup('env', 'NYTT_POLITILOGGEN_ENABLED') | default('true', true) }}

@@ -8,8 +8,12 @@ import multer from "multer";
 import pg from "pg";
 import { ZodError } from "zod";
 import {
+  accessRequestInputSchema,
+  accessRequestDecisionSchema,
+  accessRequestQuerySchema,
   articleQuerySchema,
   coverageBundleQuerySchema,
+  emailLoginRequestSchema,
   lifecycleInputSchema,
   noteInputSchema,
   operationsTimelineQuerySchema,
@@ -25,6 +29,7 @@ import {
   taskInputSchema,
   trafficMapQuerySchema,
   travelPlanQuerySchema,
+  userUpdateSchema,
   workspaceMapQuerySchema,
   type MapFeature,
   type MapFirstSituation,
@@ -48,7 +53,15 @@ import {
   type TrafficMapSourceStatus,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
-import { configureAuth, csrfToken, currentLogin, requireCsrf, requireUser } from "./auth.js";
+import {
+  configureAuth,
+  csrfToken,
+  currentLogin,
+  requireCsrf,
+  requireOwner,
+  requireUser,
+} from "./auth.js";
+import { createEmailSender } from "./email.js";
 import { buildWorkspaceExport, safeFilename } from "./export.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
 import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
@@ -285,6 +298,44 @@ function attachmentSizeBytes(size: unknown): number {
   const bytes =
     typeof size === "number" ? size : typeof size === "string" ? Number(size) : Number.NaN;
   return Number.isFinite(bytes) && bytes >= 0 ? bytes : Number.POSITIVE_INFINITY;
+}
+
+function requirePublicSameOrigin(config: AppConfig): express.RequestHandler {
+  return (req, res, next) => {
+    const origin = req.get("origin");
+    if (origin && origin !== config.publicOrigin) {
+      res.status(403).json({ error: "Ugyldig forespørselsopprinnelse." });
+      return;
+    }
+    next();
+  };
+}
+
+function appUrl(config: AppConfig, path: string): string {
+  return new URL(path, config.publicOrigin).toString();
+}
+
+function accessVerificationEmail(config: AppConfig, input: { displayName: string; token: string }) {
+  const url = appUrl(config, `/auth/access/verify?token=${encodeURIComponent(input.token)}`);
+  return {
+    subject: "Bekreft tilgangsforespørsel til Nytt Trondheim",
+    text: `Hei ${input.displayName}.\n\nBekreft e-postadressen din for Nytt Trondheim:\n${url}\n\nHvis du ikke ba om tilgang, kan du ignorere denne meldingen.`,
+  };
+}
+
+function emailLoginMessage(
+  config: AppConfig,
+  input: { displayName: string; token: string; invite?: boolean },
+) {
+  const url = appUrl(config, `/auth/email/callback?token=${encodeURIComponent(input.token)}`);
+  return {
+    subject: input.invite ? "Du har fått tilgang til Nytt Trondheim" : "Logg inn på Nytt Trondheim",
+    text: `Hei ${input.displayName}.\n\n${
+      input.invite
+        ? "Du har fått lesetilgang til Nytt Trondheim."
+        : "Bruk lenken under for å logge inn."
+    }\n\n${url}\n\nLenken kan bare brukes én gang.`,
+  };
 }
 
 interface RateLimitRule {
@@ -616,6 +667,22 @@ function isPrivateAnnotationFeature(feature: MapFeature): feature is PrivateAnno
   return feature.properties.provenance === "private_annotation";
 }
 
+function viewerSafeWorkspace(workspace: SituationWorkspace): SituationWorkspace {
+  return {
+    ...workspace,
+    situation: {
+      ...workspace.situation,
+      features: workspace.situation.features.filter(
+        (feature) => !isPrivateAnnotationFeature(feature),
+      ),
+      saved: false,
+    },
+    tasks: [],
+    notes: [],
+    attachments: [],
+  };
+}
+
 function sourceIdsForSituation(situation: Situation, sourceItems: SourceItem[]): Set<SourceId> {
   return new Set<SourceId>([
     ...situation.evidence.map((evidence) => evidence.source),
@@ -735,6 +802,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   if (config.rateLimitEnabled) {
     app.use(createRateLimiter());
   }
+  const emailSender = config.emailSender ?? createEmailSender(config);
   app.use(
     helmet({
       contentSecurityPolicy:
@@ -763,7 +831,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }),
   );
   app.use(express.json({ limit: "1mb" }));
-  configureAuth(app, config, pool);
+  configureAuth(app, config, store, pool);
 
   app.get("/health", async (_req, res) => {
     try {
@@ -774,11 +842,122 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.get("/auth/access/verify", async (req, res, next) => {
+    try {
+      const token = typeof req.query.token === "string" ? req.query.token : "";
+      const result = token ? await store.verifyAccessRequestToken(token) : "invalid";
+      res.redirect(
+        result === "verified" ? "/logg-inn?access=verified" : "/logg-inn?access=invalid",
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/auth/email/request", requirePublicSameOrigin(config), async (req, res, next) => {
+    try {
+      const input = emailLoginRequestSchema.parse(req.body);
+      const result = await store.requestEmailLogin(input.email);
+      if (result.login) {
+        const message = emailLoginMessage(config, result.login);
+        await emailSender.send({ to: result.login.email, ...message });
+      }
+      res.status(202).json({ status: "received" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/auth/email/callback", async (req, res, next) => {
+    try {
+      const token = typeof req.query.token === "string" ? req.query.token : "";
+      const user = token ? await store.consumeEmailLoginToken(token) : undefined;
+      if (!user) {
+        res.redirect("/logg-inn?email=invalid");
+        return;
+      }
+      req.login(user, (error) => {
+        if (error) return next(error);
+        res.redirect("/");
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/access-requests", requirePublicSameOrigin(config), async (req, res, next) => {
+    try {
+      const input = accessRequestInputSchema.parse(req.body);
+      const result = await store.createAccessRequest(input);
+      if (result.verification) {
+        const message = accessVerificationEmail(config, result.verification);
+        await emailSender.send({ to: result.verification.email, ...message });
+      }
+      res.status(202).json({ status: "received" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/session", requireUser, (req, res) =>
     res.json({ user: req.user, csrfToken: csrfToken(req) }),
   );
   app.use("/api", requireUser);
   app.use("/api", requireCsrf(config));
+
+  app.use("/api/operations", requireOwner);
+  app.use("/api/saved", requireOwner);
+  app.use("/api/source-items", requireOwner);
+  app.use("/api/users", requireOwner);
+
+  app.get("/api/access-requests", requireOwner, async (req, res, next) => {
+    try {
+      const query = accessRequestQuerySchema.parse(req.query);
+      res.json(await store.listAccessRequests(query, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/access-requests/:id", requireOwner, async (req, res, next) => {
+    try {
+      const input = accessRequestDecisionSchema.parse(req.body);
+      const result = await store.decideAccessRequest(
+        String(req.params.id),
+        input,
+        currentLogin(req),
+      );
+      if (result.invite) {
+        const message = emailLoginMessage(config, { ...result.invite, invite: true });
+        await emailSender.send({ to: result.invite.email, ...message });
+      }
+      res.json(result.request);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/users", requireOwner, async (req, res, next) => {
+    try {
+      res.json(await store.listUsers(currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/users/:id", requireOwner, async (req, res, next) => {
+    try {
+      const input = userUpdateSchema.parse(req.body);
+      const result = await store.updateUser(String(req.params.id), input, currentLogin(req));
+      if (result.invite) {
+        const message = emailLoginMessage(config, { ...result.invite, invite: true });
+        await emailSender.send({ to: result.invite.email, ...message });
+      }
+      res.json(result.user);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.get("/api/bootstrap", async (req, res, next) => {
     try {
@@ -1047,8 +1226,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/situations/workspace-map", async (req, res, next) => {
     try {
       const query = workspaceMapQuerySchema.parse(req.query);
+      const effectiveQuery =
+        req.user?.role === "owner"
+          ? query
+          : {
+              ...query,
+              includePrivateAnnotations: false,
+              layers: query.layers?.filter((layer) => layer !== "private_annotations"),
+            };
       const login = currentLogin(req);
-      const includeDismissed = query.statuses?.includes("dismissed") ?? false;
+      const includeDismissed = effectiveQuery.statuses?.includes("dismissed") ?? false;
       const situations = await store.listSituations({ includeDismissed, limit: 100 }, login);
       const workspaceRows = await Promise.all(
         situations.items.map(async (situation) => {
@@ -1066,50 +1253,56 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       );
       const mappedSituations = entries
         .map(({ workspace, sourceItems }) =>
-          mapFirstSituationFromWorkspace(workspace.situation, sourceItems, query),
+          mapFirstSituationFromWorkspace(
+            req.user?.role === "owner"
+              ? workspace.situation
+              : viewerSafeWorkspace(workspace).situation,
+            sourceItems,
+            effectiveQuery,
+          ),
         )
         .filter((situation): situation is MapFirstSituation => Boolean(situation));
       const visibleIds = new Set(mappedSituations.map((situation) => situation.id));
       const timeline = entries
         .filter(({ workspace }) => visibleIds.has(workspace.situation.id))
         .flatMap(({ workspace }) => workspace.situation.timeline)
-        .filter((entry) => timelineEntryMatchesWorkspaceQuery(entry, query))
+        .filter((entry) => timelineEntryMatchesWorkspaceQuery(entry, effectiveQuery))
         .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
         .slice(0, 100);
       const privateAnnotations = mappedSituations.flatMap((situation) =>
-        query.includePrivateAnnotations === false
+        effectiveQuery.includePrivateAnnotations === false
           ? []
           : situation.features.filter(isPrivateAnnotationFeature),
       );
       const payload: SituationMapWorkspace = {
         situations: mappedSituations,
         mapState: {
-          ...(typeof query.north === "number" &&
-          typeof query.south === "number" &&
-          typeof query.east === "number" &&
-          typeof query.west === "number"
+          ...(typeof effectiveQuery.north === "number" &&
+          typeof effectiveQuery.south === "number" &&
+          typeof effectiveQuery.east === "number" &&
+          typeof effectiveQuery.west === "number"
             ? {
                 bounds: {
-                  north: query.north,
-                  south: query.south,
-                  east: query.east,
-                  west: query.west,
+                  north: effectiveQuery.north,
+                  south: effectiveQuery.south,
+                  east: effectiveQuery.east,
+                  west: effectiveQuery.west,
                 },
               }
             : {}),
-          layers: query.layers ?? [
+          layers: effectiveQuery.layers ?? [
             "situations",
             "evidence",
             "preparedness_context",
-            "private_annotations",
+            ...(req.user?.role === "owner" ? ["private_annotations" as const] : []),
           ],
           sourceFilters: {
-            providers: query.sources,
-            provenances: query.provenances,
-            confidenceLevels: query.confidenceLevels,
-            includeTelemetry: query.includeTelemetry,
-            includePrivateAnnotations: query.includePrivateAnnotations,
-            q: query.q,
+            providers: effectiveQuery.sources,
+            provenances: effectiveQuery.provenances,
+            confidenceLevels: effectiveQuery.confidenceLevels,
+            includeTelemetry: effectiveQuery.includeTelemetry,
+            includePrivateAnnotations: effectiveQuery.includePrivateAnnotations,
+            q: effectiveQuery.q,
           },
         },
         timeline,
@@ -1129,9 +1322,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         return;
       }
       const sourceItems = await store.listSituationSourceItems(req.params.id, currentLogin(req));
+      const visibleWorkspace =
+        req.user?.role === "owner" ? workspace : viewerSafeWorkspace(workspace);
       res.json({
-        ...workspace,
-        explanation: buildSituationExplanation(workspace.situation, sourceItems),
+        ...visibleWorkspace,
+        explanation: buildSituationExplanation(visibleWorkspace.situation, sourceItems),
       });
     } catch (error) {
       next(error);
@@ -1168,37 +1363,49 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.post("/api/situations/:id/source-items/:sourceItemId", async (req, res, next) => {
-    try {
-      const { relationship } = sourceItemLinkInputSchema.parse(req.body ?? {});
-      const linked = await store.linkSourceItem(
-        req.params.id,
-        req.params.sourceItemId,
-        relationship,
-        currentLogin(req),
-      );
-      if (!linked) {
-        res.status(404).json({ error: "Situasjon eller kildeelement finnes ikke." });
-        return;
+  app.post(
+    "/api/situations/:id/source-items/:sourceItemId",
+    requireOwner,
+    async (req, res, next) => {
+      try {
+        const { relationship } = sourceItemLinkInputSchema.parse(req.body ?? {});
+        const linked = await store.linkSourceItem(
+          String(req.params.id),
+          String(req.params.sourceItemId),
+          relationship,
+          currentLogin(req),
+        );
+        if (!linked) {
+          res.status(404).json({ error: "Situasjon eller kildeelement finnes ikke." });
+          return;
+        }
+        res.status(201).json(linked);
+      } catch (error) {
+        next(error);
       }
-      res.status(201).json(linked);
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
-  app.delete("/api/situations/:id/source-items/:sourceItemId", async (req, res, next) => {
-    try {
-      await store.unlinkSourceItem(req.params.id, req.params.sourceItemId, currentLogin(req));
-      res.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.delete(
+    "/api/situations/:id/source-items/:sourceItemId",
+    requireOwner,
+    async (req, res, next) => {
+      try {
+        await store.unlinkSourceItem(
+          String(req.params.id),
+          String(req.params.sourceItemId),
+          currentLogin(req),
+        );
+        res.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.get("/api/situations/:id/features", async (req, res, next) => {
+  app.get("/api/situations/:id/features", requireOwner, async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      const workspace = await store.getWorkspace(String(req.params.id), currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.json(workspace.situation.features);
     } catch (error) {
@@ -1206,9 +1413,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.put("/api/situations/:id/saved", async (req, res, next) => {
+  app.put("/api/situations/:id/saved", requireOwner, async (req, res, next) => {
     try {
-      const saved = await store.setSavedSituation(req.params.id, true, currentLogin(req));
+      const saved = await store.setSavedSituation(String(req.params.id), true, currentLogin(req));
       if (!saved) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.status(204).end();
     } catch (error) {
@@ -1216,9 +1423,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.delete("/api/situations/:id/saved", async (req, res, next) => {
+  app.delete("/api/situations/:id/saved", requireOwner, async (req, res, next) => {
     try {
-      const saved = await store.setSavedSituation(req.params.id, false, currentLogin(req));
+      const saved = await store.setSavedSituation(String(req.params.id), false, currentLogin(req));
       if (!saved) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.status(204).end();
     } catch (error) {
@@ -1226,10 +1433,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.patch("/api/situations/:id/status", async (req, res, next) => {
+  app.patch("/api/situations/:id/status", requireOwner, async (req, res, next) => {
     try {
       const { status, dismissalReason } = lifecycleInputSchema.parse(req.body);
-      const situation = await store.setSituationStatus(req.params.id, status, dismissalReason);
+      const situation = await store.setSituationStatus(
+        String(req.params.id),
+        status,
+        dismissalReason,
+      );
       if (!situation) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.json(situation);
     } catch (error) {
@@ -1263,41 +1474,47 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     return sourceItemIds.filter((sourceItemId) => !linkedIds.has(sourceItemId));
   }
 
-  app.post("/api/situations/:id/features", ensureSituationExists, async (req, res, next) => {
-    try {
-      const input = privateMapFeatureInputSchema.parse(req.body);
-      const login = currentLogin(req);
-      const situationId = String(req.params.id);
-      const sourceItemIds = input.properties.sourceItemIds ?? [];
-      const invalidIds = await unlinkedPrivateAnnotationSourceItemIds(
-        situationId,
-        login,
-        sourceItemIds,
-      );
-      if (invalidIds.length) {
-        return void res.status(400).json({
-          error:
-            "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
-        });
+  app.post(
+    "/api/situations/:id/features",
+    requireOwner,
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        const input = privateMapFeatureInputSchema.parse(req.body);
+        const login = currentLogin(req);
+        const situationId = String(req.params.id);
+        const sourceItemIds = input.properties.sourceItemIds ?? [];
+        const invalidIds = await unlinkedPrivateAnnotationSourceItemIds(
+          situationId,
+          login,
+          sourceItemIds,
+        );
+        if (invalidIds.length) {
+          return void res.status(400).json({
+            error:
+              "Kildeelementer må være koblet til situasjonen før de kan brukes som privat markering-grunnlag.",
+          });
+        }
+        const feature: MapFeature = {
+          id: randomUUID(),
+          type: "Feature",
+          geometry: input.geometry,
+          properties: {
+            ...input.properties,
+            provenance: "private_annotation",
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        res.status(201).json(await store.addPrivateFeature(situationId, feature));
+      } catch (error) {
+        next(error);
       }
-      const feature: MapFeature = {
-        id: randomUUID(),
-        type: "Feature",
-        geometry: input.geometry,
-        properties: {
-          ...input.properties,
-          provenance: "private_annotation",
-          updatedAt: new Date().toISOString(),
-        },
-      };
-      res.status(201).json(await store.addPrivateFeature(situationId, feature));
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
   app.patch(
     "/api/situations/:id/features/:featureId",
+    requireOwner,
     ensureSituationExists,
     async (req, res, next) => {
       try {
@@ -1330,6 +1547,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.delete(
     "/api/situations/:id/features/:featureId",
+    requireOwner,
     ensureSituationExists,
     async (req, res, next) => {
       try {
@@ -1345,78 +1563,109 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     },
   );
 
-  app.post("/api/situations/:id/tasks", ensureSituationExists, async (req, res, next) => {
-    try {
-      const { text } = taskInputSchema.parse(req.body);
-      res.status(201).json(await store.addTask(String(req.params.id), text));
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.patch("/api/situations/:id/tasks/:taskId", ensureSituationExists, async (req, res, next) => {
-    try {
-      const situationId = String(req.params.id);
-      const taskId = String(req.params.taskId);
-      const task =
-        typeof req.body?.text === "string"
-          ? await store.updateTaskText(situationId, taskId, taskInputSchema.parse(req.body).text)
-          : await store.toggleTask(situationId, taskId, Boolean(req.body?.completed));
-      if (!task) {
-        res.status(404).json({ error: "Oppgaven finnes ikke." });
-        return;
+  app.post(
+    "/api/situations/:id/tasks",
+    requireOwner,
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        const { text } = taskInputSchema.parse(req.body);
+        res.status(201).json(await store.addTask(String(req.params.id), text));
+      } catch (error) {
+        next(error);
       }
-      res.json(task);
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
-  app.delete("/api/situations/:id/tasks/:taskId", ensureSituationExists, async (req, res, next) => {
-    try {
-      if (!(await store.deleteTask(String(req.params.id), String(req.params.taskId)))) {
-        return void res.status(404).json({ error: "Oppgaven finnes ikke." });
+  app.patch(
+    "/api/situations/:id/tasks/:taskId",
+    requireOwner,
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        const situationId = String(req.params.id);
+        const taskId = String(req.params.taskId);
+        const task =
+          typeof req.body?.text === "string"
+            ? await store.updateTaskText(situationId, taskId, taskInputSchema.parse(req.body).text)
+            : await store.toggleTask(situationId, taskId, Boolean(req.body?.completed));
+        if (!task) {
+          res.status(404).json({ error: "Oppgaven finnes ikke." });
+          return;
+        }
+        res.json(task);
+      } catch (error) {
+        next(error);
       }
-      res.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
-  app.post("/api/situations/:id/notes", ensureSituationExists, async (req, res, next) => {
-    try {
-      const { text } = noteInputSchema.parse(req.body);
-      res.status(201).json(await store.addNote(String(req.params.id), text));
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.patch("/api/situations/:id/notes/:noteId", ensureSituationExists, async (req, res, next) => {
-    try {
-      const { text } = noteInputSchema.parse(req.body);
-      const note = await store.updateNote(String(req.params.id), String(req.params.noteId), text);
-      if (!note) return void res.status(404).json({ error: "Notatet finnes ikke." });
-      res.json(note);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.delete("/api/situations/:id/notes/:noteId", ensureSituationExists, async (req, res, next) => {
-    try {
-      if (!(await store.deleteNote(String(req.params.id), String(req.params.noteId)))) {
-        return void res.status(404).json({ error: "Notatet finnes ikke." });
+  app.delete(
+    "/api/situations/:id/tasks/:taskId",
+    requireOwner,
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        if (!(await store.deleteTask(String(req.params.id), String(req.params.taskId)))) {
+          return void res.status(404).json({ error: "Oppgaven finnes ikke." });
+        }
+        res.status(204).end();
+      } catch (error) {
+        next(error);
       }
-      res.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
+
+  app.post(
+    "/api/situations/:id/notes",
+    requireOwner,
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        const { text } = noteInputSchema.parse(req.body);
+        res.status(201).json(await store.addNote(String(req.params.id), text));
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.patch(
+    "/api/situations/:id/notes/:noteId",
+    requireOwner,
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        const { text } = noteInputSchema.parse(req.body);
+        const note = await store.updateNote(String(req.params.id), String(req.params.noteId), text);
+        if (!note) return void res.status(404).json({ error: "Notatet finnes ikke." });
+        res.json(note);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.delete(
+    "/api/situations/:id/notes/:noteId",
+    requireOwner,
+    ensureSituationExists,
+    async (req, res, next) => {
+      try {
+        if (!(await store.deleteNote(String(req.params.id), String(req.params.noteId)))) {
+          return void res.status(404).json({ error: "Notatet finnes ikke." });
+        }
+        res.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   const upload = multer({ dest: config.uploadDir, limits: { fileSize: 20 * 1024 * 1024 } });
   app.post(
     "/api/situations/:id/attachments",
+    requireOwner,
     ensureSituationExists,
     upload.single("file"),
     async (req, res, next) => {
@@ -1444,10 +1693,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     },
   );
 
-  app.get("/api/situations/:id/attachments/:attachmentId", async (req, res, next) => {
+  app.get("/api/situations/:id/attachments/:attachmentId", requireOwner, async (req, res, next) => {
     try {
-      const attachment = await store.getAttachment(req.params.attachmentId);
-      if (!attachment || attachment.situationId !== req.params.id) {
+      const situationId = String(req.params.id);
+      const attachment = await store.getAttachment(String(req.params.attachmentId));
+      if (!attachment || attachment.situationId !== situationId) {
         return void res.status(404).json({ error: "Vedlegget finnes ikke." });
       }
       res.download(attachment.storagePath, safeFilename(attachment.filename));
@@ -1456,20 +1706,28 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.delete("/api/situations/:id/attachments/:attachmentId", async (req, res, next) => {
-    try {
-      const attachment = await store.deleteAttachment(req.params.id, req.params.attachmentId);
-      if (!attachment) return void res.status(404).json({ error: "Vedlegget finnes ikke." });
-      await unlink(attachment.storagePath).catch(() => undefined);
-      res.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.delete(
+    "/api/situations/:id/attachments/:attachmentId",
+    requireOwner,
+    async (req, res, next) => {
+      try {
+        const attachment = await store.deleteAttachment(
+          String(req.params.id),
+          String(req.params.attachmentId),
+        );
+        if (!attachment) return void res.status(404).json({ error: "Vedlegget finnes ikke." });
+        await unlink(attachment.storagePath).catch(() => undefined);
+        res.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.post("/api/situations/:id/exports", async (req, res, next) => {
+  app.post("/api/situations/:id/exports", requireOwner, async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      const situationId = String(req.params.id);
+      const workspace = await store.getWorkspace(situationId, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       const attachmentCount = workspace.attachments.length;
       const attachmentSizes = workspace.attachments.map((attachment) =>
@@ -1500,7 +1758,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         await writeFile(storagePath, contents);
         await store.recordExport({
           id: exportId,
-          situationId: req.params.id,
+          situationId,
           githubLogin: currentLogin(req),
           storagePath,
           payload: manifest,
@@ -1510,10 +1768,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         await unlink(storagePath).catch(() => undefined);
         throw error;
       }
-      res.set(
-        "Location",
-        `/api/situations/${encodeURIComponent(req.params.id)}/exports/${exportId}`,
-      );
+      res.set("Location", `/api/situations/${encodeURIComponent(situationId)}/exports/${exportId}`);
       res.set("X-Export-Id", exportId);
       res.attachment(`${workspace.situation.id}-arbeidsmappe.zip`).send(contents);
     } catch (error) {
@@ -1521,11 +1776,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.get("/api/situations/:id/exports/:exportId", async (req, res, next) => {
+  app.get("/api/situations/:id/exports/:exportId", requireOwner, async (req, res, next) => {
     try {
-      const record = await store.getExport(req.params.exportId, req.params.id, currentLogin(req));
+      const situationId = String(req.params.id);
+      const record = await store.getExport(
+        String(req.params.exportId),
+        situationId,
+        currentLogin(req),
+      );
       if (!record) return void res.status(404).json({ error: "Eksporten finnes ikke." });
-      res.download(record.storagePath, `${req.params.id}-arbeidsmappe.zip`);
+      res.download(record.storagePath, `${situationId}-arbeidsmappe.zip`);
     } catch (error) {
       next(error);
     }
