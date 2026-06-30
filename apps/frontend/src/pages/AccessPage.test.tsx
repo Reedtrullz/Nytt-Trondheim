@@ -50,4 +50,49 @@ describe("AccessRequestsDashboard", () => {
     expect(html).toContain("Vil følge Trondheim-beredskap.");
     expect(html).toContain("Venter");
   });
+
+  it("counts active viewer accounts as approved access", () => {
+    const html = renderToStaticMarkup(
+      <AccessRequestsDashboard
+        page={{
+          summary: { total: 0, unverified: 0, pending: 0, approved: 0, rejected: 0 },
+          items: [],
+        }}
+        users={{
+          summary: { total: 3, owner: 1, viewer: 2, active: 2, revoked: 1 },
+          items: [
+            {
+              id: "owner-one",
+              displayName: "Reidar",
+              role: "owner",
+              status: "active",
+              createdAt: "2026-06-29T08:00:00.000Z",
+              updatedAt: "2026-06-29T08:00:00.000Z",
+            },
+            {
+              id: "viewer-one",
+              displayName: "Ine Test",
+              role: "viewer",
+              status: "active",
+              email: "ine@example.test",
+              createdAt: "2026-06-29T08:00:00.000Z",
+              updatedAt: "2026-06-29T08:00:00.000Z",
+            },
+            {
+              id: "viewer-two",
+              displayName: "Revoked Test",
+              role: "viewer",
+              status: "revoked",
+              email: "revoked@example.test",
+              createdAt: "2026-06-29T08:00:00.000Z",
+              updatedAt: "2026-06-29T08:00:00.000Z",
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain("<strong>1</strong><span>Godkjente lesere</span>");
+    expect(html).toContain("1 aktiv leser · 1 tilbakekalt");
+  });
 });

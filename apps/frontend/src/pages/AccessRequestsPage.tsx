@@ -46,6 +46,24 @@ function roleLabel(role: AppUser["role"]) {
   return role === "owner" ? "Eier" : "Leser";
 }
 
+function viewerAccessSummary(users?: UserPage, fallbackApproved = 0) {
+  if (!users) return { active: fallbackApproved, revoked: 0 };
+  return users.items.reduce(
+    (summary, user) => {
+      if (user.role !== "viewer") return summary;
+      if (user.status === "active") summary.active += 1;
+      if (user.status === "revoked") summary.revoked += 1;
+      return summary;
+    },
+    { active: 0, revoked: 0 },
+  );
+}
+
+function viewerAccessLabel(summary: { active: number; revoked: number }) {
+  const active = summary.active === 1 ? "1 aktiv leser" : `${summary.active} aktive lesere`;
+  return `${active} · ${summary.revoked} tilbakekalt`;
+}
+
 function ActionButton({
   children,
   disabled,
@@ -137,6 +155,8 @@ export function AccessRequestsDashboard({
   onGrantAccess?: (input: UserGrantInput) => void;
   onUserUpdate?: (id: string, input: UserUpdateInput) => void;
 }) {
+  const viewerSummary = viewerAccessSummary(users, page.summary.approved);
+
   return (
     <main className="access-requests-page">
       <header className="page-heading">
@@ -162,8 +182,8 @@ export function AccessRequestsDashboard({
           <span>Venter</span>
         </article>
         <article>
-          <strong>{page.summary.approved}</strong>
-          <span>Godkjent</span>
+          <strong>{viewerSummary.active}</strong>
+          <span>Godkjente lesere</span>
         </article>
         <article>
           <strong>{page.summary.rejected}</strong>
@@ -243,9 +263,7 @@ export function AccessRequestsDashboard({
               <p className="label">Brukere</p>
               <h2>Godkjente kontoer</h2>
             </div>
-            <span>
-              {users.summary.active} aktive · {users.summary.revoked} tilbakekalt
-            </span>
+            <span>{viewerAccessLabel(viewerSummary)}</span>
           </header>
           {users.items.map((user) => (
             <article key={user.id} className="user-admin-row">
