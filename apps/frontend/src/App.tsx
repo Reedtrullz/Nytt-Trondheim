@@ -39,6 +39,9 @@ const SavedPage = lazy(() =>
 const SourceAuditPage = lazy(() =>
   import("./pages/SourceAuditPage.js").then((module) => ({ default: module.SourceAuditPage })),
 );
+const SportPage = lazy(() =>
+  import("./pages/SportPage.js").then((module) => ({ default: module.SportPage })),
+);
 const SituationPage = lazy(() =>
   import("./pages/SituationPage.js").then((module) => ({ default: module.SituationPage })),
 );
@@ -101,6 +104,7 @@ function Header({
           <NavLink to="/situasjoner">Situasjonsrom</NavLink>
           <NavLink to="/trafikk">Trafikkart</NavLink>
           <NavLink to="/vaer">Vær</NavLink>
+          <NavLink to="/sport">Sport</NavLink>
           {isOwner ? <NavLink to="/lagret">Lagret</NavLink> : null}
           {isOwner ? <NavLink to="/drift">Drift</NavLink> : null}
         </nav>
@@ -124,10 +128,23 @@ function Header({
 
 function ForbiddenPage() {
   return (
-    <main className="forbidden-page">
+    <main className="status-page">
       <p className="label">403</p>
       <h1>Dette krever eiertilgang</h1>
       <p>Du har lesetilgang til forsiden, nyheter, trafikk, vær og offentlige situasjonsrom.</p>
+      <Link className="primary-link" to="/">
+        Til forsiden
+      </Link>
+    </main>
+  );
+}
+
+function NotFoundPage() {
+  return (
+    <main className="status-page">
+      <p className="label">404</p>
+      <h1>Fant ikke siden</h1>
+      <p>Siden finnes ikke i denne versjonen av Nytt Trondheim.</p>
       <Link className="primary-link" to="/">
         Til forsiden
       </Link>
@@ -213,6 +230,7 @@ function AuthenticatedApp() {
             <Route path="/situasjoner/:id" element={<SituationPage canManage={isOwner} />} />
             <Route path="/trafikk" element={<TrafficMapPage />} />
             <Route path="/vaer" element={<WeatherPage />} />
+            <Route path="/sport" element={<SportPage initialArticles={data.articles} />} />
             <Route
               path="/lagret"
               element={
@@ -261,7 +279,7 @@ function AuthenticatedApp() {
                 </OwnerOnly>
               }
             />
-            <Route path="*" element={<ForbiddenPage />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Suspense>
       ) : null}

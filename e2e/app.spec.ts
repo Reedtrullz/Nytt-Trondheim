@@ -1120,6 +1120,66 @@ test("home keeps Vær as weather page navigation, not an article category filter
   await expect(page.getByText('Ingen saker samsvarer med "bru" i Trøndelag.')).toBeVisible();
 });
 
+test("sport page shows a World Cup desk with local sport stories", async ({ page }) => {
+  const sportArticles: Article[] = [
+    {
+      id: "sport-ranheim-aasane",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Ranheim tapte borte mot Åsane",
+      excerpt: "Ranheim tapte 0-3 borte mot Åsane i 1. divisjon.",
+      url: "https://example.test/sport-ranheim-aasane",
+      publishedAt: "2026-06-30T17:59:00.000Z",
+      scope: "trondelag",
+      category: "Sport",
+      places: ["Ranheim", "Trondheim"],
+    },
+  ];
+  await page.route("**/api/articles?**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("category") === "Sport") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: sportArticles }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/sport");
+
+  await expect(page.getByRole("heading", { name: "VM 2026" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Neste kamper" })).toBeVisible();
+  const nextMatches = page.locator(".sport-match-panel");
+  await expect(nextMatches).toContainText("Elfenbenskysten");
+  await expect(nextMatches).toContainText("Norge");
+  await expect(page.getByRole("heading", { name: "Sluttspillstatus" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Gruppe I" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Gruppe E" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lokale sportssaker" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Ranheim tapte borte mot Åsane/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /FIFA kampoversikt/ })).toHaveAttribute(
+    "target",
+    "_blank",
+  );
+
+  await page.getByRole("button", { name: "Norge" }).click();
+  await expect(page.locator(".sport-match-list")).toContainText("Elfenbenskysten");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+});
+
+test("unknown viewer route is a missing page, not an owner-only denial", async ({ page }) => {
+  await page.goto("/sport-does-not-exist");
+
+  await expect(page.getByRole("heading", { name: "Fant ikke siden" })).toBeVisible();
+  await expect(page.getByText("Dette krever eiertilgang")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Sport" })).toHaveAttribute("href", "/sport");
+});
+
 test("article save missing target rolls back optimistic state", async ({ page }) => {
   await page.route("**/api/saved/articles/a-bridge", async (route) => {
     await route.fulfill({
