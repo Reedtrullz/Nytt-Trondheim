@@ -1138,6 +1138,8 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
   await page.route("**/api/articles?**", async (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("category") === "Sport") {
+      expect(url.searchParams.get("scope")).toBe("trondelag");
+      expect(url.searchParams.get("limit")).toBe("8");
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -1155,7 +1157,11 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
   const nextMatches = page.locator(".sport-match-panel");
   await expect(nextMatches).toContainText("Elfenbenskysten");
   await expect(nextMatches).toContainText("Norge");
+  await expect(page.locator(".sport-data-status")).toContainText("ikke live-resultater");
+  await expect(page.getByRole("heading", { name: "Veien videre" })).toBeVisible();
+  await expect(page.locator(".sport-path-panel")).toContainText("Brasil");
   await expect(page.getByRole("heading", { name: "Sluttspillstatus" })).toBeVisible();
+  await expect(page.locator(".sport-bracket-table")).toContainText("Møter Brasil");
   await expect(page.getByRole("heading", { name: "Gruppe I" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Gruppe E" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Lokale sportssaker" })).toBeVisible();
@@ -1167,6 +1173,7 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
 
   await page.getByRole("button", { name: "Norge" }).click();
   await expect(page.locator(".sport-match-list")).toContainText("Elfenbenskysten");
+  await expect(page.locator(".sport-match-list")).toContainText("Brasil");
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
   ).toBe(true);

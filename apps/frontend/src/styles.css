@@ -5443,10 +5443,27 @@ button {
   gap: 12px;
 }
 
+.sport-data-status,
+.sport-phase-strip,
+.sport-path-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sport-data-status {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sport-phase-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .sport-summary-card,
 .sport-panel,
 .sport-bracket-panel,
-.sport-table-panel {
+.sport-table-panel,
+.sport-data-status article,
+.sport-phase-strip article {
   border: 1px solid var(--line);
   background: var(--paper);
 }
@@ -5461,14 +5478,24 @@ button {
 }
 
 .sport-summary-card span,
+.sport-data-status span,
+.sport-phase-strip span,
+.sport-path-list span,
 .sport-news-list span,
 .sport-match-status,
 .sport-match small,
-.sport-panel-heading > span {
+.sport-panel-heading > span,
+.sport-bracket-row-head {
   color: var(--muted);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.sport-data-status article,
+.sport-phase-strip article {
+  min-height: 104px;
+  padding: 14px;
 }
 
 .sport-summary-card strong {
@@ -5477,7 +5504,18 @@ button {
   font: 28px/1.05 var(--serif);
 }
 
+.sport-data-status strong,
+.sport-phase-strip strong,
+.sport-path-list strong {
+  display: block;
+  margin-top: 7px;
+  font: 20px/1.08 var(--serif);
+}
+
 .sport-summary-card p,
+.sport-data-status p,
+.sport-phase-strip p,
+.sport-path-list p,
 .sport-match p,
 .sport-news-list p,
 .sport-news-state {
@@ -5498,6 +5536,21 @@ button {
 .sport-bracket-panel,
 .sport-table-panel {
   padding: 18px;
+}
+
+.sport-path-panel {
+  border-left: 4px solid var(--blue);
+}
+
+.sport-path-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sport-path-list article {
+  min-height: 102px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
 }
 
 .sport-panel-heading {
@@ -5573,6 +5626,10 @@ button {
   border-left: 4px solid var(--terracotta);
 }
 
+.sport-match-live {
+  border-left: 4px solid var(--terracotta);
+}
+
 .sport-match-finished {
   border-left: 4px solid var(--green);
 }
@@ -5623,6 +5680,11 @@ button {
   font-weight: 800;
 }
 
+.sport-match-consequence {
+  color: var(--ink) !important;
+  font-weight: 800;
+}
+
 .sport-match small {
   display: block;
   margin-top: 12px;
@@ -5669,6 +5731,41 @@ button {
   gap: 10px;
 }
 
+.sport-bracket-table {
+  display: grid;
+  border: 1px solid var(--line);
+}
+
+.sport-bracket-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(120px, 0.45fr) minmax(220px, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+
+.sport-bracket-row:first-child {
+  border-top: 0;
+}
+
+.sport-bracket-row-head {
+  background: var(--page);
+}
+
+.sport-bracket-row strong {
+  display: block;
+  font: 20px/1.1 var(--serif);
+}
+
+.sport-bracket-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .sport-table-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5691,7 +5788,7 @@ button {
 
 .sport-table-panel table {
   width: 100%;
-  min-width: 560px;
+  min-width: 680px;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -6052,6 +6149,9 @@ button {
   }
 
   .sport-summary-grid,
+  .sport-data-status,
+  .sport-phase-strip,
+  .sport-path-list,
   .sport-bracket-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6359,8 +6459,17 @@ button {
   }
 
   .sport-summary-grid,
+  .sport-data-status,
+  .sport-phase-strip,
+  .sport-path-list,
   .sport-bracket-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sport-data-status article,
+  .sport-phase-strip article,
+  .sport-path-list article {
+    min-height: 0;
   }
 
   .sport-panel,
@@ -6393,6 +6502,24 @@ button {
 
   .sport-match-line strong:last-child {
     text-align: left;
+  }
+
+  .sport-bracket-table {
+    border: 0;
+    gap: 10px;
+  }
+
+  .sport-bracket-row,
+  .sport-bracket-row-head {
+    grid-template-columns: 1fr;
+  }
+
+  .sport-bracket-row {
+    border: 1px solid var(--line);
+  }
+
+  .sport-bracket-row-head {
+    display: none;
   }
 
   .weather-map-panel {

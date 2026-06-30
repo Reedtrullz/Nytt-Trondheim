@@ -17,10 +17,25 @@ const sportArticle: Article = {
   places: ["Ranheim", "Trondheim"],
 };
 
-function renderDashboard(articles: Article[] = [sportArticle], loadingArticles = false) {
+function renderDashboard({
+  articles = [sportArticle],
+  loadingArticles = false,
+  articleError,
+  now = new Date("2026-07-01T10:45:00.000Z"),
+}: {
+  articles?: Article[];
+  loadingArticles?: boolean;
+  articleError?: string;
+  now?: Date;
+} = {}) {
   return renderToStaticMarkup(
     <MemoryRouter>
-      <WorldCupSportDashboard articles={articles} loadingArticles={loadingArticles} />
+      <WorldCupSportDashboard
+        articles={articles}
+        loadingArticles={loadingArticles}
+        articleError={articleError}
+        now={now}
+      />
     </MemoryRouter>,
   );
 }
@@ -33,27 +48,49 @@ describe("WorldCupSportDashboard", () => {
     expect(html).toContain("32-delsfinaler");
     expect(html).toContain("Elfenbenskysten");
     expect(html).toContain("Norge");
+    expect(html).toContain("Elfenbenskysten 1–2 Norge");
+    expect(html).toContain("Brasil – Norge");
+    expect(html).toContain("Veien videre");
+    expect(html).toContain("Datastatus");
+    expect(html).toContain("ikke live-resultater");
+    expect(html).toContain("Åttedelsfinale");
+    expect(html).toContain("MF");
+    expect(html).toContain("MM");
     expect(html).toContain("Gruppe I");
     expect(html).toContain("Frankrike");
     expect(html).toContain("Gruppe E");
     expect(html).toContain("Ranheim tapte borte mot Åsane");
+    expect(html).toContain("FIFA format");
     expect(html).toContain("FIFA kampoversikt");
-    expect(html).toContain("FIFA tabeller");
     expect(html).toContain("ESPN kampoppsett");
-    expect(html).toContain("CBS gruppetabeller");
+    expect(html).toContain("FOX live score");
+    expect(html).toContain("FOX tabeller");
     expect(html).toContain("https://www.fifa.com/");
     expect(html).toContain("/?category=Sport");
   });
 
   it("renders the local sport empty state", () => {
-    const html = renderDashboard([]);
+    const html = renderDashboard({ articles: [] });
 
     expect(html).toContain("Ingen lokale sportssaker akkurat nå.");
     expect(html).toContain("Sluttspillstatus");
   });
 
+  it("keeps initial sport stories visible when a later fetch error is shown", () => {
+    const html = renderDashboard({ articleError: "Kunne ikke hente sportssaker." });
+
+    expect(html).toContain("Ranheim tapte borte mot Åsane");
+    expect(html).toContain("Kunne ikke hente sportssaker.");
+  });
+
+  it("warns when the curated World Cup snapshot should be checked", () => {
+    const html = renderDashboard({ now: new Date("2026-07-02T10:45:00.000Z") });
+
+    expect(html).toContain("Bør kontrolleres mot live score");
+  });
+
   it("does not link unsafe article URLs", () => {
-    const html = renderDashboard([{ ...sportArticle, url: "javascript:alert(1)" }]);
+    const html = renderDashboard({ articles: [{ ...sportArticle, url: "javascript:alert(1)" }] });
 
     expect(html).toContain("Ranheim tapte borte mot Åsane");
     expect(html).not.toContain("javascript:alert");
