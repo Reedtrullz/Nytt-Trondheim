@@ -223,6 +223,22 @@ const topicSignals: Array<[string, (text: string) => boolean]> = [
       /\b(hovedtrener\w*|trenerjobb\w*|trener\w*|ansatt\w*|presentert\w*)\b/iu.test(text),
   ],
 ];
+const sportsResultTopicPrefix = "sport_result:";
+const localSportsClubSignals: Array<[string, RegExp]> = [
+  ["ranheim", /\branheim(?:s)?\b/iu],
+  ["rosenborg", /\b(?:rosenborg(?:s)?|rbk)\b/iu],
+  ["kolstad", /\bkolstad(?:s)?\b/iu],
+  ["byasen", /\bby[åa]sen(?:s)?\b/iu],
+  ["nardo", /\bnardo(?:s)?\b/iu],
+  ["strindheim", /\bstrindheim(?:s)?\b/iu],
+  ["levanger", /\blevanger(?:s)?\b/iu],
+  ["stjordals-blink", /\bstj[øo]rdals(?:-|\s+)blink\b|\bstj[øo]rdalsblink\b/iu],
+];
+const sportsResultPattern =
+  /\b(?:bortekompleks\w*|bortesmell\w*|bortetap\w*|hjemmeseier\w*|seier\w*|slo|tap(?:et|te)?|uavgjort|vant)\b|\b\d+\s*[–-]\s*\d+\b/iu;
+const sportsMatchContextPattern =
+  /\b(?:borte|divisjon\w*|eliteserien|fotball\w*|hjemme(?:laget)?|kamp(?:en)?|lag(?:et)?|liga(?:en)?|m[åa]l(?:et|ene)?|obos|poeng\w*|resultat(?:et)?)\b|bortekompleks\w*|bortesmell\w*|bortetap\w*/iu;
+const localSportsClubKeys = new Set(localSportsClubSignals.map(([club]) => club));
 
 function normalizeText(value: string): string {
   return value
@@ -328,9 +344,49 @@ function articleIncidentSignals(article: Article): Set<string> {
   return signals;
 }
 
+function sportsResultTopicSignals(text: string): string[] {
+  if (!sportsResultPattern.test(text) || !sportsMatchContextPattern.test(text)) return [];
+  return localSportsClubSignals.flatMap(([club, pattern]) =>
+    pattern.test(text) ? [`${sportsResultTopicPrefix}${club}`] : [],
+  );
+}
+
+function sportsMatchDescriptors(text: string): { opponents: Set<string>; scores: Set<string> } {
+  const scores = new Set(
+    [...text.matchAll(/\b(\d+)\s*[–-]\s*(\d+)\b/giu)].map((match) => `${match[1]}-${match[2]}`),
+  );
+  const opponents = new Set(
+    [...text.matchAll(/\bmot\s+([0-9a-zæøå-]{3,})\b/giu)]
+      .map((match) => normalizeText(match[1] ?? ""))
+      .filter((opponent) => opponent.length > 2 && !localSportsClubKeys.has(opponent)),
+  );
+  return { opponents, scores };
+}
+
+function descriptorSetsConflict(left: Set<string>, right: Set<string>): boolean {
+  if (left.size === 0 || right.size === 0) return false;
+  return tokenSimilarity(left, right).overlap === 0;
+}
+
+function sportsResultDescriptorsConflict(left: Article, right: Article): boolean {
+  const leftDescriptors = sportsMatchDescriptors(articleText(left));
+  const rightDescriptors = sportsMatchDescriptors(articleText(right));
+  return (
+    descriptorSetsConflict(leftDescriptors.opponents, rightDescriptors.opponents) ||
+    descriptorSetsConflict(leftDescriptors.scores, rightDescriptors.scores)
+  );
+}
+
+function isSportsResultTopic(signal: string): boolean {
+  return signal.startsWith(sportsResultTopicPrefix);
+}
+
 function articleTopicSignals(article: Article): Set<string> {
   const text = articleText(article);
-  return new Set(topicSignals.flatMap(([signal, matches]) => (matches(text) ? [signal] : [])));
+  return new Set([
+    ...topicSignals.flatMap(([signal, matches]) => (matches(text) ? [signal] : [])),
+    ...sportsResultTopicSignals(text),
+  ]);
 }
 
 function sharedIncidentSignals(left: Article, right: Article): Set<string> {
@@ -396,7 +452,11 @@ function hasTopicalThreadMatch(
   body: { overlap: number; score: number },
 ): boolean {
   if (publishedDistanceMs(left, right) > topicalThreadWindowMs) return false;
-  if (sharedTopicSignals(left, right).size === 0) return false;
+  const topics = sharedTopicSignals(left, right);
+  if (topics.size === 0) return false;
+  if ([...topics].some(isSportsResultTopic)) {
+    return body.overlap >= 1 && !sportsResultDescriptorsConflict(left, right);
+  }
   return body.overlap >= 2;
 }
 
@@ -422,7 +482,15 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
   }
   if (left.situationId && left.situationId === right.situationId) return signals;
   if (left.situationId && right.situationId) return [];
-  if (hasConflictingSpecificPlaces(left, right) && !sameCanonicalUrl(left, right)) return [];
+  const topics = sharedTopicSignals(left, right);
+  const hasSportsResultTopic = [...topics].some(isSportsResultTopic);
+  if (
+    hasConflictingSpecificPlaces(left, right) &&
+    !sameCanonicalUrl(left, right) &&
+    !(hasSportsResultTopic && !sportsResultDescriptorsConflict(left, right))
+  ) {
+    return [];
+  }
   if (coverageBundlesCompatible(left, right)) {
     signals.push({
       kind: "persisted_bundle",
@@ -471,6 +539,7 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
     signals.push({
       kind: "topical_thread",
       articleIds: [left.id, right.id],
+      detail: [...sharedTopicSignals(left, right)].join(", "),
       overlap: body.overlap,
       score: body.score,
     });

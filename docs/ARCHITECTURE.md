@@ -36,9 +36,11 @@ enrich after those rules pass, but it must not replace the deterministic evidenc
 
 ## AI Boundary
 
-The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only public feed excerpts and public official data may enter that process. Private annotations, attachments, tasks and notes are excluded.
+The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only public feed excerpts, public official data and compact summaries of open (`preliminary`/`active`) situations may enter that process. Private annotations, attachments, tasks and notes are excluded.
 
 AI clusters are accepted only after each cited snippet matches an input excerpt and at least two independent sources remain. Deterministic multi-source detection remains available when AI is disabled or degraded.
+
+DeepSeek may also return structured hints for situation progress, likely same-story bundles, category/topic suggestions, Trondheim/Trøndelag relevance and owner-facing operations notes. Those hints are derived analysis, not upstream provenance: they stay in `ai_processing_runs.result` unless deterministic code explicitly consumes them. In v1 only cited situation-progress hints can attach public articles to existing open situations, and they do so as low-confidence reporting estimates. They cannot create new situations, reopen resolved/dismissed situations, write `source_items`, override categories, or replace deterministic coverage-bundle decisions.
 
 Incident identity is lifecycle-aware: an open case may receive timely matching reports or a later official closure, while resolved or dismissed history cannot absorb a later same-place event. A later qualifying event receives a distinct activation identity and preserved provenance.
 

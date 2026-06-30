@@ -360,4 +360,114 @@ describe("article coverage analysis", () => {
       ]),
     });
   });
+
+  it("bundles terse Ranheim match-result coverage with fuller match reports", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "nrk-ranheim-aasane",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Ranheim tapte 0-3 borte mot Åsane",
+          excerpt:
+            "Ranheim tapte 0-3 borte mot Åsane i 1. divisjon lørdag. Kampen var målløs til pause, før hjemmelaget tok ledelsen tidlig i andre omgang. Dette er Ranheims femte bortetap på rad.",
+          publishedAt: "2026-06-28T15:59:00.000Z",
+          category: "Nyheter",
+          places: ["Ranheim", "Trondheim"],
+          location: undefined,
+        }),
+        article({
+          id: "adressa-bortesmell",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ny bortesmell",
+          excerpt: "Ranheims bortekompleks fortsetter.",
+          publishedAt: "2026-06-28T15:52:00.000Z",
+          category: "Sport",
+          places: [],
+          location: undefined,
+        }),
+      ],
+      "2026-06-28T16:10:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "topic",
+      confidence: "high",
+      memberArticleIds: ["nrk-ranheim-aasane", "adressa-bortesmell"],
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "topical_thread",
+          detail: "sport_result:ranheim",
+        }),
+      ]),
+    });
+  });
+
+  it("does not use Ranheim alone to bundle non-sports neighborhood stories with match results", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "ranheim-pris",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ranheim vant pris for ny møteplass",
+          excerpt: "Prosjektet på Ranheim ble hedret av kommunen.",
+          publishedAt: "2026-06-28T16:05:00.000Z",
+          category: "Nyheter",
+          places: ["Ranheim", "Trondheim"],
+          location: undefined,
+        }),
+        article({
+          id: "nrk-ranheim-aasane",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Ranheim tapte 0-3 borte mot Åsane",
+          excerpt:
+            "Ranheim tapte 0-3 borte mot Åsane i 1. divisjon lørdag. Kampen endte med Ranheims femte bortetap på rad.",
+          publishedAt: "2026-06-28T15:59:00.000Z",
+          category: "Nyheter",
+          places: ["Ranheim", "Trondheim"],
+          location: undefined,
+        }),
+      ],
+      "2026-06-28T16:10:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(0);
+  });
+
+  it("does not bundle separate same-club match results with different explicit opponents", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "ranheim-aasane",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Ranheim tapte 0-3 borte mot Åsane",
+          excerpt:
+            "Ranheim tapte 0-3 borte mot Åsane i 1. divisjon lørdag. Kampen endte med bortetap.",
+          publishedAt: "2026-06-28T15:59:00.000Z",
+          category: "Sport",
+          places: ["Ranheim", "Trondheim"],
+          location: undefined,
+        }),
+        article({
+          id: "ranheim-start",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ranheim tapte 1-2 hjemme mot Start",
+          excerpt: "Ranheim tapte 1-2 hjemme mot Start etter en jevn kamp.",
+          publishedAt: "2026-06-28T15:55:00.000Z",
+          category: "Sport",
+          places: ["Ranheim", "Trondheim"],
+          location: undefined,
+        }),
+      ],
+      "2026-06-28T16:10:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(0);
+  });
 });

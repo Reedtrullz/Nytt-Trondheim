@@ -20,7 +20,7 @@ import {
   probeOfficialSources,
   rssSources,
 } from "./collectors.js";
-import { createAnalyzer, enhanceSituations } from "./ai.js";
+import { applySituationUpdateHints, createAnalyzer, enhanceSituations } from "./ai.js";
 import {
   collectDatexTravelTimePulse,
   defaultDatexTravelTimeDataEndpoint,
@@ -1154,8 +1154,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     (event) => event.source === "met" || event.source === "nve",
   );
   const currentDatexEvents = currentOfficialEvents.filter((event) => event.source === "datex");
+  const trackedSituations = await repository.trackedSituations();
   const aiStartedAtMs = Date.now();
-  const analysis = await analyzer.cluster(recentArticles);
+  const analysis = await analyzer.cluster(recentArticles, { situations: trackedSituations });
   recordSourceMetric("deepseek", aiStartedAtMs, {
     parseFailures: analysis.run.status === "degraded" ? 1 : 0,
   });
@@ -1169,12 +1170,23 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     nextPollAt,
     detail:
       analysis.run.status === "ok"
-        ? `${analysis.result.clusters.length} validerte kandidatgrupper`
+        ? [
+            `${analysis.result.clusters.length} validerte kandidatgrupper`,
+            `${analysis.result.situationUpdates.length} mulige situasjonsoppdateringer`,
+            `${analysis.result.bundleHints.length} bunthint`,
+            `${analysis.result.categoryHints.length} kategorihint`,
+            `${analysis.result.relevanceHints.length} relevanshint`,
+          ].join(", ")
         : analysis.run.status === "disabled"
           ? "DEEPSEEK_API_KEY er ikke konfigurert"
           : (analysis.run.error ?? "AI-analyse feilet"),
   });
-  const trackedSituations = await repository.trackedSituations();
+  const aiSituationUpdates = applySituationUpdateHints(
+    trackedSituations,
+    analysis.result,
+    recentArticles,
+    analysis.run.completedAt,
+  );
   const deterministicSituations = enhanceSituations(
     detectPreliminarySituations(situationUpdateArticles, currentWarnings, trackedSituations),
     analysis.result,
@@ -1219,6 +1231,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     : [];
   const situationsToPersist = [
     ...deterministicSituations,
+    ...aiSituationUpdates,
     ...officialTrafficSituations,
     ...politiloggenSituations,
     ...resolvedDuplicateDatexSituations,
@@ -1227,7 +1240,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
   console.log(
-    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen); AI identified ${analysis.result.clusters.length} validated candidates`,
+    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints`,
   );
   const workerMetrics = buildWorkerCycleMetrics({
     cycleStartedAt,
