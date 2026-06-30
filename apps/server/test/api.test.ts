@@ -177,6 +177,41 @@ describe("private situation API", () => {
     throw new Error(`expected a 429 before loop finished, last status was ${lastStatus}`);
   });
 
+  it("keeps bootstrap situations as lean frontpage summaries", async () => {
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent.get("/api/bootstrap").expect(200);
+
+    expect(response.body.articles.length).toBeGreaterThan(0);
+    expect(response.body.sourceHealth.length).toBeGreaterThan(0);
+    expect(response.body.situations.length).toBeGreaterThan(0);
+    expect(response.body.situations.length).toBeLessThanOrEqual(3);
+    for (const situation of response.body.situations as Array<Record<string, unknown>>) {
+      expect(["preliminary", "active"]).toContain(situation.status);
+      expect(situation).toEqual(
+        expect.objectContaining({
+          id: expect.any(String),
+          title: expect.any(String),
+          summary: expect.any(String),
+          status: expect.any(String),
+          verificationStatus: expect.any(String),
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+          locationLabel: expect.any(String),
+        }),
+      );
+      expect(situation).not.toHaveProperty("evidence");
+      expect(situation).not.toHaveProperty("features");
+      expect(situation).not.toHaveProperty("timeline");
+      expect(situation).not.toHaveProperty("relatedArticleIds");
+      expect(situation).not.toHaveProperty("activationBasis");
+      expect(situation).not.toHaveProperty("provenanceSummary");
+      expect(situation).not.toHaveProperty("sourceConfidence");
+    }
+  });
+
   it("accepts only the configured GitHub owner account", () => {
     expect(
       authorizeGitHubProfile({ username: "someone-else", displayName: "Other" }, "Reedtrullz"),

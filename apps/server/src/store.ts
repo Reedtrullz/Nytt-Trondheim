@@ -96,6 +96,8 @@ export interface SituationFilters {
   limit?: number;
 }
 
+type HomeSituationSummary = BootstrapPayload["situations"][number];
+
 export interface OfficialEventFilters {
   source?: OfficialEvent["source"];
   states?: OfficialEvent["state"][];
@@ -311,6 +313,19 @@ function beforeCursor(
 
 function normalizeAccessRequestEmail(email: string): string {
   return email.trim().toLocaleLowerCase("nb");
+}
+
+function homeSituationSummary(situation: Situation): HomeSituationSummary {
+  return {
+    id: situation.id,
+    title: situation.title,
+    summary: situation.summary,
+    status: situation.status,
+    verificationStatus: situation.verificationStatus,
+    updatedAt: situation.updatedAt,
+    createdAt: situation.createdAt,
+    locationLabel: situation.locationLabel,
+  };
 }
 
 const accessVerificationTtlMs = 24 * 60 * 60 * 1000;
@@ -2346,10 +2361,20 @@ export class MemoryStore implements Store {
   }
 
   async getBootstrap(): Promise<BootstrapPayload> {
+    const articles = await this.listArticles({ scope: "trondheim", limit: 40 });
+    const situations = [...this.situations.values()]
+      .filter((situation) => situation.status === "preliminary" || situation.status === "active")
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
+      )
+      .slice(0, 3)
+      .map(homeSituationSummary);
     return {
       ...clone(sampleBootstrap),
-      articles: clone(this.articles),
-      situations: [...this.situations.values()].map(clone),
+      articles: articles.items,
+      ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
+      situations,
     };
   }
 
@@ -2817,6 +2842,44 @@ export class MemoryStore implements Store {
 
 export class PgStore implements Store {
   constructor(private readonly pool: pg.Pool) {}
+
+  private async listHomeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
+    const result = await this.pool.query<{
+      id: string;
+      title: string;
+      summary: string;
+      status: Situation["status"];
+      verificationStatus: Situation["verificationStatus"];
+      updatedAt: Date | string;
+      createdAt: string;
+      locationLabel: string;
+    }>(
+      `SELECT
+         id,
+         payload->>'title' AS "title",
+         payload->>'summary' AS "summary",
+         status,
+         payload->>'verificationStatus' AS "verificationStatus",
+         updated_at AS "updatedAt",
+         payload->>'createdAt' AS "createdAt",
+         payload->>'locationLabel' AS "locationLabel"
+       FROM situations
+       WHERE status IN ('preliminary', 'active')
+       ORDER BY updated_at DESC, id DESC
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      summary: row.summary,
+      status: row.status,
+      verificationStatus: row.verificationStatus,
+      updatedAt: isoString(row.updatedAt),
+      createdAt: isoString(row.createdAt),
+      locationLabel: row.locationLabel,
+    }));
+  }
 
   private async issuePgAuthToken(
     client: Pick<pg.Pool, "query"> | pg.PoolClient,
@@ -3343,11 +3406,16 @@ export class PgStore implements Store {
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
     const [articles, situations, sourceHealth] = await Promise.all([
-      this.listArticles({ limit: 100 }, login),
-      this.listSituations({ includeDismissed: false, limit: 100 }, login),
+      this.listArticles({ scope: "trondheim", limit: 40 }, login),
+      this.listHomeSituationSummaries(),
       this.listSourceHealth(),
     ]);
-    return { articles: articles.items, situations: situations.items, sourceHealth };
+    return {
+      articles: articles.items,
+      ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
+      situations,
+      sourceHealth,
+    };
   }
 
   async listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage> {

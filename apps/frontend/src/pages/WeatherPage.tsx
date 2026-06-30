@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { GeoJsonObject } from "geojson";
 import type { PathOptions } from "leaflet";
 import { Circle, GeoJSON, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import type {
   WeatherImpactGroup,
   WeatherMapLayer,

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Article, BootstrapPayload } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
-import { NewsMap } from "../components/MapViews.js";
 import {
   articleCategories,
   articleCategoryLabels,
@@ -22,6 +21,11 @@ import {
 } from "../homeNearby.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
+
+const NewsMap = lazy(() =>
+  import("../components/NewsMap.js").then((module) => ({ default: module.NewsMap })),
+);
+const defaultHomeFeedKey = "trondheim\u0000Alle\u0000\u0000";
 
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("nb-NO", {
@@ -280,7 +284,9 @@ function NearbyRail({
             Åpne situasjonskart <ArrowIcon />
           </Link>
         </div>
-        <NewsMap items={nearby} selectedId={selectedNearby?.id} onSelect={setSelectedNearbyId} />
+        <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
+          <NewsMap items={nearby} selectedId={selectedNearby?.id} onSelect={setSelectedNearbyId} />
+        </Suspense>
         {nearby.length > 0 ? (
           <>
             <ol className="nearby-list">
@@ -409,10 +415,7 @@ export function HomePage({
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
   const { scope, category, topic, q: query } = filters;
   const [articles, setArticles] = useState(initialData.articles);
-  const [nextCursor, setNextCursor] = useState<string>();
-  const [situations, setSituations] = useState<BootstrapPayload["situations"]>(
-    initialData.situations,
-  );
+  const [nextCursor, setNextCursor] = useState<string | undefined>(initialData.articleNextCursor);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
@@ -433,6 +436,14 @@ export function HomePage({
   }
 
   useEffect(() => {
+    if (feedKey === defaultHomeFeedKey) {
+      setLoading(false);
+      setLoadingMore(false);
+      setFeedError(undefined);
+      setArticles(initialData.articles);
+      setNextCursor(initialData.articleNextCursor);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setLoadingMore(false);
@@ -478,14 +489,7 @@ export function HomePage({
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [category, query, scope, topic]);
-
-  useEffect(() => {
-    void api
-      .situations()
-      .then((page) => setSituations(page.items))
-      .catch(() => setSituations(initialData.situations));
-  }, [initialData.situations]);
+  }, [category, feedKey, initialData.articleNextCursor, initialData.articles, query, scope, topic]);
 
   const filtered = useMemo(() => articles, [articles]);
   const isTextSearch = query.trim().length > 0;
@@ -607,7 +611,7 @@ export function HomePage({
           </div>
         ) : null}
       </div>
-      {!isTextSearch ? <SituationBanner situations={situations} /> : null}
+      {!isTextSearch ? <SituationBanner situations={initialData.situations} /> : null}
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>

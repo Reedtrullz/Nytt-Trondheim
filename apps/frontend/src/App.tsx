@@ -1,21 +1,56 @@
-import { type ChangeEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  type ChangeEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import type { BootstrapPayload, SessionPayload } from "@nytt/shared";
 import { ApiError, api } from "./api.js";
 import { headerFreshnessLabel } from "./freshness.js";
 import { buildHomeSearch, parseHomeFilters } from "./homeFilters.js";
 import { AccessPage } from "./pages/AccessPage.js";
-import { AccessRequestsPage } from "./pages/AccessRequestsPage.js";
 import { HomePage } from "./pages/HomePage.js";
-import { CoverageBundlesPage } from "./pages/CoverageBundlesPage.js";
-import { OperationsPage } from "./pages/OperationsPage.js";
-import { OperationsTimelinePage } from "./pages/OperationsTimelinePage.js";
-import { SavedPage } from "./pages/SavedPage.js";
-import { SourceAuditPage } from "./pages/SourceAuditPage.js";
-import { SituationPage } from "./pages/SituationPage.js";
-import { SituationsPage } from "./pages/SituationsPage.js";
-import { TrafficMapPage } from "./pages/TrafficMapPage.js";
-import { WeatherPage } from "./pages/WeatherPage.js";
+
+const AccessRequestsPage = lazy(() =>
+  import("./pages/AccessRequestsPage.js").then((module) => ({
+    default: module.AccessRequestsPage,
+  })),
+);
+const CoverageBundlesPage = lazy(() =>
+  import("./pages/CoverageBundlesPage.js").then((module) => ({
+    default: module.CoverageBundlesPage,
+  })),
+);
+const OperationsPage = lazy(() =>
+  import("./pages/OperationsPage.js").then((module) => ({ default: module.OperationsPage })),
+);
+const OperationsTimelinePage = lazy(() =>
+  import("./pages/OperationsTimelinePage.js").then((module) => ({
+    default: module.OperationsTimelinePage,
+  })),
+);
+const SavedPage = lazy(() =>
+  import("./pages/SavedPage.js").then((module) => ({ default: module.SavedPage })),
+);
+const SourceAuditPage = lazy(() =>
+  import("./pages/SourceAuditPage.js").then((module) => ({ default: module.SourceAuditPage })),
+);
+const SituationPage = lazy(() =>
+  import("./pages/SituationPage.js").then((module) => ({ default: module.SituationPage })),
+);
+const SituationsPage = lazy(() =>
+  import("./pages/SituationsPage.js").then((module) => ({ default: module.SituationsPage })),
+);
+const TrafficMapPage = lazy(() =>
+  import("./pages/TrafficMapPage.js").then((module) => ({ default: module.TrafficMapPage })),
+);
+const WeatherPage = lazy(() =>
+  import("./pages/WeatherPage.js").then((module) => ({ default: module.WeatherPage })),
+);
 
 function Header({
   freshnessLabel,
@@ -162,62 +197,64 @@ function AuthenticatedApp() {
         </main>
       ) : null}
       {!loading && data && session ? (
-        <Routes>
-          <Route path="/" element={<HomePage initialData={data} canSave={isOwner} />} />
-          <Route path="/situasjoner" element={<SituationsPage canSeePrivate={isOwner} />} />
-          <Route path="/situasjoner/:id" element={<SituationPage canManage={isOwner} />} />
-          <Route path="/trafikk" element={<TrafficMapPage />} />
-          <Route path="/vaer" element={<WeatherPage />} />
-          <Route
-            path="/lagret"
-            element={
-              <OwnerOnly isOwner={isOwner}>
-                <SavedPage />
-              </OwnerOnly>
-            }
-          />
-          <Route
-            path="/drift"
-            element={
-              <OwnerOnly isOwner={isOwner}>
-                <OperationsPage />
-              </OwnerOnly>
-            }
-          />
-          <Route
-            path="/drift/tilgang"
-            element={
-              <OwnerOnly isOwner={isOwner}>
-                <AccessRequestsPage />
-              </OwnerOnly>
-            }
-          />
-          <Route
-            path="/drift/dekning"
-            element={
-              <OwnerOnly isOwner={isOwner}>
-                <CoverageBundlesPage />
-              </OwnerOnly>
-            }
-          />
-          <Route
-            path="/drift/kilder"
-            element={
-              <OwnerOnly isOwner={isOwner}>
-                <SourceAuditPage />
-              </OwnerOnly>
-            }
-          />
-          <Route
-            path="/drift/tidslinje"
-            element={
-              <OwnerOnly isOwner={isOwner}>
-                <OperationsTimelinePage />
-              </OwnerOnly>
-            }
-          />
-          <Route path="*" element={<ForbiddenPage />} />
-        </Routes>
+        <Suspense fallback={<main className="loading">Henter siden...</main>}>
+          <Routes>
+            <Route path="/" element={<HomePage initialData={data} canSave={isOwner} />} />
+            <Route path="/situasjoner" element={<SituationsPage canSeePrivate={isOwner} />} />
+            <Route path="/situasjoner/:id" element={<SituationPage canManage={isOwner} />} />
+            <Route path="/trafikk" element={<TrafficMapPage />} />
+            <Route path="/vaer" element={<WeatherPage />} />
+            <Route
+              path="/lagret"
+              element={
+                <OwnerOnly isOwner={isOwner}>
+                  <SavedPage />
+                </OwnerOnly>
+              }
+            />
+            <Route
+              path="/drift"
+              element={
+                <OwnerOnly isOwner={isOwner}>
+                  <OperationsPage />
+                </OwnerOnly>
+              }
+            />
+            <Route
+              path="/drift/tilgang"
+              element={
+                <OwnerOnly isOwner={isOwner}>
+                  <AccessRequestsPage />
+                </OwnerOnly>
+              }
+            />
+            <Route
+              path="/drift/dekning"
+              element={
+                <OwnerOnly isOwner={isOwner}>
+                  <CoverageBundlesPage />
+                </OwnerOnly>
+              }
+            />
+            <Route
+              path="/drift/kilder"
+              element={
+                <OwnerOnly isOwner={isOwner}>
+                  <SourceAuditPage />
+                </OwnerOnly>
+              }
+            />
+            <Route
+              path="/drift/tidslinje"
+              element={
+                <OwnerOnly isOwner={isOwner}>
+                  <OperationsTimelinePage />
+                </OwnerOnly>
+              }
+            />
+            <Route path="*" element={<ForbiddenPage />} />
+          </Routes>
+        </Suspense>
       ) : null}
     </>
   );

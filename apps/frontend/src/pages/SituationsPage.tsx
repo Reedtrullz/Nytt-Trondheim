@@ -1,6 +1,7 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import type { MapFirstSituation, Provenance, SourceConfidenceLevel } from "@nytt/shared";
 import { api } from "../api.js";
 import { MapAccessibility } from "../components/map/MapAccessibility.js";

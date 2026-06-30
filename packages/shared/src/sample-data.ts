@@ -240,7 +240,18 @@ export const sampleSourceHealth: SourceHealth[] = [
 
 export const sampleBootstrap: BootstrapPayload = {
   articles: sampleArticles,
-  situations: [sampleSituation],
+  situations: [
+    {
+      id: sampleSituation.id,
+      title: sampleSituation.title,
+      summary: sampleSituation.summary,
+      status: sampleSituation.status,
+      verificationStatus: sampleSituation.verificationStatus,
+      updatedAt: sampleSituation.updatedAt,
+      createdAt: sampleSituation.createdAt,
+      locationLabel: sampleSituation.locationLabel,
+    },
+  ],
   sourceHealth: sampleSourceHealth,
 };
 

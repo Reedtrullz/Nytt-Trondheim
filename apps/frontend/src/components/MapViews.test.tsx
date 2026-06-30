@@ -64,7 +64,8 @@ vi.mock("react-leaflet", () => ({
   useMapEvents: () => null,
 }));
 
-import { NewsMap, SituationMap } from "./MapViews.js";
+import { NewsMap } from "./NewsMap.js";
+import { SituationMap } from "./MapViews.js";
 
 const article: Article = {
   id: "article-1",

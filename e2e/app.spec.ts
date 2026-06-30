@@ -43,6 +43,32 @@ test("Situation Room explains provenance and keeps private map controls distinct
   ).toBeVisible();
 });
 
+test("frontpage uses bootstrap feed without immediate duplicate refreshes", async ({ page }) => {
+  const duplicateRefreshes: string[] = [];
+  await page.route("**/api/articles?**", async (route) => {
+    duplicateRefreshes.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: sampleBootstrap.articles, nextCursor: undefined }),
+    });
+  });
+  await page.route("**/api/situations?**", async (route) => {
+    duplicateRefreshes.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+  await expect(page.getByText("Oppdaterer saker...")).toHaveCount(0);
+  expect(duplicateRefreshes).toEqual([]);
+});
+
 test("situation overview keeps the selected map case actionable", async ({ page }) => {
   await page.goto("/situasjoner");
 

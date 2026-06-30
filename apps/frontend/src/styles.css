@@ -818,6 +818,31 @@ button {
   border: 1px solid var(--line);
 }
 
+.nearby-map-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.nearby-map-loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.55) 45%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: nearby-map-loading 1.4s ease-in-out infinite;
+}
+
+@keyframes nearby-map-loading {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .leaflet-control-attribution a {
   color: #154e76;
   text-decoration: underline;

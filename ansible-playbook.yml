@@ -353,6 +353,7 @@
             marker: "# {mark} ANSIBLE MANAGED - Nytt Trondheim"
             block: |
               nytt.reidar.tech {
+                encode zstd gzip
                 reverse_proxy 127.0.0.1:{{ app_port }}
               }
 

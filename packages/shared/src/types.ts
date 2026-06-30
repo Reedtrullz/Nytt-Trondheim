@@ -753,6 +753,18 @@ export interface Situation {
   saved?: boolean;
 }
 
+export type HomeSituationSummary = Pick<
+  Situation,
+  | "id"
+  | "title"
+  | "summary"
+  | "status"
+  | "verificationStatus"
+  | "updatedAt"
+  | "createdAt"
+  | "locationLabel"
+>;
+
 export interface MapViewport {
   north: number;
   south: number;
@@ -923,7 +935,8 @@ export interface SituationWorkspace {
 
 export interface BootstrapPayload {
   articles: Article[];
-  situations: Situation[];
+  articleNextCursor?: string;
+  situations: HomeSituationSummary[];
   sourceHealth: SourceHealth[];
 }
 

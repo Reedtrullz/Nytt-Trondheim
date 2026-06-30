@@ -1,24 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GeoJsonObject } from "geojson";
-import L, { type LatLngTuple } from "leaflet";
+import type { LatLngTuple } from "leaflet";
 import {
   CircleMarker,
   GeoJSON,
   MapContainer,
-  Marker,
   Popup,
   TileLayer,
   WMSTileLayer,
   useMap,
   useMapEvents,
 } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import {
   provenanceLabels,
   type MapFeature,
   type PrivateMapFeatureInput,
   type Situation,
 } from "@nytt/shared";
-import type { NearbyStoryItem } from "../homeNearby.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import {
   boundsFromLatLngs,
@@ -66,49 +65,6 @@ function FitMapToPositions({ positions }: { positions: Array<[number, number]> }
   }, [bounds, focusKey, map]);
 
   return null;
-}
-
-export function NewsMap({
-  items,
-  selectedId,
-  onSelect,
-}: {
-  items: NearbyStoryItem[];
-  selectedId?: string;
-  onSelect?: (id: string) => void;
-}) {
-  const selected = items.find((item) => item.id === selectedId);
-  const activeId = selected?.id ?? items[0]?.id;
-  const center: LatLngTuple = selected?.position ?? items[0]?.position ?? [63.421, 10.395];
-  return (
-    <MapContainer
-      id="map"
-      center={center}
-      zoom={12}
-      className="nearby-map"
-      zoomControl={false}
-      scrollWheelZoom={false}
-    >
-      <TileLayer url={tiles} attribution="© Kartverket" />
-      <MapAccessibility label="Kart over nærliggende nyhetssaker" />
-      <FitMapToPositions positions={items.map(({ position }) => position)} />
-      {items.map((item) => (
-        <Marker
-          key={item.id}
-          position={item.position}
-          title={`${item.markerLabel}. ${item.title} (${item.locationLabel})`}
-          eventHandlers={{ click: () => onSelect?.(item.id) }}
-          icon={L.divIcon({
-            className: `story-marker story-marker-${item.kind}${
-              activeId === item.id ? " story-marker-selected" : ""
-            }`,
-            html: `<span>${item.markerLabel}</span>`,
-            iconSize: [30, 30],
-          })}
-        />
-      ))}
-    </MapContainer>
-  );
 }
 
 type DrawingMode = MapToolPreset["geometryMode"] | null;
