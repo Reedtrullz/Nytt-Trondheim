@@ -29,6 +29,7 @@ import type {
   SourceItemFilters,
   SourceItemPage,
   SourceItemRelationship,
+  UserGrantInput,
   UserPage,
   UserUpdateInput,
   WorkspaceNote,
@@ -154,6 +155,11 @@ export const api = {
       body: JSON.stringify(input),
     }),
   users: () => request<UserPage>("/api/users"),
+  grantUserAccess: (input: UserGrantInput) =>
+    request<AppUser>("/api/users", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   updateUser: (id: string, input: UserUpdateInput) =>
     request<AppUser>(`/api/users/${encodeURIComponent(id)}`, {
       method: "PATCH",

@@ -1182,6 +1182,72 @@ button {
   font-size: 13px;
 }
 
+.inline-success {
+  margin: 0 0 18px;
+  padding: 11px 14px;
+  color: var(--green);
+  border: 1px solid #c9dfd2;
+  background: var(--green-soft);
+  font-size: 13px;
+}
+
+.direct-access-grant {
+  margin: 0 0 20px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.direct-access-grant header {
+  margin-bottom: 14px;
+}
+
+.direct-access-grant h2 {
+  margin: 2px 0 0;
+  font: 28px/1.08 var(--serif);
+}
+
+.direct-access-grant form {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.direct-access-grant label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.direct-access-grant input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.direct-access-grant button {
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid var(--blue);
+  color: #fff;
+  background: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.direct-access-grant button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
 .access-request-list {
   display: grid;
   gap: 14px;
@@ -5757,6 +5823,7 @@ button {
   }
 
   .access-options,
+  .direct-access-grant form,
   .user-admin-row {
     grid-template-columns: 1fr;
   }

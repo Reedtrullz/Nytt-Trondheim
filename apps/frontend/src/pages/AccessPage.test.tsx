@@ -43,6 +43,8 @@ describe("AccessRequestsDashboard", () => {
     );
 
     expect(html).toContain("Tilgangsforespørsler");
+    expect(html).toContain("Gi tilgang uten forespørsel");
+    expect(html).toContain("Gi tilgang");
     expect(html).toContain("Ine Test");
     expect(html).toContain("ine@example.test");
     expect(html).toContain("Vil følge Trondheim-beredskap.");

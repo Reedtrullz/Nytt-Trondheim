@@ -1073,6 +1073,11 @@ export interface UserPage {
   };
 }
 
+export interface UserGrantInput {
+  displayName: string;
+  email: string;
+}
+
 export interface UserUpdateInput {
   status?: UserStatus;
   resendInvite?: boolean;

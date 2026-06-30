@@ -56,6 +56,7 @@ import type {
   SourceHealth,
   SourceId,
   UserUpdateInput,
+  UserGrantInput,
   UserPage,
   TimelineEntry,
   TrafficCounterSnapshot,
@@ -189,6 +190,7 @@ export interface Store {
   requestEmailLogin(email: string): Promise<EmailLoginRequestResult>;
   consumeEmailLoginToken(token: string): Promise<AuthUser | undefined>;
   listUsers(login: string): Promise<UserPage>;
+  grantUserAccess(input: UserGrantInput, login: string): Promise<UserGrantResult>;
   updateUser(id: string, input: UserUpdateInput, login: string): Promise<UserUpdateResult>;
   ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false>;
   getBootstrap(login: string): Promise<BootstrapPayload>;
@@ -351,6 +353,11 @@ export interface EmailLoginRequestResult extends AccessRequestSubmissionResponse
 export interface AccessRequestDecisionResult {
   request: AccessRequest;
   invite?: TokenDelivery;
+}
+
+export interface UserGrantResult {
+  user: AppUser;
+  invite: TokenDelivery;
 }
 
 export interface UserUpdateResult {
@@ -2123,11 +2130,11 @@ export class MemoryStore implements Store {
     }
   }
 
-  private createOrReactivateViewer(request: AccessRequest): AppUser {
+  private createOrReactivateViewer(input: UserGrantInput): AppUser {
     const now = new Date().toISOString();
-    const existing = this.findUserByEmail(request.email);
+    const existing = this.findUserByEmail(input.email);
     if (existing) {
-      existing.displayName = request.displayName;
+      existing.displayName = input.displayName;
       existing.role = "viewer";
       existing.status = "active";
       existing.updatedAt = now;
@@ -2136,8 +2143,8 @@ export class MemoryStore implements Store {
     }
     const user: AppUser = {
       id: randomUUID(),
-      displayName: request.displayName,
-      email: request.email,
+      displayName: input.displayName,
+      email: input.email,
       role: "viewer",
       status: "active",
       createdAt: now,
@@ -2262,6 +2269,19 @@ export class MemoryStore implements Store {
     return {
       request: clone(request),
       invite: { email: request.email, displayName: request.displayName, token },
+    };
+  }
+
+  async grantUserAccess(input: UserGrantInput, login: string): Promise<UserGrantResult> {
+    const user = this.createOrReactivateViewer(input);
+    const token = this.issueMemoryToken("invite", inviteTtlMs, {
+      userId: user.id,
+      email: user.email,
+      createdBy: login,
+    });
+    return {
+      user: clone(user),
+      invite: { email: user.email ?? input.email, displayName: user.displayName, token },
     };
   }
 
@@ -2929,6 +2949,35 @@ export class PgStore implements Store {
     return result.rows[0] ? appUserFromRow(result.rows[0]) : undefined;
   }
 
+  private async createOrReactivatePgViewer(
+    client: Pick<pg.Pool, "query"> | pg.PoolClient,
+    input: UserGrantInput,
+  ): Promise<AppUser> {
+    const userResult = await client.query<UserRow>(
+      `INSERT INTO users (id, email, email_normalized, display_name, role, status)
+       VALUES ($1,$2,$3,$4,'viewer','active')
+       ON CONFLICT (email_normalized) WHERE email_normalized IS NOT NULL DO UPDATE SET
+         display_name = EXCLUDED.display_name,
+         role = 'viewer',
+         status = 'active',
+         updated_at = now()
+       RETURNING id, display_name AS "displayName", email, role, status,
+                 created_at AS "createdAt", updated_at AS "updatedAt",
+                 last_login_at AS "lastLoginAt"`,
+      [randomUUID(), input.email, normalizeAccessRequestEmail(input.email), input.displayName],
+    );
+    const user = appUserFromRow(userResult.rows[0]!);
+    await client.query(
+      `INSERT INTO user_identities (id, user_id, provider, provider_subject)
+       VALUES ($1,$2,'email',$3)
+       ON CONFLICT (provider, provider_subject) DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         updated_at = now()`,
+      [randomUUID(), user.id, normalizeAccessRequestEmail(input.email)],
+    );
+    return user;
+  }
+
   async createAccessRequest(input: AccessRequestInput): Promise<AccessRequestSubmissionResult> {
     const result = await this.pool.query<AccessRequestRow>(
       `INSERT INTO access_requests (id, email, email_normalized, display_name, message, status)
@@ -3138,33 +3187,7 @@ export class PgStore implements Store {
         await client.query("COMMIT");
         return { request };
       }
-      const userResult = await client.query<UserRow>(
-        `INSERT INTO users (id, email, email_normalized, display_name, role, status)
-         VALUES ($1,$2,$3,$4,'viewer','active')
-         ON CONFLICT (email_normalized) WHERE email_normalized IS NOT NULL DO UPDATE SET
-           display_name = EXCLUDED.display_name,
-           role = 'viewer',
-           status = 'active',
-           updated_at = now()
-         RETURNING id, display_name AS "displayName", email, role, status,
-                   created_at AS "createdAt", updated_at AS "updatedAt",
-                   last_login_at AS "lastLoginAt"`,
-        [
-          randomUUID(),
-          request.email,
-          normalizeAccessRequestEmail(request.email),
-          request.displayName,
-        ],
-      );
-      const user = appUserFromRow(userResult.rows[0]!);
-      await client.query(
-        `INSERT INTO user_identities (id, user_id, provider, provider_subject)
-         VALUES ($1,$2,'email',$3)
-         ON CONFLICT (provider, provider_subject) DO UPDATE SET
-           user_id = EXCLUDED.user_id,
-           updated_at = now()`,
-        [randomUUID(), user.id, normalizeAccessRequestEmail(request.email)],
-      );
+      const user = await this.createOrReactivatePgViewer(client, request);
       const token = await this.issuePgAuthToken(client, "invite", inviteTtlMs, {
         userId: user.id,
         email: request.email,
@@ -3174,6 +3197,33 @@ export class PgStore implements Store {
       return {
         request,
         invite: { email: request.email, displayName: request.displayName, token },
+      };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Preserve the original failure.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async grantUserAccess(input: UserGrantInput, login: string): Promise<UserGrantResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const user = await this.createOrReactivatePgViewer(client, input);
+      const token = await this.issuePgAuthToken(client, "invite", inviteTtlMs, {
+        userId: user.id,
+        email: input.email,
+        createdBy: login,
+      });
+      await client.query("COMMIT");
+      return {
+        user,
+        invite: { email: input.email, displayName: input.displayName, token },
       };
     } catch (error) {
       try {

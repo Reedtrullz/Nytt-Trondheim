@@ -396,6 +396,38 @@ describe("private situation API", () => {
       .expect(403);
   });
 
+  it("lets the owner grant viewer access without a prior request", async () => {
+    const { app, store, sentEmails } = await testAppWithEmail();
+    const owner = request.agent(app);
+    const ownerSession = await owner.get("/api/session").expect(200);
+
+    const response = await owner
+      .post("/api/users")
+      .set("X-CSRF-Token", ownerSession.body.csrfToken as string)
+      .send({ displayName: "Direkte Leser", email: "direct@example.test" })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      displayName: "Direkte Leser",
+      email: "direct@example.test",
+      role: "viewer",
+      status: "active",
+    });
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0]!.subject).toContain("tilgang");
+    const accessRequests = await store.listAccessRequests({ limit: 10 }, "owner");
+    expect(accessRequests.summary.total).toBe(0);
+
+    const login = await store.consumeEmailLoginToken(
+      tokenFromEmail(sentEmails[0]!, "/auth/email/callback"),
+    );
+    expect(login).toMatchObject({
+      email: "direct@example.test",
+      role: "viewer",
+      status: "active",
+    });
+  });
+
   it("sends generic email-login responses and refuses revoked viewers", async () => {
     const { app, store, sentEmails } = await testAppWithEmail(false);
     const requestResult = await store.createAccessRequest({

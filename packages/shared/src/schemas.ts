@@ -173,6 +173,15 @@ export const accessRequestDecisionSchema = z
 
 export type AccessRequestDecisionPayload = z.infer<typeof accessRequestDecisionSchema>;
 
+export const userGrantSchema = z
+  .object({
+    displayName: z.string().trim().min(2).max(120),
+    email: z.string().trim().email().max(254).toLowerCase(),
+  })
+  .strict();
+
+export type UserGrantPayload = z.infer<typeof userGrantSchema>;
+
 export const userUpdateSchema = z
   .object({
     status: z.enum(["active", "revoked"]).optional(),

@@ -29,6 +29,7 @@ import {
   taskInputSchema,
   trafficMapQuerySchema,
   travelPlanQuerySchema,
+  userGrantSchema,
   userUpdateSchema,
   workspaceMapQuerySchema,
   type MapFeature,
@@ -955,6 +956,18 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/users", requireOwner, async (req, res, next) => {
     try {
       res.json(await store.listUsers(currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/users", requireOwner, async (req, res, next) => {
+    try {
+      const input = userGrantSchema.parse(req.body);
+      const result = await store.grantUserAccess(input, currentLogin(req));
+      const message = emailLoginMessage(config, { ...result.invite, invite: true });
+      await emailSender.send({ to: result.invite.email, ...message });
+      res.status(201).json(result.user);
     } catch (error) {
       next(error);
     }

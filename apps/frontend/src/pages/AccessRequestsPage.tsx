@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import type {
   AccessRequest,
   AccessRequestDecisionInput,
   AccessRequestPage as AccessRequestPagePayload,
   AccessRequestStatus,
   AppUser,
+  UserGrantInput,
   UserPage,
   UserUpdateInput,
 } from "@nytt/shared";
@@ -61,21 +62,79 @@ function ActionButton({
   );
 }
 
+function DirectGrantForm({
+  busy,
+  onGrantAccess,
+}: {
+  busy?: boolean;
+  onGrantAccess?: (input: UserGrantInput) => void;
+}) {
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const input = { displayName: displayName.trim(), email: email.trim().toLowerCase() };
+    if (!input.displayName || !input.email || !onGrantAccess) return;
+    onGrantAccess(input);
+  }
+
+  return (
+    <section className="direct-access-grant" aria-labelledby="direct-access-grant-heading">
+      <header>
+        <div>
+          <p className="label">Direkte tilgang</p>
+          <h2 id="direct-access-grant-heading">Gi tilgang uten forespørsel</h2>
+        </div>
+      </header>
+      <form onSubmit={submit}>
+        <label>
+          <span>Navn</span>
+          <input
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            minLength={2}
+            maxLength={120}
+            required
+          />
+        </label>
+        <label>
+          <span>E-post</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            maxLength={254}
+            required
+          />
+        </label>
+        <button type="submit" disabled={busy || !onGrantAccess}>
+          Gi tilgang
+        </button>
+      </form>
+    </section>
+  );
+}
+
 export function AccessRequestsDashboard({
   page,
   users,
   status = "all",
   busyId,
+  successMessage,
   onFilter,
   onDecision,
+  onGrantAccess,
   onUserUpdate,
 }: {
   page: AccessRequestPagePayload;
   users?: UserPage;
   status?: AccessRequestStatus | "all";
   busyId?: string;
+  successMessage?: string;
   onFilter?: (status: AccessRequestStatus | "all") => void;
   onDecision?: (id: string, input: AccessRequestDecisionInput) => void;
+  onGrantAccess?: (input: UserGrantInput) => void;
   onUserUpdate?: (id: string, input: UserUpdateInput) => void;
 }) {
   return (
@@ -88,6 +147,11 @@ export function AccessRequestsDashboard({
           e-postbekreftelse.
         </p>
       </header>
+      {successMessage ? (
+        <div className="inline-success" role="status">
+          {successMessage}
+        </div>
+      ) : null}
       <section className="access-request-summary" aria-label="Tilgangsoppsummering">
         <article>
           <strong>{page.summary.unverified}</strong>
@@ -121,6 +185,7 @@ export function AccessRequestsDashboard({
           ))}
         </div>
       ) : null}
+      <DirectGrantForm busy={busyId === "grant-access"} onGrantAccess={onGrantAccess} />
       <section className="access-request-list" aria-label="Forespørsler">
         {page.items.length === 0 ? (
           <p className="empty-panel">Ingen tilgangsforespørsler matcher filteret.</p>
@@ -244,6 +309,7 @@ export function AccessRequestsPage() {
   const [status, setStatus] = useState<AccessRequestStatus | "all">("pending");
   const [busyId, setBusyId] = useState<string>();
   const [error, setError] = useState<string>();
+  const [successMessage, setSuccessMessage] = useState<string>();
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -274,6 +340,7 @@ export function AccessRequestsPage() {
   async function decide(id: string, input: AccessRequestDecisionInput) {
     setBusyId(id);
     setError(undefined);
+    setSuccessMessage(undefined);
     try {
       await api.decideAccessRequest(id, input);
       setAttempt((value) => value + 1);
@@ -284,9 +351,25 @@ export function AccessRequestsPage() {
     }
   }
 
+  async function grantUserAccess(input: UserGrantInput) {
+    setBusyId("grant-access");
+    setError(undefined);
+    setSuccessMessage(undefined);
+    try {
+      const user = await api.grantUserAccess(input);
+      setSuccessMessage(`Tilgang er åpnet for ${user.email ?? user.displayName}.`);
+      setAttempt((value) => value + 1);
+    } catch (reason) {
+      setError(errorMessage(reason, "Kunne ikke gi tilgang."));
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
   async function updateUser(id: string, input: UserUpdateInput) {
     setBusyId(id);
     setError(undefined);
+    setSuccessMessage(undefined);
     try {
       await api.updateUser(id, input);
       setAttempt((value) => value + 1);
@@ -317,8 +400,10 @@ export function AccessRequestsPage() {
         users={users}
         status={status}
         busyId={busyId}
+        successMessage={successMessage}
         onFilter={setStatus}
         onDecision={(id, input) => void decide(id, input)}
+        onGrantAccess={(input) => void grantUserAccess(input)}
         onUserUpdate={(id, input) => void updateUser(id, input)}
       />
     </>

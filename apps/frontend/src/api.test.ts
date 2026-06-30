@@ -264,6 +264,34 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("grants users through the owner API helper", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(okResponse({ id: "viewer-one", status: "active" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.grantUserAccess({
+      displayName: "Ine Viewer",
+      email: "ine@example.test",
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/users",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify({
+          displayName: "Ine Viewer",
+          email: "ine@example.test",
+        }),
+      }),
+    );
+  });
+
   it("encodes reserved characters in situation source item paths", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse([]));
     vi.stubGlobal("fetch", fetchMock);
