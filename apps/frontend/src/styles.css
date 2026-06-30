@@ -843,7 +843,7 @@ button {
   }
 }
 
-.leaflet-control-attribution a {
+.leaflet-container .leaflet-control-attribution a {
   color: #154e76;
   text-decoration: underline;
   text-underline-offset: 1px;

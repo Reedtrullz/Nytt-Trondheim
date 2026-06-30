@@ -140,6 +140,15 @@ function OwnerOnly({ isOwner, children }: { isOwner: boolean; children: ReactNod
   return <>{children}</>;
 }
 
+function LoadingPage({ message }: { message: string }) {
+  return (
+    <main className="loading">
+      <h1>Nytt Trondheim</h1>
+      <p>{message}</p>
+    </main>
+  );
+}
+
 function AuthenticatedApp() {
   const [data, setData] = useState<BootstrapPayload>();
   const [session, setSession] = useState<SessionPayload>();
@@ -187,7 +196,7 @@ function AuthenticatedApp() {
   return (
     <>
       {session ? <Header freshnessLabel={freshnessLabel} user={session.user} /> : null}
-      {loading ? <main className="loading">Henter siste nytt...</main> : null}
+      {loading ? <LoadingPage message="Henter siste nytt..." /> : null}
       {!loading && error ? (
         <main className="fatal-error" role="alert">
           <p>{error}</p>
@@ -197,7 +206,7 @@ function AuthenticatedApp() {
         </main>
       ) : null}
       {!loading && data && session ? (
-        <Suspense fallback={<main className="loading">Henter siden...</main>}>
+        <Suspense fallback={<LoadingPage message="Henter siden..." />}>
           <Routes>
             <Route path="/" element={<HomePage initialData={data} canSave={isOwner} />} />
             <Route path="/situasjoner" element={<SituationsPage canSeePrivate={isOwner} />} />
