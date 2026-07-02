@@ -2,11 +2,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import type {
+  AiProcessingRun,
   Article,
   ArticleCoverageAnalysis,
   OfficialEvent,
   PublicTransportServiceAlert,
   SourceCollectorRun,
+  SourceHealth,
   SourceItemInput,
   TrafficCounterSnapshot,
   WorkerCycleMetrics,
@@ -21,6 +23,7 @@ import {
   rssSources,
 } from "./collectors.js";
 import { applySituationUpdateHints, createAnalyzer, enhanceSituations } from "./ai.js";
+import type { DeepSeekAnalysisResult } from "./ai.js";
 import {
   collectDatexTravelTimePulse,
   defaultDatexTravelTimeDataEndpoint,
@@ -199,6 +202,81 @@ export function collectorRunFromMetric(metric: WorkerSourceMetricInput): SourceC
 
 export function shouldResolveMissingDatexSituations(freshSnapshot: boolean): boolean {
   return freshSnapshot;
+}
+
+const softDeepSeekOutputFailureMarkers = [
+  "truncated by token limit",
+  "returned empty json content",
+  "returned no json object",
+  "syntaxerror",
+  "unexpected end of json input",
+  "unexpected token",
+  "invalid_enum_value",
+  "invalid_type",
+  "invalid_literal",
+  "invalid_union",
+  "unrecognized_keys",
+  "too_small",
+  "too_big",
+];
+
+export function isSoftDeepSeekOutputFailure(error: string | undefined): boolean {
+  const normalized = error?.toLocaleLowerCase("en") ?? "";
+  return softDeepSeekOutputFailureMarkers.some((marker) => normalized.includes(marker));
+}
+
+function deepSeekOkHealthDetail(result: DeepSeekAnalysisResult): string {
+  return [
+    `${result.clusters.length} validerte kandidatgrupper`,
+    `${result.situationUpdates.length} mulige situasjonsoppdateringer`,
+    `${result.bundleHints.length} bunthint`,
+    `${result.categoryHints.length} kategorihint`,
+    `${result.relevanceHints.length} relevanshint`,
+  ].join(", ");
+}
+
+export function sourceHealthFromDeepSeekAnalysis(
+  analysis: { result: DeepSeekAnalysisResult; run: AiProcessingRun },
+  nextPollAt: string,
+): SourceHealth {
+  if (analysis.run.status === "ok") {
+    return {
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "ok",
+      lastCheckedAt: analysis.run.completedAt,
+      nextPollAt,
+      detail: deepSeekOkHealthDetail(analysis.result),
+    };
+  }
+  if (analysis.run.status === "disabled") {
+    return {
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "disabled",
+      lastCheckedAt: analysis.run.completedAt,
+      nextPollAt,
+      detail: "DEEPSEEK_API_KEY er ikke konfigurert",
+    };
+  }
+
+  const softOutputFailure = isSoftDeepSeekOutputFailure(analysis.run.error);
+  return {
+    source: "deepseek",
+    label: "AI-analyse",
+    state: softOutputFailure ? "ok" : "degraded",
+    lastCheckedAt: analysis.run.completedAt,
+    ...(softOutputFailure ? {} : { lastFailureAt: analysis.run.completedAt }),
+    nextPollAt,
+    detail: [
+      softOutputFailure
+        ? "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering brukes fortsatt."
+        : "AI-analyse feilet, men deterministisk gruppering brukes fortsatt.",
+      analysis.run.error,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
 }
 
 export function createCollectionGuard(
@@ -1157,31 +1235,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const trackedSituations = await repository.trackedSituations();
   const analysis = await analyzer.cluster(recentArticles, { situations: trackedSituations });
   await repository.saveAiRun(analysis.run);
-  await repository.setHealth({
-    source: "deepseek",
-    label: "AI-analyse",
-    state: analysis.run.status === "disabled" ? "disabled" : analysis.run.status,
-    lastCheckedAt: analysis.run.completedAt,
-    lastFailureAt: analysis.run.status === "degraded" ? analysis.run.completedAt : undefined,
-    nextPollAt,
-    detail:
-      analysis.run.status === "ok"
-        ? [
-            `${analysis.result.clusters.length} validerte kandidatgrupper`,
-            `${analysis.result.situationUpdates.length} mulige situasjonsoppdateringer`,
-            `${analysis.result.bundleHints.length} bunthint`,
-            `${analysis.result.categoryHints.length} kategorihint`,
-            `${analysis.result.relevanceHints.length} relevanshint`,
-          ].join(", ")
-        : analysis.run.status === "disabled"
-          ? "DEEPSEEK_API_KEY er ikke konfigurert"
-          : [
-              "AI-analyse feilet, men deterministisk gruppering brukes fortsatt.",
-              analysis.run.error,
-            ]
-              .filter(Boolean)
-              .join(" "),
-  });
+  await repository.setHealth(sourceHealthFromDeepSeekAnalysis(analysis, nextPollAt));
   const aiSituationUpdates = applySituationUpdateHints(
     trackedSituations,
     analysis.result,

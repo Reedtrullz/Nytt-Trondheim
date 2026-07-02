@@ -118,6 +118,42 @@ describe("AI citation validation", () => {
     expect(outcome.run.status).toBe("ok");
   });
 
+  it("treats blank optional category topics as omitted", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content: JSON.stringify({
+              clusters: [],
+              categoryHints: [
+                {
+                  articleId: "one",
+                  category: "Sport",
+                  topic: "",
+                  reason: "Artikkelen omtaler Rosenborg.",
+                  supportingSnippet: "Røyk er observert",
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    });
+    const analyzer = new DeepSeekAnalyzer("test-key", "test-model");
+    Object.assign(analyzer, { client: { chat: { completions: { create } } } });
+
+    const outcome = await analyzer.cluster(articles);
+
+    expect(outcome.run.status).toBe("ok");
+    expect(outcome.result.categoryHints).toHaveLength(1);
+    expect(outcome.result.categoryHints[0]).toMatchObject({
+      articleId: "one",
+      category: "Sport",
+    });
+    expect(outcome.result.categoryHints[0]?.topic).toBeUndefined();
+  });
+
   it("sends only open situation summaries as DeepSeek context", async () => {
     const create = vi
       .fn()

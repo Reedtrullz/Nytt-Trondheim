@@ -21,6 +21,7 @@ import {
   collectorRunFromMetric,
   normalizeDatexSituationEndpoint,
   prepareArticleCoverageAnalysis,
+  sourceHealthFromDeepSeekAnalysis,
   shouldResolveMissingDatexSituations,
 } from "../src/index.js";
 import { normalizeDatexCredentialedEndpoint } from "../src/datex.js";
@@ -241,6 +242,80 @@ describe("worker lifecycle helpers", () => {
       recordsSeen: 0,
       recordsAccepted: 0,
       recordsRejected: 0,
+    });
+  });
+
+  it("keeps DeepSeek output-format failures observable without source outage alerts", () => {
+    const completedAt = "2026-07-02T09:39:35.717Z";
+    const health = sourceHealthFromDeepSeekAnalysis(
+      {
+        result: {
+          clusters: [],
+          situationUpdates: [],
+          bundleHints: [],
+          categoryHints: [],
+          relevanceHints: [],
+          operationsNotes: [],
+        },
+        run: {
+          id: "ai-run-one",
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          status: "degraded",
+          startedAt: "2026-07-02T09:39:10.000Z",
+          completedAt,
+          articleIds: [],
+          result: {},
+          error: "Error: DeepSeek JSON response was truncated by token limit.",
+        },
+      },
+      "2026-07-02T09:50:00.000Z",
+    );
+
+    expect(health).toMatchObject({
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "ok",
+      lastCheckedAt: completedAt,
+      nextPollAt: "2026-07-02T09:50:00.000Z",
+    });
+    expect(health.lastFailureAt).toBeUndefined();
+    expect(health.detail).toContain("deterministisk gruppering brukes fortsatt");
+  });
+
+  it("keeps hard DeepSeek provider failures degraded", () => {
+    const completedAt = "2026-07-02T09:39:35.717Z";
+    const health = sourceHealthFromDeepSeekAnalysis(
+      {
+        result: {
+          clusters: [],
+          situationUpdates: [],
+          bundleHints: [],
+          categoryHints: [],
+          relevanceHints: [],
+          operationsNotes: [],
+        },
+        run: {
+          id: "ai-run-two",
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          status: "degraded",
+          startedAt: "2026-07-02T09:39:10.000Z",
+          completedAt,
+          articleIds: [],
+          result: {},
+          error: "Error: 401 Unauthorized",
+        },
+      },
+      "2026-07-02T09:50:00.000Z",
+    );
+
+    expect(health).toMatchObject({
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "degraded",
+      lastCheckedAt: completedAt,
+      lastFailureAt: completedAt,
     });
   });
 

@@ -9,6 +9,15 @@ const citedClaimSchema = z.object({
   supportingSnippet: z.string(),
 });
 
+const optionalCategoryTopicSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const normalized = value.trim().toLowerCase();
+    return normalized ? normalized : undefined;
+  },
+  z.enum(["rosenborg"]).optional(),
+);
+
 const resultSchema = z.object({
   clusters: z.array(
     z.object({
@@ -65,7 +74,7 @@ const resultSchema = z.object({
           "Politikk",
           "Vær",
         ]),
-        topic: z.enum(["rosenborg"]).optional(),
+        topic: optionalCategoryTopicSchema,
         reason: z.string(),
         supportingSnippet: z.string(),
       }),
