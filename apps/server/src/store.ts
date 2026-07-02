@@ -33,6 +33,12 @@ import type {
   OperationsTimelineResponse,
   OperationsStatus,
   PrivateAnnotationUpdateRequest,
+  PushDeliveryListItem,
+  PushDeliveryPage,
+  PushDeliveryStatus,
+  PushNotificationSettings,
+  PushSubscriptionInput,
+  PushSubscriptionSummary,
   Provenance,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
@@ -220,6 +226,13 @@ export interface Store {
     filters: NotificationTriggerQueryInput,
     login: string,
   ): Promise<NotificationTriggerPage>;
+  getPushSettings(userId: string, publicKey?: string): Promise<PushNotificationSettings>;
+  upsertPushSubscription(
+    userId: string,
+    input: PushSubscriptionInput,
+  ): Promise<PushSubscriptionSummary>;
+  deletePushSubscription(userId: string, id: string): Promise<void>;
+  listPushDeliveries(limit: number, login: string): Promise<PushDeliveryPage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   getRawSourceItem(id: string, login: string): Promise<RawInspectorSourceItemDetail | undefined>;
   listRawAiRuns(filters: RawInspectorAiRunFilters, login: string): Promise<RawInspectorAiRunPage>;
@@ -401,6 +414,20 @@ function hashAuthToken(token: string): string {
   return sha256(token);
 }
 
+function pushEndpointHash(endpoint: string): string {
+  return sha256(endpoint.trim());
+}
+
+function summarizePushDeliveries(items: PushDeliveryListItem[]): PushDeliveryPage["summary"] {
+  return {
+    total: items.length,
+    sent: items.filter((item) => item.status === "sent").length,
+    failed: items.filter((item) => item.status === "failed").length,
+    claimed: items.filter((item) => item.status === "claimed").length,
+    skipped: items.filter((item) => item.status === "skipped").length,
+  };
+}
+
 function expiresAt(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
 }
@@ -453,6 +480,44 @@ type MemoryAuthToken = {
   createdBy?: string;
 };
 
+type MemoryPushSubscription = PushSubscriptionSummary & {
+  userId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+};
+
+type PushSubscriptionRow = {
+  id: string;
+  endpointHash: string;
+  enabled: boolean;
+  minSeverity: PushSubscriptionSummary["minSeverity"];
+  kinds: PushSubscriptionSummary["kinds"];
+  userAgent?: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  lastSeenAt: Date | string;
+  lastSuccessAt?: Date | string | null;
+  lastFailureAt?: Date | string | null;
+  failureCount: number;
+};
+
+type PushDeliveryRow = {
+  id: string;
+  triggerId: string;
+  subscriptionId: string;
+  userId: string;
+  status: PushDeliveryStatus;
+  kind: PushDeliveryListItem["kind"];
+  severity: PushDeliveryListItem["severity"];
+  title: string;
+  body: string;
+  targetUrl?: string | null;
+  errorMessage?: string | null;
+  createdAt: Date | string;
+  sentAt?: Date | string | null;
+};
+
 function isoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
@@ -493,6 +558,41 @@ function appUserFromRow(row: UserRow): AppUser {
     updatedAt: isoString(row.updatedAt),
     ...(row.email ? { email: row.email } : {}),
     ...(row.lastLoginAt ? { lastLoginAt: isoString(row.lastLoginAt) } : {}),
+  };
+}
+
+function pushSubscriptionFromRow(row: PushSubscriptionRow): PushSubscriptionSummary {
+  return {
+    id: row.id,
+    endpointHash: row.endpointHash,
+    enabled: row.enabled,
+    minSeverity: row.minSeverity,
+    kinds: row.kinds ?? [],
+    ...(row.userAgent ? { userAgent: row.userAgent } : {}),
+    createdAt: isoString(row.createdAt),
+    updatedAt: isoString(row.updatedAt),
+    lastSeenAt: isoString(row.lastSeenAt),
+    ...(row.lastSuccessAt ? { lastSuccessAt: isoString(row.lastSuccessAt) } : {}),
+    ...(row.lastFailureAt ? { lastFailureAt: isoString(row.lastFailureAt) } : {}),
+    failureCount: Number(row.failureCount),
+  };
+}
+
+function pushDeliveryFromRow(row: PushDeliveryRow): PushDeliveryListItem {
+  return {
+    id: row.id,
+    triggerId: row.triggerId,
+    subscriptionId: row.subscriptionId,
+    userId: row.userId,
+    status: row.status,
+    kind: row.kind,
+    severity: row.severity,
+    title: row.title,
+    body: row.body,
+    ...(row.targetUrl ? { targetUrl: row.targetUrl } : {}),
+    ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+    createdAt: isoString(row.createdAt),
+    ...(row.sentAt ? { sentAt: isoString(row.sentAt) } : {}),
   };
 }
 
@@ -2258,6 +2358,8 @@ export class MemoryStore implements Store {
   private users: AppUser[] = [];
   private userIdentities: MemoryUserIdentity[] = [];
   private authTokens: MemoryAuthToken[] = [];
+  private pushSubscriptions: MemoryPushSubscription[] = [];
+  private pushDeliveries: PushDeliveryListItem[] = [];
   private savedSituations = new Set<string>();
   private sourceItems = new Map<string, SourceItemRecord>(
     sampleArticles.map((article) => {
@@ -2720,6 +2822,83 @@ export class MemoryStore implements Store {
       generatedAt: new Date().toISOString(),
       filters,
     });
+  }
+
+  async getPushSettings(userId: string, publicKey?: string): Promise<PushNotificationSettings> {
+    return {
+      configured: Boolean(publicKey),
+      ...(publicKey ? { publicKey } : {}),
+      subscriptions: clone(
+        this.pushSubscriptions
+          .filter((subscription) => subscription.userId === userId)
+          .map((subscription) => pushSubscriptionFromRow(subscription)),
+      ),
+    };
+  }
+
+  async upsertPushSubscription(
+    userId: string,
+    input: PushSubscriptionInput,
+  ): Promise<PushSubscriptionSummary> {
+    const now = new Date().toISOString();
+    const endpointHash = pushEndpointHash(input.endpoint);
+    const existing = this.pushSubscriptions.find(
+      (subscription) => subscription.endpointHash === endpointHash,
+    );
+    if (existing) {
+      existing.userId = userId;
+      existing.endpoint = input.endpoint;
+      existing.p256dh = input.keys.p256dh;
+      existing.auth = input.keys.auth;
+      existing.enabled = true;
+      existing.minSeverity = input.minSeverity ?? "warning";
+      existing.kinds = input.kinds ?? [];
+      if (input.userAgent) existing.userAgent = input.userAgent;
+      existing.updatedAt = now;
+      existing.lastSeenAt = now;
+      return clone(pushSubscriptionFromRow(existing));
+    }
+    const subscription: MemoryPushSubscription = {
+      id: randomUUID(),
+      userId,
+      endpoint: input.endpoint,
+      endpointHash,
+      p256dh: input.keys.p256dh,
+      auth: input.keys.auth,
+      enabled: true,
+      minSeverity: input.minSeverity ?? "warning",
+      kinds: input.kinds ?? [],
+      ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+      createdAt: now,
+      updatedAt: now,
+      lastSeenAt: now,
+      failureCount: 0,
+    };
+    this.pushSubscriptions.push(subscription);
+    return clone(pushSubscriptionFromRow(subscription));
+  }
+
+  async deletePushSubscription(userId: string, id: string): Promise<void> {
+    const subscription = this.pushSubscriptions.find(
+      (item) => item.userId === userId && item.id === id,
+    );
+    if (!subscription) return;
+    subscription.enabled = false;
+    subscription.updatedAt = new Date().toISOString();
+  }
+
+  async listPushDeliveries(limit: number): Promise<PushDeliveryPage> {
+    const items = clone(
+      this.pushDeliveries
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, limit),
+    );
+    return {
+      generatedAt: new Date().toISOString(),
+      items,
+      summary: summarizePushDeliveries(items),
+    };
   }
 
   async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {
@@ -4076,6 +4255,122 @@ export class PgStore implements Store {
       generatedAt: new Date().toISOString(),
       filters,
     });
+  }
+
+  async getPushSettings(userId: string, publicKey?: string): Promise<PushNotificationSettings> {
+    const result = await this.pool.query<PushSubscriptionRow>(
+      `SELECT
+         id,
+         endpoint_hash AS "endpointHash",
+         enabled,
+         min_severity AS "minSeverity",
+         kinds,
+         user_agent AS "userAgent",
+         created_at AS "createdAt",
+         updated_at AS "updatedAt",
+         last_seen_at AS "lastSeenAt",
+         last_success_at AS "lastSuccessAt",
+         last_failure_at AS "lastFailureAt",
+         failure_count AS "failureCount"
+       FROM push_subscriptions
+       WHERE user_id=$1 AND revoked_at IS NULL
+       ORDER BY last_seen_at DESC, id DESC`,
+      [userId],
+    );
+    return {
+      configured: Boolean(publicKey),
+      ...(publicKey ? { publicKey } : {}),
+      subscriptions: result.rows.map(pushSubscriptionFromRow),
+    };
+  }
+
+  async upsertPushSubscription(
+    userId: string,
+    input: PushSubscriptionInput,
+  ): Promise<PushSubscriptionSummary> {
+    const endpointHash = pushEndpointHash(input.endpoint);
+    const result = await this.pool.query<PushSubscriptionRow>(
+      `INSERT INTO push_subscriptions
+        (id, user_id, endpoint, endpoint_hash, p256dh, auth, user_agent, enabled, min_severity, kinds)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$9)
+       ON CONFLICT (endpoint_hash) DO UPDATE SET
+         user_id=EXCLUDED.user_id,
+         endpoint=EXCLUDED.endpoint,
+         p256dh=EXCLUDED.p256dh,
+         auth=EXCLUDED.auth,
+         user_agent=EXCLUDED.user_agent,
+         enabled=true,
+         min_severity=EXCLUDED.min_severity,
+         kinds=EXCLUDED.kinds,
+         revoked_at=NULL,
+         updated_at=now(),
+         last_seen_at=now()
+       RETURNING
+         id,
+         endpoint_hash AS "endpointHash",
+         enabled,
+         min_severity AS "minSeverity",
+         kinds,
+         user_agent AS "userAgent",
+         created_at AS "createdAt",
+         updated_at AS "updatedAt",
+         last_seen_at AS "lastSeenAt",
+         last_success_at AS "lastSuccessAt",
+         last_failure_at AS "lastFailureAt",
+         failure_count AS "failureCount"`,
+      [
+        randomUUID(),
+        userId,
+        input.endpoint,
+        endpointHash,
+        input.keys.p256dh,
+        input.keys.auth,
+        input.userAgent ?? null,
+        input.minSeverity ?? "warning",
+        input.kinds ?? [],
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Kunne ikke lagre push-abonnement.");
+    return pushSubscriptionFromRow(row);
+  }
+
+  async deletePushSubscription(userId: string, id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE push_subscriptions
+       SET enabled=false, revoked_at=now(), updated_at=now()
+       WHERE user_id=$1 AND id=$2`,
+      [userId, id],
+    );
+  }
+
+  async listPushDeliveries(limit: number): Promise<PushDeliveryPage> {
+    const result = await this.pool.query<PushDeliveryRow>(
+      `SELECT
+         id,
+         trigger_id AS "triggerId",
+         subscription_id AS "subscriptionId",
+         user_id AS "userId",
+         status,
+         kind,
+         severity,
+         title,
+         body,
+         target_url AS "targetUrl",
+         error_message AS "errorMessage",
+         created_at AS "createdAt",
+         sent_at AS "sentAt"
+       FROM push_notification_deliveries
+       ORDER BY created_at DESC, id DESC
+       LIMIT $1`,
+      [limit],
+    );
+    const items = result.rows.map(pushDeliveryFromRow);
+    return {
+      generatedAt: new Date().toISOString(),
+      items,
+      summary: summarizePushDeliveries(items),
+    };
   }
 
   async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {

@@ -255,4 +255,18 @@ describe("source item schema", () => {
     expect(schema).not.toMatch(/auth_tokens[\s\S]{0,120}source_items/);
     expect(schema).not.toMatch(/user_identities[\s\S]{0,120}source_items/);
   });
+
+  it("stores Web Push subscriptions and deliveries outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS push_subscriptions");
+    expect(schema).toContain("endpoint_hash text NOT NULL UNIQUE");
+    expect(schema).toContain("min_severity text NOT NULL DEFAULT 'warning'");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS push_notification_deliveries");
+    expect(schema).toContain("UNIQUE (trigger_id, subscription_id)");
+    expect(schema).toContain("push_notification_deliveries_created_idx");
+    expect(schema).toContain("014_web_push_notifications");
+    expect(schema).not.toMatch(/push_subscriptions[\s\S]{0,160}source_items/);
+    expect(schema).not.toMatch(/push_notification_deliveries[\s\S]{0,160}source_items/);
+  });
 });

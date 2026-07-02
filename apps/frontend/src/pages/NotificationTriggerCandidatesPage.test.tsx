@@ -54,12 +54,33 @@ const page: NotificationTriggerPage = {
   ],
 };
 
+const deliveries = {
+  generatedAt: "2026-07-02T09:46:00.000Z",
+  items: [
+    {
+      id: "delivery-one",
+      triggerId: "notification:situation:road-one",
+      subscriptionId: "subscription-one",
+      userId: "viewer-one",
+      status: "sent" as const,
+      kind: "traffic_disruption" as const,
+      severity: "critical" as const,
+      title: "Steinsprang, vegen er stengt",
+      body: "Gangåsvegen: Vegen er stengt.",
+      createdAt: "2026-07-02T09:46:00.000Z",
+      sentAt: "2026-07-02T09:46:01.000Z",
+    },
+  ],
+  summary: { total: 1, sent: 1, failed: 0, claimed: 0, skipped: 0 },
+};
+
 describe("NotificationTriggerCandidatesDashboard", () => {
   it("renders candidates with delivery disclaimers and reasons", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <NotificationTriggerCandidatesDashboard
           filters={{ limit: 30 }}
+          deliveries={deliveries}
           onFiltersChange={vi.fn()}
           page={page}
         />
@@ -67,7 +88,8 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     );
 
     expect(html).toContain("Varselutløsere");
-    expect(html).toContain("ingen Web Push-varsler sendes");
+    expect(html).toContain("Siste leveranser");
+    expect(html).toContain("1 sendt");
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kritisk");
     expect(html).toContain("Ikke sendt");
@@ -81,6 +103,11 @@ describe("NotificationTriggerCandidatesDashboard", () => {
       <MemoryRouter>
         <NotificationTriggerCandidatesDashboard
           filters={{ limit: 30 }}
+          deliveries={{
+            ...deliveries,
+            items: [],
+            summary: { total: 0, sent: 0, failed: 0, claimed: 0, skipped: 0 },
+          }}
           onFiltersChange={vi.fn()}
           page={{
             ...page,

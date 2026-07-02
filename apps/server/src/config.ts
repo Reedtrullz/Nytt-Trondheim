@@ -14,6 +14,7 @@ export interface AppConfig {
   uploadDir: string;
   runtimeStatusDir: string;
   rateLimitEnabled: boolean;
+  webPushPublicKey?: string;
   smtp?: SmtpConfig;
   emailSender?: EmailSender;
 }
@@ -98,6 +99,7 @@ export function loadConfig(): AppConfig {
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
+    webPushPublicKey: process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim() || undefined,
     smtp: smtpConfigForEnvironment(nodeEnv),
   };
 }

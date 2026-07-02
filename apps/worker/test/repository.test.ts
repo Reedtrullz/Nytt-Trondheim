@@ -4,6 +4,7 @@ import type {
   AiProcessingRun,
   Article,
   MorningBrief,
+  NotificationTriggerCandidate,
   OfficialEvent,
   PersistedTrafficMapEvent,
   PublicTransportServiceAlert,
@@ -264,6 +265,64 @@ describe("WorkerRepository", () => {
       brief.aiRun?.completedAt,
       JSON.stringify(brief),
     ]);
+  });
+
+  it("claims Web Push deliveries outside the source item ledger", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ id: "claim-one" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const candidate: NotificationTriggerCandidate = {
+      id: "notification:situation:road-one",
+      kind: "traffic_disruption",
+      severity: "critical",
+      deliveryState: "candidate_only",
+      title: "Steinsprang, vegen er stengt",
+      body: "Gangåsvegen: Vegen er stengt.",
+      detail: "Kandidat for systemvarsel.",
+      score: 0.91,
+      confidence: {
+        level: "confirmed",
+        score: 0.91,
+        sourceCount: 2,
+        updatedAt: "2026-07-02T09:45:00.000Z",
+      },
+      generatedAt: "2026-07-02T09:45:00.000Z",
+      eventUpdatedAt: "2026-07-02T09:40:00.000Z",
+      situationId: "road-one",
+      articleIds: ["article-one"],
+      sourceIds: ["datex", "adressa"],
+      sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+      matchedKeywords: ["stengt"],
+      reasons: ["Har offentlig kildegrunnlag."],
+      links: [
+        {
+          kind: "situation",
+          label: "Åpne situasjon",
+          href: "/situasjoner/road-one",
+          situationId: "road-one",
+        },
+      ],
+    };
+
+    await expect(
+      repository.claimPushDelivery(candidate, {
+        id: "subscription-one",
+        userId: "viewer-one",
+      }),
+    ).resolves.toEqual({ id: "claim-one" });
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("INSERT INTO push_notification_deliveries");
+    expect(sql).toContain("ON CONFLICT (trigger_id, subscription_id) DO NOTHING");
+    expect(sql).not.toContain("source_items");
+    expect(query.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining([
+        candidate.id,
+        "subscription-one",
+        "viewer-one",
+        "traffic_disruption",
+        "critical",
+      ]),
+    );
   });
 
   it("expires DATEX official events missing from a successful snapshot", async () => {

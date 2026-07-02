@@ -1217,6 +1217,69 @@ CREATE INDEX IF NOT EXISTS auth_tokens_access_request_idx
 CREATE INDEX IF NOT EXISTS auth_tokens_user_idx
   ON auth_tokens (user_id);
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  endpoint text NOT NULL,
+  endpoint_hash text NOT NULL UNIQUE,
+  p256dh text NOT NULL,
+  auth text NOT NULL,
+  user_agent text,
+  enabled boolean NOT NULL DEFAULT true,
+  min_severity text NOT NULL DEFAULT 'warning' CHECK (min_severity IN ('critical', 'warning', 'watch')),
+  kinds text[] NOT NULL DEFAULT ARRAY[]::text[],
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_success_at timestamptz,
+  last_failure_at timestamptz,
+  failure_count integer NOT NULL DEFAULT 0 CHECK (failure_count >= 0),
+  revoked_at timestamptz,
+  CHECK (length(trim(endpoint)) > 20),
+  CHECK (length(trim(endpoint_hash)) >= 16),
+  CHECK (length(trim(p256dh)) >= 20),
+  CHECK (length(trim(auth)) >= 8),
+  CHECK (
+    kinds <@ ARRAY[
+      'public_safety',
+      'traffic_disruption',
+      'weather_hazard',
+      'service_disruption'
+    ]::text[]
+  )
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx
+  ON push_subscriptions (user_id, enabled);
+CREATE INDEX IF NOT EXISTS push_subscriptions_last_seen_idx
+  ON push_subscriptions (last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS push_notification_deliveries (
+  id text PRIMARY KEY,
+  trigger_id text NOT NULL,
+  subscription_id text NOT NULL,
+  user_id text NOT NULL,
+  status text NOT NULL CHECK (status IN ('claimed', 'sent', 'failed', 'skipped')),
+  kind text NOT NULL CHECK (kind IN ('public_safety', 'traffic_disruption', 'weather_hazard', 'service_disruption')),
+  severity text NOT NULL CHECK (severity IN ('critical', 'warning', 'watch')),
+  title text NOT NULL,
+  body text NOT NULL,
+  target_url text,
+  error_message text,
+  payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz,
+  UNIQUE (trigger_id, subscription_id),
+  CHECK (length(trim(trigger_id)) > 0),
+  CHECK (length(trim(subscription_id)) > 0),
+  CHECK (jsonb_typeof(payload) = 'object')
+);
+CREATE INDEX IF NOT EXISTS push_notification_deliveries_created_idx
+  ON push_notification_deliveries (created_at DESC);
+CREATE INDEX IF NOT EXISTS push_notification_deliveries_trigger_idx
+  ON push_notification_deliveries (trigger_id);
+CREATE INDEX IF NOT EXISTS push_notification_deliveries_subscription_idx
+  ON push_notification_deliveries (subscription_id);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "sid" varchar NOT NULL PRIMARY KEY,
   "sess" json NOT NULL,
@@ -1237,3 +1300,4 @@ INSERT INTO schema_migrations (version) VALUES ('010_coverage_bundles') ON CONFL
 INSERT INTO schema_migrations (version) VALUES ('011_access_requests') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('012_restricted_beta_auth') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('013_morning_briefs') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('014_web_push_notifications') ON CONFLICT DO NOTHING;

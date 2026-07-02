@@ -13,7 +13,11 @@ import type {
   TrafficCounterSnapshot,
   WorkerCycleMetrics,
 } from "@nytt/shared";
-import { analyzeArticleCoverage, buildMorningBrief } from "@nytt/shared";
+import {
+  analyzeArticleCoverage,
+  buildMorningBrief,
+  buildNotificationTriggerPage,
+} from "@nytt/shared";
 import {
   collectFrontpage,
   collectMunicipality,
@@ -70,6 +74,7 @@ import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 import { WorkerRepository } from "./repository.js";
+import { deliverPushNotifications } from "./push-notifications.js";
 import {
   collectTrafficInfoMessages,
   defaultTrafficInfoEndpoint,
@@ -1294,16 +1299,25 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     ...resolvedDatexSituations,
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
+  const briefArticles = await repository.recentArticles(24);
+  const briefSituations = await repository.homeSituationSummaries(3);
   const morningBrief = buildMorningBrief({
-    articles: await repository.recentArticles(24),
-    situations: await repository.homeSituationSummaries(3),
+    articles: briefArticles,
+    situations: briefSituations,
     sourceHealth: await repository.sourceHealth(),
     latestAiRun: analysis.run,
     generatedAt: analysis.run.completedAt,
   });
   await repository.upsertMorningBrief(morningBrief);
+  const notificationTriggers = buildNotificationTriggerPage({
+    situations: await repository.trackedSituations(),
+    articles: briefArticles,
+    generatedAt: analysis.run.completedAt,
+    filters: { severities: ["critical", "warning"], limit: 10 },
+  });
+  const pushMetrics = await deliverPushNotifications(notificationTriggers.items, repository);
   console.log(
-    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief`,
+    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief; push ${pushMetrics.configured ? "configured" : "disabled"} ${pushMetrics.sent} sent / ${pushMetrics.failed} failed / ${pushMetrics.skipped} skipped`,
   );
   const workerMetrics = buildWorkerCycleMetrics({
     cycleStartedAt,

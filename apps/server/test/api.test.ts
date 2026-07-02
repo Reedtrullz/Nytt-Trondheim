@@ -79,6 +79,24 @@ async function testAppWithRateLimit(rateLimitEnabled: boolean) {
   return { ...runtime, uploadDir };
 }
 
+async function testAppWithPushPublicKey(publicKey = "test-public-vapid-key") {
+  const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
+  const runtime = await createApp({
+    port: 0,
+    nodeEnv: "development",
+    publicOrigin: "http://localhost",
+    seedDemo: true,
+    devAuthBypass: true,
+    githubAllowedLogin: "Reedtrullz",
+    sessionSecret: "test-only-secret",
+    uploadDir,
+    runtimeStatusDir: uploadDir,
+    rateLimitEnabled: true,
+    webPushPublicKey: publicKey,
+  });
+  return { ...runtime, uploadDir };
+}
+
 async function testAppWithEmail(devAuthBypass = true) {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
   const sentEmails: EmailMessage[] = [];
@@ -331,8 +349,10 @@ describe("private situation API", () => {
       rateLimitEnabled: true,
     });
     await request(app).get("/api/bootstrap").expect(401);
+    await request(app).get("/api/notifications/settings").expect(401);
     await request(app).get("/api/operations/coverage-bundles").expect(401);
     await request(app).get("/api/operations/notification-triggers").expect(401);
+    await request(app).get("/api/operations/notification-deliveries").expect(401);
     await request(app).get("/api/operations/spatial-analytics").expect(401);
     await request(app).get("/api/operations/raw/ai-runs").expect(401);
     await request(app).get("/api/access-requests").expect(401);
@@ -2381,6 +2401,95 @@ describe("private situation API", () => {
     expect(JSON.stringify(response.body)).not.toContain("rawPayload");
     expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
     expect(JSON.stringify(response.body)).not.toContain("raw_payload");
+  });
+
+  it("lets signed-in users manage Web Push subscriptions without exposing endpoint secrets", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    const csrf = session.body.csrfToken as string;
+
+    const initial = await agent.get("/api/notifications/settings").expect(200);
+    expect(initial.body).toMatchObject({
+      configured: true,
+      publicKey: "test-public-vapid-key",
+      subscriptions: [],
+    });
+
+    const subscription = await agent
+      .post("/api/notifications/subscriptions")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        endpoint: "https://push.example.test/send/very-secret-endpoint-token",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        userAgent: "Vitest Browser",
+        minSeverity: "critical",
+        kinds: ["traffic_disruption"],
+      })
+      .expect(201);
+
+    expect(subscription.body).toMatchObject({
+      id: expect.any(String),
+      endpointHash: expect.any(String),
+      enabled: true,
+      minSeverity: "critical",
+      kinds: ["traffic_disruption"],
+      userAgent: "Vitest Browser",
+    });
+    expect(JSON.stringify(subscription.body)).not.toContain("very-secret-endpoint-token");
+    expect(JSON.stringify(subscription.body)).not.toContain("p256dh-key-material");
+    expect(JSON.stringify(subscription.body)).not.toContain("auth-key");
+
+    const settings = await agent.get("/api/notifications/settings").expect(200);
+    expect(settings.body.subscriptions).toHaveLength(1);
+
+    await agent
+      .delete(`/api/notifications/subscriptions/${subscription.body.id as string}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(204);
+    const afterDelete = await agent.get("/api/notifications/settings").expect(200);
+    expect(afterDelete.body.subscriptions[0]).toMatchObject({ enabled: false });
+  });
+
+  it("requires Web Push configuration before accepting subscriptions", async () => {
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    await agent
+      .post("/api/notifications/subscriptions")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .send({
+        endpoint: "https://push.example.test/send/disabled",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+      })
+      .expect(503);
+  });
+
+  it("serves recent notification delivery history as owner-only operations data", async () => {
+    await request((await testAppWithEmail(false)).app)
+      .get("/api/operations/notification-deliveries")
+      .expect(401);
+    const { agent } = await ownerAgent();
+
+    const response = await agent
+      .get("/api/operations/notification-deliveries?limit=10")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      generatedAt: expect.any(String),
+      items: expect.any(Array),
+      summary: expect.objectContaining({
+        total: expect.any(Number),
+        sent: expect.any(Number),
+        failed: expect.any(Number),
+      }),
+    });
   });
 
   it("serves command center spatial analytics as derived operations data", async () => {

@@ -195,6 +195,39 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests notification settings and delivery history", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okResponse({
+          configured: false,
+          subscriptions: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        okResponse({
+          generatedAt: "2026-07-02T09:45:00.000Z",
+          items: [],
+          summary: { total: 0, sent: 0, failed: 0, claimed: 0, skipped: 0 },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.notificationSettings();
+    await api.notificationDeliveries(10);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/notifications/settings",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/operations/notification-deliveries?limit=10",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("requests command center spatial analytics with typed filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       okResponse({
@@ -403,6 +436,45 @@ describe("frontend source item API helpers", () => {
           displayName: "Ine Viewer",
           email: "ine@example.test",
         }),
+      }),
+    );
+  });
+
+  it("manages push subscriptions with CSRF protection", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(okResponse({ id: "subscription-one", endpointHash: "hash" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.subscribeToNotifications({
+      endpoint: "https://push.example.test/send/secret",
+      keys: {
+        p256dh: "p256dh-key-material-that-is-long-enough",
+        auth: "auth-key-long-enough",
+      },
+      minSeverity: "warning",
+      kinds: [],
+    });
+    await freshApi.unsubscribeFromNotifications("subscription one");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/notifications/subscriptions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/notifications/subscriptions/subscription%20one",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
       }),
     );
   });

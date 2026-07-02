@@ -22,6 +22,10 @@ import type {
   OperationsStatus,
   PrivateAnnotationUpdateRequest,
   PrivateMapFeatureInput,
+  PushDeliveryPage,
+  PushNotificationSettings,
+  PushSubscriptionInput,
+  PushSubscriptionSummary,
   RawInspectorAiRunDetail,
   RawInspectorAiRunFilters,
   RawInspectorAiRunPage,
@@ -248,6 +252,18 @@ export const api = {
       `/api/operations/notification-triggers${search ? `?${search}` : ""}`,
     );
   },
+  notificationSettings: () => request<PushNotificationSettings>("/api/notifications/settings"),
+  subscribeToNotifications: (input: PushSubscriptionInput) =>
+    request<PushSubscriptionSummary>("/api/notifications/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  unsubscribeFromNotifications: (id: string) =>
+    request<void>(`/api/notifications/subscriptions/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  notificationDeliveries: (limit = 50) =>
+    request<PushDeliveryPage>(`/api/operations/notification-deliveries?limit=${limit}`),
   spatialAnalytics: (
     query: CommandCenterSpatialAnalyticsQueryInput = { minDelaySeconds: 180, limit: 80 },
   ) => {

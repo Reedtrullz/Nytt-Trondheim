@@ -3608,7 +3608,7 @@ button {
 }
 
 .notification-trigger-row.critical {
-  border-left-color: var(--rust);
+  border-left-color: var(--accent);
 }
 
 .notification-trigger-row.warning {
@@ -3704,6 +3704,121 @@ button {
   font-size: 13px;
   font-weight: 700;
   text-transform: none;
+}
+
+.notification-delivery-history {
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.notification-delivery-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.notification-delivery-row {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--muted);
+}
+
+.notification-delivery-row.sent {
+  border-left-color: var(--green);
+}
+
+.notification-delivery-row.failed {
+  border-left-color: var(--accent);
+}
+
+.notification-delivery-row span,
+.notification-delivery-row strong,
+.notification-delivery-row small {
+  display: block;
+}
+
+.notification-delivery-row span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.notification-delivery-row strong {
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.notification-delivery-row small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.notification-settings-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 44px 32px 80px;
+}
+
+.notification-settings-card,
+.notification-settings-list {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.notification-settings-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 22px;
+}
+
+.notification-settings-card h2,
+.notification-settings-list h2 {
+  margin: 0 0 6px;
+  font: 28px/1.1 var(--serif);
+}
+
+.notification-settings-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.notification-settings-card .muted {
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.notification-settings-list {
+  padding: 20px;
+}
+
+.notification-subscription-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.notification-subscription-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+}
+
+.notification-subscription-row p,
+.notification-subscription-row small {
+  margin: 4px 0 0;
+  color: var(--muted);
 }
 
 .spatial-analytics-page {
@@ -6237,7 +6352,9 @@ button {
   .source-audit-row,
   .source-audit-row.header,
   .coverage-bundle-row,
-  .notification-trigger-row {
+  .notification-trigger-row,
+  .notification-settings-card,
+  .notification-subscription-row {
     grid-template-columns: 1fr;
   }
 
@@ -6995,6 +7112,7 @@ button {
   .operations-timeline-page,
   .coverage-bundles-page,
   .notification-triggers-page,
+  .notification-settings-page,
   .spatial-analytics-page,
   .raw-inspector-page,
   .saved-page,
@@ -7039,6 +7157,7 @@ button {
   .operations-timeline-grid,
   .coverage-bundles-grid,
   .notification-triggers-grid,
+  .notification-delivery-list,
   .spatial-analytics-grid,
   .raw-inspector-grid,
   .worker-metrics-grid,

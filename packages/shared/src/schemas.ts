@@ -975,6 +975,14 @@ export const notificationTriggerKindSchema = z.enum([
 ]);
 
 export const notificationTriggerSeveritySchema = z.enum(["critical", "warning", "watch"]);
+export const notificationTriggerDeliveryStateSchema = z.enum([
+  "candidate_only",
+  "not_configured",
+  "ready",
+  "sent",
+  "failed",
+  "suppressed",
+]);
 
 export const notificationTriggerQuerySchema = z.object({
   kinds: csvListSchema(notificationTriggerKindSchema),
@@ -990,7 +998,7 @@ export const notificationTriggerCandidateSchema = z
     id: z.string().trim().min(1).max(260),
     kind: notificationTriggerKindSchema,
     severity: notificationTriggerSeveritySchema,
-    deliveryState: z.literal("candidate_only"),
+    deliveryState: notificationTriggerDeliveryStateSchema,
     title: z.string().trim().min(1).max(220),
     body: z.string().trim().min(1).max(1000),
     detail: z.string().trim().min(1).max(1000),
@@ -1025,6 +1033,85 @@ export const notificationTriggerPageSchema = z
     filters: notificationTriggerQuerySchema,
     items: z.array(notificationTriggerCandidateSchema).max(100),
     summary: notificationTriggerSummarySchema,
+  })
+  .strict();
+
+export const pushSubscriptionInputSchema = z
+  .object({
+    endpoint: z.string().trim().url().max(2048),
+    expirationTime: z.number().int().nonnegative().nullable().optional(),
+    keys: z
+      .object({
+        p256dh: z.string().trim().min(20).max(512),
+        auth: z.string().trim().min(8).max(256),
+      })
+      .strict(),
+    userAgent: z.string().trim().max(500).optional(),
+    minSeverity: notificationTriggerSeveritySchema.default("warning"),
+    kinds: z.array(notificationTriggerKindSchema).max(8).default([]),
+  })
+  .strict();
+
+export type PushSubscriptionInputSchema = z.infer<typeof pushSubscriptionInputSchema>;
+
+export const pushSubscriptionSummarySchema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    endpointHash: z.string().trim().min(16).max(128),
+    enabled: z.boolean(),
+    minSeverity: notificationTriggerSeveritySchema,
+    kinds: z.array(notificationTriggerKindSchema).max(8),
+    userAgent: z.string().trim().max(500).optional(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    lastSeenAt: z.string().datetime(),
+    lastSuccessAt: z.string().datetime().optional(),
+    lastFailureAt: z.string().datetime().optional(),
+    failureCount: z.number().int().nonnegative().max(100_000),
+  })
+  .strict();
+
+export const pushNotificationSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    publicKey: z.string().trim().min(20).max(512).optional(),
+    subscriptions: z.array(pushSubscriptionSummarySchema).max(50),
+  })
+  .strict();
+
+export const pushDeliveryStatusSchema = z.enum(["claimed", "sent", "failed", "skipped"]);
+
+export const pushDeliveryListItemSchema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    triggerId: z.string().trim().min(1).max(260),
+    subscriptionId: z.string().trim().min(1).max(200),
+    userId: z.string().trim().min(1).max(200),
+    status: pushDeliveryStatusSchema,
+    kind: notificationTriggerKindSchema,
+    severity: notificationTriggerSeveritySchema,
+    title: z.string().trim().min(1).max(220),
+    body: z.string().trim().min(1).max(1000),
+    targetUrl: z.string().trim().max(2048).optional(),
+    errorMessage: z.string().trim().max(1000).optional(),
+    createdAt: z.string().datetime(),
+    sentAt: z.string().datetime().optional(),
+  })
+  .strict();
+
+export const pushDeliveryPageSchema = z
+  .object({
+    generatedAt: z.string().datetime(),
+    items: z.array(pushDeliveryListItemSchema).max(100),
+    summary: z
+      .object({
+        total: z.number().int().nonnegative().max(100_000),
+        sent: z.number().int().nonnegative().max(100_000),
+        failed: z.number().int().nonnegative().max(100_000),
+        claimed: z.number().int().nonnegative().max(100_000),
+        skipped: z.number().int().nonnegative().max(100_000),
+      })
+      .strict(),
   })
   .strict();
 

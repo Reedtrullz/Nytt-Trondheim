@@ -6,6 +6,7 @@ import type {
   NotificationTriggerPage,
   NotificationTriggerQueryInput,
   NotificationTriggerSeverity,
+  PushDeliveryPage,
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
@@ -204,12 +205,46 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
   );
 }
 
+function DeliveryHistory({ deliveries }: { deliveries?: PushDeliveryPage }) {
+  if (!deliveries) return null;
+  return (
+    <section className="notification-delivery-history" aria-labelledby="notification-deliveries">
+      <div className="section-heading-row">
+        <div>
+          <p className="label">Web Push</p>
+          <h2 id="notification-deliveries">Siste leveranser</h2>
+        </div>
+        <span>
+          {deliveries.summary.sent} sendt · {deliveries.summary.failed} feilet
+        </span>
+      </div>
+      {deliveries.items.length ? (
+        <div className="notification-delivery-list">
+          {deliveries.items.slice(0, 6).map((item) => (
+            <article key={item.id} className={`notification-delivery-row ${item.status}`}>
+              <span>{item.status}</span>
+              <strong>{item.title}</strong>
+              <small>
+                {severityLabels[item.severity]} · {time(item.sentAt ?? item.createdAt)}
+              </small>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="coverage-bundle-empty">Ingen leveringsforsøk registrert ennå.</p>
+      )}
+    </section>
+  );
+}
+
 export function NotificationTriggerCandidatesDashboard({
   page,
+  deliveries,
   filters,
   onFiltersChange,
 }: {
   page: NotificationTriggerPage;
+  deliveries?: PushDeliveryPage;
   filters: NotificationTriggerFilters;
   onFiltersChange: (filters: NotificationTriggerFilters) => void;
 }) {
@@ -227,8 +262,8 @@ export function NotificationTriggerCandidatesDashboard({
           <p className="label">Privat kommandosenter</p>
           <h1>Varselutløsere</h1>
           <p>
-            Kandidater for høyeffektsvarsler. Dette er en les-only beslutningsflate; ingen Web
-            Push-varsler sendes fra denne versjonen.
+            Kandidater for høyeffektsvarsler og siste Web Push-leveranser. Dette er en les-only
+            operatørflate; personlige abonnement styres fra Varsler-siden.
           </p>
         </div>
         <div className="coverage-bundles-actions">
@@ -255,6 +290,7 @@ export function NotificationTriggerCandidatesDashboard({
           <span>Høy tillit</span>
         </article>
       </section>
+      <DeliveryHistory deliveries={deliveries} />
       <section className="notification-triggers-grid">
         <aside
           className="coverage-bundles-sidebar notification-triggers-sidebar"
@@ -342,16 +378,22 @@ export function NotificationTriggerCandidatesPage() {
   const search = searchParams.toString();
   const filters = useMemo(() => parseFilters(search), [search]);
   const [page, setPage] = useState<NotificationTriggerPage>();
+  const [deliveries, setDeliveries] = useState<PushDeliveryPage>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let ignore = false;
     setError(undefined);
-    api
-      .notificationTriggers(queryFromFilters(filters))
-      .then((nextPage) => {
-        if (!ignore) setPage(nextPage);
+    Promise.all([
+      api.notificationTriggers(queryFromFilters(filters)),
+      api.notificationDeliveries(30),
+    ])
+      .then(([nextPage, nextDeliveries]) => {
+        if (!ignore) {
+          setPage(nextPage);
+          setDeliveries(nextDeliveries);
+        }
       })
       .catch((reason: Error) => {
         if (!ignore) setError(reason.message);
@@ -388,6 +430,7 @@ export function NotificationTriggerCandidatesPage() {
   return (
     <NotificationTriggerCandidatesDashboard
       filters={filters}
+      deliveries={deliveries}
       onFiltersChange={updateFilters}
       page={page}
     />

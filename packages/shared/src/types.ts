@@ -762,7 +762,13 @@ export type NotificationTriggerKind =
   | "weather_hazard"
   | "service_disruption";
 export type NotificationTriggerSeverity = "critical" | "warning" | "watch";
-export type NotificationTriggerDeliveryState = "candidate_only";
+export type NotificationTriggerDeliveryState =
+  | "candidate_only"
+  | "not_configured"
+  | "ready"
+  | "sent"
+  | "failed"
+  | "suppressed";
 
 export interface NotificationTriggerCandidate {
   id: string;
@@ -806,6 +812,69 @@ export interface NotificationTriggerPage {
   filters: NotificationTriggerQuery;
   items: NotificationTriggerCandidate[];
   summary: NotificationTriggerSummary;
+}
+
+export interface PushSubscriptionInput {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  userAgent?: string;
+  minSeverity?: NotificationTriggerSeverity;
+  kinds?: NotificationTriggerKind[];
+}
+
+export interface PushSubscriptionSummary {
+  id: string;
+  endpointHash: string;
+  enabled: boolean;
+  minSeverity: NotificationTriggerSeverity;
+  kinds: NotificationTriggerKind[];
+  userAgent?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  failureCount: number;
+}
+
+export interface PushNotificationSettings {
+  configured: boolean;
+  publicKey?: string;
+  subscriptions: PushSubscriptionSummary[];
+}
+
+export type PushDeliveryStatus = "claimed" | "sent" | "failed" | "skipped";
+
+export interface PushDeliveryListItem {
+  id: string;
+  triggerId: string;
+  subscriptionId: string;
+  userId: string;
+  status: PushDeliveryStatus;
+  kind: NotificationTriggerKind;
+  severity: NotificationTriggerSeverity;
+  title: string;
+  body: string;
+  targetUrl?: string;
+  errorMessage?: string;
+  createdAt: string;
+  sentAt?: string;
+}
+
+export interface PushDeliveryPage {
+  generatedAt: string;
+  items: PushDeliveryListItem[];
+  summary: {
+    total: number;
+    sent: number;
+    failed: number;
+    claimed: number;
+    skipped: number;
+  };
 }
 
 export interface SituationSourceItemLink {

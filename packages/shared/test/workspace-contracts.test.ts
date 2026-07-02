@@ -6,6 +6,9 @@ import {
   notificationTriggerQuerySchema,
   operationsTimelineQuerySchema,
   operationsTimelineResponseSchema,
+  pushDeliveryPageSchema,
+  pushNotificationSettingsSchema,
+  pushSubscriptionInputSchema,
   sourceAuditFilterQuerySchema,
   sourceAuditWorkspaceResponseSchema,
   sourceNonSecretDiagnosticSchema,
@@ -23,6 +26,8 @@ import type {
   PrivateAnnotationCreateResponse,
   NotificationTriggerPage,
   OperationsTimelineResponse,
+  PushDeliveryPage,
+  PushNotificationSettings,
   SituationMapWorkspace,
   SourceAuditWorkspaceResponse,
 } from "../src/types.js";
@@ -237,6 +242,75 @@ describe("workspace contract schemas", () => {
 
     expect(notificationTriggerPageSchema.parse(response)).toMatchObject({
       items: [{ deliveryState: "candidate_only", title: "Steinsprang, vegen er stengt" }],
+    });
+  });
+
+  it("validates Web Push subscription and delivery envelopes without raw upstream payloads", () => {
+    expect(
+      pushSubscriptionInputSchema.parse({
+        endpoint: "https://push.example.test/send/secret-token",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        minSeverity: "critical",
+        kinds: ["traffic_disruption"],
+      }),
+    ).toMatchObject({
+      minSeverity: "critical",
+      kinds: ["traffic_disruption"],
+    });
+
+    const settings = {
+      configured: true,
+      publicKey: "test-public-vapid-key",
+      subscriptions: [
+        {
+          id: "subscription-one",
+          endpointHash: "hash-without-raw-endpoint",
+          enabled: true,
+          minSeverity: "warning",
+          kinds: [],
+          createdAt: "2026-07-02T09:00:00.000Z",
+          updatedAt: "2026-07-02T09:05:00.000Z",
+          lastSeenAt: "2026-07-02T09:05:00.000Z",
+          failureCount: 0,
+        },
+      ],
+    } satisfies PushNotificationSettings;
+
+    const deliveries = {
+      generatedAt: "2026-07-02T09:45:00.000Z",
+      items: [
+        {
+          id: "delivery-one",
+          triggerId: "notification:situation:one",
+          subscriptionId: "subscription-one",
+          userId: "user-one",
+          status: "sent",
+          kind: "traffic_disruption",
+          severity: "critical",
+          title: "Steinsprang, vegen er stengt",
+          body: "Gangåsvegen: Vegen er stengt.",
+          targetUrl: "/situasjoner/one",
+          createdAt: "2026-07-02T09:45:00.000Z",
+          sentAt: "2026-07-02T09:45:01.000Z",
+        },
+      ],
+      summary: {
+        total: 1,
+        sent: 1,
+        failed: 0,
+        claimed: 0,
+        skipped: 0,
+      },
+    } satisfies PushDeliveryPage;
+
+    expect(pushNotificationSettingsSchema.parse(settings).subscriptions[0]).not.toHaveProperty(
+      "endpoint",
+    );
+    expect(pushDeliveryPageSchema.parse(deliveries)).toMatchObject({
+      items: [{ status: "sent", triggerId: "notification:situation:one" }],
     });
   });
 

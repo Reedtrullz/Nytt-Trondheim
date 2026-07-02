@@ -1,0 +1,147 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { NotificationTriggerCandidate } from "@nytt/shared";
+import { deliverPushNotifications, loadWebPushConfig } from "../src/push-notifications.js";
+
+const webPushMock = vi.hoisted(() => ({
+  setVapidDetails: vi.fn(),
+  sendNotification: vi.fn(),
+}));
+
+vi.mock("web-push", () => ({
+  default: webPushMock,
+  setVapidDetails: webPushMock.setVapidDetails,
+  sendNotification: webPushMock.sendNotification,
+}));
+
+const candidate: NotificationTriggerCandidate = {
+  id: "notification:situation:road-one",
+  kind: "traffic_disruption",
+  severity: "critical",
+  deliveryState: "candidate_only",
+  title: "Steinsprang, vegen er stengt",
+  body: "Gangåsvegen: Vegen er stengt.",
+  detail: "Kandidat for systemvarsel.",
+  score: 0.91,
+  confidence: {
+    level: "confirmed",
+    score: 0.91,
+    sourceCount: 2,
+    updatedAt: "2026-07-02T09:45:00.000Z",
+  },
+  generatedAt: "2026-07-02T09:45:00.000Z",
+  eventUpdatedAt: "2026-07-02T09:40:00.000Z",
+  situationId: "road-one",
+  articleIds: ["article-one"],
+  sourceIds: ["datex", "adressa"],
+  sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+  matchedKeywords: ["stengt"],
+  reasons: ["Har offentlig kildegrunnlag."],
+  links: [
+    {
+      kind: "situation",
+      label: "Åpne situasjon",
+      href: "/situasjoner/road-one",
+      situationId: "road-one",
+    },
+  ],
+};
+
+function repository(overrides: Record<string, unknown> = {}) {
+  return {
+    activePushSubscriptions: vi.fn().mockResolvedValue([
+      {
+        id: "subscription-one",
+        userId: "viewer-one",
+        endpoint: "https://push.example.test/send/secret",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        minSeverity: "warning",
+        kinds: [],
+      },
+    ]),
+    claimPushDelivery: vi.fn().mockResolvedValue({ id: "claim-one" }),
+    markPushDeliverySent: vi.fn().mockResolvedValue(undefined),
+    markPushDeliveryFailed: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+describe("push notifications", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps delivery disabled when VAPID keys are missing", async () => {
+    const repo = repository();
+
+    const metrics = await deliverPushNotifications([candidate], repo, undefined);
+
+    expect(metrics).toMatchObject({ configured: false, sent: 0, skipped: 1 });
+    expect(repo.activePushSubscriptions).not.toHaveBeenCalled();
+    expect(webPushMock.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("claims and sends matching critical candidates once", async () => {
+    const repo = repository();
+
+    const metrics = await deliverPushNotifications([candidate], repo, {
+      publicKey: "public-key",
+      privateKey: "private-key",
+      subject: "mailto:test@example.test",
+    });
+
+    expect(metrics).toMatchObject({
+      configured: true,
+      candidates: 1,
+      subscriptions: 1,
+      claimed: 1,
+      sent: 1,
+      failed: 0,
+    });
+    expect(webPushMock.setVapidDetails).toHaveBeenCalledWith(
+      "mailto:test@example.test",
+      "public-key",
+      "private-key",
+    );
+    expect(webPushMock.sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: "https://push.example.test/send/secret" }),
+      expect.stringContaining("Steinsprang"),
+      expect.objectContaining({ TTL: 600, urgency: "high" }),
+    );
+    expect(repo.claimPushDelivery).toHaveBeenCalledWith(
+      candidate,
+      expect.objectContaining({ id: "subscription-one" }),
+    );
+    expect(repo.markPushDeliverySent).toHaveBeenCalledWith("claim-one", "subscription-one");
+  });
+
+  it("does not send when the idempotent delivery claim already exists", async () => {
+    const repo = repository({ claimPushDelivery: vi.fn().mockResolvedValue(undefined) });
+
+    const metrics = await deliverPushNotifications([candidate], repo, {
+      publicKey: "public-key",
+      privateKey: "private-key",
+      subject: "mailto:test@example.test",
+    });
+
+    expect(metrics).toMatchObject({ claimed: 0, sent: 0, skipped: 1 });
+    expect(webPushMock.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("loads VAPID config only when public and private keys exist", () => {
+    expect(loadWebPushConfig({ WEB_PUSH_VAPID_PUBLIC_KEY: "public" })).toBeUndefined();
+    expect(
+      loadWebPushConfig({
+        WEB_PUSH_VAPID_PUBLIC_KEY: "public",
+        WEB_PUSH_VAPID_PRIVATE_KEY: "private",
+        WEB_PUSH_SUBJECT: "mailto:ops@example.test",
+      }),
+    ).toEqual({
+      publicKey: "public",
+      privateKey: "private",
+      subject: "mailto:ops@example.test",
+    });
+  });
+});

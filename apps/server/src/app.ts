@@ -22,6 +22,7 @@ import {
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
   publicTransportMapQuerySchema,
+  pushSubscriptionInputSchema,
   rawInspectorAiRunQuerySchema,
   sourceItemLinkInputSchema,
   sourceItemQuerySchema,
@@ -930,6 +931,42 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.use("/api/saved", requireOwner);
   app.use("/api/source-items", requireOwner);
   app.use("/api/users", requireOwner);
+
+  app.get("/api/notifications/settings", async (req, res, next) => {
+    try {
+      res.json(
+        await store.getPushSettings(req.user?.id ?? currentLogin(req), config.webPushPublicKey),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/notifications/subscriptions", async (req, res, next) => {
+    try {
+      if (!config.webPushPublicKey) {
+        res.status(503).json({ error: "Web Push er ikke konfigurert ennå." });
+        return;
+      }
+      const input = pushSubscriptionInputSchema.parse(req.body);
+      const subscription = await store.upsertPushSubscription(
+        req.user?.id ?? currentLogin(req),
+        input,
+      );
+      res.status(201).json(subscription);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/notifications/subscriptions/:id", async (req, res, next) => {
+    try {
+      await store.deletePushSubscription(req.user?.id ?? currentLogin(req), String(req.params.id));
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.get("/api/access-requests", requireOwner, async (req, res, next) => {
     try {
@@ -1864,6 +1901,18 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const filters = notificationTriggerQuerySchema.parse(req.query);
       res.json(await store.listNotificationTriggers(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/notification-deliveries", async (req, res, next) => {
+    try {
+      const limit = Math.min(
+        100,
+        Math.max(1, Number.parseInt(String(req.query.limit ?? "50"), 10) || 50),
+      );
+      res.json(await store.listPushDeliveries(limit, currentLogin(req)));
     } catch (error) {
       next(error);
     }

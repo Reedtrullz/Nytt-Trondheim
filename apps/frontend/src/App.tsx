@@ -38,6 +38,11 @@ const NotificationTriggerCandidatesPage = lazy(() =>
     default: module.NotificationTriggerCandidatesPage,
   })),
 );
+const NotificationSettingsPage = lazy(() =>
+  import("./pages/NotificationSettingsPage.js").then((module) => ({
+    default: module.NotificationSettingsPage,
+  })),
+);
 const RawDataInspectorPage = lazy(() =>
   import("./pages/RawDataInspectorPage.js").then((module) => ({
     default: module.RawDataInspectorPage,
@@ -120,6 +125,7 @@ function Header({
           <NavLink to="/trafikk">Trafikkart</NavLink>
           <NavLink to="/vaer">Vær</NavLink>
           <NavLink to="/sport">Sport</NavLink>
+          <NavLink to="/varsler">Varsler</NavLink>
           {isOwner ? <NavLink to="/lagret">Lagret</NavLink> : null}
           {isOwner ? <NavLink to="/command">Kommandosenter</NavLink> : null}
         </nav>
@@ -247,6 +253,7 @@ function AuthenticatedApp() {
             <Route path="/trafikk" element={<TrafficMapPage />} />
             <Route path="/vaer" element={<WeatherPage />} />
             <Route path="/sport" element={<SportPage initialArticles={data.articles} />} />
+            <Route path="/varsler" element={<NotificationSettingsPage />} />
             <Route path="/lagret" element={ownerOnly(<SavedPage />)} />
             <Route path="/command" element={ownerOnly(<OperationsPage />)} />
             <Route path="/command/tilgang" element={ownerOnly(<AccessRequestsPage />)} />

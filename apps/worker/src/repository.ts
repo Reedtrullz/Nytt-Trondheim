@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import type {
   AiProcessingRun,
@@ -6,6 +6,9 @@ import type {
   ArticleCoverageBundleDecision,
   HomeSituationSummary,
   MorningBrief,
+  NotificationTriggerCandidate,
+  NotificationTriggerKind,
+  NotificationTriggerSeverity,
   OfficialEvent,
   PersistedTrafficMapEvent,
   PersistedTrafficMapEventSource,
@@ -50,6 +53,22 @@ export interface PublicTransportBounds {
   south: number;
   east: number;
   west: number;
+}
+
+export interface PushDeliveryTarget {
+  id: string;
+  userId: string;
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  minSeverity: NotificationTriggerSeverity;
+  kinds: NotificationTriggerKind[];
+}
+
+export interface PushDeliveryClaim {
+  id: string;
 }
 
 export class WorkerRepository {
@@ -188,6 +207,118 @@ export class WorkerRepository {
         brief.aiRun?.completedAt ?? null,
         JSON.stringify(brief),
       ],
+    );
+  }
+
+  async activePushSubscriptions(): Promise<PushDeliveryTarget[]> {
+    const result = await this.pool.query<{
+      id: string;
+      userId: string;
+      endpoint: string;
+      p256dh: string;
+      auth: string;
+      minSeverity: NotificationTriggerSeverity;
+      kinds: NotificationTriggerKind[];
+    }>(
+      `SELECT
+         id,
+         user_id AS "userId",
+         endpoint,
+         p256dh,
+         auth,
+         min_severity AS "minSeverity",
+         kinds
+       FROM push_subscriptions
+       WHERE enabled=true AND revoked_at IS NULL
+       ORDER BY last_seen_at DESC, id DESC`,
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      endpoint: row.endpoint,
+      keys: { p256dh: row.p256dh, auth: row.auth },
+      minSeverity: row.minSeverity,
+      kinds: row.kinds ?? [],
+    }));
+  }
+
+  async claimPushDelivery(
+    candidate: NotificationTriggerCandidate,
+    subscription: Pick<PushDeliveryTarget, "id" | "userId">,
+  ): Promise<PushDeliveryClaim | undefined> {
+    const id = randomUUID();
+    const targetUrl = candidate.links[0]?.href;
+    const result = await this.pool.query<{ id: string }>(
+      `INSERT INTO push_notification_deliveries
+        (id, trigger_id, subscription_id, user_id, status, kind, severity, title, body, target_url, payload)
+       VALUES ($1,$2,$3,$4,'claimed',$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (trigger_id, subscription_id) DO NOTHING
+       RETURNING id`,
+      [
+        id,
+        candidate.id,
+        subscription.id,
+        subscription.userId,
+        candidate.kind,
+        candidate.severity,
+        candidate.title,
+        candidate.body,
+        targetUrl ?? null,
+        JSON.stringify({
+          id: candidate.id,
+          kind: candidate.kind,
+          severity: candidate.severity,
+          title: candidate.title,
+          body: candidate.body,
+          eventUpdatedAt: candidate.eventUpdatedAt,
+          situationId: candidate.situationId,
+          articleIds: candidate.articleIds,
+          sourceIds: candidate.sourceIds,
+          links: candidate.links,
+        }),
+      ],
+    );
+    const row = result.rows[0];
+    return row ? { id: row.id } : undefined;
+  }
+
+  async markPushDeliverySent(claimId: string, subscriptionId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE push_notification_deliveries
+       SET status='sent', sent_at=now(), error_message=NULL
+       WHERE id=$1`,
+      [claimId],
+    );
+    await this.pool.query(
+      `UPDATE push_subscriptions
+       SET last_success_at=now(), last_failure_at=NULL, failure_count=0, updated_at=now()
+       WHERE id=$1`,
+      [subscriptionId],
+    );
+  }
+
+  async markPushDeliveryFailed(
+    claimId: string,
+    subscriptionId: string,
+    errorMessage: string,
+    disableSubscription = false,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE push_notification_deliveries
+       SET status='failed', error_message=$2
+       WHERE id=$1`,
+      [claimId, errorMessage.slice(0, 1000)],
+    );
+    await this.pool.query(
+      `UPDATE push_subscriptions
+       SET
+         enabled=CASE WHEN $2 THEN false ELSE enabled END,
+         revoked_at=CASE WHEN $2 THEN now() ELSE revoked_at END,
+         last_failure_at=now(),
+         failure_count=failure_count + 1,
+         updated_at=now()
+       WHERE id=$1`,
+      [subscriptionId, disableSubscription],
     );
   }
 
