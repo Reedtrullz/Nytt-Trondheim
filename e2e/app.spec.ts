@@ -249,6 +249,12 @@ test("home nearby module links ranked local stories with the map", async ({ page
 
   await page.getByTitle(/Ny bru over Nidelva/).click();
   await expect(nearby.getByRole("heading", { name: /Ny bru over Nidelva/ })).toBeVisible();
+  const mapAgeSlider = nearby.getByLabel("Filtrer kart etter alder");
+  await expect(mapAgeSlider).toHaveValue("0");
+  await mapAgeSlider.fill("2");
+  await expect(page).toHaveURL(/window=24h/);
+  await expect(mapAgeSlider).toHaveValue("2");
+  await expect(nearby.getByText(/Kartet følger 24 timer/i)).toBeVisible();
   await expectNoHorizontalPageOverflow(page);
 });
 

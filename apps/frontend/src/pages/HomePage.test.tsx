@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { Article, BootstrapPayload, MorningBrief } from "@nytt/shared";
-import { CityPulseDashboard, MorningBriefPanel, StoryVerificationProof } from "./HomePage.js";
+import {
+  CityPulseDashboard,
+  MapTimeSlider,
+  MorningBriefPanel,
+  StoryVerificationProof,
+} from "./HomePage.js";
 
 const brief: MorningBrief = {
   generatedAt: "2026-07-02T07:30:00.000Z",
@@ -109,6 +114,18 @@ describe("CityPulseDashboard", () => {
         <CityPulseDashboard data={{ articles: [], situations: [], sourceHealth: [] }} />,
       ),
     ).toBe("");
+  });
+});
+
+describe("MapTimeSlider", () => {
+  it("renders a compact age slider for the public nearby map", () => {
+    const html = renderToStaticMarkup(<MapTimeSlider value="24h" />);
+
+    expect(html).toContain("Kartperiode");
+    expect(html).toContain("24 timer");
+    expect(html).toContain('type="range"');
+    expect(html).toContain('aria-label="Filtrer kart etter alder"');
+    expect(html).toContain('aria-valuetext="24 timer"');
   });
 });
 

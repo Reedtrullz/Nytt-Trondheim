@@ -1202,6 +1202,62 @@ button {
   line-height: 1.35;
 }
 
+.nearby-time-slider {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(120px, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  margin: -4px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 86%, var(--blue-soft));
+}
+
+.nearby-time-slider div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nearby-time-slider span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nearby-time-slider strong {
+  font-size: 13px;
+}
+
+.nearby-time-slider input {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--blue);
+}
+
+.nearby-time-slider-labels {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.nearby-time-slider-labels span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearby-time-slider-labels span.selected {
+  color: var(--blue);
+}
+
 .nearby-map {
   min-height: 246px;
   height: clamp(246px, 32vh, 330px);

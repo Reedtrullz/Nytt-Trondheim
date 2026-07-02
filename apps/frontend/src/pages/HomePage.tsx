@@ -25,6 +25,7 @@ import {
   searchSummary,
   type ArticleCategoryFilter,
   type HomeFilters,
+  type HomeTimeWindow,
 } from "../homeFilters.js";
 import { groupHomeArticles, type HomeArticleGroup } from "../homeArticleGroups.js";
 import {
@@ -481,12 +482,16 @@ function NearbyRail({
   data,
   groups,
   localFocus,
+  onTimeWindowChange,
+  timeWindow,
   timeWindowLabel,
 }: {
   articles: Article[];
   data: BootstrapPayload;
   groups: HomeArticleGroup[];
   localFocus?: HomeLocalFocusPoint;
+  onTimeWindowChange: (timeWindow: HomeTimeWindow) => void;
+  timeWindow: HomeTimeWindow;
   timeWindowLabel?: string;
 }) {
   const allNearby = useMemo(
@@ -530,6 +535,7 @@ function NearbyRail({
             Åpne situasjonskart <ArrowIcon />
           </Link>
         </div>
+        <MapTimeSlider value={timeWindow} onChange={onTimeWindowChange} />
         <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
           <NewsMap
             items={mapNearby}
@@ -644,6 +650,47 @@ function NearbyRail({
         </div>
       </section>
     </aside>
+  );
+}
+
+export function MapTimeSlider({
+  value,
+  onChange,
+}: {
+  value: HomeTimeWindow;
+  onChange?: (timeWindow: HomeTimeWindow) => void;
+}) {
+  const selectedIndex = Math.max(0, homeTimeWindows.indexOf(value));
+  const selectedValue = homeTimeWindows[selectedIndex] ?? "all";
+  const selectedLabel = homeTimeWindowLabels[selectedValue];
+
+  return (
+    <div className="nearby-time-slider" aria-label="Kartperiode">
+      <div>
+        <span>Kartperiode</span>
+        <strong>{selectedLabel}</strong>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={homeTimeWindows.length - 1}
+        step={1}
+        value={selectedIndex}
+        aria-label="Filtrer kart etter alder"
+        aria-valuetext={selectedLabel}
+        onChange={(event) => {
+          const next = homeTimeWindows[Number(event.currentTarget.value)] ?? "all";
+          onChange?.(next);
+        }}
+      />
+      <div className="nearby-time-slider-labels" aria-hidden="true">
+        {homeTimeWindows.map((window) => (
+          <span className={window === selectedValue ? "selected" : ""} key={window}>
+            {homeTimeWindowLabels[window]}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1114,6 +1161,8 @@ export function HomePage({
           articles={articles}
           groups={displayedGroups}
           localFocus={activeLocalFocus}
+          onTimeWindowChange={(nextWindow) => updateFilters({ timeWindow: nextWindow })}
+          timeWindow={timeWindow}
           timeWindowLabel={timeWindow === "all" ? undefined : homeTimeWindowLabels[timeWindow]}
           data={initialData}
         />
