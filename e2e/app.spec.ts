@@ -330,11 +330,11 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
     .toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(timeWindowRequest?.searchParams.get("scope")).toBe("trondheim");
   await page.getByRole("button", { name: "Nær meg" }).click();
-  await expect(page.getByRole("button", { name: "Nær meg aktiv" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "Lokalt fokus aktivt" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(page.getByText("Innen 10 km")).toBeVisible();
+  await expect(page.getByText(/innen 10 km/i)).toBeVisible();
 });
 
 test("coverage bundle operations page renders persisted decisions and drawer detail", async ({
@@ -1827,7 +1827,7 @@ test("owner can open the real situation index and operations status", async ({ p
   await page.getByRole("link", { name: "Kommandosenter" }).click();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();
-  await expect(page.getByText("Innhentede saker")).toBeVisible();
+  await expect(page.getByText("Innhentede saker", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Åpne kilderevisjon" }).click();
   await expect(page).toHaveURL(/\/command\/kilder$/);
   await expect(page.getByRole("heading", { name: "Kildehelse og proveniens" })).toBeVisible();
