@@ -38,7 +38,7 @@ enrich after those rules pass, but it must not replace the deterministic evidenc
 
 ## AI Boundary
 
-The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only public feed excerpts, public official data and compact summaries of open (`preliminary`/`active`) situations may enter that process. Private annotations, attachments, tasks and notes are excluded.
+The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only bounded public feed excerpts, public official data and compact summaries of open (`preliminary`/`active`) situations may enter that process. Private annotations, attachments, tasks and notes are excluded. DeepSeek calls are optional derived analysis with a short timeout; malformed, empty or truncated model output degrades only the AI enrichment path while deterministic grouping continues.
 
 AI clusters are accepted only after each cited snippet matches an input excerpt and at least two independent sources remain. Deterministic multi-source detection remains available when AI is disabled or degraded.
 

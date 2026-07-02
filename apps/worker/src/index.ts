@@ -1155,11 +1155,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   );
   const currentDatexEvents = currentOfficialEvents.filter((event) => event.source === "datex");
   const trackedSituations = await repository.trackedSituations();
-  const aiStartedAtMs = Date.now();
   const analysis = await analyzer.cluster(recentArticles, { situations: trackedSituations });
-  recordSourceMetric("deepseek", aiStartedAtMs, {
-    parseFailures: analysis.run.status === "degraded" ? 1 : 0,
-  });
   await repository.saveAiRun(analysis.run);
   await repository.setHealth({
     source: "deepseek",
@@ -1179,7 +1175,12 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
           ].join(", ")
         : analysis.run.status === "disabled"
           ? "DEEPSEEK_API_KEY er ikke konfigurert"
-          : (analysis.run.error ?? "AI-analyse feilet"),
+          : [
+              "AI-analyse feilet, men deterministisk gruppering brukes fortsatt.",
+              analysis.run.error,
+            ]
+              .filter(Boolean)
+              .join(" "),
   });
   const aiSituationUpdates = applySituationUpdateHints(
     trackedSituations,

@@ -120,6 +120,8 @@
           SMTP_PASSWORD={{ lookup('env', 'NYTT_SMTP_API_KEY') }}
           DEEPSEEK_API_KEY={{ lookup('env', 'NYTT_DEEPSEEK_API_KEY') }}
           DEEPSEEK_MODEL=deepseek-v4-flash
+          DEEPSEEK_TIMEOUT_MS=25000
+          DEEPSEEK_MAX_RETRIES=0
           POLITILOGGEN_ENABLED={{ lookup('env', 'NYTT_POLITILOGGEN_ENABLED') | default('true', true) }}
           ENTUR_CLIENT_NAME={{ lookup('env', 'NYTT_ENTUR_CLIENT_NAME') | default('reidar-nytt-trondheim', true) }}
           ENTUR_CODESPACES={{ lookup('env', 'NYTT_ENTUR_CODESPACES') | default('ATB', true) }}

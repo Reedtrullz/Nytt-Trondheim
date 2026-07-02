@@ -103,6 +103,11 @@ type AnalysisResult = z.infer<typeof resultSchema>;
 
 export type DeepSeekAnalysisResult = AnalysisResult;
 
+interface DeepSeekAnalyzerOptions {
+  timeoutMs?: number;
+  maxRetries?: number;
+}
+
 export interface AnalysisContext {
   situations?: Situation[];
 }
@@ -114,6 +119,47 @@ export interface AnalysisOutcome {
 
 export interface SituationAnalyzer {
   cluster(articles: Article[], context?: AnalysisContext): Promise<AnalysisOutcome>;
+}
+
+const DEFAULT_DEEPSEEK_TIMEOUT_MS = 25_000;
+const DEFAULT_DEEPSEEK_MAX_RETRIES = 0;
+const MAX_DEEPSEEK_ARTICLES = 12;
+const MAX_DEEPSEEK_SITUATIONS = 12;
+const MAX_TITLE_LENGTH = 180;
+const MAX_EXCERPT_LENGTH = 900;
+const MAX_PLACE_LENGTH = 80;
+const MAX_SUMMARY_LENGTH = 700;
+const EMPTY_ANALYSIS_JSON =
+  '{"clusters":[],"situationUpdates":[],"bundleHints":[],"categoryHints":[],"relevanceHints":[],"operationsNotes":[]}';
+
+function integerFromEnv(name: string, fallback: number, minimum: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= minimum ? parsed : fallback;
+}
+
+function compactString(value: string | undefined, maxLength: number): string | undefined {
+  if (!value) return value;
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
+}
+
+function stripJsonFence(content: string): string {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced ? fenced[1]!.trim() : trimmed;
+}
+
+function parseAnalysisContent(content: string): AnalysisResult {
+  const normalized = stripJsonFence(content);
+  if (!normalized) throw new Error("DeepSeek returned empty JSON content.");
+  const firstBrace = normalized.indexOf("{");
+  const lastBrace = normalized.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error("DeepSeek returned no JSON object.");
+  }
+  return resultSchema.parse(JSON.parse(normalized.slice(firstBrace, lastBrace + 1)));
 }
 
 function run(
@@ -152,35 +198,45 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
   constructor(
     apiKey: string,
     private readonly model = process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
+    options: DeepSeekAnalyzerOptions = {},
   ) {
-    this.client = new OpenAI({ apiKey, baseURL: "https://api.deepseek.com" });
+    this.client = new OpenAI({
+      apiKey,
+      baseURL: "https://api.deepseek.com",
+      timeout:
+        options.timeoutMs ??
+        integerFromEnv("DEEPSEEK_TIMEOUT_MS", DEFAULT_DEEPSEEK_TIMEOUT_MS, 1_000),
+      maxRetries:
+        options.maxRetries ??
+        integerFromEnv("DEEPSEEK_MAX_RETRIES", DEFAULT_DEEPSEEK_MAX_RETRIES, 0),
+    });
   }
 
   async cluster(articles: Article[], context: AnalysisContext = {}): Promise<AnalysisOutcome> {
     const startedAt = new Date().toISOString();
-    const publicInputs = articles.map(
-      ({ id, title, excerpt, source, sourceLabel, publishedAt, places }) => ({
+    const publicInputs = articles
+      .slice(0, MAX_DEEPSEEK_ARTICLES)
+      .map(({ id, title, excerpt, source, sourceLabel, publishedAt, places }) => ({
         id,
-        title,
-        excerpt,
+        title: compactString(title, MAX_TITLE_LENGTH),
+        excerpt: compactString(excerpt, MAX_EXCERPT_LENGTH),
         source,
         sourceLabel,
         publishedAt,
-        places,
-      }),
-    );
+        places: places.map((place) => compactString(place, MAX_PLACE_LENGTH)).filter(Boolean),
+      }));
     const situationInputs = (context.situations ?? [])
       .filter((situation) => situation.status === "preliminary" || situation.status === "active")
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .slice(0, 30)
+      .slice(0, MAX_DEEPSEEK_SITUATIONS)
       .map(({ id, type, title, summary, status, updatedAt, locationLabel, relatedArticleIds }) => ({
         id,
         type,
-        title,
-        summary,
+        title: compactString(title, MAX_TITLE_LENGTH),
+        summary: compactString(summary, MAX_SUMMARY_LENGTH),
         status,
         updatedAt,
-        locationLabel,
+        locationLabel: compactString(locationLabel, MAX_PLACE_LENGTH),
         relatedArticleIds,
       }));
     let lastError: unknown;
@@ -191,8 +247,7 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
           messages: [
             {
               role: "system",
-              content:
-                'Return JSON only in the supplied shape. Use only public article excerpts and the supplied situation summaries. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Situation update hints must only link supplied articles to supplied active/preliminary situations when the article text is clearly progress or a direct update for the same incident. Bundle hints are suggestions for same-story rows, not evidence. Category and relevance hints are suggestions only. Return at most 8 clusters, 8 situationUpdates, 12 bundleHints, 20 categoryHints, 20 relevanceHints and 12 operationsNotes. Cite literal supporting excerpts for every claim. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"situationUpdates":[{"situationId":"string","articleIds":["string"],"summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"bundleHints":[{"title":"string","articleIds":["string"],"reason":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"categoryHints":[{"articleId":"string","category":"Nyheter|Hendelser|Krim|Byutvikling|Kultur|Sport|Transport|Politikk|Vær","topic":"rosenborg","reason":"string","supportingSnippet":"string"}],"relevanceHints":[{"articleId":"string","scope":"trondheim|trondelag|ignore","reason":"string","supportingSnippet":"string"}],"operationsNotes":[{"kind":"situation_progress|bundle_candidate|category_relevance|source_quality|other","subjectId":"string","summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}. Use empty arrays when uncertain.',
+              content: `Return one compact JSON object only. Use only public article excerpts and supplied situation summaries. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Situation update hints must only link supplied articles to supplied active/preliminary situations when article text is clearly progress or a direct update for the same incident. Bundle/category/relevance hints are suggestions only, not evidence. Return at most 5 clusters, 5 situationUpdates, 8 bundleHints, 12 categoryHints, 12 relevanceHints and 6 operationsNotes. Keep title, summary, reason, claim and supportingSnippet strings short; supportingSnippet must be a literal article excerpt substring no longer than 160 characters. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"situationUpdates":[{"situationId":"string","articleIds":["string"],"summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"bundleHints":[{"title":"string","articleIds":["string"],"reason":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"categoryHints":[{"articleId":"string","category":"Nyheter|Hendelser|Krim|Byutvikling|Kultur|Sport|Transport|Politikk|Vær","topic":"rosenborg","reason":"string","supportingSnippet":"string"}],"relevanceHints":[{"articleId":"string","scope":"trondheim|trondelag|ignore","reason":"string","supportingSnippet":"string"}],"operationsNotes":[{"kind":"situation_progress|bundle_candidate|category_relevance|source_quality|other","subjectId":"string","summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}. Use ${EMPTY_ANALYSIS_JSON} when uncertain.`,
             },
             {
               role: "user",
@@ -207,18 +262,21 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
               ? [
                   {
                     role: "system" as const,
-                    content:
-                      'The previous completion was not valid structured output. Return one compact, syntactically valid JSON object only. Use {"clusters":[],"situationUpdates":[],"bundleHints":[],"categoryHints":[],"relevanceHints":[],"operationsNotes":[]} when uncertain.',
+                    content: `The previous completion was not valid structured output. Return one compact, syntactically valid JSON object only. Use ${EMPTY_ANALYSIS_JSON} when uncertain.`,
                   },
                 ]
               : []),
           ],
           response_format: { type: "json_object" },
-          max_tokens: 8192,
+          max_tokens: 4096,
         });
-        const content = response.choices[0]?.message.content;
+        const choice = response.choices[0];
+        const content = choice?.message.content;
+        if (choice?.finish_reason === "length") {
+          throw new Error("DeepSeek JSON response was truncated by token limit.");
+        }
         if (!content) throw new Error("DeepSeek returned empty JSON content.");
-        const parsed = resultSchema.parse(JSON.parse(content));
+        const parsed = parseAnalysisContent(content);
         const validated = validateCitations(parsed, articles);
         return {
           result: validated,

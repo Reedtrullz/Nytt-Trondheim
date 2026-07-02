@@ -100,6 +100,24 @@ describe("AI citation validation", () => {
     });
   });
 
+  it("retries truncated DeepSeek completions and accepts fenced JSON", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [{ finish_reason: "length", message: { content: '{"clusters":[]}' } }],
+      })
+      .mockResolvedValueOnce({
+        choices: [{ finish_reason: "stop", message: { content: '```json\n{"clusters":[]}\n```' } }],
+      });
+    const analyzer = new DeepSeekAnalyzer("test-key", "test-model");
+    Object.assign(analyzer, { client: { chat: { completions: { create } } } });
+
+    const outcome = await analyzer.cluster(articles);
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(outcome.run.status).toBe("ok");
+  });
+
   it("sends only open situation summaries as DeepSeek context", async () => {
     const create = vi
       .fn()
@@ -146,6 +164,60 @@ describe("AI citation validation", () => {
     expect(payload.situations).toEqual([
       expect.objectContaining({ id: "open-one", relatedArticleIds: ["one"] }),
     ]);
+  });
+
+  it("bounds DeepSeek request payloads before sending public context", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValue({ choices: [{ message: { content: '{"clusters":[]}' } }] });
+    const analyzer = new DeepSeekAnalyzer("test-key", "test-model");
+    Object.assign(analyzer, { client: { chat: { completions: { create } } } });
+    const manyArticles = Array.from({ length: 14 }, (_, index) => ({
+      ...articles[0]!,
+      id: `article-${index}`,
+      title: `Lang tittel ${index} ${"x".repeat(400)}`,
+      excerpt: `Lang ingress ${index} ${"y".repeat(1600)}`,
+      places: [`${"z".repeat(160)}`],
+    }));
+    const manySituations: Situation[] = Array.from({ length: 14 }, (_, index) => ({
+      id: `situation-${index}`,
+      type: "fire",
+      title: `Lang situasjon ${index} ${"t".repeat(400)}`,
+      summary: `Lang oppsummering ${index} ${"s".repeat(1600)}`,
+      status: "active",
+      verificationStatus: "Foreløpig fra rapportering",
+      importance: "normal",
+      updatedAt: `2026-05-26T${String(index).padStart(2, "0")}:30:00Z`,
+      createdAt: "2026-05-26T09:00:00Z",
+      locationLabel: `${"p".repeat(160)}`,
+      relatedArticleIds: [],
+      evidence: [],
+      features: [],
+      timeline: [],
+    }));
+
+    await analyzer.cluster(manyArticles, { situations: manySituations });
+
+    const request = create.mock.calls[0]?.[0] as {
+      max_tokens: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+    const userMessage = request.messages.find((message) => message.role === "user");
+    const payloadPrefix =
+      "Analyze these public feed excerpts and active situations and output JSON: ";
+    const payload = JSON.parse(userMessage?.content.replace(payloadPrefix, "") ?? "{}") as {
+      articles: Array<{ title: string; excerpt: string; places: string[] }>;
+      situations: Array<{ title: string; summary: string; locationLabel: string }>;
+    };
+
+    expect(request.max_tokens).toBe(4096);
+    expect(payload.articles).toHaveLength(12);
+    expect(payload.situations).toHaveLength(12);
+    expect(payload.articles[0]?.title.length).toBeLessThanOrEqual(180);
+    expect(payload.articles[0]?.excerpt.length).toBeLessThanOrEqual(900);
+    expect(payload.articles[0]?.places[0]?.length).toBeLessThanOrEqual(80);
+    expect(payload.situations[0]?.summary.length).toBeLessThanOrEqual(700);
+    expect(payload.situations[0]?.locationLabel.length).toBeLessThanOrEqual(80);
   });
 
   it("validates optional AI hints against literal public excerpts", () => {
