@@ -54,6 +54,7 @@ button {
 
 .site-header {
   height: 84px;
+  overflow-x: clip;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
 }
@@ -526,6 +527,11 @@ button {
   border-left-color: var(--blue);
 }
 
+.morning-brief > *,
+.situation-banner > * {
+  min-width: 0;
+}
+
 .morning-brief-heading {
   display: flex;
   align-items: baseline;
@@ -576,6 +582,12 @@ button {
   text-transform: uppercase;
 }
 
+.morning-brief-sources > *,
+.morning-brief-highlights > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .morning-brief-sources div {
   display: flex;
   flex-wrap: wrap;
@@ -583,6 +595,7 @@ button {
 }
 
 .morning-brief-sources a {
+  min-width: 0;
   max-width: min(100%, 320px);
   color: var(--blue);
   overflow: hidden;
@@ -2427,6 +2440,8 @@ button {
 
 .dashboard-widget {
   min-height: 100%;
+  min-width: 0;
+  width: 100%;
   grid-column: span 4;
   padding: 18px;
   border: 1px solid var(--line);
@@ -2463,6 +2478,10 @@ button {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.dashboard-widget-body {
+  min-width: 0;
 }
 
 .dashboard-layout-city-pulse {
