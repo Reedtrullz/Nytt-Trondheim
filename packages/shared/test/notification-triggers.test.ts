@@ -118,9 +118,15 @@ describe("notification trigger candidates", () => {
       generatedAt: "2026-07-02T09:00:00.000Z",
     });
 
-    expect(applyNotificationDeliveryStates(page, { configured: false }).items[0]).toMatchObject({
+    const disabledPage = applyNotificationDeliveryStates(page, { configured: false });
+    expect(disabledPage.items[0]).toMatchObject({
       deliveryState: "not_configured",
       detail: expect.stringContaining("Web Push er ikke konfigurert"),
+    });
+    expect(disabledPage.pushStatus).toMatchObject({
+      configured: false,
+      label: "Ikke konfigurert",
+      blockedCandidates: 1,
     });
 
     expect(applyNotificationDeliveryStates(page, { configured: true }).items[0]).toMatchObject({
@@ -128,35 +134,55 @@ describe("notification trigger candidates", () => {
       detail: expect.stringContaining("Klar for Web Push"),
     });
 
-    expect(
-      applyNotificationDeliveryStates(page, {
-        configured: true,
-        subscriptions: [],
-      }).items[0],
-    ).toMatchObject({
+    const noSubscriberPage = applyNotificationDeliveryStates(page, {
+      configured: true,
+      subscriptions: [],
+    });
+    expect(noSubscriberPage.items[0]).toMatchObject({
       deliveryState: "no_subscribers",
       detail: expect.stringContaining("Ingen aktive push-abonnement"),
     });
+    expect(noSubscriberPage.pushStatus).toMatchObject({
+      label: "Mangler match",
+      activeSubscriptions: 0,
+      matchingCandidates: 0,
+      blockedCandidates: 1,
+    });
 
-    expect(
-      applyNotificationDeliveryStates(page, {
-        configured: true,
-        subscriptions: [{ enabled: true, minSeverity: "warning", kinds: ["traffic_disruption"] }],
-      }).items[0],
-    ).toMatchObject({
+    const readyPage = applyNotificationDeliveryStates(page, {
+      configured: true,
+      subscriptions: [{ enabled: true, minSeverity: "warning", kinds: ["traffic_disruption"] }],
+      sourceHealth: [
+        {
+          source: "web_push",
+          label: "Web Push",
+          state: "ok",
+          lastCheckedAt: "2026-07-02T09:00:00.000Z",
+          detail: "1 kandidat vurdert, 1 sendt",
+        },
+      ],
+    });
+    expect(readyPage.items[0]).toMatchObject({
       deliveryState: "ready",
       detail: expect.stringContaining("Klar for Web Push"),
     });
+    expect(readyPage.pushStatus).toMatchObject({
+      label: "Klar",
+      activeSubscriptions: 1,
+      matchingCandidates: 1,
+      readyCandidates: 1,
+      health: expect.objectContaining({ source: "web_push", state: "ok" }),
+    });
 
-    expect(
-      applyNotificationDeliveryStates(page, {
-        configured: true,
-        deliveries: [{ triggerId: "notification:situation:situation-one", status: "sent" }],
-      }).items[0],
-    ).toMatchObject({
+    const sentPage = applyNotificationDeliveryStates(page, {
+      configured: true,
+      deliveries: [{ triggerId: "notification:situation:situation-one", status: "sent" }],
+    });
+    expect(sentPage.items[0]).toMatchObject({
       deliveryState: "sent",
       detail: expect.stringContaining("Push-varsel er sendt"),
     });
+    expect(sentPage.pushStatus?.deliveryCounts).toMatchObject({ total: 1, sent: 1 });
   });
 
   it("uses the same subscription matching rule as worker dispatch", () => {

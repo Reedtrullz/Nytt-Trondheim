@@ -44,6 +44,7 @@ export const sourceIdLabels = {
   internal: "Internt",
   private_annotations: "Private markeringer",
   deepseek: "Privat AI-analyse",
+  web_push: "Web Push",
 } as const satisfies Record<SourceId, string>;
 
 export const sourceItemKindLabels = {

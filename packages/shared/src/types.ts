@@ -38,7 +38,8 @@ export type SourceId =
   | "politiloggen"
   | "internal"
   | "private_annotations"
-  | "deepseek";
+  | "deepseek"
+  | "web_push";
 
 export type GeographicScope = "trondheim" | "trondelag";
 export type ArticleCategory =
@@ -811,6 +812,24 @@ export interface NotificationTriggerSummary {
   highConfidence: number;
 }
 
+export interface NotificationPushStatus {
+  configured: boolean;
+  label: string;
+  detail: string;
+  health?: SourceHealth;
+  activeSubscriptions: number;
+  matchingCandidates: number;
+  readyCandidates: number;
+  blockedCandidates: number;
+  deliveryCounts: {
+    total: number;
+    sent: number;
+    failed: number;
+    claimed: number;
+    skipped: number;
+  };
+}
+
 export interface NotificationTriggerQuery {
   kinds?: NotificationTriggerKind[];
   severities?: NotificationTriggerSeverity[];
@@ -823,6 +842,7 @@ export interface NotificationTriggerPage {
   filters: NotificationTriggerQuery;
   items: NotificationTriggerCandidate[];
   summary: NotificationTriggerSummary;
+  pushStatus?: NotificationPushStatus;
 }
 
 export interface PushSubscriptionInput {

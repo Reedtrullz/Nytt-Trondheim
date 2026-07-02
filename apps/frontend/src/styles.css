@@ -4088,6 +4088,68 @@ button {
   background: var(--paper);
 }
 
+.notification-push-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.9fr);
+  gap: 16px;
+  align-items: center;
+  margin: 16px 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  background: var(--paper);
+}
+
+.notification-push-status.degraded {
+  border-left-color: #c07818;
+}
+
+.notification-push-status.disabled {
+  border-left-color: var(--muted);
+}
+
+.notification-push-status h2 {
+  margin: 2px 0 4px;
+  font: 24px/1.1 var(--serif);
+}
+
+.notification-push-status p,
+.notification-push-status small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.notification-push-status dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.notification-push-status div,
+.notification-push-status dl div {
+  min-width: 0;
+}
+
+.notification-push-status dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.notification-push-status dd {
+  margin: 3px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.notification-push-status small {
+  grid-column: 1 / -1;
+}
+
 .notification-delivery-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -7649,6 +7711,7 @@ button {
   .operations-timeline-grid,
   .coverage-bundles-grid,
   .notification-triggers-grid,
+  .notification-push-status,
   .notification-delivery-list,
   .spatial-analytics-grid,
   .raw-inspector-grid,
@@ -7713,6 +7776,10 @@ button {
   .notification-triggers-sidebar,
   .spatial-analytics-sidebar,
   .raw-inspector-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .notification-push-status dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

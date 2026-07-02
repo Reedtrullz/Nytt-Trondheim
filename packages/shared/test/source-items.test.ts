@@ -12,6 +12,7 @@ describe("source item validation schemas", () => {
   it("validates source item filters and link input", () => {
     expect(sourceItemKindSchema.parse("official_event")).toBe("official_event");
     expect(sourceIdSchema.parse("bane_nor")).toBe("bane_nor");
+    expect(sourceIdSchema.parse("web_push")).toBe("web_push");
     expect(sourceReliabilityTierSchema.parse("official")).toBe("official");
     expect(sourceItemRelationshipSchema.parse("context")).toBe("context");
     expect(

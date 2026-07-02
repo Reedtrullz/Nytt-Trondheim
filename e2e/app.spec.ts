@@ -1284,6 +1284,157 @@ test("frontpage and sport stay responsive on phone and tablet viewports", async 
   }
 });
 
+test("command notification bridge shows Web Push readiness responsively", async ({ page }) => {
+  await page.route("**/api/operations/notification-triggers**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: "2026-07-02T09:45:00.000Z",
+        filters: { limit: 30 },
+        summary: {
+          total: 2,
+          critical: 1,
+          warning: 1,
+          watch: 0,
+          officialBacked: 1,
+          highConfidence: 1,
+        },
+        pushStatus: {
+          configured: true,
+          label: "Mangler match",
+          detail: "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+          activeSubscriptions: 1,
+          matchingCandidates: 1,
+          readyCandidates: 1,
+          blockedCandidates: 1,
+          deliveryCounts: { total: 2, sent: 1, failed: 1, claimed: 0, skipped: 0 },
+          health: {
+            source: "web_push",
+            label: "Web Push",
+            state: "degraded",
+            lastCheckedAt: "2026-07-02T09:44:00.000Z",
+            detail: "2 kandidater vurdert, 1 sendt, 1 feilet",
+          },
+        },
+        items: [
+          {
+            id: "notification:situation:road-one",
+            kind: "traffic_disruption",
+            severity: "critical",
+            deliveryState: "ready",
+            title: "Steinsprang, vegen er stengt",
+            body: "Gangåsvegen: Vegen er stengt og omkjøring er skiltet.",
+            detail: "Klar for Web Push dersom en aktiv abonnent matcher alvorlighet og type.",
+            score: 0.91,
+            confidence: {
+              level: "confirmed",
+              label: "Bekreftet",
+              score: 0.91,
+              sourceCount: 2,
+              updatedAt: "2026-07-02T09:45:00.000Z",
+            },
+            generatedAt: "2026-07-02T09:45:00.000Z",
+            eventUpdatedAt: "2026-07-02T09:40:00.000Z",
+            situationId: "road-one",
+            articleIds: ["article-one"],
+            sourceIds: ["datex", "adressa"],
+            sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+            matchedKeywords: ["stengt", "omkjøring"],
+            reasons: ["Har offentlig kildegrunnlag."],
+            links: [
+              {
+                kind: "situation",
+                label: "Åpne situasjon",
+                href: "/situasjoner/road-one",
+                situationId: "road-one",
+              },
+            ],
+          },
+          {
+            id: "notification:article:violence-one",
+            kind: "public_safety",
+            severity: "warning",
+            deliveryState: "no_subscribers",
+            title: "Voldshendelse på Lade",
+            body: "Ingen aktive abonnement matcher denne typen.",
+            detail: "Ingen aktive push-abonnement matcher alvorlighet og type.",
+            score: 0.72,
+            confidence: {
+              level: "likely",
+              label: "Sannsynlig",
+              score: 0.72,
+              sourceCount: 1,
+              updatedAt: "2026-07-02T09:45:00.000Z",
+            },
+            generatedAt: "2026-07-02T09:45:00.000Z",
+            eventUpdatedAt: "2026-07-02T09:42:00.000Z",
+            articleIds: ["violence-one"],
+            sourceIds: ["politiloggen"],
+            sourceLabels: ["Politiloggen"],
+            matchedKeywords: ["voldshendelse"],
+            reasons: ["Høyeffektsord i fersk sak."],
+            links: [],
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/operations/notification-deliveries**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: "2026-07-02T09:46:00.000Z",
+        items: [
+          {
+            id: "delivery-one",
+            triggerId: "notification:situation:road-one",
+            subscriptionId: "subscription-one",
+            userId: "owner-one",
+            status: "sent",
+            kind: "traffic_disruption",
+            severity: "critical",
+            title: "Steinsprang, vegen er stengt",
+            body: "Gangåsvegen: Vegen er stengt.",
+            createdAt: "2026-07-02T09:46:00.000Z",
+            sentAt: "2026-07-02T09:46:01.000Z",
+          },
+          {
+            id: "delivery-two",
+            triggerId: "notification:article:violence-one",
+            subscriptionId: "subscription-one",
+            userId: "owner-one",
+            status: "failed",
+            kind: "public_safety",
+            severity: "warning",
+            title: "Voldshendelse på Lade",
+            body: "Ingen aktive abonnement matcher denne typen.",
+            createdAt: "2026-07-02T09:47:00.000Z",
+          },
+        ],
+        summary: { total: 2, sent: 1, failed: 1, claimed: 0, skipped: 0 },
+      }),
+    });
+  });
+
+  for (const viewport of [
+    { width: 360, height: 780 },
+    { width: 820, height: 1180 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/command/varsler");
+    await expect(page.getByRole("heading", { name: "Varselutløsere" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Mangler match" })).toBeVisible();
+    await expect(page.getByText("1/2")).toBeVisible();
+    await expect(page.getByText("Kildehelse kontrollert")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Siste leveranser" })).toBeVisible();
+    await expect(page.getByText("Steinsprang, vegen er stengt").first()).toBeVisible();
+    await expect(page.getByText("Ingen abonnent").first()).toBeVisible();
+    await expectNoHorizontalPageOverflow(page);
+  }
+});
+
 test("unknown viewer route is a missing page, not an owner-only denial", async ({ page }) => {
   await page.goto("/sport-does-not-exist");
 

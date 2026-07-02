@@ -2408,6 +2408,11 @@ describe("private situation API", () => {
         warning: expect.any(Number),
         officialBacked: expect.any(Number),
       }),
+      pushStatus: expect.objectContaining({
+        configured: false,
+        label: "Ikke konfigurert",
+        blockedCandidates: expect.any(Number),
+      }),
       items: expect.any(Array),
     });
     expect(response.body.items.length).toBeGreaterThan(0);
@@ -2441,6 +2446,12 @@ describe("private situation API", () => {
       deliveryState: "no_subscribers",
       detail: expect.stringContaining("Ingen aktive push-abonnement"),
     });
+    expect(response.body.pushStatus).toMatchObject({
+      configured: true,
+      label: "Mangler match",
+      activeSubscriptions: 0,
+      matchingCandidates: 0,
+    });
   });
 
   it("marks notification trigger candidates as ready when an active subscription matches", async () => {
@@ -2470,6 +2481,13 @@ describe("private situation API", () => {
       id: expect.stringContaining("notification:"),
       deliveryState: "ready",
       detail: expect.stringContaining("Klar for Web Push"),
+    });
+    expect(response.body.pushStatus).toMatchObject({
+      configured: true,
+      label: "Klar",
+      activeSubscriptions: 1,
+      matchingCandidates: expect.any(Number),
+      readyCandidates: expect.any(Number),
     });
   });
 

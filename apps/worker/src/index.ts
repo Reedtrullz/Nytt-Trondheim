@@ -74,7 +74,7 @@ import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 import { WorkerRepository } from "./repository.js";
-import { deliverPushNotifications } from "./push-notifications.js";
+import { deliverPushNotifications, type PushDeliveryMetrics } from "./push-notifications.js";
 import {
   collectTrafficInfoMessages,
   defaultTrafficInfoEndpoint,
@@ -281,6 +281,41 @@ export function sourceHealthFromDeepSeekAnalysis(
     ]
       .filter(Boolean)
       .join(" "),
+  };
+}
+
+export function sourceHealthFromPushDelivery(
+  metrics: PushDeliveryMetrics,
+  checkedAt: string,
+  nextPollAt: string,
+): SourceHealth {
+  if (!metrics.configured) {
+    return {
+      source: "web_push",
+      label: "Web Push",
+      state: "disabled",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "WEB_PUSH_VAPID_PUBLIC_KEY og WEB_PUSH_VAPID_PRIVATE_KEY er ikke konfigurert.",
+    };
+  }
+
+  const failed = metrics.failed > 0;
+  return {
+    source: "web_push",
+    label: "Web Push",
+    state: failed ? "degraded" : "ok",
+    lastCheckedAt: checkedAt,
+    ...(failed ? { lastFailureAt: checkedAt } : {}),
+    nextPollAt,
+    detail: [
+      `${metrics.candidates} kandidater vurdert`,
+      `${metrics.subscriptions} aktive abonnementer`,
+      `${metrics.claimed} levering${metrics.claimed === 1 ? "" : "er"} reservert`,
+      `${metrics.sent} sendt`,
+      `${metrics.failed} feilet`,
+      `${metrics.skipped} hoppet over`,
+    ].join(", "),
   };
 }
 
@@ -1316,6 +1351,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     filters: { severities: ["critical", "warning"], limit: 10 },
   });
   const pushMetrics = await deliverPushNotifications(notificationTriggers.items, repository);
+  await repository.setHealth(
+    sourceHealthFromPushDelivery(pushMetrics, analysis.run.completedAt, nextPollAt),
+  );
   console.log(
     `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief; push ${pushMetrics.configured ? "configured" : "disabled"} ${pushMetrics.sent} sent / ${pushMetrics.failed} failed / ${pushMetrics.skipped} skipped`,
   );

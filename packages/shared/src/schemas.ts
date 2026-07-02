@@ -233,6 +233,7 @@ export const sourceIdSchema = z.enum([
   "internal",
   "private_annotations",
   "deepseek",
+  "web_push",
 ]);
 
 export const sourceAuditSourceIdSchema = sourceIdSchema;
@@ -1028,12 +1029,35 @@ export const notificationTriggerSummarySchema = z
   })
   .strict();
 
+export const notificationPushStatusSchema = z
+  .object({
+    configured: z.boolean(),
+    label: z.string().trim().min(1).max(120),
+    detail: z.string().trim().min(1).max(1000),
+    health: sourceHealthSchema.optional(),
+    activeSubscriptions: z.number().int().nonnegative().max(100_000),
+    matchingCandidates: z.number().int().nonnegative().max(100_000),
+    readyCandidates: z.number().int().nonnegative().max(100_000),
+    blockedCandidates: z.number().int().nonnegative().max(100_000),
+    deliveryCounts: z
+      .object({
+        total: z.number().int().nonnegative().max(100_000),
+        sent: z.number().int().nonnegative().max(100_000),
+        failed: z.number().int().nonnegative().max(100_000),
+        claimed: z.number().int().nonnegative().max(100_000),
+        skipped: z.number().int().nonnegative().max(100_000),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const notificationTriggerPageSchema = z
   .object({
     generatedAt: z.string().datetime(),
     filters: notificationTriggerQuerySchema,
     items: z.array(notificationTriggerCandidateSchema).max(100),
     summary: notificationTriggerSummarySchema,
+    pushStatus: notificationPushStatusSchema.optional(),
   })
   .strict();
 

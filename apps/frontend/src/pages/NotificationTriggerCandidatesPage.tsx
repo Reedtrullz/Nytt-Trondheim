@@ -5,6 +5,7 @@ import type {
   NotificationTriggerDeliveryState,
   NotificationTriggerKind,
   NotificationTriggerPage,
+  NotificationPushStatus,
   NotificationTriggerQueryInput,
   NotificationTriggerSeverity,
   PushDeliveryPage,
@@ -249,6 +250,49 @@ function DeliveryHistory({ deliveries }: { deliveries?: PushDeliveryPage }) {
   );
 }
 
+function PushStatusPanel({ status }: { status?: NotificationPushStatus }) {
+  if (!status) return null;
+  const healthState = status.health?.state ?? (status.configured ? "ok" : "disabled");
+  return (
+    <section className={`notification-push-status ${healthState}`} aria-labelledby="push-status">
+      <div>
+        <p className="label">Web Push-kanal</p>
+        <h2 id="push-status">{status.label}</h2>
+        <p>{status.detail}</p>
+      </div>
+      <dl>
+        <div>
+          <dt>Abonnement</dt>
+          <dd>{status.activeSubscriptions}</dd>
+        </div>
+        <div>
+          <dt>Matcher</dt>
+          <dd>
+            {status.matchingCandidates}/{status.matchingCandidates + status.blockedCandidates}
+          </dd>
+        </div>
+        <div>
+          <dt>Klar</dt>
+          <dd>{status.readyCandidates}</dd>
+        </div>
+        <div>
+          <dt>Siste sendt</dt>
+          <dd>{status.deliveryCounts.sent}</dd>
+        </div>
+        <div>
+          <dt>Feilet</dt>
+          <dd>{status.deliveryCounts.failed}</dd>
+        </div>
+      </dl>
+      <small>
+        {status.health?.lastCheckedAt
+          ? `Kildehelse kontrollert ${time(status.health.lastCheckedAt)}`
+          : "Kildehelse venter på første worker-kjøring"}
+      </small>
+    </section>
+  );
+}
+
 export function NotificationTriggerCandidatesDashboard({
   page,
   deliveries,
@@ -302,6 +346,7 @@ export function NotificationTriggerCandidatesDashboard({
           <span>Høy tillit</span>
         </article>
       </section>
+      <PushStatusPanel status={page.pushStatus} />
       <DeliveryHistory deliveries={deliveries} />
       <section className="notification-triggers-grid">
         <aside

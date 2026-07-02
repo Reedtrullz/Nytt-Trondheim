@@ -22,6 +22,7 @@ import {
   normalizeDatexSituationEndpoint,
   prepareArticleCoverageAnalysis,
   sourceHealthFromDeepSeekAnalysis,
+  sourceHealthFromPushDelivery,
   shouldResolveMissingDatexSituations,
 } from "../src/index.js";
 import { normalizeDatexCredentialedEndpoint } from "../src/datex.js";
@@ -317,6 +318,78 @@ describe("worker lifecycle helpers", () => {
       lastCheckedAt: completedAt,
       lastFailureAt: completedAt,
     });
+  });
+
+  it("reports disabled Web Push as source health", () => {
+    const health = sourceHealthFromPushDelivery(
+      {
+        configured: false,
+        candidates: 2,
+        subscriptions: 0,
+        claimed: 0,
+        sent: 0,
+        failed: 0,
+        skipped: 2,
+      },
+      "2026-07-02T18:00:00.000Z",
+      "2026-07-02T18:10:00.000Z",
+    );
+
+    expect(health).toMatchObject({
+      source: "web_push",
+      label: "Web Push",
+      state: "disabled",
+      lastCheckedAt: "2026-07-02T18:00:00.000Z",
+      nextPollAt: "2026-07-02T18:10:00.000Z",
+    });
+    expect(health.detail).toContain("WEB_PUSH_VAPID_PUBLIC_KEY");
+  });
+
+  it("reports Web Push delivery failures as degraded health", () => {
+    const health = sourceHealthFromPushDelivery(
+      {
+        configured: true,
+        candidates: 3,
+        subscriptions: 2,
+        claimed: 2,
+        sent: 1,
+        failed: 1,
+        skipped: 4,
+      },
+      "2026-07-02T18:00:00.000Z",
+      "2026-07-02T18:10:00.000Z",
+    );
+
+    expect(health).toMatchObject({
+      source: "web_push",
+      state: "degraded",
+      lastFailureAt: "2026-07-02T18:00:00.000Z",
+    });
+    expect(health.detail).toContain("3 kandidater vurdert");
+    expect(health.detail).toContain("2 aktive abonnementer");
+    expect(health.detail).toContain("1 feilet");
+  });
+
+  it("reports successful Web Push checks as ok health", () => {
+    const health = sourceHealthFromPushDelivery(
+      {
+        configured: true,
+        candidates: 1,
+        subscriptions: 1,
+        claimed: 1,
+        sent: 1,
+        failed: 0,
+        skipped: 0,
+      },
+      "2026-07-02T18:00:00.000Z",
+      "2026-07-02T18:10:00.000Z",
+    );
+
+    expect(health).toMatchObject({
+      source: "web_push",
+      state: "ok",
+    });
+    expect(health.lastFailureAt).toBeUndefined();
   });
 
   it("geocodes collected articles before deriving coverage bundle decisions", async () => {

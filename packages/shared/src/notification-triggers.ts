@@ -11,6 +11,7 @@ import type {
   Situation,
   SourceConfidenceLevel,
   SourceConfidenceSummary,
+  SourceHealth,
   SourceId,
 } from "./types.js";
 
@@ -31,6 +32,7 @@ export interface NotificationDeliveryStateContext {
   configured: boolean;
   deliveries?: Array<Pick<PushDeliveryListItem, "triggerId" | "status">>;
   subscriptions?: NotificationSubscriptionPreference[];
+  sourceHealth?: SourceHealth[];
 }
 
 export type NotificationSubscriptionPreference = Pick<
@@ -498,11 +500,87 @@ function deliveryDetail(state: NotificationTriggerDeliveryState): string {
   }
 }
 
+function pushDeliveryCounts(deliveries: NotificationDeliveryStateContext["deliveries"] = []) {
+  return {
+    total: deliveries.length,
+    sent: deliveries.filter((item) => item.status === "sent").length,
+    failed: deliveries.filter((item) => item.status === "failed").length,
+    claimed: deliveries.filter((item) => item.status === "claimed").length,
+    skipped: deliveries.filter((item) => item.status === "skipped").length,
+  };
+}
+
+function pushStatusLabel(
+  context: NotificationDeliveryStateContext,
+  health: SourceHealth | undefined,
+  blockedCandidates: number,
+): { label: string; detail: string } {
+  if (!context.configured) {
+    return {
+      label: "Ikke konfigurert",
+      detail: "Web Push mangler VAPID-nøkler og sender ikke automatiske varsler.",
+    };
+  }
+  if (health?.state === "degraded") {
+    return {
+      label: "Degradert",
+      detail: health.detail,
+    };
+  }
+  if (health?.state === "disabled") {
+    return {
+      label: "Avslått",
+      detail: health.detail,
+    };
+  }
+  if (blockedCandidates > 0) {
+    return {
+      label: "Mangler match",
+      detail: "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+    };
+  }
+  return {
+    label: "Klar",
+    detail: health?.detail ?? "Web Push er konfigurert og kandidatene er vurdert for levering.",
+  };
+}
+
+function notificationPushStatus(
+  page: NotificationTriggerPage,
+  context: NotificationDeliveryStateContext,
+): NotificationTriggerPage["pushStatus"] {
+  const subscriptions = context.subscriptions?.filter((subscription) => subscription.enabled) ?? [];
+  const health = context.sourceHealth?.find((source) => source.source === "web_push");
+  const matchingCandidates = page.items.filter((candidate) =>
+    subscriptions.some((subscription) =>
+      notificationSubscriptionMatchesCandidate(subscription, candidate),
+    ),
+  ).length;
+  const readyCandidates = page.items.filter(
+    (candidate) => candidate.deliveryState === "ready",
+  ).length;
+  const blockedCandidates = page.items.filter((candidate) =>
+    ["not_configured", "no_subscribers", "failed"].includes(candidate.deliveryState),
+  ).length;
+  const label = pushStatusLabel(context, health, blockedCandidates);
+
+  return {
+    configured: context.configured,
+    ...label,
+    ...(health ? { health } : {}),
+    activeSubscriptions: subscriptions.length,
+    matchingCandidates,
+    readyCandidates,
+    blockedCandidates,
+    deliveryCounts: pushDeliveryCounts(context.deliveries),
+  };
+}
+
 export function applyNotificationDeliveryStates(
   page: NotificationTriggerPage,
   context: NotificationDeliveryStateContext,
 ): NotificationTriggerPage {
-  return {
+  const nextPage = {
     ...page,
     items: page.items.map((candidate) => {
       const deliveryState = deliveryStateForCandidate(candidate, context);
@@ -512,6 +590,10 @@ export function applyNotificationDeliveryStates(
         detail: deliveryDetail(deliveryState),
       };
     }),
+  };
+  return {
+    ...nextPage,
+    pushStatus: notificationPushStatus(nextPage, context),
   };
 }
 

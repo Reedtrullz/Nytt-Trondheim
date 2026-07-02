@@ -1215,6 +1215,7 @@ const sourceAuditRequiredSources: SourceId[] = [
   "politiloggen",
   "internal",
   "deepseek",
+  "web_push",
   "private_annotations",
 ];
 
@@ -1257,6 +1258,7 @@ const sourceAuditLabelFallbacks: Record<SourceId, string> = {
   internal: "Interne vurderinger",
   private_annotations: "Private annotasjoner",
   deepseek: "AI-analyse",
+  web_push: "Web Push",
 };
 
 const sourceAuditContractPaths: Partial<Record<SourceId, string>> = {
@@ -1312,7 +1314,7 @@ function sourceAuditGroup(source: SourceId): SourceAuditProviderGroup {
     return "datex";
   if (source.startsWith("entur")) return "entur";
   if (source === "politiloggen") return "politiloggen";
-  if (source === "internal" || source === "deepseek") return "internal";
+  if (source === "internal" || source === "deepseek" || source === "web_push") return "internal";
   if (source === "private_annotations") return "private_annotation";
   if (
     [
@@ -1354,7 +1356,8 @@ function sourceAuditRole(source: SourceId): SourceAuditRole {
   ) {
     return "telemetry_source";
   }
-  if (source === "internal" || source === "deepseek") return "internal_analysis";
+  if (source === "internal" || source === "deepseek" || source === "web_push")
+    return "internal_analysis";
   if (source === "private_annotations") return "private_annotation";
   if (source === "met" || source === "nve" || source === "entur_service_alerts") {
     return "context_source";

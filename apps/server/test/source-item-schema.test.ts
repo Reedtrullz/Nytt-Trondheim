@@ -125,6 +125,11 @@ describe("source item schema", () => {
       expect(evidenceSourceConstraint).toContain(provider);
       expect(sourceItemProviderConstraint).toContain(provider);
     }
+    expect(sourceHealthConstraint).toContain("web_push");
+    expect(evidenceSourceConstraint).toContain("web_push");
+    expect(sourceItemProviderConstraint).toContain("web_push");
+    expect(schema).toContain("CHECK (source NOT IN ('dsb','web_push'))");
+    expect(schema).toContain("CHECK (provider NOT IN ('dsb','web_push'))");
     expect(schema).toContain("traffic_map_events_source_check");
     expect(schema).toContain("CHECK (source IN ('vegvesen_traffic_info'))");
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");

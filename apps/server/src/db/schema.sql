@@ -310,14 +310,14 @@ ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_telemetry_source_che
   ));
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM evidence_items WHERE source = 'dsb') THEN
-    RAISE EXCEPTION 'DSB is health-only and must not exist in evidence_items';
+  IF EXISTS (SELECT 1 FROM evidence_items WHERE source IN ('dsb','web_push')) THEN
+    RAISE EXCEPTION 'health-only source must not exist in evidence_items';
   END IF;
 END;
 $$;
 ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_no_health_only_source_check;
 ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_health_only_source_check
-  CHECK (source <> 'dsb');
+  CHECK (source NOT IN ('dsb','web_push'));
 DO $$
 BEGIN
   IF EXISTS (
@@ -329,7 +329,7 @@ BEGIN
       'tronderbladet','nidaros','t_a',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-      'private_annotations','deepseek'
+      'private_annotations','deepseek','web_push'
     )
   ) THEN
     RAISE EXCEPTION 'unknown source exists in evidence_items';
@@ -345,7 +345,7 @@ ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_source_id_check
     'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-    'private_annotations','deepseek'
+    'private_annotations','deepseek','web_push'
   ));
 
 CREATE TABLE IF NOT EXISTS timeline_entries (
@@ -515,7 +515,7 @@ BEGIN
       'tronderbladet','nidaros','t_a',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-      'private_annotations','deepseek'
+      'private_annotations','deepseek','web_push'
     )
   ) THEN
     RAISE EXCEPTION 'unknown provider exists in source_items';
@@ -531,18 +531,18 @@ ALTER TABLE source_items ADD CONSTRAINT source_items_provider_source_id_check
     'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-    'private_annotations','deepseek'
+    'private_annotations','deepseek','web_push'
   ));
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM source_items WHERE provider = 'dsb') THEN
-    RAISE EXCEPTION 'DSB is health-only and must not exist in source_items';
+  IF EXISTS (SELECT 1 FROM source_items WHERE provider IN ('dsb','web_push')) THEN
+    RAISE EXCEPTION 'health-only provider must not exist in source_items';
   END IF;
 END;
 $$;
 ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_no_health_only_provider_check;
 ALTER TABLE source_items ADD CONSTRAINT source_items_no_health_only_provider_check
-  CHECK (provider <> 'dsb');
+  CHECK (provider NOT IN ('dsb','web_push'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_kind_external_id_unique
   ON source_items (provider, kind, external_id)
@@ -1085,7 +1085,7 @@ ALTER TABLE source_health ADD CONSTRAINT source_health_source_id_check
     'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-    'private_annotations','deepseek'
+    'private_annotations','deepseek','web_push'
   ));
 ALTER TABLE source_health DROP CONSTRAINT IF EXISTS source_health_state_check;
 ALTER TABLE source_health ADD CONSTRAINT source_health_state_check

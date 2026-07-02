@@ -15,6 +15,23 @@ const page: NotificationTriggerPage = {
     officialBacked: 1,
     highConfidence: 1,
   },
+  pushStatus: {
+    configured: true,
+    label: "Klar",
+    detail: "Web Push er konfigurert og kandidatene er vurdert for levering.",
+    activeSubscriptions: 1,
+    matchingCandidates: 1,
+    readyCandidates: 0,
+    blockedCandidates: 0,
+    deliveryCounts: { total: 1, sent: 1, failed: 0, claimed: 0, skipped: 0 },
+    health: {
+      source: "web_push",
+      label: "Web Push",
+      state: "ok",
+      lastCheckedAt: "2026-07-02T09:46:00.000Z",
+      detail: "1 kandidater vurdert, 1 sendt",
+    },
+  },
   items: [
     {
       id: "notification:situation:road-one",
@@ -88,6 +105,10 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     );
 
     expect(html).toContain("Varselutløsere");
+    expect(html).toContain("Web Push-kanal");
+    expect(html).toContain("Klar");
+    expect(html).toContain("1/1");
+    expect(html).toContain("Kildehelse kontrollert");
     expect(html).toContain("Siste leveranser");
     expect(html).toContain("1 sendt");
     expect(html).toContain("Steinsprang, vegen er stengt");
@@ -122,6 +143,16 @@ describe("NotificationTriggerCandidatesDashboard", () => {
               officialBacked: 0,
               highConfidence: 0,
             },
+            pushStatus: {
+              configured: true,
+              label: "Klar",
+              detail: "Ingen kandidater i nåværende filter.",
+              activeSubscriptions: 1,
+              matchingCandidates: 0,
+              readyCandidates: 0,
+              blockedCandidates: 0,
+              deliveryCounts: { total: 0, sent: 0, failed: 0, claimed: 0, skipped: 0 },
+            },
           }}
         />
       </MemoryRouter>,
@@ -147,6 +178,17 @@ describe("NotificationTriggerCandidatesDashboard", () => {
                 detail: "Ingen aktive push-abonnement matcher alvorlighet og type.",
               },
             ],
+            pushStatus: {
+              configured: true,
+              label: "Mangler match",
+              detail:
+                "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+              activeSubscriptions: 0,
+              matchingCandidates: 0,
+              readyCandidates: 0,
+              blockedCandidates: 1,
+              deliveryCounts: { total: 0, sent: 0, failed: 0, claimed: 0, skipped: 0 },
+            },
           }}
         />
       </MemoryRouter>,
@@ -154,5 +196,6 @@ describe("NotificationTriggerCandidatesDashboard", () => {
 
     expect(html).toContain("Ingen abonnent");
     expect(html).toContain("Ingen aktive push-abonnement matcher alvorlighet og type.");
+    expect(html).toContain("Mangler match");
   });
 });

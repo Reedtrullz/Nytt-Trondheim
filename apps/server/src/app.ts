@@ -1928,16 +1928,18 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/operations/notification-triggers", async (req, res, next) => {
     try {
       const filters = notificationTriggerQuerySchema.parse(req.query);
-      const [page, deliveries, subscriptions] = await Promise.all([
+      const [page, deliveries, subscriptions, sourceHealth] = await Promise.all([
         store.listNotificationTriggers(filters, currentLogin(req)),
         store.listPushDeliveries(100, currentLogin(req)),
         store.listPushSubscriptionPreferences(currentLogin(req)),
+        store.listSourceHealth(),
       ]);
       res.json(
         applyNotificationDeliveryStates(page, {
           configured: Boolean(config.webPushConfigured),
           deliveries: deliveries.items,
           subscriptions,
+          sourceHealth,
         }),
       );
     } catch (error) {
