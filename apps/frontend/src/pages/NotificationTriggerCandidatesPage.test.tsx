@@ -20,10 +20,10 @@ const page: NotificationTriggerPage = {
       id: "notification:situation:road-one",
       kind: "traffic_disruption",
       severity: "critical",
-      deliveryState: "candidate_only",
+      deliveryState: "sent",
       title: "Steinsprang, vegen er stengt",
       body: "Gangåsvegen: Vegen er stengt og omkjøring er skiltet.",
-      detail: "Kandidat for systemvarsel. Ingen push er sendt i denne versjonen.",
+      detail: "Push-varsel er sendt for denne utløseren.",
       score: 0.91,
       confidence: {
         level: "confirmed",
@@ -92,7 +92,8 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("1 sendt");
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kritisk");
-    expect(html).toContain("Ikke sendt");
+    expect(html).toContain("Sendt");
+    expect(html).toContain("Push-varsel er sendt for denne utløseren");
     expect(html).toContain("Har offentlig kildegrunnlag");
     expect(html).toContain("stengt");
     expect(html).toContain("/situasjoner/road-one");

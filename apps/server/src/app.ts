@@ -11,6 +11,7 @@ import {
   accessRequestInputSchema,
   accessRequestDecisionSchema,
   accessRequestQuerySchema,
+  applyNotificationDeliveryStates,
   articleQuerySchema,
   commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
@@ -959,7 +960,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/notifications/settings", async (req, res, next) => {
     try {
       res.json(
-        await store.getPushSettings(req.user?.id ?? currentLogin(req), config.webPushPublicKey),
+        await store.getPushSettings(
+          req.user?.id ?? currentLogin(req),
+          config.webPushConfigured ? config.webPushPublicKey : undefined,
+        ),
       );
     } catch (error) {
       next(error);
@@ -968,7 +972,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.post("/api/notifications/subscriptions", async (req, res, next) => {
     try {
-      if (!config.webPushPublicKey) {
+      if (!config.webPushConfigured || !config.webPushPublicKey) {
         res.status(503).json({ error: "Web Push er ikke konfigurert ennå." });
         return;
       }
@@ -1924,7 +1928,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/operations/notification-triggers", async (req, res, next) => {
     try {
       const filters = notificationTriggerQuerySchema.parse(req.query);
-      res.json(await store.listNotificationTriggers(filters, currentLogin(req)));
+      const [page, deliveries] = await Promise.all([
+        store.listNotificationTriggers(filters, currentLogin(req)),
+        store.listPushDeliveries(100, currentLogin(req)),
+      ]);
+      res.json(
+        applyNotificationDeliveryStates(page, {
+          configured: Boolean(config.webPushConfigured),
+          deliveries: deliveries.items,
+        }),
+      );
     } catch (error) {
       next(error);
     }

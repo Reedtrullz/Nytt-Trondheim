@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
   NotificationTriggerCandidate,
+  NotificationTriggerDeliveryState,
   NotificationTriggerKind,
   NotificationTriggerPage,
   NotificationTriggerQueryInput,
@@ -26,6 +27,15 @@ const kindLabels: Record<NotificationTriggerKind, string> = {
   traffic_disruption: "Trafikk",
   weather_hazard: "Vær",
   service_disruption: "Driftsbrudd",
+};
+
+const deliveryStateLabels: Record<NotificationTriggerDeliveryState, string> = {
+  candidate_only: "Ikke sendt",
+  not_configured: "Ikke konfigurert",
+  ready: "Klar",
+  sent: "Sendt",
+  failed: "Feilet",
+  suppressed: "Dempet",
 };
 
 const severityOptions: Array<{ value: NotificationTriggerSeverity; label: string }> = [
@@ -130,10 +140,11 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
       <p className="label">{kindLabels[candidate.kind]}</p>
       <h2>{candidate.title}</h2>
       <p>{candidate.body}</p>
+      <p>{candidate.detail}</p>
       <div className="notification-trigger-badges">
         <span>{severityLabels[candidate.severity]}</span>
         <span>{percent(candidate.score)} score</span>
-        <span>Ikke sendt</span>
+        <span>{deliveryStateLabels[candidate.deliveryState]}</span>
       </div>
       <dl className="coverage-bundle-facts">
         <div>
@@ -155,7 +166,7 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
         </div>
         <div>
           <dt>Levering</dt>
-          <dd>Kandidat-only</dd>
+          <dd>{deliveryStateLabels[candidate.deliveryState]}</dd>
         </div>
       </dl>
       <section>

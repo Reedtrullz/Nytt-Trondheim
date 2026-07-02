@@ -93,6 +93,7 @@ async function testAppWithPushPublicKey(publicKey = "test-public-vapid-key") {
     runtimeStatusDir: uploadDir,
     rateLimitEnabled: true,
     webPushPublicKey: publicKey,
+    webPushConfigured: true,
   });
   return { ...runtime, uploadDir };
 }
@@ -166,6 +167,27 @@ describe("private situation API", () => {
     expect(withEnvValue("RATE_LIMIT_ENABLED", "false", () => loadConfig().rateLimitEnabled)).toBe(
       false,
     );
+  });
+
+  it("treats Web Push as configured only when both VAPID keys exist", () => {
+    withEnvValue("WEB_PUSH_VAPID_PRIVATE_KEY", undefined, () => {
+      expect(
+        withEnvValue(
+          "WEB_PUSH_VAPID_PUBLIC_KEY",
+          "public-key",
+          () => loadConfig().webPushConfigured,
+        ),
+      ).toBe(false);
+    });
+    withEnvValue("WEB_PUSH_VAPID_PRIVATE_KEY", "private-key", () => {
+      expect(
+        withEnvValue(
+          "WEB_PUSH_VAPID_PUBLIC_KEY",
+          "public-key",
+          () => loadConfig().webPushConfigured,
+        ),
+      ).toBe(true);
+    });
   });
 
   it("can disable API rate limiting through config", async () => {
@@ -2391,8 +2413,9 @@ describe("private situation API", () => {
     expect(response.body.items.length).toBeGreaterThan(0);
     expect(response.body.items[0]).toMatchObject({
       id: expect.stringContaining("notification:"),
-      deliveryState: "candidate_only",
+      deliveryState: "not_configured",
       title: expect.any(String),
+      detail: expect.stringContaining("Web Push er ikke konfigurert"),
       score: expect.any(Number),
       confidence: expect.objectContaining({ level: expect.any(String) }),
       reasons: expect.arrayContaining([expect.any(String)]),
@@ -2401,6 +2424,23 @@ describe("private situation API", () => {
     expect(JSON.stringify(response.body)).not.toContain("rawPayload");
     expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
     expect(JSON.stringify(response.body)).not.toContain("raw_payload");
+  });
+
+  it("marks notification trigger candidates as ready when Web Push is configured", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent
+      .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")
+      .expect(200);
+
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(response.body.items[0]).toMatchObject({
+      id: expect.stringContaining("notification:"),
+      deliveryState: "ready",
+      detail: expect.stringContaining("Klar for Web Push"),
+    });
   });
 
   it("lets signed-in users manage Web Push subscriptions without exposing endpoint secrets", async () => {

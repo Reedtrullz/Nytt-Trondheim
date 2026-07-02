@@ -1,10 +1,12 @@
 import type {
   Article,
   NotificationTriggerCandidate,
+  NotificationTriggerDeliveryState,
   NotificationTriggerKind,
   NotificationTriggerPage,
   NotificationTriggerQuery,
   NotificationTriggerSeverity,
+  PushDeliveryListItem,
   Situation,
   SourceConfidenceLevel,
   SourceConfidenceSummary,
@@ -22,6 +24,11 @@ export interface BuildNotificationTriggersInput {
   articles: Article[];
   generatedAt: string;
   filters?: NotificationTriggerQuery;
+}
+
+export interface NotificationDeliveryStateContext {
+  configured: boolean;
+  deliveries?: Array<Pick<PushDeliveryListItem, "triggerId" | "status">>;
 }
 
 const highImpactRules: NotificationTriggerRule[] = [
@@ -431,6 +438,52 @@ function summaryForCandidates(
       item.sourceIds.some((source) => officialSources.has(source)),
     ).length,
     highConfidence: items.filter((item) => item.confidence.level === "confirmed").length,
+  };
+}
+
+function deliveryStateForCandidate(
+  candidate: NotificationTriggerCandidate,
+  context: NotificationDeliveryStateContext,
+): NotificationTriggerDeliveryState {
+  const deliveries = context.deliveries?.filter((item) => item.triggerId === candidate.id) ?? [];
+  if (deliveries.some((item) => item.status === "sent")) return "sent";
+  if (deliveries.some((item) => item.status === "failed")) return "failed";
+  if (deliveries.some((item) => item.status === "skipped")) return "suppressed";
+  if (!context.configured) return "not_configured";
+  return "ready";
+}
+
+function deliveryDetail(state: NotificationTriggerDeliveryState): string {
+  switch (state) {
+    case "not_configured":
+      return "Web Push er ikke konfigurert. Kandidaten blir ikke sendt automatisk.";
+    case "ready":
+      return "Klar for Web Push dersom en aktiv abonnent matcher alvorlighet og type.";
+    case "sent":
+      return "Push-varsel er sendt for denne utløseren.";
+    case "failed":
+      return "Siste push-levering for denne utløseren feilet.";
+    case "suppressed":
+      return "Utløseren er dempet eller allerede håndtert for aktuelle abonnementer.";
+    case "candidate_only":
+      return "Kandidat for systemvarsel. Ingen push er sendt i denne visningen.";
+  }
+}
+
+export function applyNotificationDeliveryStates(
+  page: NotificationTriggerPage,
+  context: NotificationDeliveryStateContext,
+): NotificationTriggerPage {
+  return {
+    ...page,
+    items: page.items.map((candidate) => {
+      const deliveryState = deliveryStateForCandidate(candidate, context);
+      return {
+        ...candidate,
+        deliveryState,
+        detail: deliveryDetail(deliveryState),
+      };
+    }),
   };
 }
 

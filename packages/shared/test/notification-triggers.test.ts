@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Article, Situation } from "../src/index.js";
-import { buildNotificationTriggerPage } from "../src/index.js";
+import { applyNotificationDeliveryStates, buildNotificationTriggerPage } from "../src/index.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -97,6 +97,42 @@ describe("notification trigger candidates", () => {
       ]),
     });
     expect(page.items[0]?.links[0]).toMatchObject({ href: "/situasjoner/situation-one" });
+  });
+
+  it("annotates candidates with Web Push readiness and delivery history", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [situation()],
+      articles: [
+        article({
+          id: "article-road",
+          title: "Ti meter stort ras kan bli stengt i flere uker",
+          excerpt: "Veien er stengt ved Gangåsvegen.",
+          category: "Transport",
+          situationId: "situation-one",
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(applyNotificationDeliveryStates(page, { configured: false }).items[0]).toMatchObject({
+      deliveryState: "not_configured",
+      detail: expect.stringContaining("Web Push er ikke konfigurert"),
+    });
+
+    expect(applyNotificationDeliveryStates(page, { configured: true }).items[0]).toMatchObject({
+      deliveryState: "ready",
+      detail: expect.stringContaining("Klar for Web Push"),
+    });
+
+    expect(
+      applyNotificationDeliveryStates(page, {
+        configured: true,
+        deliveries: [{ triggerId: "notification:situation:situation-one", status: "sent" }],
+      }).items[0],
+    ).toMatchObject({
+      deliveryState: "sent",
+      detail: expect.stringContaining("Push-varsel er sendt"),
+    });
   });
 
   it("keeps sport stories about Brann out of public-safety triggers", () => {

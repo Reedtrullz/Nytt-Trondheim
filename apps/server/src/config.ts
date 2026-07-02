@@ -15,6 +15,7 @@ export interface AppConfig {
   runtimeStatusDir: string;
   rateLimitEnabled: boolean;
   webPushPublicKey?: string;
+  webPushConfigured?: boolean;
   smtp?: SmtpConfig;
   emailSender?: EmailSender;
 }
@@ -79,6 +80,8 @@ function smtpConfigForEnvironment(nodeEnv: string): SmtpConfig | undefined {
 export function loadConfig(): AppConfig {
   const nodeEnv = process.env.NODE_ENV ?? "development";
   const databaseUrl = process.env.DATABASE_URL?.trim();
+  const webPushPublicKey = process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim() || undefined;
+  const webPushPrivateKeyConfigured = Boolean(process.env.WEB_PUSH_VAPID_PRIVATE_KEY?.trim());
   if (nodeEnv === "production" && !databaseUrl) {
     throw new Error("DATABASE_URL is required in production");
   }
@@ -99,7 +102,8 @@ export function loadConfig(): AppConfig {
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
-    webPushPublicKey: process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim() || undefined,
+    webPushPublicKey,
+    webPushConfigured: Boolean(webPushPublicKey && webPushPrivateKeyConfigured),
     smtp: smtpConfigForEnvironment(nodeEnv),
   };
 }
