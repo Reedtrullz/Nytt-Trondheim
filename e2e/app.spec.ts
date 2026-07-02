@@ -2103,12 +2103,19 @@ test("owner can open the real situation index and operations status", async ({ p
   await page.getByRole("link", { name: "Kommandosenter" }).click();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Intelligence Bridge" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Varselbro" })).toBeVisible();
   const intelligenceBridge = page.locator(".dashboard-widget", {
     has: page.getByRole("heading", { name: "Intelligence Bridge" }),
   });
   await expect(
     intelligenceBridge.getByRole("link", { name: "Åpne brief-revisjon" }),
   ).toHaveAttribute("href", "/command/brief");
+  const notificationBridge = page.locator(".dashboard-widget", {
+    has: page.getByRole("heading", { name: "Varselbro" }),
+  });
+  await expect(
+    notificationBridge.getByRole("link", { name: "Åpne varselutløsere" }),
+  ).toHaveAttribute("href", "/command/varsler");
   await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();
   await expect(page.getByText("Innhentede saker", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Åpne kilderevisjon" }).click();

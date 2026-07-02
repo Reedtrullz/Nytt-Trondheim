@@ -765,7 +765,12 @@ function publicVerificationForSituation(
   situation: Situation,
 ): Article["publicVerification"] | undefined {
   if (situation.officialSource !== "datex") return undefined;
+  if (situation.verificationStatus !== "Offentlig bekreftet") return undefined;
   if (situation.status !== "active" && situation.status !== "preliminary") return undefined;
+  const hasDatexEvidence = situation.evidence.some(
+    (item) => item.source === "datex" && item.provenance === "official",
+  );
+  if (!hasDatexEvidence) return undefined;
   const reportingSources = [
     ...new Set(
       situation.evidence

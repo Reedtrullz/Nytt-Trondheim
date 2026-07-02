@@ -229,4 +229,152 @@ describe("article store", () => {
     });
     expect(query).toHaveBeenCalledTimes(2);
   });
+
+  it("does not add a public verification badge without official DATEX evidence", async () => {
+    const article: Article = {
+      id: "article-road-unverified",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Kollisjon stenger E6",
+      excerpt: "En kollisjon gjør at E6 er stengt.",
+      url: "https://example.test/e6",
+      publishedAt: "2026-07-02T09:34:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["E6"],
+    };
+    const situation: Situation = {
+      id: "datex-e6-unverified",
+      type: "traffic",
+      title: "Kollisjon på E6",
+      summary: "DATEX melder om stengt veg.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      importance: "high",
+      updatedAt: "2026-07-02T09:40:00.000Z",
+      createdAt: "2026-07-02T09:20:00.000Z",
+      locationLabel: "E6",
+      officialSource: "datex",
+      officialEventId: "datex-e6-unverified",
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["datex"],
+        articleIds: [],
+        activatedAt: "2026-07-02T09:20:00.000Z",
+      },
+      relatedArticleIds: ["article-road-unverified"],
+      evidence: [
+        {
+          id: "article-evidence",
+          situationId: "datex-e6-unverified",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          sourceUrl: "https://example.test/e6",
+          supportingSnippet: "En kollisjon gjør at E6 er stengt.",
+          claim: "Kollisjon stenger E6",
+          claimType: "reporting_match",
+          provenance: "reporting_estimate",
+          confidence: 0.72,
+          extractedAt: "2026-07-02T09:40:00.000Z",
+          publishedAt: "2026-07-02T09:34:00.000Z",
+        },
+      ],
+      features: [],
+      timeline: [],
+    };
+    const query = vi.fn(async () => {
+      if (query.mock.calls.length > 1) return { rows: [{ payload: situation }] };
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ limit: 10 }, "Reedtrullz");
+
+    expect(page.items[0]).toMatchObject({
+      id: "article-road-unverified",
+      situationId: "datex-e6-unverified",
+    });
+    expect(page.items[0]?.publicVerification).toBeUndefined();
+  });
+
+  it("does not add a public verification badge before the linked situation is officially verified", async () => {
+    const article: Article = {
+      id: "article-road-preliminary",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Kollisjon stenger E6",
+      excerpt: "En kollisjon gjør at E6 er stengt.",
+      url: "https://example.test/e6",
+      publishedAt: "2026-07-02T09:34:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["E6"],
+    };
+    const situation: Situation = {
+      id: "datex-e6-preliminary",
+      type: "traffic",
+      title: "Kollisjon på E6",
+      summary: "DATEX melder om stengt veg.",
+      status: "preliminary",
+      verificationStatus: "Foreløpig fra rapportering",
+      importance: "medium",
+      updatedAt: "2026-07-02T09:40:00.000Z",
+      createdAt: "2026-07-02T09:20:00.000Z",
+      locationLabel: "E6",
+      officialSource: "datex",
+      officialEventId: "datex-e6-preliminary",
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["datex"],
+        articleIds: [],
+        activatedAt: "2026-07-02T09:20:00.000Z",
+      },
+      relatedArticleIds: ["article-road-preliminary"],
+      evidence: [
+        {
+          id: "datex-evidence",
+          situationId: "datex-e6-preliminary",
+          source: "datex",
+          sourceLabel: "Statens vegvesen DATEX",
+          sourceUrl: "https://example.test/datex",
+          supportingSnippet: "Stengt veg",
+          claim: "E6 er stengt",
+          claimType: "official_traffic_status",
+          provenance: "official",
+          confidence: 1,
+          extractedAt: "2026-07-02T09:40:00.000Z",
+          publishedAt: "2026-07-02T09:20:00.000Z",
+        },
+        {
+          id: "article-evidence",
+          situationId: "datex-e6-preliminary",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          sourceUrl: "https://example.test/e6",
+          supportingSnippet: "En kollisjon gjør at E6 er stengt.",
+          claim: "Kollisjon stenger E6",
+          claimType: "reporting_match",
+          provenance: "reporting_estimate",
+          confidence: 0.72,
+          extractedAt: "2026-07-02T09:40:00.000Z",
+          publishedAt: "2026-07-02T09:34:00.000Z",
+        },
+      ],
+      features: [],
+      timeline: [],
+    };
+    const query = vi.fn(async () => {
+      if (query.mock.calls.length > 1) return { rows: [{ payload: situation }] };
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ limit: 10 }, "Reedtrullz");
+
+    expect(page.items[0]).toMatchObject({
+      id: "article-road-preliminary",
+      situationId: "datex-e6-preliminary",
+    });
+    expect(page.items[0]?.publicVerification).toBeUndefined();
+  });
 });

@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { CommandCenterBriefingPayload, OperationsStatus } from "@nytt/shared";
+import type {
+  CommandCenterBriefingPayload,
+  NotificationTriggerPage,
+  OperationsStatus,
+} from "@nytt/shared";
 import { OperationsDashboard } from "./OperationsPage.js";
 
 const status: OperationsStatus = {
@@ -117,9 +121,89 @@ const briefing: CommandCenterBriefingPayload = {
   attentionSources: [],
 };
 
+const notificationTriggers: NotificationTriggerPage = {
+  generatedAt: "2026-06-02T06:06:00.000Z",
+  filters: { limit: 4 },
+  summary: {
+    total: 2,
+    critical: 1,
+    warning: 1,
+    watch: 0,
+    officialBacked: 1,
+    highConfidence: 1,
+  },
+  pushStatus: {
+    configured: true,
+    label: "Mangler match",
+    detail: "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+    activeSubscriptions: 1,
+    matchingCandidates: 1,
+    readyCandidates: 1,
+    blockedCandidates: 1,
+    deliveryCounts: { total: 2, sent: 1, failed: 1, claimed: 0, skipped: 0 },
+  },
+  items: [
+    {
+      id: "notification:situation:e6",
+      kind: "traffic_disruption",
+      severity: "critical",
+      deliveryState: "ready",
+      title: "Kollisjon stenger E6",
+      body: "E6 er stengt etter kollisjon.",
+      detail: "Klar for Web Push.",
+      score: 0.91,
+      confidence: {
+        level: "confirmed",
+        score: 0.91,
+        sourceCount: 2,
+        updatedAt: "2026-06-02T06:06:00.000Z",
+      },
+      generatedAt: "2026-06-02T06:06:00.000Z",
+      eventUpdatedAt: "2026-06-02T06:05:00.000Z",
+      situationId: "e6",
+      articleIds: ["article:e6"],
+      sourceIds: ["datex", "adressa"],
+      sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+      matchedKeywords: ["stengt"],
+      reasons: ["Har offentlig kildegrunnlag."],
+      links: [{ kind: "situation", label: "Åpne situasjon", href: "/situasjoner/e6" }],
+    },
+    {
+      id: "notification:article:fire",
+      kind: "public_safety",
+      severity: "warning",
+      deliveryState: "no_subscribers",
+      title: "Røykutvikling på Lade",
+      body: "Nødetatene er på vei.",
+      detail: "Ingen abonnent.",
+      score: 0.72,
+      confidence: {
+        level: "likely",
+        score: 0.72,
+        sourceCount: 1,
+        updatedAt: "2026-06-02T06:06:00.000Z",
+      },
+      generatedAt: "2026-06-02T06:06:00.000Z",
+      eventUpdatedAt: "2026-06-02T06:04:00.000Z",
+      articleIds: ["article:fire"],
+      sourceIds: ["nrk"],
+      sourceLabels: ["NRK Trøndelag"],
+      matchedKeywords: ["røyk"],
+      reasons: ["Høyeffektspråk: røyk."],
+      links: [{ kind: "external", label: "NRK Trøndelag", href: "https://example.test/fire" }],
+    },
+  ],
+};
+
 describe("OperationsDashboard", () => {
   it("renders worker cycle metrics as operational telemetry", () => {
-    const html = renderToStaticMarkup(<OperationsDashboard status={status} briefing={briefing} />);
+    const html = renderToStaticMarkup(
+      <OperationsDashboard
+        status={status}
+        briefing={briefing}
+        notificationTriggers={notificationTriggers}
+      />,
+    );
 
     expect(html).toContain("Worker-syklus");
     expect(html).toContain("Operasjonell telemetri");
@@ -148,6 +232,13 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Åpne tidslinje");
     expect(html).toContain("/command/varsler");
     expect(html).toContain("Åpne varselutløsere");
+    expect(html).toContain("Varselbro");
+    expect(html).toContain("Høyeffektskandidater");
+    expect(html).toContain("Mangler match");
+    expect(html).toContain("1 klare · 1 sendt");
+    expect(html).toContain("Kollisjon stenger E6");
+    expect(html).toContain("Vegvesen DATEX, Adresseavisen");
+    expect(html).toContain("91 %");
     expect(html).toContain("/command/romlig");
     expect(html).toContain("Åpne romlig analyse");
     expect(html).toContain("/command/radata");
@@ -161,5 +252,6 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Siste syklus");
     expect(html).toContain("Ingen fullført worker-syklus");
     expect(html).toContain("Ingen måling");
+    expect(html).toContain("Varselutløsere beregnes separat");
   });
 });

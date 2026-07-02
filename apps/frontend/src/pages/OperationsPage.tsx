@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
   CommandCenterBriefingPayload,
+  NotificationTriggerCandidate,
+  NotificationTriggerPage,
   OperationsStatus,
   RuntimeFreshness,
   TrafficPulseCorridor,
@@ -34,6 +36,10 @@ function delayText(delaySeconds?: number) {
   if (delaySeconds === undefined) return "Forsinkelse ukjent";
   if (delaySeconds <= 0) return "Ingen forsinkelse";
   return `${Math.max(1, Math.round(delaySeconds / 60))} min forsinkelse`;
+}
+
+function percent(value: number) {
+  return `${Math.round(value * 100)} %`;
 }
 
 function trafficStateLabel(state: TrafficPulseCorridor["state"]) {
@@ -116,6 +122,89 @@ function CommandLinksWidget() {
       </a>
       <a className="operations-audit-link" href="/command/kilder">
         Åpne kilderevisjon
+      </a>
+    </div>
+  );
+}
+
+const notificationSeverityLabels: Record<NotificationTriggerCandidate["severity"], string> = {
+  critical: "Kritisk",
+  warning: "Varsel",
+  watch: "Følg med",
+};
+
+const notificationKindLabels: Record<NotificationTriggerCandidate["kind"], string> = {
+  public_safety: "Sikkerhet",
+  traffic_disruption: "Trafikk",
+  weather_hazard: "Vær",
+  service_disruption: "Driftsbrudd",
+};
+
+function NotificationBridgeWidget({ page }: { page?: NotificationTriggerPage }) {
+  if (!page) {
+    return (
+      <div className="notification-bridge-widget">
+        <p className="dashboard-widget-note">
+          Varselutløsere beregnes separat fra driftstatus. Åpne verktøyet for siste kandidater og
+          Web Push-status.
+        </p>
+        <a className="operations-audit-link" href="/command/varsler">
+          Åpne varselutløsere
+        </a>
+      </div>
+    );
+  }
+
+  const activeCandidates = page.items.filter((item) => item.severity !== "watch");
+  const topCandidates = activeCandidates.length
+    ? activeCandidates.slice(0, 3)
+    : page.items.slice(0, 3);
+  const pushStatus = page.pushStatus;
+
+  return (
+    <div className="notification-bridge-widget">
+      <div className="notification-bridge-meta">
+        <article>
+          <span>Kritisk</span>
+          <strong>{page.summary.critical}</strong>
+          <small>{page.summary.warning} varsel</small>
+        </article>
+        <article>
+          <span>Offentlig</span>
+          <strong>{page.summary.officialBacked}</strong>
+          <small>{page.summary.highConfidence} høy tillit</small>
+        </article>
+        <article>
+          <span>Push</span>
+          <strong>{pushStatus?.label ?? "Ukjent"}</strong>
+          <small>
+            {pushStatus
+              ? `${pushStatus.readyCandidates} klare · ${pushStatus.deliveryCounts.sent} sendt`
+              : "Venter på kanalstatus"}
+          </small>
+        </article>
+      </div>
+      {topCandidates.length ? (
+        <div className="notification-bridge-candidates">
+          {topCandidates.map((candidate) => (
+            <article className={`notification-bridge-row ${candidate.severity}`} key={candidate.id}>
+              <div>
+                <span>
+                  {notificationKindLabels[candidate.kind]} ·{" "}
+                  {notificationSeverityLabels[candidate.severity]}
+                </span>
+                <strong>{candidate.title}</strong>
+                <small>{candidate.sourceLabels.join(", ") || candidate.sourceIds.join(", ")}</small>
+              </div>
+              <b>{percent(candidate.score)}</b>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="dashboard-widget-note">Ingen høyeffektskandidater akkurat nå.</p>
+      )}
+      <a className="operations-audit-link" href="/command/varsler">
+        Åpne varselutløsere
       </a>
     </div>
   );
@@ -328,9 +417,11 @@ function IntelligenceBridgeWidget({ briefing }: { briefing?: CommandCenterBriefi
 export function OperationsDashboard({
   status,
   briefing,
+  notificationTriggers,
 }: {
   status: OperationsStatus;
   briefing?: CommandCenterBriefingPayload;
+  notificationTriggers?: NotificationTriggerPage;
 }) {
   const trafficPulse = status.trafficPulse ?? [];
   const workerMetrics = status.workerCycleMetrics;
@@ -371,6 +462,13 @@ export function OperationsDashboard({
         children: <IntelligenceBridgeWidget briefing={briefing} />,
       },
       {
+        id: "notifications",
+        title: "Varselbro",
+        description: "Høyeffektskandidater og Web Push-klargjøring for operatørvarsler.",
+        defaultSize: "wide",
+        children: <NotificationBridgeWidget page={notificationTriggers} />,
+      },
+      {
         id: "traffic-pulse",
         title: "Trafikkpuls fra Vegvesen",
         description: "Målt/estimert reisetid per korridor uten å anta årsak.",
@@ -401,6 +499,7 @@ export function OperationsDashboard({
     ],
     [
       briefing,
+      notificationTriggers,
       parseFailures,
       slowest,
       sourceItems,
@@ -430,6 +529,7 @@ export function OperationsDashboard({
 export function OperationsPage() {
   const [status, setStatus] = useState<OperationsStatus>();
   const [briefing, setBriefing] = useState<CommandCenterBriefingPayload>();
+  const [notificationTriggers, setNotificationTriggers] = useState<NotificationTriggerPage>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
 
@@ -438,6 +538,7 @@ export function OperationsPage() {
     setError(undefined);
     setStatus(undefined);
     setBriefing(undefined);
+    setNotificationTriggers(undefined);
     void api
       .operations()
       .then((nextStatus) => {
@@ -450,6 +551,14 @@ export function OperationsPage() {
           })
           .catch(() => {
             // Keep the Command Center usable if the derived briefing review is temporarily unavailable.
+          });
+        void api
+          .notificationTriggers({ limit: 4 })
+          .then((nextTriggers) => {
+            if (!cancelled) setNotificationTriggers(nextTriggers);
+          })
+          .catch(() => {
+            // Keep the Command Center usable if notification analysis is temporarily unavailable.
           });
       })
       .catch((reason: Error) => {
@@ -472,5 +581,11 @@ export function OperationsPage() {
   }
   if (!status) return <main className="operations-page">Henter driftstatus...</main>;
 
-  return <OperationsDashboard status={status} briefing={briefing} />;
+  return (
+    <OperationsDashboard
+      status={status}
+      briefing={briefing}
+      notificationTriggers={notificationTriggers}
+    />
+  );
 }

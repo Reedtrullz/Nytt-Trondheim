@@ -2669,6 +2669,90 @@ button {
   padding-left: 2px;
 }
 
+.notification-bridge-widget {
+  display: grid;
+  gap: 12px;
+}
+
+.notification-bridge-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.notification-bridge-meta article,
+.notification-bridge-row {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.notification-bridge-meta span,
+.notification-bridge-meta small,
+.notification-bridge-row span,
+.notification-bridge-row small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.notification-bridge-meta span,
+.notification-bridge-row span {
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.notification-bridge-meta strong {
+  display: block;
+  margin: 4px 0 2px;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.notification-bridge-candidates {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-bridge-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border-left-width: 5px;
+}
+
+.notification-bridge-row.critical {
+  border-left-color: var(--red);
+}
+
+.notification-bridge-row.warning {
+  border-left-color: var(--orange);
+}
+
+.notification-bridge-row.watch {
+  border-left-color: var(--blue);
+}
+
+.notification-bridge-row strong,
+.notification-bridge-row small {
+  display: block;
+}
+
+.notification-bridge-row strong {
+  margin: 3px 0 2px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.notification-bridge-row b {
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .source-state-list {
   display: grid;
   gap: 0;
@@ -8104,7 +8188,8 @@ button {
 
   .command-briefing-highlights,
   .command-briefing-ai-meta,
-  .intelligence-bridge-meta {
+  .intelligence-bridge-meta,
+  .notification-bridge-meta {
     grid-template-columns: 1fr;
   }
 
