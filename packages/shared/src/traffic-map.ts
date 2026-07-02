@@ -1,5 +1,10 @@
 import type { Geometry, LineString, Point } from "geojson";
-import type { SourceId, TrafficPulseCorridor } from "./types.js";
+import type {
+  SourceConfidenceLevel,
+  SourceConfidenceSummary,
+  SourceId,
+  TrafficPulseCorridor,
+} from "./types.js";
 
 export type TrafficEventCategory =
   | "roadworks"
@@ -235,6 +240,7 @@ export interface SpatialHeatmapCell {
   lastSeenAt: string;
   sourceIds: Array<SourceId | TrafficMapEventSource>;
   maxSeverity?: TrafficEventSeverity;
+  sourceConfidence?: SourceConfidenceSummary;
 }
 
 export interface UnexplainedDelayCandidate {
@@ -251,6 +257,7 @@ export interface UnexplainedDelayCandidate {
   affectedEventIds: string[];
   confidence: "watch" | "warning" | "critical";
   reason: string;
+  sourceConfidence?: SourceConfidenceSummary;
 }
 
 export interface CommandCenterSpatialAnalyticsPayload {
@@ -264,6 +271,7 @@ export interface CommandCenterSpatialAnalyticsPayload {
     observations: number;
     unexplainedDelays: number;
     criticalDelays: number;
+    bySourceConfidence: Record<SourceConfidenceLevel, number>;
   };
   heatmapCells: SpatialHeatmapCell[];
   unexplainedDelays: UnexplainedDelayCandidate[];

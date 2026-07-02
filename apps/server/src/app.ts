@@ -29,7 +29,9 @@ import {
   sourceAuditFilterQuerySchema,
   provenanceLabels,
   situationQuerySchema,
+  sourceConfidenceLevelFromScore,
   sourceConfidenceLabels,
+  sourceMixConfidenceSummary,
   taskInputSchema,
   trafficMapQuerySchema,
   travelPlanQuerySchema,
@@ -46,16 +48,17 @@ import {
   type SituationExplanation,
   type SituationMapWorkspace,
   type SituationWorkspace,
-  type SourceConfidenceLevel,
   type SourceConfidenceSummary,
   type SourceHealth,
   type SourceId,
   type SourceItem,
+  type SpatialHeatmapCell,
   type RuntimeFreshness,
   type TimelineEntry,
   type TrafficEventState,
   type TrafficMapEvent,
   type TrafficMapSourceStatus,
+  type UnexplainedDelayCandidate,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
 import {
@@ -465,14 +468,6 @@ function filterTrafficMapEvents(
   });
 }
 
-function confidenceLevelFromScore(score?: number): SourceConfidenceLevel {
-  if (score === undefined || !Number.isFinite(score)) return "uncertain";
-  if (score >= 0.85) return "confirmed";
-  if (score >= 0.65) return "likely";
-  if (score >= 0.35) return "uncertain";
-  return "speculative";
-}
-
 function sourceConfidenceForSituation(
   situation: Situation,
   sourceItems: SourceItem[],
@@ -490,7 +485,7 @@ function sourceConfidenceForSituation(
     sourceItems.some(
       (item) => item.reliabilityTier === "official" && item.relationship === "supports",
     );
-  const level = hasOfficialSignal ? "confirmed" : confidenceLevelFromScore(score);
+  const level = hasOfficialSignal ? "confirmed" : sourceConfidenceLevelFromScore(score);
   const sourceIds = new Set<SourceId>([
     ...situation.evidence.map((evidence) => evidence.source),
     ...situation.timeline.flatMap((entry) => (entry.source ? [entry.source] : [])),
@@ -506,6 +501,34 @@ function sourceConfidenceForSituation(
       ? "Offentlig eller offisielt kildegrunnlag er koblet til situasjonen."
       : "Bygget fra tilgjengelige kilde- og tidslinjesignaler.",
   };
+}
+
+function sourceConfidenceForHeatmapCell(cell: SpatialHeatmapCell): SourceConfidenceSummary {
+  const sources = new Set(cell.sourceIds);
+  if (cell.articleCount > 0) sources.add("news_article");
+  if (cell.trafficEventCount > 0) sources.add("vegvesen_traffic_info");
+  return sourceMixConfidenceSummary([...sources], { updatedAt: cell.lastSeenAt });
+}
+
+function sourceConfidenceForDelayCandidate(
+  candidate: UnexplainedDelayCandidate,
+): SourceConfidenceSummary {
+  const sources = new Set<string>(["datex_travel_time"]);
+  if (candidate.matchedArticleIds.length > 0) sources.add("news_article");
+  if (candidate.affectedEventIds.length > 0) sources.add("vegvesen_traffic_info");
+  return sourceMixConfidenceSummary([...sources], { updatedAt: candidate.updatedAt });
+}
+
+function sourceConfidenceCounts(
+  items: Array<{ sourceConfidence?: SourceConfidenceSummary }>,
+): Record<SourceConfidenceSummary["level"], number> {
+  return items.reduce<Record<SourceConfidenceSummary["level"], number>>(
+    (counts, item) => {
+      counts[item.sourceConfidence?.level ?? "uncertain"] += 1;
+      return counts;
+    },
+    { confirmed: 0, likely: 0, uncertain: 0, speculative: 0 },
+  );
 }
 
 function addProvenanceBucket(
@@ -586,7 +609,8 @@ function provenanceSummaryForSituation(
       bucket.scores.length > 0
         ? bucket.scores.reduce((total, value) => total + value, 0) / bucket.scores.length
         : undefined;
-    const level = provenance === "official" ? "confirmed" : confidenceLevelFromScore(averageScore);
+    const level =
+      provenance === "official" ? "confirmed" : sourceConfidenceLevelFromScore(averageScore);
     return {
       provenance,
       label: provenanceLabels[provenance],
@@ -1970,13 +1994,24 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         eventIntersectsTimeRange(event, query.from, query.to),
       );
       const corridorImpacts = buildCorridorImpacts(events, trafficPulse);
+      const enrichedHeatmapCells = heatmapCells.map((cell) => ({
+        ...cell,
+        sourceConfidence: cell.sourceConfidence ?? sourceConfidenceForHeatmapCell(cell),
+      }));
       const unexplainedDelays = buildUnexplainedDelayCandidates(
         corridorImpacts,
         articlesPage.items,
         {
           minDelaySeconds: query.minDelaySeconds,
         },
-      ).slice(0, 20);
+      )
+        .slice(0, 20)
+        .map((candidate) => ({
+          ...candidate,
+          sourceConfidence:
+            candidate.sourceConfidence ?? sourceConfidenceForDelayCandidate(candidate),
+        }));
+      const confidenceItems = [...enrichedHeatmapCells, ...unexplainedDelays];
 
       res.json({
         generatedAt: new Date().toISOString(),
@@ -1985,14 +2020,15 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           ...(query.to ? { to: query.to } : {}),
         },
         summary: {
-          heatmapCells: heatmapCells.length,
-          observations: heatmapCells.reduce((sum, cell) => sum + cell.count, 0),
+          heatmapCells: enrichedHeatmapCells.length,
+          observations: enrichedHeatmapCells.reduce((sum, cell) => sum + cell.count, 0),
           unexplainedDelays: unexplainedDelays.length,
           criticalDelays: unexplainedDelays.filter(
             (candidate) => candidate.confidence === "critical",
           ).length,
+          bySourceConfidence: sourceConfidenceCounts(confidenceItems),
         },
-        heatmapCells,
+        heatmapCells: enrichedHeatmapCells,
         unexplainedDelays,
       });
     } catch (error) {

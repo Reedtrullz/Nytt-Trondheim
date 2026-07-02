@@ -3,6 +3,7 @@ export * from "./schemas.js";
 export * from "./sample-data.js";
 export * from "./article-bundles.js";
 export * from "./incident-text.js";
+export * from "./source-confidence.js";
 export * from "./source-labels.js";
 export * from "./situation-activation-policy.js";
 export * from "./morning-brief.js";

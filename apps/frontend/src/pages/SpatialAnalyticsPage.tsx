@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import type {
-  CommandCenterSpatialAnalyticsPayload,
-  CommandCenterSpatialAnalyticsQueryInput,
-  SpatialHeatmapCell,
-  UnexplainedDelayCandidate,
+import {
+  sourceMixConfidenceSummary,
+  type CommandCenterSpatialAnalyticsPayload,
+  type CommandCenterSpatialAnalyticsQueryInput,
+  type SourceConfidenceSummary,
+  type SpatialHeatmapCell,
+  type UnexplainedDelayCandidate,
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
@@ -20,6 +22,33 @@ const confidenceLabels: Record<UnexplainedDelayCandidate["confidence"], string> 
   watch: "Følg med",
   warning: "Varsel",
   critical: "Kritisk",
+};
+
+type HotspotPriority = "watch" | "high" | "critical";
+
+const hotspotPriorityLabels: Record<HotspotPriority, string> = {
+  watch: "Følg med",
+  high: "Høy prioritet",
+  critical: "Kritisk varmepunkt",
+};
+
+const severityLabels: Record<NonNullable<SpatialHeatmapCell["maxSeverity"]>, string> = {
+  low: "lav",
+  medium: "middels",
+  high: "høy",
+  critical: "kritisk",
+};
+
+const hotspotPriorityRank: Record<HotspotPriority, number> = {
+  watch: 0,
+  high: 1,
+  critical: 2,
+};
+
+const delayPriorityRank: Record<UnexplainedDelayCandidate["confidence"], number> = {
+  watch: 0,
+  warning: 1,
+  critical: 2,
 };
 
 function time(value?: string) {
@@ -54,6 +83,103 @@ function sourceLabel(source: SpatialHeatmapCell["sourceIds"][number]) {
     default:
       return source;
   }
+}
+
+function hotspotPriority(cell: SpatialHeatmapCell): HotspotPriority {
+  if (cell.maxSeverity === "critical" || cell.trafficEventCount >= 3 || cell.count >= 10) {
+    return "critical";
+  }
+  if (
+    cell.maxSeverity === "high" ||
+    cell.trafficEventCount > 0 ||
+    cell.count >= 4 ||
+    (cell.articleCount > 0 && cell.sourceItemCount > 0)
+  ) {
+    return "high";
+  }
+  return "watch";
+}
+
+function hotspotReason(cell: SpatialHeatmapCell) {
+  const signals: string[] = [];
+  if (cell.maxSeverity) {
+    signals.push(`${severityLabels[cell.maxSeverity]} alvorlighet`);
+  }
+  if (cell.trafficEventCount > 0) {
+    signals.push(
+      `${cell.trafficEventCount} trafikkhendelse${cell.trafficEventCount === 1 ? "" : "r"}`,
+    );
+  }
+  if (cell.articleCount > 0) {
+    signals.push(`${cell.articleCount} nyhetssak${cell.articleCount === 1 ? "" : "er"}`);
+  }
+  if (cell.sourceItemCount > 0) {
+    signals.push(`${cell.sourceItemCount} kildeobservasjoner`);
+  }
+  if (cell.count >= 4) {
+    signals.push(`${cell.count} samlede observasjoner`);
+  }
+  return signals.length > 0 ? signals.join(" · ") : "Lav tetthet uten tydelig tverrkilde-signal.";
+}
+
+function hotspotConfidence(cell: SpatialHeatmapCell): SourceConfidenceSummary {
+  if (cell.sourceConfidence) return cell.sourceConfidence;
+  const sources = new Set(cell.sourceIds);
+  if (cell.articleCount > 0) sources.add("news_article");
+  if (cell.trafficEventCount > 0) sources.add("vegvesen_traffic_info");
+  return sourceMixConfidenceSummary([...sources], { updatedAt: cell.lastSeenAt });
+}
+
+function delayConfidence(candidate: UnexplainedDelayCandidate): SourceConfidenceSummary {
+  if (candidate.sourceConfidence) return candidate.sourceConfidence;
+  const sources = new Set<string>(["datex_travel_time"]);
+  if (candidate.matchedArticleIds.length > 0) sources.add("news_article");
+  if (candidate.affectedEventIds.length > 0) sources.add("vegvesen_traffic_info");
+  return sourceMixConfidenceSummary([...sources], { updatedAt: candidate.updatedAt });
+}
+
+function confidenceScoreLabel(confidence: SourceConfidenceSummary) {
+  return confidence.score !== undefined ? `${Math.round(confidence.score * 100)} %` : "Ukjent";
+}
+
+function trustedSignalCount(payload: CommandCenterSpatialAnalyticsPayload) {
+  return payload.summary.bySourceConfidence.confirmed + payload.summary.bySourceConfidence.likely;
+}
+
+function compareHeatmapCells(left: SpatialHeatmapCell, right: SpatialHeatmapCell) {
+  const priorityDifference =
+    hotspotPriorityRank[hotspotPriority(right)] - hotspotPriorityRank[hotspotPriority(left)];
+  if (priorityDifference !== 0) return priorityDifference;
+
+  const confidenceDifference =
+    (hotspotConfidence(right).score ?? 0) - (hotspotConfidence(left).score ?? 0);
+  if (confidenceDifference !== 0) return confidenceDifference;
+
+  const countDifference = right.count - left.count;
+  if (countDifference !== 0) return countDifference;
+
+  const recencyDifference = Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt);
+  if (recencyDifference !== 0 && Number.isFinite(recencyDifference)) return recencyDifference;
+
+  return left.id.localeCompare(right.id);
+}
+
+function compareDelayCandidates(left: UnexplainedDelayCandidate, right: UnexplainedDelayCandidate) {
+  const priorityDifference =
+    delayPriorityRank[right.confidence] - delayPriorityRank[left.confidence];
+  if (priorityDifference !== 0) return priorityDifference;
+
+  const confidenceDifference =
+    (delayConfidence(right).score ?? 0) - (delayConfidence(left).score ?? 0);
+  if (confidenceDifference !== 0) return confidenceDifference;
+
+  const delayDifference = (right.delaySeconds ?? 0) - (left.delaySeconds ?? 0);
+  if (delayDifference !== 0) return delayDifference;
+
+  const recencyDifference = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  if (recencyDifference !== 0 && Number.isFinite(recencyDifference)) return recencyDifference;
+
+  return left.id.localeCompare(right.id);
 }
 
 function parseFilters(search: string): SpatialAnalyticsFilters {
@@ -107,50 +233,67 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
           attribution='&copy; <a href="https://www.kartverket.no/">Kartverket</a>'
           url={tiles}
         />
-        {payload.heatmapCells.map((cell) => (
-          <CircleMarker
-            center={[cell.center.lat, cell.center.lng]}
-            key={cell.id}
-            pathOptions={{
-              color: heatmapColor(cell),
-              fillColor: heatmapColor(cell),
-              fillOpacity: 0.34,
-              opacity: 0.82,
-              weight: 2,
-            }}
-            radius={heatmapRadius(cell)}
-          >
-            <Popup>
-              <article className="spatial-map-popup">
-                <strong>{cell.count} observasjoner</strong>
-                <p>
-                  {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser
-                </p>
-                <p>{cell.sourceIds.map(sourceLabel).join(", ")}</p>
-                <small>Sist sett {time(cell.lastSeenAt)}</small>
-              </article>
-            </Popup>
-          </CircleMarker>
-        ))}
-        {payload.unexplainedDelays.map((candidate) => (
-          <Polyline
-            key={candidate.id}
-            pathOptions={{
-              color: candidate.confidence === "critical" ? "#b3311f" : "#c07818",
-              opacity: 0.9,
-              weight: candidate.confidence === "critical" ? 6 : 4,
-            }}
-            positions={linePositions(candidate)}
-          >
-            <Popup>
-              <article className="spatial-map-popup">
-                <strong>{candidate.corridorName}</strong>
-                <p>{delayText(candidate.delaySeconds)}</p>
-                <p>{candidate.reason}</p>
-              </article>
-            </Popup>
-          </Polyline>
-        ))}
+        {payload.heatmapCells.map((cell) => {
+          const priority = hotspotPriority(cell);
+          const confidence = hotspotConfidence(cell);
+          return (
+            <CircleMarker
+              center={[cell.center.lat, cell.center.lng]}
+              key={cell.id}
+              pathOptions={{
+                color: heatmapColor(cell),
+                fillColor: heatmapColor(cell),
+                fillOpacity: 0.34,
+                opacity: 0.82,
+                weight: 2,
+              }}
+              radius={heatmapRadius(cell)}
+            >
+              <Popup>
+                <article className="spatial-map-popup">
+                  <strong>{hotspotPriorityLabels[priority]}</strong>
+                  <p>
+                    {confidence.label} tillit · {confidenceScoreLabel(confidence)}
+                  </p>
+                  <p>{cell.count} observasjoner</p>
+                  <p>
+                    {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser
+                  </p>
+                  <p>{hotspotReason(cell)}</p>
+                  <p>{confidence.rationale}</p>
+                  <p>{cell.sourceIds.map(sourceLabel).join(", ")}</p>
+                  <small>Sist sett {time(cell.lastSeenAt)}</small>
+                </article>
+              </Popup>
+            </CircleMarker>
+          );
+        })}
+        {payload.unexplainedDelays.map((candidate) => {
+          const confidence = delayConfidence(candidate);
+          return (
+            <Polyline
+              key={candidate.id}
+              pathOptions={{
+                color: candidate.confidence === "critical" ? "#b3311f" : "#c07818",
+                opacity: 0.9,
+                weight: candidate.confidence === "critical" ? 6 : 4,
+              }}
+              positions={linePositions(candidate)}
+            >
+              <Popup>
+                <article className="spatial-map-popup">
+                  <strong>{candidate.corridorName}</strong>
+                  <p>
+                    {confidence.label} tillit · {confidenceScoreLabel(confidence)}
+                  </p>
+                  <p>{delayText(candidate.delaySeconds)}</p>
+                  <p>{candidate.reason}</p>
+                  <p>{confidence.rationale}</p>
+                </article>
+              </Popup>
+            </Polyline>
+          );
+        })}
       </MapContainer>
     </div>
   );
@@ -158,12 +301,17 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
 
 function DelayCandidateRow({ candidate }: { candidate: UnexplainedDelayCandidate }) {
   const sourceUrl = safeExternalUrl(candidate.sourceUrl);
+  const confidence = delayConfidence(candidate);
   return (
     <article className={`spatial-delay-row ${candidate.confidence}`}>
       <div>
         <p className="label">{confidenceLabels[candidate.confidence]}</p>
         <h3>{candidate.corridorName}</h3>
+        <p className={`spatial-delay-confidence confidence-${confidence.level}`}>
+          {confidence.label} tillit · {confidenceScoreLabel(confidence)}
+        </p>
         <p>{candidate.reason}</p>
+        <p>{confidence.rationale}</p>
       </div>
       <dl>
         <div>
@@ -199,6 +347,15 @@ export function SpatialAnalyticsDashboard({
   onFiltersChange: (filters: SpatialAnalyticsFilters) => void;
   showMap?: boolean;
 }) {
+  const rankedHeatmapCells = useMemo(
+    () => [...payload.heatmapCells].sort(compareHeatmapCells),
+    [payload.heatmapCells],
+  );
+  const rankedDelayCandidates = useMemo(
+    () => [...payload.unexplainedDelays].sort(compareDelayCandidates),
+    [payload.unexplainedDelays],
+  );
+
   function update(next: Partial<SpatialAnalyticsFilters>) {
     onFiltersChange({ ...filters, ...next });
   }
@@ -233,6 +390,10 @@ export function SpatialAnalyticsDashboard({
         <article>
           <strong>{payload.summary.criticalDelays}</strong>
           <span>Kritiske køsignaler</span>
+        </article>
+        <article>
+          <strong>{trustedSignalCount(payload)}</strong>
+          <span>Bekreftet/sannsynlig</span>
         </article>
       </section>
       <section className="spatial-analytics-grid">
@@ -276,7 +437,7 @@ export function SpatialAnalyticsDashboard({
               </p>
             ) : (
               <div className="spatial-delay-list">
-                {payload.unexplainedDelays.map((candidate) => (
+                {rankedDelayCandidates.map((candidate) => (
                   <DelayCandidateRow candidate={candidate} key={candidate.id} />
                 ))}
               </div>
@@ -294,15 +455,28 @@ export function SpatialAnalyticsDashboard({
             <p className="spatial-empty-state">Ingen stedfestede observasjoner i vinduet.</p>
           ) : (
             <div className="spatial-cell-list">
-              {payload.heatmapCells.map((cell) => (
-                <article className="spatial-cell-row" key={cell.id}>
-                  <strong>{cell.count} observasjoner</strong>
-                  <span>
-                    {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser
-                  </span>
-                  <small>{cell.sourceIds.map(sourceLabel).join(", ")}</small>
-                </article>
-              ))}
+              {rankedHeatmapCells.map((cell) => {
+                const priority = hotspotPriority(cell);
+                const confidence = hotspotConfidence(cell);
+                return (
+                  <article className={`spatial-cell-row priority-${priority}`} key={cell.id}>
+                    <p className={`spatial-hotspot-priority priority-${priority}`}>
+                      {hotspotPriorityLabels[priority]}
+                    </p>
+                    <p className={`spatial-hotspot-confidence confidence-${confidence.level}`}>
+                      {confidence.label} tillit · {confidenceScoreLabel(confidence)}
+                    </p>
+                    <strong>{cell.count} observasjoner</strong>
+                    <span>
+                      {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser · sist
+                      sett {time(cell.lastSeenAt)}
+                    </span>
+                    <small>{hotspotReason(cell)}</small>
+                    <small>{confidence.rationale}</small>
+                    <small>{cell.sourceIds.map(sourceLabel).join(", ")}</small>
+                  </article>
+                );
+              })}
             </div>
           )}
         </aside>

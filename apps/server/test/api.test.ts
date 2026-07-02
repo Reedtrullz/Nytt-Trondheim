@@ -2536,12 +2536,23 @@ describe("private situation API", () => {
         observations: 3,
         unexplainedDelays: expect.any(Number),
         criticalDelays: expect.any(Number),
+        bySourceConfidence: expect.objectContaining({
+          confirmed: expect.any(Number),
+          likely: expect.any(Number),
+          uncertain: expect.any(Number),
+          speculative: expect.any(Number),
+        }),
       },
       heatmapCells: [
         expect.objectContaining({
           id: "cell:1039:6339",
           count: 3,
           sourceIds: ["nrk", "vegvesen_traffic_info"],
+          sourceConfidence: expect.objectContaining({
+            level: "confirmed",
+            label: "Bekreftet",
+            score: expect.any(Number),
+          }),
         }),
       ],
     });
