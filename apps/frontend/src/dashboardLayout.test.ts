@@ -16,15 +16,24 @@ describe("dashboard layout model", () => {
   it("normalizes persisted order and sizes against available widgets", () => {
     const layout = normalizeDashboardLayout(widgets, {
       order: ["sources", "missing", "summary"],
-      sizes: { sources: "large", worker: "not-a-size" as never },
+      sizes: { sources: "full", worker: "not-a-size" as never },
     });
 
     expect(layout.order).toEqual(["sources", "summary", "worker"]);
     expect(layout.sizes).toEqual({
-      sources: "large",
+      sources: "full",
       summary: "wide",
       worker: "standard",
     });
+  });
+
+  it("keeps non-resizable widgets on their declared size", () => {
+    const layout = normalizeDashboardLayout(
+      [{ id: "brief", defaultSize: "full" as const, resizable: false }],
+      { sizes: { brief: "compact" } },
+    );
+
+    expect(layout.sizes.brief).toBe("full");
   });
 
   it("moves widgets with bounded indexes", () => {

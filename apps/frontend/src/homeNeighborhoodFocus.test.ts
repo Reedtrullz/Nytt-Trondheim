@@ -1,23 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
-  homeNeighborhoodFocusOption,
-  homeNeighborhoodFocusOptions,
+  homeNeighborhoodFocusOptionForQuery,
   parseHomeNeighborhoodFocusId,
 } from "./homeNeighborhoodFocus.js";
 
 describe("home neighborhood focus", () => {
-  it("offers known Trondheim neighborhood focus presets", () => {
-    expect(homeNeighborhoodFocusOptions.map((option) => option.label)).toContain("Midtbyen");
-    expect(homeNeighborhoodFocusOptions.map((option) => option.label)).toContain("Tiller");
-    expect(homeNeighborhoodFocusOption("lade")).toMatchObject({
-      label: "Lade",
-      point: { lat: 63.445, lng: 10.447 },
-    });
+  it("resolves known Trondheim postcodes to a local focus option", () => {
+    expect(homeNeighborhoodFocusOptionForQuery("7041")?.label).toBe("Lade");
+    expect(homeNeighborhoodFocusOptionForQuery("7088")?.label).toBe("Heimdal");
   });
 
-  it("ignores unknown persisted local-focus ids", () => {
-    expect(parseHomeNeighborhoodFocusId("midtbyen")).toBe("midtbyen");
-    expect(parseHomeNeighborhoodFocusId(" ukjent ")).toBeUndefined();
-    expect(homeNeighborhoodFocusOption("")).toBeUndefined();
+  it("resolves place labels and ascii aliases", () => {
+    expect(homeNeighborhoodFocusOptionForQuery("trondheim sentrum")?.id).toBe("midtbyen");
+    expect(homeNeighborhoodFocusOptionForQuery("byasen")?.label).toBe("Byåsen");
+    expect(homeNeighborhoodFocusOptionForQuery("Flatåsen")?.id).toBe("flatasen");
+  });
+
+  it("rejects unknown persisted ids and local focus queries", () => {
+    expect(parseHomeNeighborhoodFocusId("ukjent")).toBeUndefined();
+    expect(homeNeighborhoodFocusOptionForQuery("9999")).toBeUndefined();
   });
 });

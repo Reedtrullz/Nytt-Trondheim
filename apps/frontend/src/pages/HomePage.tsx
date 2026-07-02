@@ -1,7 +1,17 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Article, BootstrapPayload } from "@nytt/shared";
 import { api } from "../api.js";
+import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
 import {
   articleCategories,
@@ -26,6 +36,7 @@ import {
 import {
   homeNeighborhoodFocusOption,
   homeNeighborhoodFocusOptions,
+  homeNeighborhoodFocusOptionForQuery,
   homeNeighborhoodFocusStorageKey,
 } from "../homeNeighborhoodFocus.js";
 import { rankHomeStoryCardsByLocalFocus, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
@@ -204,6 +215,55 @@ export function MorningBriefPanel({
         ))}
       </dl>
     </section>
+  );
+}
+
+export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
+  const widgets = useMemo(() => {
+    const nextWidgets: DashboardWidgetDefinition[] = [];
+    if (data.morningBrief) {
+      nextWidgets.push({
+        id: "morning-brief",
+        title: "Morgenbrief",
+        description: "Dagens prioriterte bypuls.",
+        defaultSize: "full",
+        resizable: false,
+        children: (
+          <MorningBriefPanel
+            articles={data.articles}
+            brief={data.morningBrief}
+            situations={data.situations}
+          />
+        ),
+      });
+    }
+    if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
+      nextWidgets.push({
+        id: "situation-banner",
+        title: "Situasjon",
+        description: "Pågående eller foreløpig offentlig hendelse.",
+        defaultSize: "full",
+        resizable: false,
+        children: <SituationBanner situations={data.situations} />,
+      });
+    }
+    return nextWidgets;
+  }, [data.articles, data.morningBrief, data.situations]);
+
+  if (widgets.length === 0) return null;
+
+  return (
+    <DashboardGrid
+      ariaLabel="Bypulsmoduler"
+      label="City Pulse"
+      title="Dagens oversikt"
+      storageKey="nytt-city-pulse-dashboard-v1"
+      editable={false}
+      showWidgetHeaders={false}
+      variant="city-pulse"
+      widgetChrome="bare"
+      widgets={widgets}
+    />
   );
 }
 
@@ -624,6 +684,7 @@ export function HomePage({
   const timeWindowFrom = useMemo(() => homeTimeWindowFrom(timeWindow), [timeWindow]);
   const [localFocus, setLocalFocus] = useState<LocalFocusState>({ status: "idle" });
   const [neighborhoodFocusId, setNeighborhoodFocusId] = useState("");
+  const [neighborhoodFocusQuery, setNeighborhoodFocusQuery] = useState("");
   const activeLocalFocus = localFocus.status === "active" ? localFocus.point : undefined;
   const activeLocalFocusRadiusKm = activeLocalFocus?.radiusKm ?? localFocusRadiusKm;
 
@@ -634,6 +695,7 @@ export function HomePage({
       );
       if (!option) return;
       setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
       setLocalFocus({
         status: "active",
         point: option.point,
@@ -659,6 +721,7 @@ export function HomePage({
       return;
     }
     setNeighborhoodFocusId("");
+    setNeighborhoodFocusQuery("");
     clearStoredNeighborhoodFocus();
     setLocalFocus({ status: "locating" });
     navigator.geolocation.getCurrentPosition(
@@ -681,6 +744,7 @@ export function HomePage({
 
   const clearLocalFocus = useCallback(() => {
     setNeighborhoodFocusId("");
+    setNeighborhoodFocusQuery("");
     clearStoredNeighborhoodFocus();
     setLocalFocus({ status: "idle" });
   }, [clearStoredNeighborhoodFocus]);
@@ -693,6 +757,7 @@ export function HomePage({
         return;
       }
       setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
       try {
         window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
       } catch {
@@ -706,6 +771,36 @@ export function HomePage({
       });
     },
     [clearLocalFocus],
+  );
+
+  const applyNeighborhoodFocusQuery = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const option = homeNeighborhoodFocusOptionForQuery(neighborhoodFocusQuery);
+      if (!option) {
+        setNeighborhoodFocusId("");
+        clearStoredNeighborhoodFocus();
+        setLocalFocus({
+          status: "error",
+          message: "Fant ikke nærområdet. Prøv postnummer eller stedsnavn i Trondheim.",
+        });
+        return;
+      }
+      setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
+      try {
+        window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+      } catch {
+        // The chosen focus still works for this session even when persistence is unavailable.
+      }
+      setLocalFocus({
+        status: "active",
+        point: option.point,
+        label: option.label,
+        persistent: true,
+      });
+    },
+    [clearStoredNeighborhoodFocus, neighborhoodFocusQuery],
   );
 
   function updateFilters(next: Partial<HomeFilters>) {
@@ -954,6 +1049,16 @@ export function HomePage({
               </option>
             ))}
           </select>
+          <form className="local-focus-search" onSubmit={applyNeighborhoodFocusQuery}>
+            <input
+              aria-label="Postnummer eller sted"
+              inputMode="search"
+              placeholder="Postnummer/sted"
+              value={neighborhoodFocusQuery}
+              onChange={(event) => setNeighborhoodFocusQuery(event.target.value)}
+            />
+            <button type="submit">Bruk</button>
+          </form>
           {localFocus.status === "active" ? (
             <span>
               Nær {localFocus.label} · innen {activeLocalFocusRadiusKm} km
@@ -964,14 +1069,7 @@ export function HomePage({
           ) : null}
         </div>
       </div>
-      {!isTextSearch ? (
-        <MorningBriefPanel
-          articles={initialData.articles}
-          brief={initialData.morningBrief}
-          situations={initialData.situations}
-        />
-      ) : null}
-      {!isTextSearch ? <SituationBanner situations={initialData.situations} /> : null}
+      {!isTextSearch ? <CityPulseDashboard data={initialData} /> : null}
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>

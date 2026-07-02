@@ -69,6 +69,7 @@ button {
 }
 
 .brand {
+  flex: 0 0 auto;
   font-family: var(--serif);
   font-size: 35px;
   letter-spacing: -0.025em;
@@ -77,9 +78,16 @@ button {
 
 .masthead nav {
   display: flex;
+  min-width: 0;
   gap: 30px;
   align-self: stretch;
   align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.masthead nav::-webkit-scrollbar {
+  display: none;
 }
 
 .masthead nav a {
@@ -109,6 +117,7 @@ button {
 
 .search {
   display: flex;
+  flex: 0 1 270px;
   align-items: center;
   min-width: 220px;
   max-width: 270px;
@@ -135,12 +144,14 @@ button {
 }
 
 .refreshed {
+  flex: 0 1 auto;
   color: var(--muted);
   font-size: 13px;
   white-space: nowrap;
 }
 
 .session-role {
+  flex: 0 1 180px;
   max-width: 180px;
   color: var(--muted);
   font-size: 12px;
@@ -149,6 +160,7 @@ button {
 }
 
 .logout {
+  flex: 0 0 auto;
   padding: 8px 12px;
   color: var(--muted);
   border: 1px solid var(--line);
@@ -408,8 +420,9 @@ button {
 
 .local-focus {
   display: flex;
-  min-width: min(100%, 180px);
+  min-width: min(100%, 260px);
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-left: 0;
   color: var(--muted);
@@ -437,6 +450,29 @@ button {
   font-weight: 700;
 }
 
+.local-focus-search {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.local-focus-search input {
+  width: 132px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.local-focus-search input::placeholder {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .local-focus button.selected {
   border-color: rgba(20, 104, 75, 0.45);
   color: var(--green);
@@ -452,6 +488,27 @@ button {
   min-width: 0;
   overflow-wrap: anywhere;
   font-weight: 700;
+}
+
+@media (max-width: 1320px) {
+  .view-controls {
+    height: auto;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px 28px;
+    padding-bottom: 8px;
+  }
+
+  .time-filters {
+    margin-left: 0;
+  }
+
+  .local-focus {
+    flex-basis: 100%;
+    min-width: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
 }
 
 .morning-brief {
@@ -2338,6 +2395,14 @@ button {
   font: 30px/1.1 var(--serif);
 }
 
+.dashboard-layout-toolbar p:not(.label) {
+  max-width: 680px;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .dashboard-layout-toolbar button,
 .dashboard-widget-controls button {
   border: 1px solid var(--line);
@@ -2388,6 +2453,33 @@ button {
 .dashboard-widget-large {
   grid-column: span 8;
   grid-row: span 2;
+}
+
+.dashboard-widget-full {
+  grid-column: 1 / -1;
+}
+
+.dashboard-widget-bare {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.dashboard-layout-city-pulse {
+  margin-top: 28px;
+}
+
+.dashboard-layout-city-pulse .dashboard-widget-grid {
+  gap: 22px;
+}
+
+.dashboard-layout-city-pulse .dashboard-widget-header {
+  margin-bottom: 8px;
+}
+
+.dashboard-layout-city-pulse .dashboard-widget-body > .morning-brief,
+.dashboard-layout-city-pulse .dashboard-widget-body > .situation-banner {
+  margin-top: 0;
 }
 
 .dashboard-widget-header {
@@ -7503,7 +7595,8 @@ button {
   .dashboard-widget-standard,
   .dashboard-widget-wide,
   .dashboard-widget-tall,
-  .dashboard-widget-large {
+  .dashboard-widget-large,
+  .dashboard-widget-full {
     grid-column: auto;
     grid-row: auto;
   }

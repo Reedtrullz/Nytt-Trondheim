@@ -32,4 +32,38 @@ describe("DashboardGrid", () => {
     expect(html).toContain("Endre størrelse på Kilder");
     expect(html).toContain("Tilbakestill");
   });
+
+  it("supports public dashboard copy and bare full-width widgets", () => {
+    const html = renderToStaticMarkup(
+      <DashboardGrid
+        ariaLabel="Bypulsmoduler"
+        label="City Pulse"
+        title="Dagens oversikt"
+        description="Kort offentlig status."
+        storageKey="city-pulse-dashboard"
+        variant="city-pulse"
+        widgetChrome="bare"
+        widgets={[
+          {
+            id: "brief",
+            title: "Morgenbrief",
+            description: "Dagens prioriterte bypuls.",
+            defaultSize: "full",
+            resizable: false,
+            children: <p>Tre ting å følge.</p>,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Bypulsmoduler");
+    expect(html).toContain("City Pulse");
+    expect(html).toContain("Dagens oversikt");
+    expect(html).toContain("Kort offentlig status.");
+    expect(html).toContain("dashboard-layout-city-pulse");
+    expect(html).toContain("dashboard-widget-full");
+    expect(html).toContain("dashboard-widget-bare");
+    expect(html).not.toContain("Endre størrelse på Morgenbrief");
+    expect(html).toContain("Flytt Morgenbrief senere");
+  });
 });

@@ -1,4 +1,11 @@
-export const dashboardWidgetSizes = ["compact", "standard", "wide", "tall", "large"] as const;
+export const dashboardWidgetSizes = [
+  "compact",
+  "standard",
+  "wide",
+  "tall",
+  "large",
+  "full",
+] as const;
 
 export type DashboardWidgetSize = (typeof dashboardWidgetSizes)[number];
 
@@ -10,6 +17,7 @@ export interface DashboardLayoutState {
 export interface DashboardLayoutWidget {
   id: string;
   defaultSize?: DashboardWidgetSize;
+  resizable?: boolean;
 }
 
 const sizeSet = new Set<string>(dashboardWidgetSizes);
@@ -30,9 +38,10 @@ export function normalizeDashboardLayout(
   const sizes: DashboardLayoutState["sizes"] = {};
   for (const widget of widgets) {
     const persistedSize = persisted?.sizes?.[widget.id];
-    sizes[widget.id] = isDashboardWidgetSize(persistedSize)
-      ? persistedSize
-      : (widget.defaultSize ?? "standard");
+    sizes[widget.id] =
+      (widget.resizable ?? true) && isDashboardWidgetSize(persistedSize)
+        ? persistedSize
+        : (widget.defaultSize ?? "standard");
   }
   return { order, sizes };
 }

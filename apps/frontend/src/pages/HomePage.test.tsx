@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { Article, BootstrapPayload, MorningBrief } from "@nytt/shared";
-import { MorningBriefPanel, StoryVerificationProof } from "./HomePage.js";
+import { CityPulseDashboard, MorningBriefPanel, StoryVerificationProof } from "./HomePage.js";
 
 const brief: MorningBrief = {
   generatedAt: "2026-07-02T07:30:00.000Z",
@@ -52,6 +53,13 @@ const situation = {
   locationLabel: "Gangåsvegen",
 } satisfies BootstrapPayload["situations"][number];
 
+const bootstrap = {
+  articles: [article],
+  situations: [situation],
+  sourceHealth: [],
+  morningBrief: brief,
+} satisfies BootstrapPayload;
+
 describe("MorningBriefPanel", () => {
   it("renders the pinned public briefing with mode and highlights", () => {
     const html = renderToStaticMarkup(
@@ -73,6 +81,34 @@ describe("MorningBriefPanel", () => {
 
   it("renders nothing when bootstrap has no brief yet", () => {
     expect(renderToStaticMarkup(<MorningBriefPanel />)).toBe("");
+  });
+});
+
+describe("CityPulseDashboard", () => {
+  it("uses the shared dashboard layout for public briefing and situation modules", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CityPulseDashboard data={bootstrap} />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Bypulsmoduler");
+    expect(html).toContain("City Pulse");
+    expect(html).toContain("Dagens oversikt");
+    expect(html).toContain("dashboard-layout-city-pulse");
+    expect(html).toContain("dashboard-widget-full");
+    expect(html).toContain("Morgenbrief");
+    expect(html).not.toContain("Flytt Morgenbrief senere");
+    expect(html).not.toContain("Tilbakestill");
+    expect(html).toContain("Steinsprang, vegen er stengt");
+  });
+
+  it("renders nothing when there are no public dashboard modules", () => {
+    expect(
+      renderToStaticMarkup(
+        <CityPulseDashboard data={{ articles: [], situations: [], sourceHealth: [] }} />,
+      ),
+    ).toBe("");
   });
 });
 

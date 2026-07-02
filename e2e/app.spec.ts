@@ -355,6 +355,12 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
     "true",
   );
   await expect(page.getByText(/innen 10 km/i)).toBeVisible();
+  await page.getByLabel("Postnummer eller sted").fill("7041");
+  await page.getByRole("button", { name: "Bruk" }).click();
+  await expect(page.getByText(/Nær Lade · innen 5 km/i)).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt.home.neighborhoodFocus.v1")))
+    .toBe("lade");
 });
 
 test("coverage bundle operations page renders persisted decisions and drawer detail", async ({
