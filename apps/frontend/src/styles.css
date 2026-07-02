@@ -443,6 +443,95 @@ button {
   font-weight: 700;
 }
 
+.morning-brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 330px);
+  gap: 30px;
+  margin-top: 28px;
+  padding: 23px 26px;
+  border: 1px solid rgba(20, 104, 75, 0.22);
+  border-left: 4px solid var(--green);
+  background: linear-gradient(115deg, rgba(20, 104, 75, 0.08), transparent 45%), var(--paper);
+}
+
+.morning-brief-deterministic {
+  border-left-color: var(--blue);
+}
+
+.morning-brief-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.morning-brief-heading h2 {
+  margin: 0;
+  font: 34px/1.06 var(--serif);
+}
+
+.morning-brief-heading span,
+.morning-brief-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.morning-brief-paragraphs {
+  display: grid;
+  gap: 8px;
+  max-width: 960px;
+  margin: 14px 0 12px;
+}
+
+.morning-brief-paragraphs p {
+  margin: 0;
+  color: #3f4b50;
+  font-size: 14px;
+  line-height: 1.48;
+}
+
+.morning-brief-highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-self: stretch;
+  margin: 0;
+}
+
+.morning-brief-highlights div {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.morning-brief-highlights dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.morning-brief-highlights dd {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+}
+
+.morning-brief-highlights strong {
+  font: 28px/1 var(--serif);
+  font-weight: 400;
+}
+
+.morning-brief-highlights span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
 .situation-banner {
   margin-top: 28px;
   min-height: 198px;
@@ -6777,6 +6866,7 @@ button {
   }
 
   .home-grid,
+  .morning-brief,
   .situation-banner,
   .situation-layout,
   .situation-explanation,
@@ -7050,6 +7140,7 @@ button {
 
   .situation-banner,
   .lead-story,
+  .morning-brief,
   .workspace-panel,
   .operations-summary,
   .operations-timeline-summary,
@@ -7066,6 +7157,24 @@ button {
   .raw-inspector-detail dl,
   .source-audit-facts,
   .source-audit-trace-table article {
+    grid-template-columns: 1fr;
+  }
+
+  .morning-brief {
+    gap: 18px;
+    padding: 18px 16px;
+  }
+
+  .morning-brief-heading {
+    display: grid;
+    gap: 7px;
+  }
+
+  .morning-brief-heading h2 {
+    font-size: 32px;
+  }
+
+  .morning-brief-highlights {
     grid-template-columns: 1fr;
   }
 

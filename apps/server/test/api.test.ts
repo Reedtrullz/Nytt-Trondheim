@@ -187,6 +187,15 @@ describe("private situation API", () => {
     expect(response.body.articles.length).toBeGreaterThan(0);
     expect(response.body.sourceHealth.length).toBeGreaterThan(0);
     expect(response.body.situations.length).toBeGreaterThan(0);
+    expect(response.body.morningBrief).toEqual(
+      expect.objectContaining({
+        title: "Morgenbrief",
+        paragraphs: expect.arrayContaining([expect.any(String)]),
+        highlights: expect.arrayContaining([expect.objectContaining({ label: "Saker" })]),
+        sourceLine: expect.any(String),
+      }),
+    );
+    expect(response.body.morningBrief.paragraphs).toHaveLength(3);
     expect(response.body.situations.length).toBeLessThanOrEqual(3);
     for (const situation of response.body.situations as Array<Record<string, unknown>>) {
       expect(["preliminary", "active"]).toContain(situation.status);

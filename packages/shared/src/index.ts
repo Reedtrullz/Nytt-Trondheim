@@ -5,6 +5,7 @@ export * from "./article-bundles.js";
 export * from "./incident-text.js";
 export * from "./source-labels.js";
 export * from "./situation-activation-policy.js";
+export * from "./morning-brief.js";
 export * from "./traffic-map.js";
 export * from "./public-transport.js";
 export * from "./weather.js";

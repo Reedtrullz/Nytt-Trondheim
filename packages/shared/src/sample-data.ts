@@ -8,6 +8,7 @@ import type {
   WorkspaceNote,
   WorkspaceTask,
 } from "./types.js";
+import { buildMorningBrief } from "./morning-brief.js";
 
 const now = "2026-05-26T12:26:00.000Z";
 
@@ -254,6 +255,13 @@ export const sampleBootstrap: BootstrapPayload = {
   ],
   sourceHealth: sampleSourceHealth,
 };
+
+sampleBootstrap.morningBrief = buildMorningBrief({
+  articles: sampleBootstrap.articles,
+  situations: sampleBootstrap.situations,
+  sourceHealth: sampleBootstrap.sourceHealth,
+  generatedAt: now,
+});
 
 export const sampleWorkspace: SituationWorkspace = {
   situation: sampleSituation,

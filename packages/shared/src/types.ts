@@ -911,6 +911,22 @@ export interface AiProcessingRun {
   error?: string;
 }
 
+export interface MorningBrief {
+  generatedAt: string;
+  title: string;
+  mode: "ai_assisted" | "deterministic";
+  sourceLine: string;
+  paragraphs: [string, string, string];
+  highlights: Array<{
+    label: string;
+    value: string;
+    detail: string;
+  }>;
+  articleIds: string[];
+  situationIds: string[];
+  aiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt">;
+}
+
 export interface WorkspaceTask {
   id: string;
   situationId: string;
@@ -982,6 +998,7 @@ export interface BootstrapPayload {
   articleNextCursor?: string;
   situations: HomeSituationSummary[];
   sourceHealth: SourceHealth[];
+  morningBrief?: MorningBrief;
 }
 
 export interface ArticlePage {

@@ -79,6 +79,7 @@ import type {
 import {
   analyzeArticleCoverage,
   activationPolicyForSource,
+  bootstrapWithMorningBrief,
   sampleArticles,
   sampleBootstrap,
   sampleNotes,
@@ -2624,12 +2625,12 @@ export class MemoryStore implements Store {
       )
       .slice(0, 3)
       .map(homeSituationSummary);
-    return {
-      ...clone(sampleBootstrap),
+    return bootstrapWithMorningBrief({
       articles: articles.items,
       ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
       situations,
-    };
+      sourceHealth: clone(sampleBootstrap.sourceHealth),
+    });
   }
 
   async listArticles(filters: ArticleFilters): Promise<ArticlePage> {
@@ -3784,17 +3785,41 @@ export class PgStore implements Store {
   }
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
-    const [articles, situations, sourceHealth] = await Promise.all([
+    const [articles, situations, sourceHealth, latestAiRun] = await Promise.all([
       this.listArticles({ scope: "trondheim", limit: 40 }, login),
       this.listHomeSituationSummaries(),
       this.listSourceHealth(),
+      this.pool.query<{
+        provider: AiProcessingRun["provider"];
+        model: string;
+        status: AiProcessingRun["status"];
+        completedAt: Date | string;
+        result: unknown;
+      }>(
+        `SELECT provider, model, status, completed_at AS "completedAt", result
+         FROM ai_processing_runs
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+      ),
     ]);
-    return {
-      articles: articles.items,
-      ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
-      situations,
-      sourceHealth,
-    };
+    const latestAiRunRow = latestAiRun.rows[0];
+    return bootstrapWithMorningBrief(
+      {
+        articles: articles.items,
+        ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
+        situations,
+        sourceHealth,
+      },
+      latestAiRunRow
+        ? {
+            provider: latestAiRunRow.provider,
+            model: latestAiRunRow.model,
+            status: latestAiRunRow.status,
+            completedAt: new Date(latestAiRunRow.completedAt).toISOString(),
+            result: latestAiRunRow.result,
+          }
+        : undefined,
+    );
   }
 
   async listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage> {

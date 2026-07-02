@@ -123,6 +123,42 @@ function SituationBanner({
   );
 }
 
+export function MorningBriefPanel({ brief }: { brief?: BootstrapPayload["morningBrief"] }) {
+  if (!brief) return null;
+  const modeLabel = brief.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief";
+  return (
+    <section
+      className={`morning-brief morning-brief-${brief.mode}`}
+      aria-labelledby="morning-brief-heading"
+    >
+      <div className="morning-brief-copy">
+        <p className="label">{modeLabel}</p>
+        <div className="morning-brief-heading">
+          <h2 id="morning-brief-heading">{brief.title}</h2>
+          <span>{formatTime(brief.generatedAt)}</span>
+        </div>
+        <div className="morning-brief-paragraphs">
+          {brief.paragraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
+        <small>{brief.sourceLine}</small>
+      </div>
+      <dl className="morning-brief-highlights" aria-label="Morgenbrief-nøkkeltall">
+        {brief.highlights.map((highlight) => (
+          <div key={highlight.label}>
+            <dt>{highlight.label}</dt>
+            <dd>
+              <strong>{highlight.value}</strong>
+              <span>{highlight.detail}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 function SourceCluster({ group }: { group: HomeArticleGroup }) {
   if (group.articles.length < 2) return null;
   const label = sourceClusterLabelForGroup(group);
@@ -778,6 +814,7 @@ export function HomePage({
           ) : null}
         </div>
       </div>
+      {!isTextSearch ? <MorningBriefPanel brief={initialData.morningBrief} /> : null}
       {!isTextSearch ? <SituationBanner situations={initialData.situations} /> : null}
       <div className="home-grid">
         <section className="news-section">
