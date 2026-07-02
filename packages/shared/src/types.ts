@@ -775,6 +775,7 @@ export type NotificationTriggerSeverity = "critical" | "warning" | "watch";
 export type NotificationTriggerDeliveryState =
   | "candidate_only"
   | "not_configured"
+  | "no_subscribers"
   | "ready"
   | "sent"
   | "failed"

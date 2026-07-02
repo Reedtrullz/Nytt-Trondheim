@@ -25,6 +25,7 @@ import type {
   EvidenceItem,
   MapFeature,
   MorningBrief,
+  NotificationSubscriptionPreference,
   NotificationTriggerPage,
   NotificationTriggerQueryInput,
   OfficialEvent,
@@ -233,6 +234,7 @@ export interface Store {
     input: PushSubscriptionInput,
   ): Promise<PushSubscriptionSummary>;
   deletePushSubscription(userId: string, id: string): Promise<void>;
+  listPushSubscriptionPreferences(login: string): Promise<NotificationSubscriptionPreference[]>;
   listPushDeliveries(limit: number, login: string): Promise<PushDeliveryPage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   getRawSourceItem(id: string, login: string): Promise<RawInspectorSourceItemDetail | undefined>;
@@ -2974,6 +2976,21 @@ export class MemoryStore implements Store {
     subscription.updatedAt = new Date().toISOString();
   }
 
+  async listPushSubscriptionPreferences(): Promise<NotificationSubscriptionPreference[]> {
+    return clone(
+      this.pushSubscriptions
+        .filter((subscription) => {
+          const user = this.users.find((item) => item.id === subscription.userId);
+          return subscription.enabled && user?.status !== "revoked";
+        })
+        .map((subscription) => ({
+          enabled: subscription.enabled,
+          minSeverity: subscription.minSeverity,
+          kinds: subscription.kinds,
+        })),
+    );
+  }
+
   async listPushDeliveries(limit: number): Promise<PushDeliveryPage> {
     const items = clone(
       this.pushDeliveries
@@ -4452,6 +4469,29 @@ export class PgStore implements Store {
        WHERE user_id=$1 AND id=$2`,
       [userId, id],
     );
+  }
+
+  async listPushSubscriptionPreferences(): Promise<NotificationSubscriptionPreference[]> {
+    const result = await this.pool.query<{
+      enabled: boolean;
+      minSeverity: NotificationSubscriptionPreference["minSeverity"];
+      kinds: NotificationSubscriptionPreference["kinds"];
+    }>(
+      `SELECT
+         ps.enabled,
+         ps.min_severity AS "minSeverity",
+         ps.kinds
+       FROM push_subscriptions ps
+       LEFT JOIN users u ON u.id=ps.user_id
+       WHERE ps.enabled=true AND ps.revoked_at IS NULL
+         AND COALESCE(u.status, 'active') = 'active'
+       ORDER BY ps.last_seen_at DESC, ps.id DESC`,
+    );
+    return result.rows.map((row) => ({
+      enabled: row.enabled,
+      minSeverity: row.minSeverity,
+      kinds: row.kinds ?? [],
+    }));
   }
 
   async listPushDeliveries(limit: number): Promise<PushDeliveryPage> {

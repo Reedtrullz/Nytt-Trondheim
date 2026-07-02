@@ -7,6 +7,7 @@ import type {
   NotificationTriggerQuery,
   NotificationTriggerSeverity,
   PushDeliveryListItem,
+  PushSubscriptionSummary,
   Situation,
   SourceConfidenceLevel,
   SourceConfidenceSummary,
@@ -29,7 +30,13 @@ export interface BuildNotificationTriggersInput {
 export interface NotificationDeliveryStateContext {
   configured: boolean;
   deliveries?: Array<Pick<PushDeliveryListItem, "triggerId" | "status">>;
+  subscriptions?: NotificationSubscriptionPreference[];
 }
+
+export type NotificationSubscriptionPreference = Pick<
+  PushSubscriptionSummary,
+  "enabled" | "kinds" | "minSeverity"
+>;
 
 const highImpactRules: NotificationTriggerRule[] = [
   {
@@ -156,6 +163,17 @@ function clampScore(score: number): number {
 
 function strongestSeverity(severities: NotificationTriggerSeverity[]): NotificationTriggerSeverity {
   return severities.sort((left, right) => severityRank[right] - severityRank[left])[0] ?? "watch";
+}
+
+export function notificationSubscriptionMatchesCandidate(
+  subscription: Pick<NotificationSubscriptionPreference, "kinds" | "minSeverity"> & {
+    enabled?: boolean;
+  },
+  candidate: Pick<NotificationTriggerCandidate, "kind" | "severity">,
+): boolean {
+  if (subscription.enabled === false) return false;
+  if (severityRank[candidate.severity] < severityRank[subscription.minSeverity]) return false;
+  return subscription.kinds.length === 0 || subscription.kinds.includes(candidate.kind);
 }
 
 function confidenceFromScore(
@@ -450,6 +468,14 @@ function deliveryStateForCandidate(
   if (deliveries.some((item) => item.status === "failed")) return "failed";
   if (deliveries.some((item) => item.status === "skipped")) return "suppressed";
   if (!context.configured) return "not_configured";
+  if (
+    context.subscriptions &&
+    !context.subscriptions.some((subscription) =>
+      notificationSubscriptionMatchesCandidate(subscription, candidate),
+    )
+  ) {
+    return "no_subscribers";
+  }
   return "ready";
 }
 
@@ -457,6 +483,8 @@ function deliveryDetail(state: NotificationTriggerDeliveryState): string {
   switch (state) {
     case "not_configured":
       return "Web Push er ikke konfigurert. Kandidaten blir ikke sendt automatisk.";
+    case "no_subscribers":
+      return "Ingen aktive push-abonnement matcher alvorlighet og type.";
     case "ready":
       return "Klar for Web Push dersom en aktiv abonnent matcher alvorlighet og type.";
     case "sent":

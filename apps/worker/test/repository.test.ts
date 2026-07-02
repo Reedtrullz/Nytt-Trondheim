@@ -325,6 +325,42 @@ describe("WorkerRepository", () => {
     );
   });
 
+  it("loads active Web Push subscriptions without revoked users", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: "subscription-one",
+          userId: "viewer-one",
+          endpoint: "https://push.example.test/send/secret",
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+          minSeverity: "warning",
+          kinds: ["traffic_disruption"],
+        },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(repository.activePushSubscriptions()).resolves.toEqual([
+      {
+        id: "subscription-one",
+        userId: "viewer-one",
+        endpoint: "https://push.example.test/send/secret",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        minSeverity: "warning",
+        kinds: ["traffic_disruption"],
+      },
+    ]);
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("LEFT JOIN users u ON u.id=ps.user_id");
+    expect(sql).toContain("COALESCE(u.status, 'active') = 'active'");
+    expect(sql).not.toContain("source_items");
+  });
+
   it("expires DATEX official events missing from a successful snapshot", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [{ id: "datex-expired" }] });
     const repository = new WorkerRepository(transactionalPool(query));

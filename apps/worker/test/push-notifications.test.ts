@@ -130,6 +130,34 @@ describe("push notifications", () => {
     expect(webPushMock.sendNotification).not.toHaveBeenCalled();
   });
 
+  it("does not claim deliveries for subscriptions that filter out the candidate kind", async () => {
+    const repo = repository({
+      activePushSubscriptions: vi.fn().mockResolvedValue([
+        {
+          id: "subscription-one",
+          userId: "viewer-one",
+          endpoint: "https://push.example.test/send/secret",
+          keys: {
+            p256dh: "p256dh-key-material-that-is-long-enough",
+            auth: "auth-key-long-enough",
+          },
+          minSeverity: "watch",
+          kinds: ["weather_hazard"],
+        },
+      ]),
+    });
+
+    const metrics = await deliverPushNotifications([candidate], repo, {
+      publicKey: "public-key",
+      privateKey: "private-key",
+      subject: "mailto:test@example.test",
+    });
+
+    expect(metrics).toMatchObject({ claimed: 0, sent: 0, skipped: 1 });
+    expect(repo.claimPushDelivery).not.toHaveBeenCalled();
+    expect(webPushMock.sendNotification).not.toHaveBeenCalled();
+  });
+
   it("loads VAPID config only when public and private keys exist", () => {
     expect(loadWebPushConfig({ WEB_PUSH_VAPID_PUBLIC_KEY: "public" })).toBeUndefined();
     expect(

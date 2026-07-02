@@ -32,6 +32,7 @@ const kindLabels: Record<NotificationTriggerKind, string> = {
 const deliveryStateLabels: Record<NotificationTriggerDeliveryState, string> = {
   candidate_only: "Ikke sendt",
   not_configured: "Ikke konfigurert",
+  no_subscribers: "Ingen abonnent",
   ready: "Klar",
   sent: "Sendt",
   failed: "Feilet",
@@ -372,7 +373,7 @@ export function NotificationTriggerCandidatesDashboard({
                 <div className="notification-trigger-row-meta">
                   <span>{severityLabels[candidate.severity]}</span>
                   <span>{percent(candidate.score)}</span>
-                  <span>Ikke sendt</span>
+                  <span>{deliveryStateLabels[candidate.deliveryState]}</span>
                 </div>
               </button>
             ))

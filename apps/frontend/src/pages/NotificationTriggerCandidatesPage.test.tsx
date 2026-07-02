@@ -93,6 +93,7 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kritisk");
     expect(html).toContain("Sendt");
+    expect(html).not.toContain("Ikke sendt");
     expect(html).toContain("Push-varsel er sendt for denne utløseren");
     expect(html).toContain("Har offentlig kildegrunnlag");
     expect(html).toContain("stengt");
@@ -128,5 +129,30 @@ describe("NotificationTriggerCandidatesDashboard", () => {
 
     expect(html).toContain("Ingen varselkandidater matcher filtrene.");
     expect(html).toContain("Ingen kandidat valgt");
+  });
+
+  it("renders no-subscriber readiness honestly", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <NotificationTriggerCandidatesDashboard
+          filters={{ limit: 30 }}
+          deliveries={deliveries}
+          onFiltersChange={vi.fn()}
+          page={{
+            ...page,
+            items: [
+              {
+                ...page.items[0]!,
+                deliveryState: "no_subscribers",
+                detail: "Ingen aktive push-abonnement matcher alvorlighet og type.",
+              },
+            ],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Ingen abonnent");
+    expect(html).toContain("Ingen aktive push-abonnement matcher alvorlighet og type.");
   });
 });

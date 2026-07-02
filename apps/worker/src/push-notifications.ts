@@ -1,6 +1,9 @@
 import webPush, { type PushSubscription } from "web-push";
-import type { NotificationTriggerCandidate, NotificationTriggerSeverity } from "@nytt/shared";
-import type { PushDeliveryTarget, WorkerRepository } from "./repository.js";
+import {
+  notificationSubscriptionMatchesCandidate,
+  type NotificationTriggerCandidate,
+} from "@nytt/shared";
+import type { WorkerRepository } from "./repository.js";
 
 interface WebPushConfig {
   publicKey: string;
@@ -18,26 +21,12 @@ export interface PushDeliveryMetrics {
   skipped: number;
 }
 
-const severityRank: Record<NotificationTriggerSeverity, number> = {
-  watch: 0,
-  warning: 1,
-  critical: 2,
-};
-
 export function loadWebPushConfig(env: NodeJS.ProcessEnv = process.env): WebPushConfig | undefined {
   const publicKey = env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim();
   const privateKey = env.WEB_PUSH_VAPID_PRIVATE_KEY?.trim();
   const subject = env.WEB_PUSH_SUBJECT?.trim() || "mailto:admin@nytt-trondheim.local";
   if (!publicKey || !privateKey) return undefined;
   return { publicKey, privateKey, subject };
-}
-
-function subscriptionMatchesCandidate(
-  subscription: Pick<PushDeliveryTarget, "kinds" | "minSeverity">,
-  candidate: NotificationTriggerCandidate,
-): boolean {
-  if (severityRank[candidate.severity] < severityRank[subscription.minSeverity]) return false;
-  return subscription.kinds.length === 0 || subscription.kinds.includes(candidate.kind);
 }
 
 function targetUrl(candidate: NotificationTriggerCandidate): string {
@@ -108,7 +97,7 @@ export async function deliverPushNotifications(
 
   for (const candidate of candidates) {
     for (const subscription of subscriptions) {
-      if (!subscriptionMatchesCandidate(subscription, candidate)) {
+      if (!notificationSubscriptionMatchesCandidate(subscription, candidate)) {
         metrics.skipped += 1;
         continue;
       }

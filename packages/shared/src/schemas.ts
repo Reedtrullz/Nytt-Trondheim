@@ -978,6 +978,7 @@ export const notificationTriggerSeveritySchema = z.enum(["critical", "warning", 
 export const notificationTriggerDeliveryStateSchema = z.enum([
   "candidate_only",
   "not_configured",
+  "no_subscribers",
   "ready",
   "sent",
   "failed",

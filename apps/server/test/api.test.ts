@@ -2426,10 +2426,40 @@ describe("private situation API", () => {
     expect(JSON.stringify(response.body)).not.toContain("raw_payload");
   });
 
-  it("marks notification trigger candidates as ready when Web Push is configured", async () => {
+  it("marks notification trigger candidates as waiting when no active subscription matches", async () => {
     const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
     const agent = request.agent(app);
     await agent.get("/api/session").expect(200);
+
+    const response = await agent
+      .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")
+      .expect(200);
+
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(response.body.items[0]).toMatchObject({
+      id: expect.stringContaining("notification:"),
+      deliveryState: "no_subscribers",
+      detail: expect.stringContaining("Ingen aktive push-abonnement"),
+    });
+  });
+
+  it("marks notification trigger candidates as ready when an active subscription matches", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    await agent
+      .post("/api/notifications/subscriptions")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .send({
+        endpoint: "https://push.example.test/send/ready-state-token",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        minSeverity: "warning",
+        kinds: [],
+      })
+      .expect(201);
 
     const response = await agent
       .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")

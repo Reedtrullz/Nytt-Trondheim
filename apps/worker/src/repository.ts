@@ -221,16 +221,18 @@ export class WorkerRepository {
       kinds: NotificationTriggerKind[];
     }>(
       `SELECT
-         id,
-         user_id AS "userId",
-         endpoint,
-         p256dh,
-         auth,
-         min_severity AS "minSeverity",
-         kinds
-       FROM push_subscriptions
-       WHERE enabled=true AND revoked_at IS NULL
-       ORDER BY last_seen_at DESC, id DESC`,
+         ps.id,
+         ps.user_id AS "userId",
+         ps.endpoint,
+         ps.p256dh,
+         ps.auth,
+         ps.min_severity AS "minSeverity",
+         ps.kinds
+       FROM push_subscriptions ps
+       LEFT JOIN users u ON u.id=ps.user_id
+       WHERE ps.enabled=true AND ps.revoked_at IS NULL
+         AND COALESCE(u.status, 'active') = 'active'
+       ORDER BY ps.last_seen_at DESC, ps.id DESC`,
     );
     return result.rows.map((row) => ({
       id: row.id,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Article, Situation } from "../src/index.js";
-import { applyNotificationDeliveryStates, buildNotificationTriggerPage } from "../src/index.js";
+import {
+  applyNotificationDeliveryStates,
+  buildNotificationTriggerPage,
+  notificationSubscriptionMatchesCandidate,
+} from "../src/index.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -127,12 +131,60 @@ describe("notification trigger candidates", () => {
     expect(
       applyNotificationDeliveryStates(page, {
         configured: true,
+        subscriptions: [],
+      }).items[0],
+    ).toMatchObject({
+      deliveryState: "no_subscribers",
+      detail: expect.stringContaining("Ingen aktive push-abonnement"),
+    });
+
+    expect(
+      applyNotificationDeliveryStates(page, {
+        configured: true,
+        subscriptions: [{ enabled: true, minSeverity: "warning", kinds: ["traffic_disruption"] }],
+      }).items[0],
+    ).toMatchObject({
+      deliveryState: "ready",
+      detail: expect.stringContaining("Klar for Web Push"),
+    });
+
+    expect(
+      applyNotificationDeliveryStates(page, {
+        configured: true,
         deliveries: [{ triggerId: "notification:situation:situation-one", status: "sent" }],
       }).items[0],
     ).toMatchObject({
       deliveryState: "sent",
       detail: expect.stringContaining("Push-varsel er sendt"),
     });
+  });
+
+  it("uses the same subscription matching rule as worker dispatch", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [situation()],
+      articles: [],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+    const candidate = page.items[0]!;
+
+    expect(
+      notificationSubscriptionMatchesCandidate(
+        { enabled: true, minSeverity: "warning", kinds: [] },
+        candidate,
+      ),
+    ).toBe(true);
+    expect(
+      notificationSubscriptionMatchesCandidate(
+        { enabled: true, minSeverity: "critical", kinds: ["weather_hazard"] },
+        candidate,
+      ),
+    ).toBe(false);
+    expect(
+      notificationSubscriptionMatchesCandidate(
+        { enabled: false, minSeverity: "watch", kinds: [] },
+        candidate,
+      ),
+    ).toBe(false);
   });
 
   it("keeps sport stories about Brann out of public-safety triggers", () => {
