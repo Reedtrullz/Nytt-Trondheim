@@ -3651,9 +3651,9 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   align-content: start;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
-  padding: 12px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--page);
@@ -3661,6 +3661,7 @@ button {
 
 .weather-map-inspector section {
   display: grid;
+  align-content: start;
   gap: 8px;
   min-width: 0;
 }
@@ -3678,7 +3679,7 @@ button {
 .weather-map-impact-list,
 .weather-map-layer-status {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3689,12 +3690,17 @@ button {
 .weather-map-impact-list li,
 .weather-map-layer-status li {
   display: grid;
-  gap: 3px;
+  gap: 2px 8px;
   min-width: 0;
-  padding: 9px;
+  padding: 8px 9px;
   border: 1px solid var(--line);
   background: var(--paper);
   font-size: 11px;
+}
+
+.weather-map-impact-list li {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
 }
 
 .weather-map-warning-list strong,
@@ -3712,6 +3718,13 @@ button {
   font-weight: 700;
 }
 
+.weather-map-impact-list span {
+  justify-self: end;
+  color: #273238;
+  font-size: 11px;
+  text-align: right;
+}
+
 .weather-map-warning-list small,
 .weather-map-warning-list em,
 .weather-map-station-list small,
@@ -3721,6 +3734,11 @@ button {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.weather-map-impact-list small {
+  grid-column: 1 / -1;
+  line-height: 1.15;
 }
 
 .weather-map-warning-list em {
@@ -3829,31 +3847,31 @@ button {
 }
 
 .weather-impact-panel > h2 {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .impact-list {
   display: grid;
-  gap: 10px;
+  gap: 7px;
 }
 
 .impact-card {
   display: grid;
-  grid-template-columns: 48px 1fr;
-  gap: 14px;
-  padding: 15px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px 10px;
+  padding: 9px 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   background: rgba(255, 254, 250, 0.72);
 }
 
 .impact-icon {
-  width: 43px;
-  height: 43px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   color: #fff;
-  border-radius: 50%;
+  border-radius: 4px;
   background: var(--amber);
 }
 
@@ -3866,26 +3884,27 @@ button {
 }
 
 .impact-icon .weather-icon {
-  width: 25px;
-  height: 25px;
+  width: 19px;
+  height: 19px;
   stroke-width: 2;
 }
 
 .impact-card header {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .impact-card h3 {
   margin: 0;
-  font: 22px/1.1 var(--serif);
+  font-size: 14px;
+  line-height: 1.2;
 }
 
 .impact-card strong {
   color: var(--amber);
-  font-size: 12px;
+  font-size: 11px;
   text-align: right;
 }
 
@@ -3898,17 +3917,17 @@ button {
 }
 
 .impact-card p {
-  margin: 0 0 12px;
+  margin: 0 0 5px;
   color: #364247;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.32;
 }
 
 .impact-card footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   color: var(--muted);
   font-size: 11px;
 }
@@ -4014,18 +4033,19 @@ button {
 
 .weather-risk-strip {
   display: grid;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 7px;
+  margin-top: 14px;
 }
 
 .risk-card {
   display: grid;
-  grid-template-columns: 32px 1fr;
-  gap: 8px 12px;
-  padding: 12px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  align-items: center;
+  padding: 9px 10px;
   border: 1px solid var(--line);
   border-left: 4px solid #96a0a6;
-  border-radius: 6px;
+  border-radius: 4px;
   background: rgba(255, 254, 250, 0.78);
 }
 
@@ -4042,20 +4062,37 @@ button {
 }
 
 .risk-card .weather-icon {
-  width: 28px;
-  height: 28px;
+  grid-row: 1 / span 3;
+  width: 27px;
+  height: 27px;
   color: var(--blue);
 }
 
+.risk-card.normal .weather-icon {
+  grid-row: 1 / span 2;
+}
+
+.risk-card.normal {
+  gap: 2px 9px;
+  padding-block: 7px;
+}
+
 .risk-card header {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  display: contents;
 }
 
 .risk-card h3 {
+  min-width: 0;
   margin: 0;
-  font: 20px/1.05 var(--serif);
+  font-size: 16px;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.risk-card header span {
+  justify-self: end;
+  font-weight: 700;
+  text-align: right;
 }
 
 .risk-card header span,
@@ -4069,11 +4106,12 @@ button {
 .risk-card strong,
 .risk-card p,
 .risk-card footer {
-  grid-column: 2;
+  grid-column: 2 / -1;
 }
 
 .risk-card strong {
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .risk-card p,
@@ -4086,9 +4124,28 @@ button {
   line-height: 1.45;
 }
 
+.risk-card p {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.risk-card.normal p {
+  display: none;
+}
+
 .risk-card footer {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  line-height: 1.2;
+}
+
+.risk-card.normal footer small {
+  display: none;
 }
 
 .weather-layer-list,
@@ -6688,21 +6745,29 @@ button {
     min-height: 320px;
   }
 
-  .impact-card,
   .weather-event-list a {
     grid-template-columns: 38px 1fr;
   }
 
-  .impact-card footer,
+  .impact-card {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
   .impact-card header {
-    display: grid;
-    gap: 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .impact-card footer {
+    display: flex;
+    gap: 8px;
   }
 
   .impact-card strong,
   .impact-card a {
     display: inline-flex;
-    margin-top: 6px;
+    margin-top: 0;
     text-align: left;
   }
 
