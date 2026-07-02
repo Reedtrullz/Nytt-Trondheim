@@ -14,9 +14,23 @@ import { api } from "../api.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 
 type SpatialAnalyticsFilters = CommandCenterSpatialAnalyticsQueryInput;
+type SpatialAnalyticsTimeWindow = "all" | "2h" | "24h" | "7d";
 
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
+
+const spatialTimeWindowLabels: Record<SpatialAnalyticsTimeWindow, string> = {
+  all: "Alt i datasettet",
+  "2h": "Siste 2 timer",
+  "24h": "Siste døgn",
+  "7d": "Siste 7 dager",
+};
+
+const spatialTimeWindowHours: Record<Exclude<SpatialAnalyticsTimeWindow, "all">, number> = {
+  "2h": 2,
+  "24h": 24,
+  "7d": 24 * 7,
+};
 
 const confidenceLabels: Record<UnexplainedDelayCandidate["confidence"], string> = {
   watch: "Følg med",
@@ -59,6 +73,31 @@ function time(value?: string) {
         timeZone: "Europe/Oslo",
       }).format(new Date(value))
     : "Ikke registrert";
+}
+
+export function spatialAnalyticsFiltersForTimeWindow(
+  window: SpatialAnalyticsTimeWindow,
+  base: Date = new Date(),
+): Pick<SpatialAnalyticsFilters, "from" | "to"> {
+  if (window === "all") return {};
+  const hours = spatialTimeWindowHours[window];
+  const to = new Date(base);
+  const from = new Date(to.getTime() - hours * 60 * 60 * 1000);
+  return {
+    from: from.toISOString(),
+    to: to.toISOString(),
+  };
+}
+
+function spatialTimeWindowForFilters(filters: SpatialAnalyticsFilters): SpatialAnalyticsTimeWindow {
+  if (!filters.from || !filters.to) return "all";
+  const durationMs = Date.parse(filters.to) - Date.parse(filters.from);
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return "all";
+  const durationHours = Math.round(durationMs / (60 * 60 * 1000));
+  if (durationHours <= 2) return "2h";
+  if (durationHours <= 24) return "24h";
+  if (durationHours <= 24 * 7) return "7d";
+  return "all";
 }
 
 function delayText(delaySeconds?: number) {
@@ -381,6 +420,21 @@ export function SpatialAnalyticsDashboard({
     onFiltersChange({ ...filters, ...next });
   }
 
+  function updateTimeWindow(window: SpatialAnalyticsTimeWindow) {
+    onFiltersChange({
+      ...filters,
+      from: undefined,
+      to: undefined,
+      ...spatialAnalyticsFiltersForTimeWindow(window),
+    });
+  }
+
+  const activeTimeWindow = spatialTimeWindowForFilters(filters);
+  const payloadWindowLabel =
+    payload.window.from || payload.window.to
+      ? `${time(payload.window.from)} - ${time(payload.window.to)}`
+      : "Hele tilgjengelige datasett";
+
   return (
     <main className="spatial-analytics-page">
       <header className="coverage-bundles-hero spatial-analytics-hero">
@@ -419,6 +473,23 @@ export function SpatialAnalyticsDashboard({
       </section>
       <section className="spatial-analytics-grid">
         <aside className="coverage-bundles-sidebar spatial-analytics-sidebar" aria-label="Filtre">
+          <label>
+            Tidsrom
+            <select
+              aria-label="Tidsrom for romlig analyse"
+              value={activeTimeWindow}
+              onChange={(event) =>
+                updateTimeWindow(event.target.value as SpatialAnalyticsTimeWindow)
+              }
+            >
+              {Object.entries(spatialTimeWindowLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="spatial-filter-note">Analysevindu: {payloadWindowLabel}</p>
           <label>
             Min. forsinkelse
             <select

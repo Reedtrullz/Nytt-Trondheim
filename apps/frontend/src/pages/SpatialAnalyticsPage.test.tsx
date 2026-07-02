@@ -12,7 +12,10 @@ vi.mock("react-leaflet", () => ({
   TileLayer: () => null,
 }));
 
-import { SpatialAnalyticsDashboard } from "./SpatialAnalyticsPage.js";
+import {
+  SpatialAnalyticsDashboard,
+  spatialAnalyticsFiltersForTimeWindow,
+} from "./SpatialAnalyticsPage.js";
 
 const payload: CommandCenterSpatialAnalyticsPayload = {
   generatedAt: "2026-07-02T09:45:00.000Z",
@@ -109,6 +112,24 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
 };
 
 describe("SpatialAnalyticsDashboard", () => {
+  it("builds deterministic query windows for spatial-temporal analysis", () => {
+    const base = new Date("2026-07-02T12:00:00.000Z");
+
+    expect(spatialAnalyticsFiltersForTimeWindow("2h", base)).toEqual({
+      from: "2026-07-02T10:00:00.000Z",
+      to: "2026-07-02T12:00:00.000Z",
+    });
+    expect(spatialAnalyticsFiltersForTimeWindow("24h", base)).toEqual({
+      from: "2026-07-01T12:00:00.000Z",
+      to: "2026-07-02T12:00:00.000Z",
+    });
+    expect(spatialAnalyticsFiltersForTimeWindow("7d", base)).toEqual({
+      from: "2026-06-25T12:00:00.000Z",
+      to: "2026-07-02T12:00:00.000Z",
+    });
+    expect(spatialAnalyticsFiltersForTimeWindow("all", base)).toEqual({});
+  });
+
   it("renders spatial summary, unexplained delays and heatmap cells", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
@@ -122,6 +143,9 @@ describe("SpatialAnalyticsDashboard", () => {
     );
 
     expect(html).toContain("Romlig analyse");
+    expect(html).toContain("Tidsrom");
+    expect(html).toContain("Siste døgn");
+    expect(html).toContain("Analysevindu: Hele tilgjengelige datasett");
     expect(html).toContain("Uforklarte forsinkelser");
     expect(html).toContain("Bekreftet/sannsynlig");
     expect(html).toContain("E6 Okstadbakken");

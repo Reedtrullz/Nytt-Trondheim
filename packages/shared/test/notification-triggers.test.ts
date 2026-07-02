@@ -4,6 +4,7 @@ import {
   applyNotificationDeliveryStates,
   buildNotificationTriggerPage,
   notificationSubscriptionMatchesCandidate,
+  publicNotificationTriggerGuidance,
 } from "../src/index.js";
 
 function article(overrides: Partial<Article> = {}): Article {
@@ -72,6 +73,33 @@ function situation(overrides: Partial<Situation> = {}): Situation {
 }
 
 describe("notification trigger candidates", () => {
+  it("exposes public guidance for the high-impact trigger categories", () => {
+    expect(publicNotificationTriggerGuidance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "public_safety",
+          severity: "critical",
+          title: "Liv og helse",
+        }),
+        expect.objectContaining({
+          kind: "traffic_disruption",
+          severity: "critical",
+          title: "Stengte hovedårer",
+        }),
+        expect.objectContaining({
+          kind: "weather_hazard",
+          severity: "warning",
+          title: "Vær og naturfare",
+        }),
+        expect.objectContaining({
+          kind: "service_disruption",
+          severity: "warning",
+          title: "Viktige bortfall",
+        }),
+      ]),
+    );
+  });
+
   it("creates explainable candidates for active high-impact situations", () => {
     const page = buildNotificationTriggerPage({
       situations: [situation()],

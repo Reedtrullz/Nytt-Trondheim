@@ -388,6 +388,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   const lead = page.locator(".lead-story");
   const sources = lead.locator(".source-cluster");
   await expect(lead.getByRole("heading", { name: "Tente på antibac i Trondheim" })).toBeVisible();
+  await expect(lead.getByText(/Kildetillit: Bekreftet/)).toBeVisible();
   await expect(sources.getByText("2 kilder · samme hendelse på tvers av kilder")).toBeVisible();
   await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toBeVisible();
   await expect(sources.getByRole("link", { name: /Politiloggen/ })).toBeVisible();

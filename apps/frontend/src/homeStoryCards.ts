@@ -1,4 +1,9 @@
-import { sourceIdLabel, type Article } from "@nytt/shared";
+import {
+  sourceIdLabel,
+  sourceMixConfidenceSummary,
+  type Article,
+  type SourceConfidenceSummary,
+} from "@nytt/shared";
 import { articleCategoryLabels } from "./homeFilters.js";
 import type { HomeArticleGroup } from "./homeArticleGroups.js";
 
@@ -19,6 +24,7 @@ export interface HomeStoryCard {
   latestAt: string;
   isClustered: boolean;
   cardKind: "situasjon" | "hendelse" | "tema" | "oppdatering" | "sak";
+  sourceConfidence: SourceConfidenceSummary;
   verification?: HomeStoryVerification;
 }
 
@@ -101,6 +107,18 @@ function storyVerification(group: HomeArticleGroup): HomeStoryVerification | und
   };
 }
 
+function storySourceConfidence(group: HomeArticleGroup): SourceConfidenceSummary {
+  const sources = new Set<string>();
+  for (const article of group.articles) {
+    sources.add(article.source);
+    const verification = article.publicVerification;
+    if (!verification) continue;
+    for (const source of verification.officialSources) sources.add(source);
+    for (const source of verification.reportingSources) sources.add(source);
+  }
+  return sourceMixConfidenceSummary([...sources], { updatedAt: group.primary.publishedAt });
+}
+
 export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
   const places = storyPlaces(group);
   return {
@@ -120,6 +138,7 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     latestAt: group.primary.publishedAt,
     isClustered: group.articles.length > 1,
     cardKind: cardKindFor(group),
+    sourceConfidence: storySourceConfidence(group),
     verification: storyVerification(group),
   };
 }

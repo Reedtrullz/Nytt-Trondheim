@@ -58,6 +58,13 @@ describe("home story cards", () => {
     expect(card.locationLabel).toBe("Torvet");
     expect(card.neighborhoodLabels).toEqual(["Torvet"]);
     expect(card.isClustered).toBe(true);
+    expect(card.sourceConfidence).toMatchObject({
+      level: "confirmed",
+      label: "Bekreftet",
+      score: 0.98,
+      sourceCount: 2,
+    });
+    expect(card.sourceConfidence.rationale).toContain("Offisielle kilder");
     expect(card.verification).toBeUndefined();
   });
 
@@ -88,6 +95,11 @@ describe("home story cards", () => {
       detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
       sourceSummary: "Statens vegvesen DATEX + Adresseavisen",
       situationId: "datex-e6",
+    });
+    expect(card.sourceConfidence).toMatchObject({
+      level: "confirmed",
+      label: "Bekreftet",
+      sourceCount: 2,
     });
   });
 
@@ -127,5 +139,10 @@ describe("home story cards", () => {
     expect(sourceClusterLabelForGroup(group)).toBeUndefined();
     expect(card.cardKind).toBe("sak");
     expect(card.isClustered).toBe(false);
+    expect(card.sourceConfidence).toMatchObject({
+      level: "uncertain",
+      label: "Usikker",
+      sourceCount: 1,
+    });
   });
 });

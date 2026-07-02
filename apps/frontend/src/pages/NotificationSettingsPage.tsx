@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { PushNotificationSettings } from "@nytt/shared";
+import {
+  publicNotificationTriggerGuidance,
+  type NotificationTriggerSeverity,
+  type PushNotificationSettings,
+} from "@nytt/shared";
 import { api, ApiError } from "../api.js";
 import { pushBrowserSupport, subscribeBrowserToPush } from "../pushNotifications.js";
 
@@ -24,6 +28,17 @@ function supportText() {
     case "unsupported":
     default:
       return "Denne nettleseren støtter ikke Web Push-varsler.";
+  }
+}
+
+function severityLabel(severity: NotificationTriggerSeverity) {
+  switch (severity) {
+    case "critical":
+      return "Kritisk";
+    case "warning":
+      return "Varsel";
+    case "watch":
+      return "Følg med";
   }
 }
 
@@ -82,6 +97,26 @@ export function NotificationSettingsDashboard({
           {error}
         </section>
       ) : null}
+
+      <section className="notification-trigger-guidance" aria-labelledby="notification-guidance">
+        <div className="section-heading-row">
+          <div>
+            <p className="label">Utløserlogikk</p>
+            <h2 id="notification-guidance">Dette kan gi varsel</h2>
+          </div>
+          <span>Kildegrunnlag må være tydelig</span>
+        </div>
+        <div className="notification-trigger-guidance-grid">
+          {publicNotificationTriggerGuidance.map((item) => (
+            <article key={item.kind}>
+              <span>{severityLabel(item.severity)}</span>
+              <h3>{item.title}</h3>
+              <p>{item.detail}</p>
+              <small>{item.examples.join(" · ")}</small>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="notification-settings-list" aria-labelledby="notification-subscriptions">
         <div className="section-heading-row">

@@ -9,7 +9,12 @@ import {
   type FormEvent,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { Article, BootstrapPayload } from "@nytt/shared";
+import {
+  buildMorningBrief,
+  type Article,
+  type BootstrapPayload,
+  type SourceConfidenceSummary,
+} from "@nytt/shared";
 import { api } from "../api.js";
 import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
@@ -225,24 +230,32 @@ export function MorningBriefPanel({
 }
 
 export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
+  const morningBrief = useMemo(
+    () =>
+      data.morningBrief ??
+      buildMorningBrief({
+        articles: data.articles,
+        situations: data.situations,
+        sourceHealth: data.sourceHealth,
+      }),
+    [data.articles, data.morningBrief, data.situations, data.sourceHealth],
+  );
   const widgets = useMemo(() => {
     const nextWidgets: DashboardWidgetDefinition[] = [];
-    if (data.morningBrief) {
-      nextWidgets.push({
-        id: "morning-brief",
-        title: "Morgenbrief",
-        description: "Dagens prioriterte bypuls.",
-        defaultSize: "full",
-        resizable: false,
-        children: (
-          <MorningBriefPanel
-            articles={data.articles}
-            brief={data.morningBrief}
-            situations={data.situations}
-          />
-        ),
-      });
-    }
+    nextWidgets.push({
+      id: "morning-brief",
+      title: "Morgenbrief",
+      description: "Dagens prioriterte bypuls.",
+      defaultSize: "full",
+      resizable: false,
+      children: (
+        <MorningBriefPanel
+          articles={data.articles}
+          brief={morningBrief}
+          situations={data.situations}
+        />
+      ),
+    });
     if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
       nextWidgets.push({
         id: "situation-banner",
@@ -254,7 +267,7 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
       });
     }
     return nextWidgets;
-  }, [data.articles, data.morningBrief, data.situations]);
+  }, [data.articles, data.situations, morningBrief]);
 
   if (widgets.length === 0) return null;
 
@@ -349,6 +362,7 @@ function LeadStory({
               {card.verification.label}
             </span>
           ) : null}
+          <StoryConfidenceBadge confidence={card.sourceConfidence} />
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
@@ -393,6 +407,24 @@ export function StoryVerificationProof({ verification }: { verification?: HomeSt
       <span>{verification.sourceSummary}</span>
       <span className="sr-only">{verification.detail}</span>
     </p>
+  );
+}
+
+export function StoryConfidenceBadge({ confidence }: { confidence: SourceConfidenceSummary }) {
+  const score = confidence.score;
+  const scoreLabel =
+    typeof score === "number" && Number.isFinite(score) && score > 0
+      ? ` · ${Math.round(score * 100)} %`
+      : "";
+  return (
+    <span
+      className={`story-badge story-confidence story-confidence-${confidence.level}`}
+      title={confidence.rationale}
+      aria-label={`Kildetillit: ${confidence.label}${scoreLabel}`}
+    >
+      Kildetillit: {confidence.label}
+      {scoreLabel}
+    </span>
   );
 }
 
@@ -443,6 +475,7 @@ function StoryCard({
               {card.verification.label}
             </span>
           ) : null}
+          <StoryConfidenceBadge confidence={card.sourceConfidence} />
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}

@@ -33,6 +33,11 @@ describe("NotificationSettingsDashboard", () => {
     );
 
     expect(html).toContain("Varsler er aktivert");
+    expect(html).toContain("Dette kan gi varsel");
+    expect(html).toContain("Liv og helse");
+    expect(html).toContain("Stengte hovedårer");
+    expect(html).toContain("Vær og naturfare");
+    expect(html).toContain("Kildegrunnlag må være tydelig");
     expect(html).toContain("1 aktive");
     expect(html).toContain("Sist sendt");
     expect(html).not.toContain("https://push");

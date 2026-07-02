@@ -21,6 +21,14 @@ interface NotificationTriggerRule {
   keywords: string[];
 }
 
+export interface PublicNotificationTriggerGuidance {
+  kind: NotificationTriggerKind;
+  severity: NotificationTriggerSeverity;
+  title: string;
+  detail: string;
+  examples: string[];
+}
+
 export interface BuildNotificationTriggersInput {
   situations: Situation[];
   articles: Article[];
@@ -99,6 +107,39 @@ const highImpactRules: NotificationTriggerRule[] = [
     keywords: ["strombrudd", "strømbrudd", "vannavstenging", "bortfall", "tele", "beredskap"],
   },
 ];
+
+export const publicNotificationTriggerGuidance = [
+  {
+    kind: "public_safety",
+    severity: "critical",
+    title: "Liv og helse",
+    detail:
+      "Kritiske hendelser der nødetater, skadeomfang eller redningsaksjon tilsier rask varsel.",
+    examples: ["kritisk skadet", "redningsaksjon", "savnet person"],
+  },
+  {
+    kind: "traffic_disruption",
+    severity: "critical",
+    title: "Stengte hovedårer",
+    detail: "Stengte veier, ras, kollisjoner og andre trafikkhendelser med tydelig kildegrunnlag.",
+    examples: ["vegen er stengt", "ras", "trafikkulykke"],
+  },
+  {
+    kind: "weather_hazard",
+    severity: "warning",
+    title: "Vær og naturfare",
+    detail:
+      "Varsler for flom, skred, ekstremvær eller andre forhold som kan endre hverdagen raskt.",
+    examples: ["farevarsel", "flom", "skred"],
+  },
+  {
+    kind: "service_disruption",
+    severity: "warning",
+    title: "Viktige bortfall",
+    detail: "Strøm, vann, tele eller beredskapssignaler der flere innbyggere kan bli påvirket.",
+    examples: ["strømbrudd", "vannavstenging", "bortfall"],
+  },
+] as const satisfies ReadonlyArray<PublicNotificationTriggerGuidance>;
 
 const severityRank: Record<NotificationTriggerSeverity, number> = {
   watch: 0,

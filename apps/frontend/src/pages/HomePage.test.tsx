@@ -7,6 +7,7 @@ import {
   LocalFocusSummaryPanel,
   MapTimeSlider,
   MorningBriefPanel,
+  StoryConfidenceBadge,
   StoryVerificationProof,
 } from "./HomePage.js";
 
@@ -109,12 +110,14 @@ describe("CityPulseDashboard", () => {
     expect(html).toContain("Steinsprang, vegen er stengt");
   });
 
-  it("renders nothing when there are no public dashboard modules", () => {
-    expect(
-      renderToStaticMarkup(
-        <CityPulseDashboard data={{ articles: [], situations: [], sourceHealth: [] }} />,
-      ),
-    ).toBe("");
+  it("renders a deterministic morning brief fallback when no stored brief exists", () => {
+    const html = renderToStaticMarkup(
+      <CityPulseDashboard data={{ articles: [], situations: [], sourceHealth: [] }} />,
+    );
+
+    expect(html).toContain("Reservebrief");
+    expect(html).toContain("Morgenbildet er rolig");
+    expect(html).toContain("dashboard-layout-city-pulse");
   });
 });
 
@@ -189,5 +192,26 @@ describe("StoryVerificationProof", () => {
 
   it("renders nothing without verification data", () => {
     expect(renderToStaticMarkup(<StoryVerificationProof />)).toBe("");
+  });
+});
+
+describe("StoryConfidenceBadge", () => {
+  it("renders a compact confidence label with score and rationale", () => {
+    const html = renderToStaticMarkup(
+      <StoryConfidenceBadge
+        confidence={{
+          level: "confirmed",
+          label: "Bekreftet",
+          score: 0.98,
+          sourceCount: 2,
+          rationale: "Offisielle kilder og redaksjonelle kilder peker mot samme område.",
+        }}
+      />,
+    );
+
+    expect(html).toContain("Kildetillit: Bekreftet");
+    expect(html).toContain("98 %");
+    expect(html).toContain("story-confidence-confirmed");
+    expect(html).toContain("Offisielle kilder og redaksjonelle kilder peker mot samme område.");
   });
 });
