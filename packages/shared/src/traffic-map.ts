@@ -1,5 +1,5 @@
 import type { Geometry, LineString, Point } from "geojson";
-import type { TrafficPulseCorridor } from "./types.js";
+import type { SourceId, TrafficPulseCorridor } from "./types.js";
 
 export type TrafficEventCategory =
   | "roadworks"
@@ -219,4 +219,52 @@ export interface TravelPlanPayload {
   publicTransportSuggestions: TravelPlanTransitSuggestion[];
   sources: TrafficMapSourceStatus[];
   generatedAt: string;
+}
+
+export interface SpatialHeatmapCell {
+  id: string;
+  center: {
+    lat: number;
+    lng: number;
+  };
+  radiusMeters: number;
+  count: number;
+  sourceItemCount: number;
+  articleCount: number;
+  trafficEventCount: number;
+  lastSeenAt: string;
+  sourceIds: Array<SourceId | TrafficMapEventSource>;
+  maxSeverity?: TrafficEventSeverity;
+}
+
+export interface UnexplainedDelayCandidate {
+  id: string;
+  corridorId: string;
+  corridorName: string;
+  geometry: LineString;
+  state: TrafficPulseCorridor["state"];
+  delaySeconds?: number;
+  delayRatio?: number;
+  updatedAt: string;
+  sourceUrl: string;
+  matchedArticleIds: string[];
+  affectedEventIds: string[];
+  confidence: "watch" | "warning" | "critical";
+  reason: string;
+}
+
+export interface CommandCenterSpatialAnalyticsPayload {
+  generatedAt: string;
+  window: {
+    from?: string;
+    to?: string;
+  };
+  summary: {
+    heatmapCells: number;
+    observations: number;
+    unexplainedDelays: number;
+    criticalDelays: number;
+  };
+  heatmapCells: SpatialHeatmapCell[];
+  unexplainedDelays: UnexplainedDelayCandidate[];
 }

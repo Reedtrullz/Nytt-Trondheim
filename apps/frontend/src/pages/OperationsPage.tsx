@@ -112,6 +112,9 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
           <a className="operations-audit-link" href="/command/tidslinje">
             Åpne tidslinje
           </a>
+          <a className="operations-audit-link" href="/command/romlig">
+            Åpne romlig analyse
+          </a>
           <a className="operations-audit-link" href="/command/radata">
             Åpne rådata
           </a>

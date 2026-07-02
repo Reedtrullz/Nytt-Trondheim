@@ -3456,6 +3456,179 @@ button {
   max-width: 720px;
 }
 
+.spatial-analytics-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 44px 32px 80px;
+}
+
+.spatial-analytics-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 330px;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.spatial-analytics-sidebar,
+.spatial-analytics-cells,
+.spatial-delay-panel {
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.spatial-analytics-sidebar,
+.spatial-analytics-cells {
+  position: sticky;
+  top: 92px;
+}
+
+.spatial-analytics-main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.spatial-analytics-map {
+  height: min(60vh, 560px);
+  min-height: 420px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.spatial-analytics-map .leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+.spatial-map-popup {
+  max-width: 260px;
+}
+
+.spatial-map-popup strong,
+.spatial-map-popup small {
+  display: block;
+}
+
+.spatial-map-popup p {
+  margin: 5px 0;
+}
+
+.spatial-map-popup small {
+  color: var(--muted);
+}
+
+.spatial-delay-panel,
+.spatial-analytics-cells {
+  padding: 18px;
+}
+
+.spatial-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.spatial-section-heading h2 {
+  margin: 3px 0 0;
+  font: 28px/1.1 var(--serif);
+}
+
+.spatial-section-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.spatial-delay-list,
+.spatial-cell-list {
+  display: grid;
+  gap: 10px;
+}
+
+.spatial-delay-row,
+.spatial-cell-row {
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.spatial-delay-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.55fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-left: 5px solid var(--line);
+}
+
+.spatial-delay-row.warning {
+  border-left-color: #c07818;
+}
+
+.spatial-delay-row.critical {
+  border-left-color: var(--rust);
+}
+
+.spatial-delay-row h3 {
+  margin: 2px 0 6px;
+  font: 22px/1.12 var(--serif);
+}
+
+.spatial-delay-row p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.spatial-delay-row dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.spatial-delay-row dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.spatial-delay-row dd {
+  margin: 3px 0 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.spatial-delay-row a {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.spatial-cell-row {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+}
+
+.spatial-cell-row strong {
+  font-size: 14px;
+}
+
+.spatial-cell-row span,
+.spatial-cell-row small,
+.spatial-empty-state {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .raw-inspector-page {
   max-width: 1440px;
   margin: 0 auto;
@@ -6569,6 +6742,7 @@ button {
   .source-audit-page,
   .operations-timeline-page,
   .coverage-bundles-page,
+  .spatial-analytics-page,
   .raw-inspector-page,
   .saved-page,
   .weather-page,
@@ -6610,6 +6784,7 @@ button {
   .source-audit-grid,
   .operations-timeline-grid,
   .coverage-bundles-grid,
+  .spatial-analytics-grid,
   .raw-inspector-grid,
   .worker-metrics-grid,
   .weather-impact-grid,
@@ -6646,6 +6821,8 @@ button {
   .operations-timeline-drawer,
   .coverage-bundles-sidebar,
   .coverage-bundle-drawer,
+  .spatial-analytics-sidebar,
+  .spatial-analytics-cells,
   .raw-inspector-sidebar,
   .raw-inspector-detail {
     position: static;
@@ -6654,6 +6831,7 @@ button {
   .source-audit-sidebar,
   .operations-timeline-sidebar,
   .coverage-bundles-sidebar,
+  .spatial-analytics-sidebar,
   .raw-inspector-sidebar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6880,6 +7058,7 @@ button {
   .source-audit-sidebar,
   .operations-timeline-sidebar,
   .coverage-bundles-sidebar,
+  .spatial-analytics-sidebar,
   .raw-inspector-sidebar,
   .operations-timeline-facts,
   .operations-timeline-metrics,
@@ -6893,6 +7072,7 @@ button {
   .source-audit-hero,
   .operations-timeline-hero,
   .coverage-bundles-hero,
+  .spatial-analytics-hero,
   .raw-inspector-hero {
     display: block;
   }
@@ -6909,8 +7089,22 @@ button {
     font-size: 38px;
   }
 
+  .spatial-analytics-hero h1 {
+    font-size: 38px;
+  }
+
   .raw-inspector-hero h1 {
     font-size: 38px;
+  }
+
+  .spatial-analytics-map {
+    min-height: 340px;
+    height: 440px;
+  }
+
+  .spatial-delay-row,
+  .spatial-delay-row dl {
+    grid-template-columns: 1fr;
   }
 
   .source-audit-row,

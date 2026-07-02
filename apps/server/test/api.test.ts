@@ -239,6 +239,7 @@ describe("private situation API", () => {
     });
     await request(app).get("/api/bootstrap").expect(401);
     await request(app).get("/api/operations/coverage-bundles").expect(401);
+    await request(app).get("/api/operations/spatial-analytics").expect(401);
     await request(app).get("/api/operations/raw/ai-runs").expect(401);
     await request(app).get("/api/access-requests").expect(401);
     await request(app)
@@ -2252,6 +2253,63 @@ describe("private situation API", () => {
       )
       .expect(200);
     expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
+  });
+
+  it("serves command center spatial analytics as derived operations data", async () => {
+    const { app, store } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    vi.spyOn(store, "listSpatialHeatmapCells").mockResolvedValue([
+      {
+        id: "cell:1039:6339",
+        center: { lat: 63.39, lng: 10.39 },
+        radiusMeters: 650,
+        count: 3,
+        sourceItemCount: 2,
+        articleCount: 1,
+        trafficEventCount: 1,
+        lastSeenAt: "2026-07-02T09:40:00.000Z",
+        sourceIds: ["nrk", "vegvesen_traffic_info"],
+        maxSeverity: "high",
+      },
+    ]);
+    vi.spyOn(store, "listTrafficPulseCorridors").mockResolvedValue([
+      {
+        id: "100141",
+        name: "E6 Okstadbakken - E6 Sluppenrampene",
+        state: "slow",
+        travelTimeSeconds: 900,
+        freeFlowSeconds: 540,
+        delaySeconds: 360,
+        delayRatio: 1.67,
+        measurementFrom: "2026-07-02T09:35:00.000Z",
+        measurementTo: "2026-07-02T09:40:00.000Z",
+        updatedAt: "2026-07-02T09:40:20.000Z",
+        sourceUrl: "https://example.test/datex-travel-time",
+      },
+    ]);
+
+    const response = await agent
+      .get("/api/operations/spatial-analytics?minDelaySeconds=180&limit=20")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      summary: {
+        heatmapCells: 1,
+        observations: 3,
+        unexplainedDelays: expect.any(Number),
+        criticalDelays: expect.any(Number),
+      },
+      heatmapCells: [
+        expect.objectContaining({
+          id: "cell:1039:6339",
+          count: 3,
+          sourceIds: ["nrk", "vegvesen_traffic_info"],
+        }),
+      ],
+    });
+    expect(response.body).not.toHaveProperty("rawPayload");
+    expect(response.body).not.toHaveProperty("sourceItems");
   });
 
   it("stores uploaded private attachment metadata with a content checksum", async () => {

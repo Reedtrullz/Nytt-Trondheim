@@ -12,6 +12,7 @@ import {
   accessRequestDecisionSchema,
   accessRequestQuerySchema,
   articleQuerySchema,
+  commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
   emailLoginRequestSchema,
   lifecycleInputSchema,
@@ -72,6 +73,7 @@ import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
+import { buildUnexplainedDelayCandidates } from "./traffic/spatial-analytics.js";
 import {
   buildTravelPlanPayload,
   resolveTravelPlanPlacesAndRoute,
@@ -1852,6 +1854,88 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const filters = coverageBundleQuerySchema.parse(req.query);
       res.json(await store.listCoverageBundles(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/spatial-analytics", async (req, res, next) => {
+    try {
+      const query = commandCenterSpatialAnalyticsQuerySchema.parse(req.query);
+      const login = currentLogin(req);
+      const [heatmapCells, trafficInfoEvents, officialEvents, articlesPage, trafficPulse] =
+        await Promise.all([
+          store.listSpatialHeatmapCells(query, login),
+          store.listTrafficMapEvents(
+            {
+              sources: ["vegvesen_traffic_info"],
+              states: ["active", "planned"],
+              from: query.from,
+              to: query.to,
+              limit: null,
+            },
+            login,
+          ),
+          store.listOfficialEvents({ source: "datex" }, login),
+          store.listArticles(
+            {
+              limit: 500,
+              ...(query.from ? { from: query.from } : {}),
+              ...(query.to ? { to: query.to } : {}),
+            },
+            login,
+          ),
+          store.listTrafficPulseCorridors(50),
+        ]);
+      const eventsBySourceKey = new Map<string, TrafficMapEvent>();
+      const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
+
+      for (const event of trafficInfoEvents) {
+        eventsBySourceKey.set(sourceKey(event), event);
+      }
+      for (const event of officialEvents) {
+        const trafficEvent = officialEventToTrafficMapEvent(event);
+        if (trafficEvent && (trafficEvent.state === "active" || trafficEvent.state === "planned")) {
+          eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
+        }
+      }
+
+      const estimatedEvents = roadClosingArticleTrafficEvents(articlesPage.items, {
+        officialEvents: [...eventsBySourceKey.values()],
+      });
+      for (const event of estimatedEvents) {
+        eventsBySourceKey.set(sourceKey(event), event);
+      }
+
+      const events = [...eventsBySourceKey.values()].filter((event) =>
+        eventIntersectsTimeRange(event, query.from, query.to),
+      );
+      const corridorImpacts = buildCorridorImpacts(events, trafficPulse);
+      const unexplainedDelays = buildUnexplainedDelayCandidates(
+        corridorImpacts,
+        articlesPage.items,
+        {
+          minDelaySeconds: query.minDelaySeconds,
+        },
+      ).slice(0, 20);
+
+      res.json({
+        generatedAt: new Date().toISOString(),
+        window: {
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+        },
+        summary: {
+          heatmapCells: heatmapCells.length,
+          observations: heatmapCells.reduce((sum, cell) => sum + cell.count, 0),
+          unexplainedDelays: unexplainedDelays.length,
+          criticalDelays: unexplainedDelays.filter(
+            (candidate) => candidate.confidence === "critical",
+          ).length,
+        },
+        heatmapCells,
+        unexplainedDelays,
+      });
     } catch (error) {
       next(error);
     }

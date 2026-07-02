@@ -1088,6 +1088,17 @@ export const trafficMapQuerySchema = z
 
 export type TrafficMapQueryInput = z.infer<typeof trafficMapQuerySchema>;
 
+export const commandCenterSpatialAnalyticsQuerySchema = z.object({
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  minDelaySeconds: z.coerce.number().int().min(0).max(7200).default(180),
+  limit: z.coerce.number().int().min(1).max(200).default(80),
+});
+
+export type CommandCenterSpatialAnalyticsQueryInput = z.infer<
+  typeof commandCenterSpatialAnalyticsQuerySchema
+>;
+
 export const situationQuerySchema = z.object({
   status: situationLifecycleSchema.optional(),
   saved: z

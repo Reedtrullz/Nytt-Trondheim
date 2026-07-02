@@ -9,6 +9,8 @@ import type {
   ArticlePage,
   ArticleTopic,
   BootstrapPayload,
+  CommandCenterSpatialAnalyticsPayload,
+  CommandCenterSpatialAnalyticsQueryInput,
   CoverageBundlePage,
   CoverageBundleQueryInput,
   EmailLoginRequestInput,
@@ -226,6 +228,22 @@ export const api = {
     const search = parameters.toString();
     return request<CoverageBundlePage>(
       `/api/operations/coverage-bundles${search ? `?${search}` : ""}`,
+    );
+  },
+  spatialAnalytics: (
+    query: CommandCenterSpatialAnalyticsQueryInput = { minDelaySeconds: 180, limit: 80 },
+  ) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<CommandCenterSpatialAnalyticsPayload>(
+      `/api/operations/spatial-analytics${search ? `?${search}` : ""}`,
     );
   },
   rawSourceItem: (id: string) =>

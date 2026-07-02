@@ -164,6 +164,36 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests command center spatial analytics with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        generatedAt: "2026-07-02T09:45:00.000Z",
+        window: {},
+        summary: {
+          heatmapCells: 0,
+          observations: 0,
+          unexplainedDelays: 0,
+          criticalDelays: 0,
+        },
+        heatmapCells: [],
+        unexplainedDelays: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.spatialAnalytics({
+      from: "2026-07-02T08:00:00.000Z",
+      to: "2026-07-02T10:00:00.000Z",
+      minDelaySeconds: 300,
+      limit: 40,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/spatial-analytics?from=2026-07-02T08%3A00%3A00.000Z&to=2026-07-02T10%3A00%3A00.000Z&minDelaySeconds=300&limit=40",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("requests raw operations inspector data with typed filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse({ items: [], nextCursor: undefined }));
     vi.stubGlobal("fetch", fetchMock);

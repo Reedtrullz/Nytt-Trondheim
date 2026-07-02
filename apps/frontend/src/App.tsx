@@ -44,6 +44,11 @@ const SavedPage = lazy(() =>
 const SourceAuditPage = lazy(() =>
   import("./pages/SourceAuditPage.js").then((module) => ({ default: module.SourceAuditPage })),
 );
+const SpatialAnalyticsPage = lazy(() =>
+  import("./pages/SpatialAnalyticsPage.js").then((module) => ({
+    default: module.SpatialAnalyticsPage,
+  })),
+);
 const SportPage = lazy(() =>
   import("./pages/SportPage.js").then((module) => ({ default: module.SportPage })),
 );
@@ -242,12 +247,14 @@ function AuthenticatedApp() {
             <Route path="/command/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/command/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/command/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route path="/command/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
             <Route path="/command/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/command/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
             <Route path="/drift" element={ownerOnly(<OperationsPage />)} />
             <Route path="/drift/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/drift/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/drift/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route path="/drift/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
             <Route path="/drift/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/drift/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
             <Route path="*" element={<NotFoundPage />} />

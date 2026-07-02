@@ -16,6 +16,7 @@ import type {
   ArticleTopic,
   Attachment,
   BootstrapPayload,
+  CommandCenterSpatialAnalyticsQueryInput,
   CoverageBundleArticleSummary,
   CoverageBundleListItem,
   CoverageBundlePage,
@@ -67,8 +68,10 @@ import type {
   UserPage,
   TimelineEntry,
   TrafficCounterSnapshot,
+  TrafficEventSeverity,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  SpatialHeatmapCell,
   WorkerCycleMetrics,
   WorkspaceNote,
   WorkspaceTask,
@@ -212,6 +215,10 @@ export interface Store {
   getRawSourceItem(id: string, login: string): Promise<RawInspectorSourceItemDetail | undefined>;
   listRawAiRuns(filters: RawInspectorAiRunFilters, login: string): Promise<RawInspectorAiRunPage>;
   getRawAiRun(id: string, login: string): Promise<RawInspectorAiRunDetail | undefined>;
+  listSpatialHeatmapCells(
+    filters: CommandCenterSpatialAnalyticsQueryInput,
+    login: string,
+  ): Promise<SpatialHeatmapCell[]>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
   listPublicTransportVehicles(
@@ -624,6 +631,19 @@ interface AiProcessingRunRow {
   error: string | null;
 }
 
+interface SpatialHeatmapCellRow {
+  id: string;
+  center_lng: number | string;
+  center_lat: number | string;
+  observation_count: string | number;
+  source_item_count: string | number;
+  article_count: string | number;
+  traffic_event_count: string | number;
+  last_seen_at: Date | string;
+  source_ids: string[] | null;
+  severity_rank: number | string | null;
+}
+
 interface CoverageBundleRow {
   id: string;
   kind: ArticleCoverageBundleKind;
@@ -809,6 +829,48 @@ function rawAiRunDetailFromRow(row: AiProcessingRunRow): RawInspectorAiRunDetail
     resultBytes: result.bytes,
     redacted: result.redacted,
     truncated: result.truncated,
+  };
+}
+
+function numericRowValue(value: number | string | null | undefined): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function severityFromRank(rank: number | string | null): TrafficEventSeverity | undefined {
+  switch (Math.round(numericRowValue(rank))) {
+    case 4:
+      return "critical";
+    case 3:
+      return "high";
+    case 2:
+      return "medium";
+    case 1:
+      return "low";
+    default:
+      return undefined;
+  }
+}
+
+function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCell {
+  const sourceIds = (row.source_ids ?? []).filter(
+    (source): source is SpatialHeatmapCell["sourceIds"][number] => typeof source === "string",
+  );
+  const maxSeverity = severityFromRank(row.severity_rank);
+  return {
+    id: row.id,
+    center: {
+      lng: numericRowValue(row.center_lng),
+      lat: numericRowValue(row.center_lat),
+    },
+    radiusMeters: 650,
+    count: numericRowValue(row.observation_count),
+    sourceItemCount: numericRowValue(row.source_item_count),
+    articleCount: numericRowValue(row.article_count),
+    trafficEventCount: numericRowValue(row.traffic_event_count),
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    sourceIds,
+    ...(maxSeverity ? { maxSeverity } : {}),
   };
 }
 
@@ -2692,6 +2754,78 @@ export class MemoryStore implements Store {
     return undefined;
   }
 
+  async listSpatialHeatmapCells(
+    filters: CommandCenterSpatialAnalyticsQueryInput,
+  ): Promise<SpatialHeatmapCell[]> {
+    const cells = new Map<
+      string,
+      {
+        lngSum: number;
+        latSum: number;
+        count: number;
+        sourceItemCount: number;
+        articleCount: number;
+        trafficEventCount: number;
+        lastSeenAt: string;
+        sourceIds: Set<SpatialHeatmapCell["sourceIds"][number]>;
+      }
+    >();
+
+    for (const item of this.sourceItems.values()) {
+      if (item.geoHint?.type !== "Point") continue;
+      const observedAt = item.publishedAt ?? item.fetchedAt;
+      if (filters.from && observedAt < filters.from) continue;
+      if (filters.to && observedAt > filters.to) continue;
+      const lng = item.geoHint.coordinates[0];
+      const lat = item.geoHint.coordinates[1];
+      if (
+        typeof lng !== "number" ||
+        typeof lat !== "number" ||
+        !Number.isFinite(lng) ||
+        !Number.isFinite(lat)
+      ) {
+        continue;
+      }
+      const key = `cell:${Math.floor(lng * 100)}:${Math.floor(lat * 100)}`;
+      const current = cells.get(key) ?? {
+        lngSum: 0,
+        latSum: 0,
+        count: 0,
+        sourceItemCount: 0,
+        articleCount: 0,
+        trafficEventCount: 0,
+        lastSeenAt: observedAt,
+        sourceIds: new Set<SpatialHeatmapCell["sourceIds"][number]>(),
+      };
+      current.lngSum += lng;
+      current.latSum += lat;
+      current.count += 1;
+      current.sourceItemCount += 1;
+      if (item.kind === "article") current.articleCount += 1;
+      if (observedAt > current.lastSeenAt) current.lastSeenAt = observedAt;
+      current.sourceIds.add(item.provider);
+      cells.set(key, current);
+    }
+
+    return [...cells.entries()]
+      .map(([id, cell]) => ({
+        id,
+        center: { lng: cell.lngSum / cell.count, lat: cell.latSum / cell.count },
+        radiusMeters: 650,
+        count: cell.count,
+        sourceItemCount: cell.sourceItemCount,
+        articleCount: cell.articleCount,
+        trafficEventCount: cell.trafficEventCount,
+        lastSeenAt: cell.lastSeenAt,
+        sourceIds: [...cell.sourceIds],
+      }))
+      .sort(
+        (left, right) =>
+          right.count - left.count || right.lastSeenAt.localeCompare(left.lastSeenAt),
+      )
+      .slice(0, filters.limit);
+  }
+
   async listOfficialEvents(): Promise<OfficialEvent[]> {
     return [];
   }
@@ -4008,6 +4142,85 @@ export class PgStore implements Store {
     );
     const row = result.rows[0];
     return row ? rawAiRunDetailFromRow(row) : undefined;
+  }
+
+  async listSpatialHeatmapCells(
+    filters: CommandCenterSpatialAnalyticsQueryInput,
+    _login: string,
+  ): Promise<SpatialHeatmapCell[]> {
+    void _login;
+    const params: unknown[] = [];
+    const sourceWhere = ["si.geo_hint IS NOT NULL"];
+    const trafficWhere = ["tme.geometry IS NOT NULL"];
+
+    if (filters.from) {
+      params.push(filters.from);
+      const index = params.length;
+      sourceWhere.push(`COALESCE(si.published_at, si.fetched_at) >= $${index}`);
+      trafficWhere.push(`COALESCE(tme.updated_at, tme.valid_from) >= $${index}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      const index = params.length;
+      sourceWhere.push(`COALESCE(si.published_at, si.fetched_at) <= $${index}`);
+      trafficWhere.push(`COALESCE(tme.updated_at, tme.valid_from) <= $${index}`);
+    }
+
+    params.push(filters.limit ?? 80);
+    const result = await this.pool.query<SpatialHeatmapCellRow>(
+      `WITH observations AS (
+         SELECT
+           'source_item'::text AS observation_type,
+           si.provider::text AS source_id,
+           si.kind::text AS item_kind,
+           NULL::text AS severity,
+           COALESCE(si.published_at, si.fetched_at) AS observed_at,
+           ST_Centroid(si.geo_hint) AS point
+         FROM source_items si
+         WHERE ${sourceWhere.join(" AND ")}
+         UNION ALL
+         SELECT
+           'traffic_event'::text AS observation_type,
+           tme.source::text AS source_id,
+           tme.category::text AS item_kind,
+           tme.severity::text AS severity,
+           COALESCE(tme.updated_at, tme.valid_from) AS observed_at,
+           ST_Centroid(tme.geometry) AS point
+         FROM traffic_map_events tme
+         WHERE ${trafficWhere.join(" AND ")}
+       ),
+       valid_points AS (
+         SELECT *,
+           floor(ST_X(point) * 100)::int AS lng_cell,
+           floor(ST_Y(point) * 100)::int AS lat_cell
+         FROM observations
+         WHERE ST_X(point) BETWEEN 9.5 AND 11.2
+           AND ST_Y(point) BETWEEN 62.9 AND 64.1
+       )
+       SELECT
+         concat('cell:', lng_cell, ':', lat_cell) AS id,
+         avg(ST_X(point)) AS center_lng,
+         avg(ST_Y(point)) AS center_lat,
+         count(*)::text AS observation_count,
+         count(*) FILTER (WHERE observation_type = 'source_item')::text AS source_item_count,
+         count(*) FILTER (WHERE observation_type = 'source_item' AND item_kind = 'article')::text AS article_count,
+         count(*) FILTER (WHERE observation_type = 'traffic_event')::text AS traffic_event_count,
+         max(observed_at) AS last_seen_at,
+         array_agg(DISTINCT source_id ORDER BY source_id) AS source_ids,
+         max(CASE severity
+           WHEN 'critical' THEN 4
+           WHEN 'high' THEN 3
+           WHEN 'medium' THEN 2
+           WHEN 'low' THEN 1
+           ELSE 0
+         END) AS severity_rank
+       FROM valid_points
+       GROUP BY lng_cell, lat_cell
+       ORDER BY observation_count DESC, last_seen_at DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows.map(spatialHeatmapCellFromRow);
   }
 
   async listOfficialEvents(filters: OfficialEventFilters): Promise<OfficialEvent[]> {
