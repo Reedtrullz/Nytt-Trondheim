@@ -519,6 +519,7 @@ describe("frontend source item API helpers", () => {
       "/api/situations/incident%2Fwith%20spaces%3F%23fragment/source-items/nrk%3Aitem%2Fwith%20spaces%3F%23fragment",
       expect.objectContaining({
         method: "POST",
+        body: JSON.stringify({ relationship: "supports" }),
         credentials: "include",
         headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
       }),
