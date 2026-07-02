@@ -369,6 +369,22 @@ export interface RawInspectorSourceItemDetail {
   truncated: boolean;
 }
 
+export type AiAnalysisProfile = "standard" | "compact_recovery" | "brief_only_recovery";
+
+export interface AiAnalysisAttemptDiagnostics {
+  profile: AiAnalysisProfile;
+  status: "ok" | "failed";
+  maxTokens: number;
+  articleCount: number;
+  situationCount: number;
+  error?: string;
+}
+
+export interface AiProcessingRunDiagnostics {
+  profile: AiAnalysisProfile;
+  attempts: AiAnalysisAttemptDiagnostics[];
+}
+
 export interface RawInspectorAiRunSummary {
   id: string;
   provider: AiProcessingRun["provider"];
@@ -377,6 +393,7 @@ export interface RawInspectorAiRunSummary {
   startedAt: string;
   completedAt: string;
   articleCount: number;
+  diagnostics?: AiProcessingRunDiagnostics;
   error?: string;
 }
 

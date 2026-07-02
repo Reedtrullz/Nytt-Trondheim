@@ -38,6 +38,34 @@ const briefing: CommandCenterBriefingPayload = {
     startedAt: "2026-07-02T06:59:00.000Z",
     completedAt: "2026-07-02T07:00:01.000Z",
     articleCount: 24,
+    diagnostics: {
+      profile: "brief_only_recovery",
+      attempts: [
+        {
+          profile: "standard",
+          status: "failed",
+          maxTokens: 4096,
+          articleCount: 12,
+          situationCount: 12,
+          error: "DeepSeek JSON response was truncated by token limit.",
+        },
+        {
+          profile: "compact_recovery",
+          status: "failed",
+          maxTokens: 2048,
+          articleCount: 8,
+          situationCount: 6,
+          error: "DeepSeek returned empty JSON content.",
+        },
+        {
+          profile: "brief_only_recovery",
+          status: "ok",
+          maxTokens: 900,
+          articleCount: 6,
+          situationCount: 3,
+        },
+      ],
+    },
   },
   operationsNotes: [
     {
@@ -106,6 +134,8 @@ describe("CommandBriefingDashboard", () => {
     expect(html).toContain("Brief-revisjon");
     expect(html).toContain("AI-assistert");
     expect(html).toContain("deepseek-v4-flash");
+    expect(html).toContain("Kun morgenbrief");
+    expect(html).toContain("Kompakt gjenoppretting feilet");
     expect(html).toContain("/command/radata?run=ai%3Aone");
     expect(html).toContain("Hendelse på Lade");
     expect(html).toContain("Flere kilder omtaler samme hendelse");

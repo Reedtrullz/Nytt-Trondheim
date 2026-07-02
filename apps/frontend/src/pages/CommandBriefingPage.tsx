@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
+  AiAnalysisProfile,
+  AiProcessingRunDiagnostics,
   CommandCenterBriefingPayload,
   CommandCenterOperationsNote,
   SourceHealth,
@@ -13,6 +15,12 @@ const noteKindLabels: Record<CommandCenterOperationsNote["kind"], string> = {
   category_relevance: "Kategori/relevans",
   source_quality: "Kildekvalitet",
   other: "Annet",
+};
+
+const aiProfileLabels: Record<AiAnalysisProfile, string> = {
+  standard: "Full analyse",
+  compact_recovery: "Kompakt gjenoppretting",
+  brief_only_recovery: "Kun morgenbrief",
 };
 
 function time(value?: string) {
@@ -34,6 +42,10 @@ function sourceStateLabel(source: SourceHealth) {
 
 function aiRunPath(id: string) {
   return `/command/radata?run=${encodeURIComponent(id)}`;
+}
+
+function aiProfileLabel(diagnostics?: AiProcessingRunDiagnostics) {
+  return diagnostics ? aiProfileLabels[diagnostics.profile] : "Ukjent profil";
 }
 
 export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenterBriefingPayload }) {
@@ -66,7 +78,9 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
           <strong>{briefing.latestAiRun?.status ?? "Ikke registrert"}</strong>
           <small>
             {briefing.latestAiRun
-              ? `${briefing.latestAiRun.model} · ${time(briefing.latestAiRun.completedAt)}`
+              ? `${briefing.latestAiRun.model} · ${aiProfileLabel(
+                  briefing.latestAiRun.diagnostics,
+                )} · ${time(briefing.latestAiRun.completedAt)}`
               : "Ingen AI-run funnet"}
           </small>
         </article>
@@ -148,6 +162,26 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
                 <dt>Saker lest</dt>
                 <dd>{briefing.latestAiRun.articleCount}</dd>
               </div>
+              <div>
+                <dt>Profil</dt>
+                <dd>{aiProfileLabel(briefing.latestAiRun.diagnostics)}</dd>
+              </div>
+              {briefing.latestAiRun.diagnostics ? (
+                <div>
+                  <dt>Forsøk</dt>
+                  <dd>
+                    {briefing.latestAiRun.diagnostics.attempts.length} ·{" "}
+                    {briefing.latestAiRun.diagnostics.attempts
+                      .map(
+                        (attempt) =>
+                          `${aiProfileLabels[attempt.profile]} ${
+                            attempt.status === "ok" ? "OK" : "feilet"
+                          }`,
+                      )
+                      .join(", ")}
+                  </dd>
+                </div>
+              ) : null}
               <div>
                 <dt>Ferdig</dt>
                 <dd>{time(briefing.latestAiRun.completedAt)}</dd>

@@ -31,7 +31,35 @@ const aiRun: RawInspectorAiRunDetail = {
   completedAt: "2026-07-02T09:02:00.000Z",
   articleCount: 2,
   articleIds: ["article:one", "article:two"],
-  result: { ok: false },
+  diagnostics: {
+    profile: "compact_recovery",
+    attempts: [
+      {
+        profile: "standard",
+        status: "failed",
+        maxTokens: 4096,
+        articleCount: 12,
+        situationCount: 4,
+        error: "JSON response was truncated",
+      },
+      {
+        profile: "compact_recovery",
+        status: "ok",
+        maxTokens: 2048,
+        articleCount: 8,
+        situationCount: 4,
+      },
+    ],
+  },
+  result: {
+    diagnostics: {
+      profile: "compact_recovery",
+      attempts: [
+        { profile: "standard", status: "failed" },
+        { profile: "compact_recovery", status: "ok" },
+      ],
+    },
+  },
   resultBytes: 32,
   redacted: false,
   truncated: false,
@@ -56,6 +84,8 @@ describe("RawDataInspectorDashboard", () => {
     expect(html).toContain("Normalisert payload");
     expect(html).toContain("Rå payload");
     expect(html).toContain("deepseek-v4-flash");
+    expect(html).toContain("Kompakt gjenoppretting");
+    expect(html).toContain("Full analyse feilet");
     expect(html).toContain("JSON response was truncated");
     expect(html).not.toContain("Slå sammen");
     expect(html).not.toContain("Kjør på nytt");

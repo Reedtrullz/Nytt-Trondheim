@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
+  AiAnalysisProfile,
+  AiProcessingRunDiagnostics,
   RawInspectorAiRunDetail,
   RawInspectorAiRunFilters,
   RawInspectorAiRunPage,
@@ -22,6 +24,12 @@ const statusLabels: Record<NonNullable<RawInspectorAiRunFilters["status"]>, stri
   ok: "OK",
   degraded: "Degradert",
   disabled: "Avslått",
+};
+
+const aiProfileLabels: Record<AiAnalysisProfile, string> = {
+  standard: "Full analyse",
+  compact_recovery: "Kompakt gjenoppretting",
+  brief_only_recovery: "Kun morgenbrief",
 };
 
 function parseRawInspectorFilters(search: string): RawInspectorViewFilters {
@@ -76,6 +84,10 @@ function time(value?: string) {
 
 function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
+}
+
+function aiProfileLabel(diagnostics?: AiProcessingRunDiagnostics) {
+  return diagnostics ? aiProfileLabels[diagnostics.profile] : "Ukjent profil";
 }
 
 function PayloadPanel({ title, value, note }: { title: string; value: unknown; note?: string }) {
@@ -213,7 +225,7 @@ export function RawDataInspectorDashboard({
                 <strong>{run.model}</strong>
                 <small>
                   {statusLabels[run.status] ?? run.status} · {run.articleCount} saker ·{" "}
-                  {time(run.completedAt)}
+                  {aiProfileLabel(run.diagnostics)} · {time(run.completedAt)}
                 </small>
                 {run.error ? <em>{run.error}</em> : null}
               </button>
@@ -275,6 +287,25 @@ export function RawDataInspectorDashboard({
                     <dt>Artikler</dt>
                     <dd>{selectedAiRun.articleIds.join(", ") || "Ingen"}</dd>
                   </div>
+                  <div>
+                    <dt>Profil</dt>
+                    <dd>{aiProfileLabel(selectedAiRun.diagnostics)}</dd>
+                  </div>
+                  {selectedAiRun.diagnostics ? (
+                    <div>
+                      <dt>Forsøk</dt>
+                      <dd>
+                        {selectedAiRun.diagnostics.attempts
+                          .map(
+                            (attempt) =>
+                              `${aiProfileLabels[attempt.profile]} ${
+                                attempt.status === "ok" ? "OK" : "feilet"
+                              } (${attempt.articleCount}/${attempt.situationCount})`,
+                          )
+                          .join(", ")}
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
                 {selectedAiRun.error ? (
                   <p className="raw-inspector-error">{selectedAiRun.error}</p>

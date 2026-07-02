@@ -6,6 +6,9 @@ import type {
   AccessRequestPage,
   AccessRequestQueryInput,
   AccessRequestSubmissionResponse,
+  AiAnalysisAttemptDiagnostics,
+  AiAnalysisProfile,
+  AiProcessingRunDiagnostics,
   AppUser,
   AiProcessingRun,
   Article,
@@ -1033,8 +1036,54 @@ function articleIdsFromAiRow(value: unknown): string[] {
   return [];
 }
 
+function isAiAnalysisProfile(value: unknown): value is AiAnalysisProfile {
+  return value === "standard" || value === "compact_recovery" || value === "brief_only_recovery";
+}
+
+function aiRunDiagnosticsFromResult(result: unknown): AiProcessingRunDiagnostics | undefined {
+  if (!result || typeof result !== "object" || !("diagnostics" in result)) return undefined;
+  const diagnostics = (result as { diagnostics?: unknown }).diagnostics;
+  if (!diagnostics || typeof diagnostics !== "object") return undefined;
+  const candidate = diagnostics as { profile?: unknown; attempts?: unknown };
+  if (!isAiAnalysisProfile(candidate.profile) || !Array.isArray(candidate.attempts)) {
+    return undefined;
+  }
+  const attempts = candidate.attempts.flatMap((attempt): AiAnalysisAttemptDiagnostics[] => {
+    if (!attempt || typeof attempt !== "object") return [];
+    const row = attempt as {
+      profile?: unknown;
+      status?: unknown;
+      maxTokens?: unknown;
+      articleCount?: unknown;
+      situationCount?: unknown;
+      error?: unknown;
+    };
+    if (
+      !isAiAnalysisProfile(row.profile) ||
+      (row.status !== "ok" && row.status !== "failed") ||
+      typeof row.maxTokens !== "number" ||
+      typeof row.articleCount !== "number" ||
+      typeof row.situationCount !== "number"
+    ) {
+      return [];
+    }
+    return [
+      {
+        profile: row.profile,
+        status: row.status,
+        maxTokens: row.maxTokens,
+        articleCount: row.articleCount,
+        situationCount: row.situationCount,
+        ...(typeof row.error === "string" ? { error: compactText(row.error, 240) } : {}),
+      },
+    ];
+  });
+  return attempts.length ? { profile: candidate.profile, attempts } : undefined;
+}
+
 function rawAiRunSummaryFromRow(row: AiProcessingRunRow): RawInspectorAiRunSummary {
   const articleIds = articleIdsFromAiRow(row.article_ids);
+  const diagnostics = aiRunDiagnosticsFromResult(row.result);
   return {
     id: row.id,
     provider: row.provider,
@@ -1043,6 +1092,7 @@ function rawAiRunSummaryFromRow(row: AiProcessingRunRow): RawInspectorAiRunSumma
     startedAt: new Date(row.started_at).toISOString(),
     completedAt: new Date(row.completed_at).toISOString(),
     articleCount: articleIds.length,
+    ...(diagnostics ? { diagnostics } : {}),
     ...(row.error ? { error: row.error } : {}),
   };
 }
