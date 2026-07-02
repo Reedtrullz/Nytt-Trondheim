@@ -96,6 +96,8 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Åpne dekningsgrupper");
     expect(html).toContain("/command/tidslinje");
     expect(html).toContain("Åpne tidslinje");
+    expect(html).toContain("/command/radata");
+    expect(html).toContain("Åpne rådata");
   });
 
   it("does not imply zero failures before worker metrics exist", () => {

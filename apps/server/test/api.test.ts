@@ -239,6 +239,7 @@ describe("private situation API", () => {
     });
     await request(app).get("/api/bootstrap").expect(401);
     await request(app).get("/api/operations/coverage-bundles").expect(401);
+    await request(app).get("/api/operations/raw/ai-runs").expect(401);
     await request(app).get("/api/access-requests").expect(401);
     await request(app)
       .post("/api/access-requests")
@@ -1024,6 +1025,38 @@ describe("private situation API", () => {
       sourceItemIds: [sourceItemId],
     });
     expect(patched.body.properties.measurement).toEqual({ radiusMeters: 750 });
+  });
+
+  it("keeps raw source payloads behind the owner-only raw inspector", async () => {
+    const { agent } = await ownerAgent();
+    const sourceItems = await agent.get("/api/source-items?limit=1").expect(200);
+    const item = sourceItems.body.items[0] as Record<string, unknown>;
+    expect(item).toMatchObject({ id: expect.any(String), provider: expect.any(String) });
+    expect(item).not.toHaveProperty("rawPayload");
+    expect(item).not.toHaveProperty("normalizedPayload");
+
+    const raw = await agent
+      .get(`/api/operations/raw/source-items/${encodeURIComponent(String(item.id))}`)
+      .expect(200);
+    expect(raw.body.item).toMatchObject({ id: item.id });
+    expect(raw.body.rawPayload).toBeDefined();
+    expect(raw.body.normalizedPayload).toBeDefined();
+    expect(raw.body.payloadBytes).toMatchObject({
+      raw: expect.any(Number),
+      normalized: expect.any(Number),
+    });
+
+    await agent.get("/api/operations/raw/source-items/source:missing").expect(404);
+  });
+
+  it("returns an owner-only AI raw inspector page shape", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent
+      .get("/api/operations/raw/ai-runs?provider=deepseek&status=degraded&limit=5")
+      .expect(200);
+
+    expect(response.body).toMatchObject({ items: expect.any(Array) });
+    expect(JSON.stringify(response.body)).not.toContain("raw_payload");
   });
 
   it("rejects private feature provenance links that are not attached to the situation", async () => {

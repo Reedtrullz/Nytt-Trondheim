@@ -314,20 +314,24 @@ function NearbyRail({
   data,
   groups,
   localFocus,
+  timeWindowLabel,
 }: {
   articles: Article[];
   data: BootstrapPayload;
   groups: HomeArticleGroup[];
   localFocus?: HomeLocalFocusPoint;
+  timeWindowLabel?: string;
 }) {
   const allNearby = useMemo(
     () => nearbyStoryItemsForGroups(groups, { limit: Number.MAX_SAFE_INTEGER, localFocus }),
     [groups, localFocus],
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
+  const mapNearby = useMemo(() => allNearby.slice(0, 24), [allNearby]);
   const [selectedNearbyId, setSelectedNearbyId] = useState<string>();
   const nearbyIds = nearby.map((item) => item.id).join("|");
-  const selectedNearby = nearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
+  const mapNearbyIds = mapNearby.map((item) => item.id).join("|");
+  const selectedNearby = mapNearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
   const selectedTarget = nearbyMapTarget(selectedNearby);
   const selectedArticleUrl = selectedNearby
     ? safeExternalUrl(selectedNearby.article.url)
@@ -339,9 +343,9 @@ function NearbyRail({
 
   useEffect(() => {
     setSelectedNearbyId((current) =>
-      current && nearby.some((item) => item.id === current) ? current : nearby[0]?.id,
+      current && mapNearby.some((item) => item.id === current) ? current : nearby[0]?.id,
     );
-  }, [nearby, nearbyIds]);
+  }, [mapNearby, mapNearbyIds, nearby, nearbyIds]);
 
   return (
     <aside className="home-rail">
@@ -349,14 +353,21 @@ function NearbyRail({
         <div className="rail-title">
           <div>
             <h2 id="nearby-heading">I nærheten</h2>
-            <p>{nearbyStorySummary(nearby, allNearby.length)}</p>
+            <p>
+              {nearbyStorySummary(nearby, allNearby.length)}
+              {timeWindowLabel ? ` Kartet følger ${timeWindowLabel.toLocaleLowerCase("nb")}.` : ""}
+            </p>
           </div>
           <Link to="/situasjoner">
             Åpne situasjonskart <ArrowIcon />
           </Link>
         </div>
         <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
-          <NewsMap items={nearby} selectedId={selectedNearby?.id} onSelect={setSelectedNearbyId} />
+          <NewsMap
+            items={mapNearby}
+            selectedId={selectedNearby?.id}
+            onSelect={setSelectedNearbyId}
+          />
         </Suspense>
         {nearby.length > 0 ? (
           <>
@@ -812,6 +823,7 @@ export function HomePage({
           articles={articles}
           groups={displayedGroups}
           localFocus={activeLocalFocus}
+          timeWindowLabel={timeWindow === "all" ? undefined : homeTimeWindowLabels[timeWindow]}
           data={initialData}
         />
       </div>

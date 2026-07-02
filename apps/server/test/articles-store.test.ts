@@ -1,9 +1,21 @@
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 import type { Article } from "@nytt/shared";
-import { PgStore } from "../src/store.js";
+import { MemoryStore, PgStore } from "../src/store.js";
 
 describe("article store", () => {
+  it("filters in-memory articles by published time window like production", async () => {
+    const store = new MemoryStore();
+
+    const page = await store.listArticles({
+      from: "2026-05-26T09:00:00.000Z",
+      to: "2026-05-26T10:00:00.000Z",
+      limit: 10,
+    });
+
+    expect(page.items.map((article) => article.id)).toEqual(["a-sluppen", "a-road"]);
+  });
+
   it("searches production articles by place metadata, source label, and category", async () => {
     const article: Article = {
       id: "flatåsen-smoke",

@@ -20,6 +20,7 @@ import {
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
   publicTransportMapQuerySchema,
+  rawInspectorAiRunQuerySchema,
   sourceItemLinkInputSchema,
   sourceItemQuerySchema,
   sourceAuditFilterQuerySchema,
@@ -1851,6 +1852,35 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const filters = coverageBundleQuerySchema.parse(req.query);
       res.json(await store.listCoverageBundles(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/source-items/:id", async (req, res, next) => {
+    try {
+      const item = await store.getRawSourceItem(String(req.params.id), currentLogin(req));
+      if (!item) return void res.status(404).json({ error: "Kildeelementet finnes ikke." });
+      res.json(item);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/ai-runs", async (req, res, next) => {
+    try {
+      const filters = rawInspectorAiRunQuerySchema.parse(req.query);
+      res.json(await store.listRawAiRuns(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/ai-runs/:id", async (req, res, next) => {
+    try {
+      const run = await store.getRawAiRun(String(req.params.id), currentLogin(req));
+      if (!run) return void res.status(404).json({ error: "AI-kjøringen finnes ikke." });
+      res.json(run);
     } catch (error) {
       next(error);
     }

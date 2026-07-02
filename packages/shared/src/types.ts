@@ -346,6 +346,50 @@ export interface SourceItemFilters {
   limit?: number;
 }
 
+export interface RawInspectorSourceItemDetail {
+  item: SourceItem;
+  rawPayload: unknown;
+  normalizedPayload: unknown;
+  payloadBytes: {
+    raw: number;
+    normalized: number;
+  };
+  redacted: boolean;
+  truncated: boolean;
+}
+
+export interface RawInspectorAiRunSummary {
+  id: string;
+  provider: AiProcessingRun["provider"];
+  model: string;
+  status: AiProcessingRun["status"];
+  startedAt: string;
+  completedAt: string;
+  articleCount: number;
+  error?: string;
+}
+
+export interface RawInspectorAiRunDetail extends RawInspectorAiRunSummary {
+  articleIds: string[];
+  result: unknown;
+  resultBytes: number;
+  redacted: boolean;
+  truncated: boolean;
+}
+
+export interface RawInspectorAiRunPage {
+  items: RawInspectorAiRunSummary[];
+  nextCursor?: string;
+}
+
+export interface RawInspectorAiRunFilters {
+  provider?: AiProcessingRun["provider"];
+  status?: AiProcessingRun["status"];
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface SourceFilterQueryState {
   providers?: SourceId[];
   kinds?: SourceItemKind[];

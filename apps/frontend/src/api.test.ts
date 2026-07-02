@@ -164,6 +164,42 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests raw operations inspector data with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ items: [], nextCursor: undefined }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.rawAiRuns({
+      provider: "deepseek",
+      status: "degraded",
+      q: "truncated",
+      cursor: "cursor:ai",
+      limit: 10,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/raw/ai-runs?provider=deepseek&status=degraded&q=truncated&cursor=cursor%3Aai&limit=10",
+      expect.objectContaining({ credentials: "include" }),
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      okResponse({
+        item: { id: "source:one" },
+        rawPayload: {},
+        normalizedPayload: {},
+        payloadBytes: { raw: 2, normalized: 2 },
+        redacted: false,
+        truncated: false,
+      }),
+    );
+
+    await api.rawSourceItem("source:one/two");
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/operations/raw/source-items/source%3Aone%2Ftwo",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("submits public access requests without an authenticated CSRF lookup", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "received" }), {

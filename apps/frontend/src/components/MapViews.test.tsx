@@ -127,6 +127,29 @@ describe("NewsMap", () => {
     expect(html).toContain("story-marker-municipal");
     expect(html).toContain('title="1. Kommunalt varsel ved Lade (Lade)"');
   });
+
+  it("renders close nearby stories as a cluster count marker", () => {
+    const second = {
+      ...article,
+      id: "article-2",
+      title: "Oppdatering ved Sluppen",
+      location: { lat: 63.4005, lng: 10.4003, label: "Sluppen" },
+    };
+    const far = {
+      ...article,
+      id: "article-3",
+      title: "Sak ved Lade",
+      location: { lat: 63.44, lng: 10.43, label: "Lade" },
+    };
+    const items = nearbyStoryItems([article, second, far], { limit: 3 });
+    const html = renderToStaticMarkup(<NewsMap items={items} selectedId="article-2" />);
+
+    expect(html).toContain("story-marker-cluster");
+    expect(html).toContain("story-marker-selected");
+    expect(html).toContain("&lt;span&gt;2&lt;/span&gt;");
+    expect(html).toContain("2 saker nær Sluppen");
+    expect(html).toContain('data-position="63.44,10.43"');
+  });
 });
 
 describe("SituationMap", () => {

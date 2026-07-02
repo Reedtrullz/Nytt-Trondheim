@@ -665,6 +665,16 @@ export const sourceItemLinkInputSchema = z.object({
   relationship: sourceItemRelationshipSchema.default("supports"),
 });
 
+export const rawInspectorAiRunQuerySchema = z.object({
+  provider: z.enum(["deepseek", "deterministic"]).optional(),
+  status: z.enum(["ok", "degraded", "disabled"]).optional(),
+  q: z.string().trim().max(160).optional(),
+  cursor: z.string().trim().max(250).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export type RawInspectorAiRunQueryInput = z.infer<typeof rawInspectorAiRunQuerySchema>;
+
 export const trafficEventCategorySchema = z.enum([
   "roadworks",
   "accident",

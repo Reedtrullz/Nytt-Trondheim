@@ -33,6 +33,11 @@ const OperationsTimelinePage = lazy(() =>
     default: module.OperationsTimelinePage,
   })),
 );
+const RawDataInspectorPage = lazy(() =>
+  import("./pages/RawDataInspectorPage.js").then((module) => ({
+    default: module.RawDataInspectorPage,
+  })),
+);
 const SavedPage = lazy(() =>
   import("./pages/SavedPage.js").then((module) => ({ default: module.SavedPage })),
 );
@@ -237,11 +242,13 @@ function AuthenticatedApp() {
             <Route path="/command/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/command/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/command/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route path="/command/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/command/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
             <Route path="/drift" element={ownerOnly(<OperationsPage />)} />
             <Route path="/drift/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/drift/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/drift/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route path="/drift/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/drift/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>

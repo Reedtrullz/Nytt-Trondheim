@@ -7,6 +7,7 @@ import type {
   AccessRequestQueryInput,
   AccessRequestSubmissionResponse,
   AppUser,
+  AiProcessingRun,
   Article,
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleDecision,
@@ -31,6 +32,11 @@ import type {
   Provenance,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
+  RawInspectorAiRunDetail,
+  RawInspectorAiRunFilters,
+  RawInspectorAiRunPage,
+  RawInspectorAiRunSummary,
+  RawInspectorSourceItemDetail,
   RoadCamera,
   RoadWeatherObservation,
   Situation,
@@ -52,6 +58,7 @@ import type {
   SourceItem,
   SourceItemFilters,
   SourceItemPage,
+  SourceItemRecord,
   SourceItemRelationship,
   SourceHealth,
   SourceId,
@@ -202,6 +209,9 @@ export interface Store {
     login: string,
   ): Promise<CoverageBundlePage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
+  getRawSourceItem(id: string, login: string): Promise<RawInspectorSourceItemDetail | undefined>;
+  listRawAiRuns(filters: RawInspectorAiRunFilters, login: string): Promise<RawInspectorAiRunPage>;
+  getRawAiRun(id: string, login: string): Promise<RawInspectorAiRunDetail | undefined>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
   listPublicTransportVehicles(
@@ -518,7 +528,7 @@ function sourceItemId(provider: string, kind: string, stableKey: string): string
   return `source:${sourceItemHash([provider, kind, stableKey])}`;
 }
 
-function memorySourceItemFromArticle(article: Article): SourceItem {
+function memorySourceItemFromArticle(article: Article): SourceItemRecord {
   const normalizedPayload = {
     id: article.id,
     source: article.source,
@@ -559,6 +569,8 @@ function memorySourceItemFromArticle(article: Article): SourceItem {
     reliabilityTier: article.source === "trondheim_kommune" ? "official" : "trusted_media",
     role: sourceItemRoleForProvider(article.source),
     linkedSituationIds: [],
+    rawPayload: article,
+    normalizedPayload,
   };
 }
 
@@ -592,6 +604,24 @@ interface SourceItemRow {
   role: SourceItem["role"] | null;
   linked_situation_ids: string[] | null;
   relationship?: SourceItemRelationship | null;
+}
+
+interface SourceItemRecordRow extends SourceItemRow {
+  raw_payload: unknown;
+  normalized_payload: unknown;
+}
+
+interface AiProcessingRunRow {
+  id: string;
+  provider: AiProcessingRun["provider"];
+  model: string;
+  status: AiProcessingRun["status"];
+  started_at: Date | string;
+  completed_at: Date | string;
+  completed_at_cursor: string;
+  article_ids: unknown;
+  result: unknown;
+  error: string | null;
 }
 
 interface CoverageBundleRow {
@@ -640,6 +670,146 @@ function sourceItemSelectColumns(alias = "si"): string {
        ${alias}.capture_hash, ${alias}.input_hash,
        ST_AsGeoJSON(${alias}.geo_hint)::json AS geo_hint, ${alias}.reliability_tier, ${alias}.role,
        links.linked_situation_ids`;
+}
+
+const rawPayloadMaxStringLength = 4000;
+const rawPayloadMaxArrayLength = 100;
+const rawPayloadMaxObjectKeys = 80;
+const secretKeyPattern =
+  /(?:api[_-]?key|authorization|bearer|cookie|password|passwd|secret|token|client[_-]?secret|smtp|datx|datex.*(?:user|pass|credential))/iu;
+
+interface SanitizedPayload {
+  value: unknown;
+  redacted: boolean;
+  truncated: boolean;
+  bytes: number;
+}
+
+function jsonByteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value) ?? "null", "utf8");
+}
+
+function sanitizeRawPayload(value: unknown, depth = 0): SanitizedPayload {
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return { value, redacted: false, truncated: false, bytes: jsonByteLength(value) };
+  }
+  if (typeof value === "string") {
+    const truncated = value.length > rawPayloadMaxStringLength;
+    const next = truncated ? `${value.slice(0, rawPayloadMaxStringLength)}... [truncated]` : value;
+    return { value: next, redacted: false, truncated, bytes: jsonByteLength(value) };
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, rawPayloadMaxArrayLength)
+      .map((item) => sanitizeRawPayload(item, depth + 1));
+    const truncated =
+      value.length > rawPayloadMaxArrayLength || items.some((item) => item.truncated);
+    const redacted = items.some((item) => item.redacted);
+    const next = items.map((item) => item.value);
+    if (value.length > rawPayloadMaxArrayLength) {
+      next.push(`[${value.length - rawPayloadMaxArrayLength} more items truncated]`);
+    }
+    return { value: next, redacted, truncated, bytes: jsonByteLength(value) };
+  }
+  if (typeof value === "object") {
+    if (depth > 8) {
+      return {
+        value: "[object depth truncated]",
+        redacted: false,
+        truncated: true,
+        bytes: jsonByteLength(value),
+      };
+    }
+    const entries = Object.entries(value as Record<string, unknown>);
+    const next: Record<string, unknown> = {};
+    let redacted = false;
+    let truncated = entries.length > rawPayloadMaxObjectKeys;
+    for (const [key, entryValue] of entries.slice(0, rawPayloadMaxObjectKeys)) {
+      if (secretKeyPattern.test(key)) {
+        next[key] = "[redacted]";
+        redacted = true;
+        continue;
+      }
+      const sanitized = sanitizeRawPayload(entryValue, depth + 1);
+      next[key] = sanitized.value;
+      redacted ||= sanitized.redacted;
+      truncated ||= sanitized.truncated;
+    }
+    if (entries.length > rawPayloadMaxObjectKeys) {
+      next.__truncatedKeys = entries.length - rawPayloadMaxObjectKeys;
+    }
+    return { value: next, redacted, truncated, bytes: jsonByteLength(value) };
+  }
+  return { value: String(value), redacted: false, truncated: false, bytes: jsonByteLength(value) };
+}
+
+function rawSourceItemDetailFromRecord(record: SourceItemRecord): RawInspectorSourceItemDetail {
+  const raw = sanitizeRawPayload(record.rawPayload);
+  const normalized = sanitizeRawPayload(record.normalizedPayload);
+  return {
+    item: sourceItemFromRecord(record),
+    rawPayload: raw.value,
+    normalizedPayload: normalized.value,
+    payloadBytes: {
+      raw: raw.bytes,
+      normalized: normalized.bytes,
+    },
+    redacted: raw.redacted || normalized.redacted,
+    truncated: raw.truncated || normalized.truncated,
+  };
+}
+
+function sourceItemFromRecord(record: SourceItemRecord): SourceItem {
+  const item = { ...record };
+  delete item.rawPayload;
+  delete item.normalizedPayload;
+  return item;
+}
+
+function sourceItemRecordFromRow(row: SourceItemRecordRow): SourceItemRecord {
+  return {
+    ...sourceItemFromRow(row),
+    rawPayload: row.raw_payload,
+    normalizedPayload: row.normalized_payload,
+  };
+}
+
+function articleIdsFromAiRow(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value === "string") {
+    try {
+      return articleIdsFromAiRow(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function rawAiRunSummaryFromRow(row: AiProcessingRunRow): RawInspectorAiRunSummary {
+  const articleIds = articleIdsFromAiRow(row.article_ids);
+  return {
+    id: row.id,
+    provider: row.provider,
+    model: row.model,
+    status: row.status,
+    startedAt: new Date(row.started_at).toISOString(),
+    completedAt: new Date(row.completed_at).toISOString(),
+    articleCount: articleIds.length,
+    ...(row.error ? { error: row.error } : {}),
+  };
+}
+
+function rawAiRunDetailFromRow(row: AiProcessingRunRow): RawInspectorAiRunDetail {
+  const result = sanitizeRawPayload(row.result);
+  return {
+    ...rawAiRunSummaryFromRow(row),
+    articleIds: articleIdsFromAiRow(row.article_ids),
+    result: result.value,
+    resultBytes: result.bytes,
+    redacted: result.redacted,
+    truncated: result.truncated,
+  };
 }
 
 function coverageBundleArticleSummary(article: Article): CoverageBundleArticleSummary {
@@ -2018,7 +2188,7 @@ export class MemoryStore implements Store {
   private userIdentities: MemoryUserIdentity[] = [];
   private authTokens: MemoryAuthToken[] = [];
   private savedSituations = new Set<string>();
-  private sourceItems = new Map<string, SourceItem>(
+  private sourceItems = new Map<string, SourceItemRecord>(
     sampleArticles.map((article) => {
       const item = memorySourceItemFromArticle(article);
       return [item.id, item];
@@ -2412,6 +2582,8 @@ export class MemoryStore implements Store {
             filters.category === "Alle" ||
             article.category === filters.category) &&
           (!filters.topic || articleMatchesTopic(article, filters.topic)) &&
+          (!filters.from || article.publishedAt >= filters.from) &&
+          (!filters.to || article.publishedAt <= filters.to) &&
           (!search ||
             `${article.title} ${article.excerpt} ${article.sourceLabel} ${article.category} ${article.places.join(" ")}`
               .toLocaleLowerCase("nb")
@@ -2469,7 +2641,7 @@ export class MemoryStore implements Store {
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
     const limit = filters.limit ?? 40;
     const withLinks = [...this.sourceItems.values()].map((item) => ({
-      ...item,
+      ...sourceItemFromRecord(item),
       linkedSituationIds: [...this.sourceLinks.values()]
         .filter((link) => link.sourceItemId === item.id)
         .map((link) => link.situationId)
@@ -2497,6 +2669,27 @@ export class MemoryStore implements Store {
       items: clone(page),
       nextCursor: items.length > limit && last ? encodeCursor(last.fetchedAt, last.id) : undefined,
     };
+  }
+
+  async getRawSourceItem(id: string): Promise<RawInspectorSourceItemDetail | undefined> {
+    const record = this.sourceItems.get(id);
+    if (!record) return undefined;
+    return rawSourceItemDetailFromRecord(
+      clone({
+        ...record,
+        linkedSituationIds: this.linkedSituationIdsForSourceItem(record.id),
+      }),
+    );
+  }
+
+  async listRawAiRuns(filters: RawInspectorAiRunFilters): Promise<RawInspectorAiRunPage> {
+    void filters;
+    return { items: [] };
+  }
+
+  async getRawAiRun(id: string): Promise<RawInspectorAiRunDetail | undefined> {
+    void id;
+    return undefined;
   }
 
   async listOfficialEvents(): Promise<OfficialEvent[]> {
@@ -2545,7 +2738,7 @@ export class MemoryStore implements Store {
       if (!item) return [];
       return [
         clone({
-          ...item,
+          ...sourceItemFromRecord(item),
           linkedSituationIds: this.linkedSituationIdsForSourceItem(item.id),
           relationship: link.relationship,
         }),
@@ -2572,7 +2765,7 @@ export class MemoryStore implements Store {
       linkedAt: new Date().toISOString(),
     });
     return clone({
-      ...item,
+      ...sourceItemFromRecord(item),
       linkedSituationIds: this.linkedSituationIdsForSourceItem(sourceItemId),
       relationship,
     });
@@ -3732,6 +3925,91 @@ export class PgStore implements Store {
     };
   }
 
+  async getRawSourceItem(
+    id: string,
+    _login: string,
+  ): Promise<RawInspectorSourceItemDetail | undefined> {
+    void _login;
+    const record = await this.getSourceItemRecord(id);
+    return record ? rawSourceItemDetailFromRecord(record) : undefined;
+  }
+
+  async listRawAiRuns(
+    filters: RawInspectorAiRunFilters,
+    _login: string,
+  ): Promise<RawInspectorAiRunPage> {
+    void _login;
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.provider) {
+      params.push(filters.provider);
+      where.push(`provider = $${params.length}`);
+    }
+    if (filters.status) {
+      params.push(filters.status);
+      where.push(`status = $${params.length}`);
+    }
+    if (filters.q) {
+      params.push(`%${filters.q}%`);
+      where.push(
+        `(id ILIKE $${params.length}
+          OR model ILIKE $${params.length}
+          OR COALESCE(error, '') ILIKE $${params.length}
+          OR article_ids::text ILIKE $${params.length}
+          OR result::text ILIKE $${params.length})`,
+      );
+    }
+    if (filters.cursor) {
+      const cursor = decodeCursor(filters.cursor);
+      params.push(cursor.timestamp);
+      const timestampIndex = params.length;
+      if (cursor.id) {
+        params.push(cursor.id);
+        where.push(
+          `(completed_at < $${timestampIndex} OR (completed_at = $${timestampIndex} AND id < $${params.length}))`,
+        );
+      } else {
+        where.push(`completed_at < $${timestampIndex}`);
+      }
+    }
+
+    params.push((filters.limit ?? 20) + 1);
+    const result = await this.pool.query<AiProcessingRunRow>(
+      `SELECT id, provider, model, status, started_at, completed_at,
+        to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS completed_at_cursor,
+        article_ids, result, error
+       FROM ai_processing_runs
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY completed_at DESC, id DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    const limit = filters.limit ?? 20;
+    const visibleRows = result.rows.slice(0, limit);
+    const lastRow = visibleRows.at(-1);
+    return {
+      items: visibleRows.map(rawAiRunSummaryFromRow),
+      nextCursor:
+        result.rows.length > limit && lastRow
+          ? encodeCursor(lastRow.completed_at_cursor, lastRow.id)
+          : undefined,
+    };
+  }
+
+  async getRawAiRun(id: string, _login: string): Promise<RawInspectorAiRunDetail | undefined> {
+    void _login;
+    const result = await this.pool.query<AiProcessingRunRow>(
+      `SELECT id, provider, model, status, started_at, completed_at,
+        to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS completed_at_cursor,
+        article_ids, result, error
+       FROM ai_processing_runs
+       WHERE id = $1`,
+      [id],
+    );
+    const row = result.rows[0];
+    return row ? rawAiRunDetailFromRow(row) : undefined;
+  }
+
   async listOfficialEvents(filters: OfficialEventFilters): Promise<OfficialEvent[]> {
     const params: unknown[] = [];
     const where: string[] = [];
@@ -4067,6 +4345,21 @@ export class PgStore implements Store {
     );
     const row = result.rows[0];
     return row ? sourceItemFromRow(row) : undefined;
+  }
+
+  private async getSourceItemRecord(id: string): Promise<SourceItemRecord | undefined> {
+    const result = await this.pool.query<SourceItemRecordRow>(
+      `SELECT ${sourceItemSelectColumns("si")}, si.raw_payload, si.normalized_payload
+       FROM source_items si
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(array_agg(ssi.situation_id ORDER BY ssi.situation_id), '{}') AS linked_situation_ids
+         FROM situation_source_items ssi WHERE ssi.source_item_id = si.id
+       ) links ON true
+       WHERE si.id = $1`,
+      [id],
+    );
+    const row = result.rows[0];
+    return row ? sourceItemRecordFromRow(row) : undefined;
   }
 
   async listSavedArticles(login: string) {

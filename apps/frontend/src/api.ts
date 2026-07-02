@@ -18,6 +18,10 @@ import type {
   OperationsStatus,
   PrivateAnnotationUpdateRequest,
   PrivateMapFeatureInput,
+  RawInspectorAiRunDetail,
+  RawInspectorAiRunFilters,
+  RawInspectorAiRunPage,
+  RawInspectorSourceItemDetail,
   SessionPayload,
   Situation,
   SituationMapWorkspace,
@@ -224,6 +228,26 @@ export const api = {
       `/api/operations/coverage-bundles${search ? `?${search}` : ""}`,
     );
   },
+  rawSourceItem: (id: string) =>
+    request<RawInspectorSourceItemDetail>(
+      `/api/operations/raw/source-items/${encodeURIComponent(id)}`,
+    ),
+  rawAiRuns: (query: RawInspectorAiRunFilters = { limit: 20 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<RawInspectorAiRunPage>(
+      `/api/operations/raw/ai-runs${search ? `?${search}` : ""}`,
+    );
+  },
+  rawAiRun: (id: string) =>
+    request<RawInspectorAiRunDetail>(`/api/operations/raw/ai-runs/${encodeURIComponent(id)}`),
   operationsTimeline: (query: OperationsTimelineQuery = {}) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
