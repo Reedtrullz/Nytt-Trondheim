@@ -21,6 +21,7 @@ import type {
   RoadCamera,
   RoadWeatherObservation,
   Situation,
+  MorningBrief,
   SourceHealth,
   SourceItem,
   TrafficCounterSnapshot,
@@ -219,6 +220,89 @@ describe("private situation API", () => {
       expect(situation).not.toHaveProperty("provenanceSummary");
       expect(situation).not.toHaveProperty("sourceConfidence");
     }
+  });
+
+  it("serves the latest stored morning brief from PgStore bootstrap when available", async () => {
+    const article: Article = {
+      id: "article-one",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Kø på E6 ved Sluppen",
+      excerpt: "Trafikken går sakte ved Sluppen.",
+      url: "https://example.test/article-one",
+      publishedAt: "2026-07-02T07:20:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["Sluppen", "Trondheim"],
+    };
+    const storedBrief: MorningBrief = {
+      generatedAt: "2026-07-02T07:30:00.000Z",
+      title: "Morgenbrief",
+      mode: "ai_assisted",
+      sourceLine: "AI-assistert · 5/6 kilder OK",
+      paragraphs: [
+        "Lagret brief fra worker.",
+        "Denne teksten skal ikke beregnes på nytt i serveren.",
+        "Siste avsnitt kommer også fra morning_briefs.",
+      ],
+      highlights: [
+        { label: "Saker", value: "1", detail: "Transport leder bildet" },
+        { label: "Situasjoner", value: "0", detail: "Aktive eller til vurdering" },
+        { label: "Kilder", value: "5/6", detail: "Rapporterer OK" },
+      ],
+      articleIds: [article.id],
+      situationIds: [],
+    };
+    const captured: string[] = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push(normalizedSql);
+        if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
+          expect(params).toEqual(["Reedtrullz", "trondheim", 41]);
+          return { rows: [{ payload: article, saved: false }] };
+        }
+        if (normalizedSql.includes("FROM situations WHERE status IN")) {
+          return { rows: [] };
+        }
+        if (normalizedSql.includes("FROM source_health")) {
+          return {
+            rows: [
+              {
+                source: "nrk",
+                label: "NRK Trøndelag",
+                state: "ok",
+                detail: "RSS",
+              } satisfies SourceHealth,
+            ],
+          };
+        }
+        if (normalizedSql.includes("FROM morning_briefs")) {
+          return { rows: [{ payload: storedBrief }] };
+        }
+        if (normalizedSql.includes("FROM ai_processing_runs")) {
+          return {
+            rows: [
+              {
+                provider: "deepseek",
+                model: "deepseek-v4-flash",
+                status: "ok",
+                completedAt: "2026-07-02T07:25:00.000Z",
+                result: { morningBrief: { paragraphs: ["Skal", "ikke", "brukes"] } },
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+    const bootstrap = await store.getBootstrap("Reedtrullz");
+
+    expect(bootstrap.articles).toEqual([{ ...article, saved: false }]);
+    expect(bootstrap.morningBrief).toBe(storedBrief);
+    expect(captured.some((sql) => sql.includes("FROM morning_briefs"))).toBe(true);
   });
 
   it("accepts only the configured GitHub owner account", () => {

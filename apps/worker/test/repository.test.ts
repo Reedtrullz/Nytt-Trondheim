@@ -3,6 +3,7 @@ import type pg from "pg";
 import type {
   AiProcessingRun,
   Article,
+  MorningBrief,
   OfficialEvent,
   PersistedTrafficMapEvent,
   PublicTransportServiceAlert,
@@ -212,6 +213,56 @@ describe("WorkerRepository", () => {
       JSON.stringify(bundle.signals),
       JSON.stringify(bundle.nearMisses),
       JSON.stringify(bundle),
+    ]);
+  });
+
+  it("stores generated morning briefs outside the source item ledger", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const brief: MorningBrief = {
+      generatedAt: "2026-07-02T07:30:00.000Z",
+      title: "Morgenbrief",
+      mode: "ai_assisted",
+      sourceLine: "AI-assistert · 5/6 kilder OK",
+      paragraphs: [
+        "Trondheim starter dagen med trafikk og noen få hendelser.",
+        "E6 ved Sluppen peker seg ut som den mest praktiske saken å følge.",
+        "Situasjonsrommet for steinsprang er fortsatt øverst i bildet.",
+      ],
+      highlights: [
+        { label: "Saker", value: "12", detail: "Transport leder bildet" },
+        { label: "Situasjoner", value: "1", detail: "Aktive eller til vurdering" },
+        { label: "Kilder", value: "5/6", detail: "Rapporterer OK" },
+      ],
+      articleIds: ["article-one", "article-two"],
+      situationIds: ["situation-one"],
+      aiRun: {
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+        status: "ok",
+        completedAt: "2026-07-02T07:25:00.000Z",
+      },
+    };
+
+    await repository.upsertMorningBrief(brief);
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("INSERT INTO morning_briefs");
+    expect(sql).not.toContain("source_items");
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      "morning:2026-07-02",
+      brief.generatedAt,
+      brief.mode,
+      brief.title,
+      brief.sourceLine,
+      JSON.stringify(brief.paragraphs),
+      JSON.stringify(brief.highlights),
+      brief.articleIds,
+      brief.situationIds,
+      brief.aiRun?.provider,
+      brief.aiRun?.status,
+      brief.aiRun?.completedAt,
+      JSON.stringify(brief),
     ]);
   });
 

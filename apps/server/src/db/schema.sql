@@ -932,6 +932,30 @@ CREATE TABLE IF NOT EXISTS ai_processing_runs (
   error text
 );
 
+CREATE TABLE IF NOT EXISTS morning_briefs (
+  id text PRIMARY KEY,
+  generated_at timestamptz NOT NULL,
+  mode text NOT NULL CHECK (mode IN ('ai_assisted', 'deterministic')),
+  title text NOT NULL,
+  source_line text NOT NULL,
+  paragraphs jsonb NOT NULL,
+  highlights jsonb NOT NULL,
+  article_ids text[] NOT NULL,
+  situation_ids text[] NOT NULL,
+  ai_run_provider text,
+  ai_run_status text,
+  ai_run_completed_at timestamptz,
+  payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(paragraphs) = 'array'),
+  CHECK (jsonb_array_length(paragraphs) = 3),
+  CHECK (jsonb_typeof(highlights) = 'array')
+);
+CREATE INDEX IF NOT EXISTS morning_briefs_generated_at_idx
+  ON morning_briefs (generated_at DESC);
+CREATE INDEX IF NOT EXISTS morning_briefs_mode_idx ON morning_briefs (mode);
+
 CREATE TABLE IF NOT EXISTS map_features (
   id text PRIMARY KEY,
   situation_id text NOT NULL REFERENCES situations(id) ON DELETE CASCADE,
@@ -1212,3 +1236,4 @@ INSERT INTO schema_migrations (version) VALUES ('009_collector_runs') ON CONFLIC
 INSERT INTO schema_migrations (version) VALUES ('010_coverage_bundles') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('011_access_requests') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('012_restricted_beta_auth') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('013_morning_briefs') ON CONFLICT DO NOTHING;

@@ -4,6 +4,8 @@ import type {
   AiProcessingRun,
   Article,
   ArticleCoverageBundleDecision,
+  HomeSituationSummary,
+  MorningBrief,
   OfficialEvent,
   PersistedTrafficMapEvent,
   PersistedTrafficMapEventSource,
@@ -22,6 +24,16 @@ import type {
 } from "@nytt/shared";
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
+
+function morningBriefStorageId(generatedAt: string): string {
+  const osloDate = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Oslo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(generatedAt));
+  return `morning:${osloDate}`;
+}
 
 export interface TrafficMapEventUpsertOptions {
   source: PersistedTrafficMapEventSource;
@@ -139,6 +151,44 @@ export class WorkerRepository {
         ],
       );
     }
+  }
+
+  async upsertMorningBrief(brief: MorningBrief): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO morning_briefs
+        (id, generated_at, mode, title, source_line, paragraphs, highlights,
+         article_ids, situation_ids, ai_run_provider, ai_run_status, ai_run_completed_at, payload)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (id) DO UPDATE SET
+         generated_at=EXCLUDED.generated_at,
+         mode=EXCLUDED.mode,
+         title=EXCLUDED.title,
+         source_line=EXCLUDED.source_line,
+         paragraphs=EXCLUDED.paragraphs,
+         highlights=EXCLUDED.highlights,
+         article_ids=EXCLUDED.article_ids,
+         situation_ids=EXCLUDED.situation_ids,
+         ai_run_provider=EXCLUDED.ai_run_provider,
+         ai_run_status=EXCLUDED.ai_run_status,
+         ai_run_completed_at=EXCLUDED.ai_run_completed_at,
+         payload=EXCLUDED.payload,
+         updated_at=now()`,
+      [
+        morningBriefStorageId(brief.generatedAt),
+        brief.generatedAt,
+        brief.mode,
+        brief.title,
+        brief.sourceLine,
+        JSON.stringify(brief.paragraphs),
+        JSON.stringify(brief.highlights),
+        brief.articleIds,
+        brief.situationIds,
+        brief.aiRun?.provider ?? null,
+        brief.aiRun?.status ?? null,
+        brief.aiRun?.completedAt ?? null,
+        JSON.stringify(brief),
+      ],
+    );
   }
 
   private async upsertSourceItem(
@@ -318,6 +368,53 @@ export class WorkerRepository {
       [hours],
     );
     return result.rows.map((row) => row.payload);
+  }
+
+  async sourceHealth(): Promise<SourceHealth[]> {
+    const result = await this.pool.query<SourceHealth>(
+      `SELECT source, label, state, last_checked_at AS "lastCheckedAt",
+       last_failure_at AS "lastFailureAt", next_poll_at AS "nextPollAt", detail
+       FROM source_health ORDER BY label`,
+    );
+    return result.rows;
+  }
+
+  async homeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
+    const result = await this.pool.query<{
+      id: string;
+      title: string;
+      summary: string;
+      status: HomeSituationSummary["status"];
+      verificationStatus: HomeSituationSummary["verificationStatus"];
+      updatedAt: Date | string;
+      createdAt: string;
+      locationLabel: string;
+    }>(
+      `SELECT
+         id,
+         payload->>'title' AS "title",
+         payload->>'summary' AS "summary",
+         status,
+         payload->>'verificationStatus' AS "verificationStatus",
+         updated_at AS "updatedAt",
+         payload->>'createdAt' AS "createdAt",
+         payload->>'locationLabel' AS "locationLabel"
+       FROM situations
+       WHERE status IN ('preliminary', 'active')
+       ORDER BY updated_at DESC, id DESC
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      summary: row.summary,
+      status: row.status,
+      verificationStatus: row.verificationStatus,
+      updatedAt: new Date(row.updatedAt).toISOString(),
+      createdAt: row.createdAt,
+      locationLabel: row.locationLabel,
+    }));
   }
 
   async trackedSituations(): Promise<Situation[]> {

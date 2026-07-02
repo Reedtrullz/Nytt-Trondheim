@@ -13,6 +13,10 @@ interface PublicAiCluster {
   articleIds: string[];
 }
 
+interface PublicAiMorningBrief {
+  paragraphs: [string, string, string];
+}
+
 export interface MorningBriefInput {
   articles: Article[];
   situations: HomeSituationSummary[];
@@ -71,6 +75,20 @@ function publicAiClusters(result: unknown): PublicAiCluster[] {
     .filter((cluster): cluster is PublicAiCluster => Boolean(cluster));
 }
 
+function publicAiMorningBrief(result: unknown): PublicAiMorningBrief | undefined {
+  if (!result || typeof result !== "object" || !("morningBrief" in result)) return undefined;
+  const morningBrief = (result as { morningBrief?: unknown }).morningBrief;
+  if (!morningBrief || typeof morningBrief !== "object") return undefined;
+  const paragraphs = (morningBrief as { paragraphs?: unknown }).paragraphs;
+  if (!Array.isArray(paragraphs) || paragraphs.length !== 3) return undefined;
+  const safeParagraphs = paragraphs.map((paragraph) =>
+    typeof paragraph === "string" ? compact(paragraph, 260) : "",
+  );
+  return safeParagraphs.every((paragraph) => paragraph.length > 0)
+    ? { paragraphs: safeParagraphs as [string, string, string] }
+    : undefined;
+}
+
 function latestArticleLead(articles: Article[]): string {
   const [first, second] = articles;
   if (!first) return "Det er foreløpig ingen ferske saker i Trondheim-utvalget.";
@@ -105,24 +123,30 @@ export function buildMorningBrief({
     (left, right) =>
       right.publishedAt.localeCompare(left.publishedAt) || right.id.localeCompare(left.id),
   );
-  const aiClusters =
+  const aiResult =
     latestAiRun?.provider === "deepseek" && latestAiRun.status === "ok"
-      ? publicAiClusters(latestAiRun.result)
-      : [];
-  const mode: MorningBrief["mode"] = aiClusters.length > 0 ? "ai_assisted" : "deterministic";
+      ? latestAiRun.result
+      : undefined;
+  const aiMorningBrief = publicAiMorningBrief(aiResult);
+  const aiClusters = publicAiClusters(aiResult);
+  const mode: MorningBrief["mode"] =
+    aiMorningBrief || aiClusters.length > 0 ? "ai_assisted" : "deterministic";
   const [topCategory, topCategoryCount] = categoryCounts(sortedArticles)[0] ?? ["Nyheter", 0];
   const [topPlace] = placeCounts(sortedArticles)[0] ?? ["Trondheim", 0];
   const clusteredArticles = sortedArticles.filter((article) => article.coverageBundle).length;
   const aiLead = aiClusters[0];
 
   const firstParagraph =
-    sortedArticles.length > 0
+    aiMorningBrief?.paragraphs[0] ??
+    (sortedArticles.length > 0
       ? `Morgenbildet dekker ${sortedArticles.length} ferske saker, særlig innen ${topCategory.toLocaleLowerCase("nb")} (${topCategoryCount}) og med mest aktivitet rundt ${topPlace}.`
-      : "Morgenbildet er rolig i de åpne kildene Nytt følger akkurat nå.";
-  const secondParagraph = aiLead
-    ? `${aiLead.title}: ${aiLead.summary}`
-    : latestArticleLead(sortedArticles);
-  const thirdParagraph = `${situationSentence(situations)} ${clusteredArticles > 0 ? `${clusteredArticles} saker er samlet i dekningsgrupper for å redusere duplikater.` : "Ingen dekningsgrupper dominerer forsiden akkurat nå."}`;
+      : "Morgenbildet er rolig i de åpne kildene Nytt følger akkurat nå.");
+  const secondParagraph =
+    aiMorningBrief?.paragraphs[1] ??
+    (aiLead ? `${aiLead.title}: ${aiLead.summary}` : latestArticleLead(sortedArticles));
+  const thirdParagraph =
+    aiMorningBrief?.paragraphs[2] ??
+    `${situationSentence(situations)} ${clusteredArticles > 0 ? `${clusteredArticles} saker er samlet i dekningsgrupper for å redusere duplikater.` : "Ingen dekningsgrupper dominerer forsiden akkurat nå."}`;
 
   return {
     generatedAt,

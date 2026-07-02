@@ -24,6 +24,7 @@ import type {
   CoverageBundleSummary,
   EvidenceItem,
   MapFeature,
+  MorningBrief,
   OfficialEvent,
   OperationsTimelineEvent,
   OperationsTimelineQuery,
@@ -3231,6 +3232,16 @@ export class PgStore implements Store {
     }));
   }
 
+  private async latestMorningBrief(): Promise<MorningBrief | undefined> {
+    const result = await this.pool.query<{ payload: MorningBrief }>(
+      `SELECT payload
+       FROM morning_briefs
+       ORDER BY generated_at DESC, id DESC
+       LIMIT 1`,
+    );
+    return result.rows[0]?.payload;
+  }
+
   private async issuePgAuthToken(
     client: Pick<pg.Pool, "query"> | pg.PoolClient,
     kind: AuthTokenKind,
@@ -3785,31 +3796,36 @@ export class PgStore implements Store {
   }
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
-    const [articles, situations, sourceHealth, latestAiRun] = await Promise.all([
-      this.listArticles({ scope: "trondheim", limit: 40 }, login),
-      this.listHomeSituationSummaries(),
-      this.listSourceHealth(),
-      this.pool.query<{
-        provider: AiProcessingRun["provider"];
-        model: string;
-        status: AiProcessingRun["status"];
-        completedAt: Date | string;
-        result: unknown;
-      }>(
-        `SELECT provider, model, status, completed_at AS "completedAt", result
+    const [articles, situations, sourceHealth, latestMorningBrief, latestAiRun] = await Promise.all(
+      [
+        this.listArticles({ scope: "trondheim", limit: 40 }, login),
+        this.listHomeSituationSummaries(),
+        this.listSourceHealth(),
+        this.latestMorningBrief(),
+        this.pool.query<{
+          provider: AiProcessingRun["provider"];
+          model: string;
+          status: AiProcessingRun["status"];
+          completedAt: Date | string;
+          result: unknown;
+        }>(
+          `SELECT provider, model, status, completed_at AS "completedAt", result
          FROM ai_processing_runs
          ORDER BY completed_at DESC
          LIMIT 1`,
-      ),
-    ]);
+        ),
+      ],
+    );
+    const bootstrapPayload = {
+      articles: articles.items,
+      ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
+      situations,
+      sourceHealth,
+    };
+    if (latestMorningBrief) return { ...bootstrapPayload, morningBrief: latestMorningBrief };
     const latestAiRunRow = latestAiRun.rows[0];
     return bootstrapWithMorningBrief(
-      {
-        articles: articles.items,
-        ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
-        situations,
-        sourceHealth,
-      },
+      bootstrapPayload,
       latestAiRunRow
         ? {
             provider: latestAiRunRow.provider,

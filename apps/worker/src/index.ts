@@ -13,7 +13,7 @@ import type {
   TrafficCounterSnapshot,
   WorkerCycleMetrics,
 } from "@nytt/shared";
-import { analyzeArticleCoverage } from "@nytt/shared";
+import { analyzeArticleCoverage, buildMorningBrief } from "@nytt/shared";
 import {
   collectFrontpage,
   collectMunicipality,
@@ -1294,8 +1294,16 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     ...resolvedDatexSituations,
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
+  const morningBrief = buildMorningBrief({
+    articles: await repository.recentArticles(24),
+    situations: await repository.homeSituationSummaries(3),
+    sourceHealth: await repository.sourceHealth(),
+    latestAiRun: analysis.run,
+    generatedAt: analysis.run.completedAt,
+  });
+  await repository.upsertMorningBrief(morningBrief);
   console.log(
-    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints`,
+    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief`,
   );
   const workerMetrics = buildWorkerCycleMetrics({
     cycleStartedAt,

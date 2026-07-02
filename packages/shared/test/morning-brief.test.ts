@@ -68,6 +68,38 @@ describe("buildMorningBrief", () => {
     expect(brief.aiRun).toMatchObject({ provider: "deepseek", status: "ok" });
   });
 
+  it("prefers generated DeepSeek morning brief paragraphs when available", () => {
+    const brief = buildMorningBrief({
+      articles: [article()],
+      situations,
+      sourceHealth,
+      latestAiRun: {
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+        status: "ok",
+        completedAt: "2026-07-02T07:25:00.000Z",
+        result: {
+          morningBrief: {
+            paragraphs: [
+              "Trondheim starter dagen med trafikk og noen få hendelser i feeden.",
+              "E6 ved Sluppen peker seg ut som den mest praktiske saken å følge.",
+              "Situasjonsrommet for steinsprang er fortsatt øverst i beredskapsbildet.",
+            ],
+          },
+          clusters: [],
+        },
+      },
+      generatedAt: "2026-07-02T07:30:00.000Z",
+    });
+
+    expect(brief.mode).toBe("ai_assisted");
+    expect(brief.paragraphs).toEqual([
+      "Trondheim starter dagen med trafikk og noen få hendelser i feeden.",
+      "E6 ved Sluppen peker seg ut som den mest praktiske saken å følge.",
+      "Situasjonsrommet for steinsprang er fortsatt øverst i beredskapsbildet.",
+    ]);
+  });
+
   it("falls back to deterministic copy when AI output is missing or degraded", () => {
     const brief = buildMorningBrief({
       articles: [

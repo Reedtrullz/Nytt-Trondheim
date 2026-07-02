@@ -19,6 +19,11 @@ const optionalCategoryTopicSchema = z.preprocess(
 );
 
 const resultSchema = z.object({
+  morningBrief: z
+    .object({
+      paragraphs: z.tuple([z.string(), z.string(), z.string()]),
+    })
+    .optional(),
   clusters: z.array(
     z.object({
       title: z.string(),
@@ -256,7 +261,7 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
           messages: [
             {
               role: "system",
-              content: `Return one compact JSON object only. Use only public article excerpts and supplied situation summaries. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Situation update hints must only link supplied articles to supplied active/preliminary situations when article text is clearly progress or a direct update for the same incident. Bundle/category/relevance hints are suggestions only, not evidence. Return at most 5 clusters, 5 situationUpdates, 8 bundleHints, 12 categoryHints, 12 relevanceHints and 6 operationsNotes. Keep title, summary, reason, claim and supportingSnippet strings short; supportingSnippet must be a literal article excerpt substring no longer than 160 characters. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"situationUpdates":[{"situationId":"string","articleIds":["string"],"summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"bundleHints":[{"title":"string","articleIds":["string"],"reason":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"categoryHints":[{"articleId":"string","category":"Nyheter|Hendelser|Krim|Byutvikling|Kultur|Sport|Transport|Politikk|Vær","topic":"rosenborg","reason":"string","supportingSnippet":"string"}],"relevanceHints":[{"articleId":"string","scope":"trondheim|trondelag|ignore","reason":"string","supportingSnippet":"string"}],"operationsNotes":[{"kind":"situation_progress|bundle_candidate|category_relevance|source_quality|other","subjectId":"string","summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}. Use ${EMPTY_ANALYSIS_JSON} when uncertain.`,
+              content: `Return one compact JSON object only. Use only public article excerpts and supplied situation summaries. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Situation update hints must only link supplied articles to supplied active/preliminary situations when article text is clearly progress or a direct update for the same incident. Bundle/category/relevance hints are suggestions only, not evidence. Return at most 5 clusters, 5 situationUpdates, 8 bundleHints, 12 categoryHints, 12 relevanceHints and 6 operationsNotes. When there is enough public feed context, include morningBrief.paragraphs with exactly 3 short public paragraphs for a citizen morning briefing; each paragraph must be under 260 characters and avoid private facts, identities, and unsourced claims. Keep title, summary, reason, claim and supportingSnippet strings short; supportingSnippet must be a literal article excerpt substring no longer than 160 characters. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"morningBrief":{"paragraphs":["string","string","string"]},"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"situationUpdates":[{"situationId":"string","articleIds":["string"],"summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"bundleHints":[{"title":"string","articleIds":["string"],"reason":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"categoryHints":[{"articleId":"string","category":"Nyheter|Hendelser|Krim|Byutvikling|Kultur|Sport|Transport|Politikk|Vær","topic":"rosenborg","reason":"string","supportingSnippet":"string"}],"relevanceHints":[{"articleId":"string","scope":"trondheim|trondelag|ignore","reason":"string","supportingSnippet":"string"}],"operationsNotes":[{"kind":"situation_progress|bundle_candidate|category_relevance|source_quality|other","subjectId":"string","summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}. Use ${EMPTY_ANALYSIS_JSON} when uncertain.`,
             },
             {
               role: "user",
@@ -347,6 +352,7 @@ export function validateCitations(
   const completeResult = { ...emptyAnalysisResult(), ...result };
   const inputs = articleById(articles);
   return {
+    ...(completeResult.morningBrief ? { morningBrief: completeResult.morningBrief } : {}),
     clusters: completeResult.clusters.flatMap((cluster) => {
       const claims = supportedClaims(cluster.citedClaims, inputs);
       const articleIds = [...new Set(claims.map((claim) => claim.articleId))];

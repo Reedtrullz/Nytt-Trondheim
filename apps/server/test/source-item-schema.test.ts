@@ -211,6 +211,18 @@ describe("source item schema", () => {
     expect(schema).not.toContain("'coverage_bundles'");
   });
 
+  it("stores generated morning briefs outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS morning_briefs");
+    expect(schema).toContain("mode text NOT NULL CHECK (mode IN ('ai_assisted', 'deterministic'))");
+    expect(schema).toContain("paragraphs jsonb NOT NULL");
+    expect(schema).toContain("CHECK (jsonb_array_length(paragraphs) = 3)");
+    expect(schema).toContain("morning_briefs_generated_at_idx");
+    expect(schema).toContain("013_morning_briefs");
+    expect(schema).not.toMatch(/morning_briefs[\s\S]{0,160}source_items/);
+  });
+
   it("stores access requests outside source_items", async () => {
     const schema = await readFile(schemaPath, "utf8");
 
