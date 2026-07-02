@@ -1560,6 +1560,39 @@ function sourceAuditProvenance(source: SourceId): Provenance {
   return "reporting_estimate";
 }
 
+const softDeepSeekOutputFailureMarkers = [
+  "truncated by token limit",
+  "returned empty json content",
+  "returned no json object",
+  "syntaxerror",
+  "unexpected end of json input",
+  "unexpected token",
+  "invalid_enum_value",
+  "invalid_type",
+  "invalid_literal",
+  "invalid_union",
+  "unrecognized_keys",
+  "too_small",
+  "too_big",
+];
+
+function isSoftDeepSeekOutputFailure(error: string | undefined): boolean {
+  const normalized = error?.toLocaleLowerCase("en") ?? "";
+  return softDeepSeekOutputFailureMarkers.some((marker) => normalized.includes(marker));
+}
+
+function isSoftDeepSeekCollectorRun(run: SourceCollectorRun | undefined): boolean {
+  return (
+    run?.source === "deepseek" &&
+    (run.status === "failed" || run.status === "partial") &&
+    isSoftDeepSeekOutputFailure(run.errorMessage)
+  );
+}
+
+function deepSeekFallbackDetail(): string {
+  return "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.";
+}
+
 function sourceAuditTimestampInRange(
   value: string | undefined,
   filters: Pick<SourceAuditFilterQuery, "from" | "to">,
@@ -1651,9 +1684,11 @@ function sourceReliability(
 ): SourceReliabilityIndicator[] {
   const failures = latestRun?.recordsRejected ?? 0;
   const state = health?.state;
+  const softDeepSeekOutputFailure = state === "ok" && isSoftDeepSeekCollectorRun(latestRun);
+  const effectiveFailures = softDeepSeekOutputFailure ? 0 : failures;
   const level =
-    state === "degraded" || failures > 0
-      ? failures > 2
+    state === "degraded" || effectiveFailures > 0
+      ? effectiveFailures > 2
         ? "poor"
         : "watch"
       : state === "ok"
@@ -1670,8 +1705,9 @@ function sourceReliability(
       ...(score !== undefined ? { score } : {}),
       sampleSize: latestRun?.recordsSeen ?? 0,
       updatedAt: health?.lastCheckedAt ?? latestRun?.completedAt ?? generatedAt,
-      detail:
-        failures > 0
+      detail: softDeepSeekOutputFailure
+        ? deepSeekFallbackDetail()
+        : failures > 0
           ? `${failures} avvik i siste registrerte innhenting.`
           : (health?.detail ?? "Basert på kildehelse og siste worker-metrikk."),
     },
@@ -1703,12 +1739,17 @@ function sourceDiagnostics(
             key: `${source}:latest_duration_ms`,
             label: "Siste innhentingstid",
             kind: "latency" as const,
-            severity: latestRun.status === "failed" ? ("error" as const) : ("info" as const),
+            severity:
+              latestRun.status === "failed" && !isSoftDeepSeekCollectorRun(latestRun)
+                ? ("error" as const)
+                : ("info" as const),
             safeForDisplay: true as const,
             value: latestRun.durationMs ?? 0,
             unit: "ms" as const,
             observedAt: latestRun.completedAt ?? latestRun.startedAt,
-            detail: `${latestRun.recordsAccepted} akseptert, ${latestRun.recordsRejected} avvist.`,
+            detail: isSoftDeepSeekCollectorRun(latestRun)
+              ? deepSeekFallbackDetail()
+              : `${latestRun.recordsAccepted} akseptert, ${latestRun.recordsRejected} avvist.`,
           },
         ]
       : []),
@@ -2086,6 +2127,7 @@ function severityForSituation(situation: Situation): OperationsTimelineEvent["se
 }
 
 function severityForCollectorRun(run: SourceCollectorRun): OperationsTimelineEvent["severity"] {
+  if (isSoftDeepSeekCollectorRun(run)) return "info";
   if (run.status === "failed") return "critical";
   if (run.status === "partial") return "warning";
   if (run.status === "skipped") return "muted";
@@ -2117,6 +2159,19 @@ function collectorRunStatusLabel(status: SourceCollectorRun["status"]): string {
     running: "kjører",
   };
   return labels[status];
+}
+
+function collectorRunTitle(run: SourceCollectorRun): string {
+  const label = sourceAuditLabelFallbacks[run.source];
+  return isSoftDeepSeekCollectorRun(run)
+    ? `${label} brukte reserveanalyse`
+    : `${label} ${collectorRunStatusLabel(run.status)}`;
+}
+
+function collectorRunDetail(run: SourceCollectorRun): string {
+  return isSoftDeepSeekCollectorRun(run)
+    ? deepSeekFallbackDetail()
+    : `${run.recordsAccepted} inn, ${run.recordsRejected} avvik, ${run.recordsSeen} sett.`;
 }
 
 function sourceItemRelationshipLabel(relationship?: SourceItemRelationship): string {
@@ -2269,8 +2324,8 @@ function operationEventFromCollectorRun(run: SourceCollectorRun): OperationsTime
     timestamp: run.completedAt ?? run.startedAt,
     kind: "collector_run",
     severity: severityForCollectorRun(run),
-    title: `${sourceAuditLabelFallbacks[run.source]} ${collectorRunStatusLabel(run.status)}`,
-    detail: `${run.recordsAccepted} inn, ${run.recordsRejected} avvik, ${run.recordsSeen} sett.`,
+    title: collectorRunTitle(run),
+    detail: collectorRunDetail(run),
     source: run.source,
     sourceLabel: sourceAuditLabelFallbacks[run.source],
     collector: run.collector,

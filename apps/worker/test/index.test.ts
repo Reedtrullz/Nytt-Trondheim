@@ -281,7 +281,9 @@ describe("worker lifecycle helpers", () => {
       nextPollAt: "2026-07-02T09:50:00.000Z",
     });
     expect(health.lastFailureAt).toBeUndefined();
-    expect(health.detail).toContain("deterministisk gruppering brukes fortsatt");
+    expect(health.detail).toContain("deterministisk gruppering og reservebrief brukes fortsatt");
+    expect(health.detail).toContain("token-grensen");
+    expect(health.detail).not.toContain("Error:");
   });
 
   it("keeps hard DeepSeek provider failures degraded", () => {

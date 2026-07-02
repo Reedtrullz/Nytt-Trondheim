@@ -22,6 +22,7 @@ import type {
   RoadWeatherObservation,
   Situation,
   MorningBrief,
+  SourceCollectorRun,
   SourceHealth,
   SourceItem,
   TrafficCounterSnapshot,
@@ -821,6 +822,85 @@ describe("private situation API", () => {
     );
     expect(JSON.stringify(response.body.events)).not.toContain('"relationship":"supports"');
     expect(JSON.stringify(response.body.events)).not.toContain('"relationship":"activation"');
+  });
+
+  it("keeps soft DeepSeek output failures as fallback diagnostics, not critical incidents", async () => {
+    const { app, store } = await testApp();
+    const completedAt = new Date().toISOString();
+    const softRun = {
+      id: "deepseek:soft-json",
+      source: "deepseek",
+      collector: "deepseek",
+      status: "failed",
+      startedAt: completedAt,
+      completedAt,
+      durationMs: 121_000,
+      recordsSeen: 1,
+      recordsAccepted: 0,
+      recordsRejected: 1,
+      errorCode: "parse_or_collection_failure",
+      errorMessage: "Error: DeepSeek JSON response was truncated by token limit.",
+    } satisfies SourceCollectorRun;
+    vi.spyOn(store, "listSituations").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "deepseek",
+        label: "AI-analyse",
+        state: "ok",
+        lastCheckedAt: completedAt,
+        detail:
+          "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering og reservebrief brukes fortsatt.",
+      },
+    ] satisfies SourceHealth[]);
+    vi.spyOn(store, "listCollectorRuns").mockResolvedValue([softRun]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const timeline = await agent
+      .get("/api/operations/timeline?sources=deepseek&kinds=collector_run")
+      .expect(200);
+    expect(timeline.body.events).toEqual([
+      expect.objectContaining({
+        kind: "collector_run",
+        source: "deepseek",
+        severity: "info",
+        role: "private",
+        title: "AI-analyse brukte reserveanalyse",
+        detail:
+          "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.",
+      }),
+    ]);
+    expect(JSON.stringify(timeline.body.events)).not.toContain("trenger tilsyn");
+
+    const audit = await agent
+      .get("/api/operations/source-audit?sources=deepseek&includeDiagnostics=true")
+      .expect(200);
+    expect(audit.body.alerts).toEqual([]);
+    expect(audit.body.sources).toEqual([
+      expect.objectContaining({
+        source: "deepseek",
+        healthState: "ok",
+        reliability: [
+          expect.objectContaining({
+            level: "good",
+            detail:
+              "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.",
+          }),
+        ],
+      }),
+    ]);
+    expect(audit.body.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "deepseek:latest_duration_ms",
+          severity: "info",
+          detail:
+            "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.",
+        }),
+      ]),
+    );
   });
 
   it("classifies status, severity, merge and split decisions on the operations timeline", async () => {

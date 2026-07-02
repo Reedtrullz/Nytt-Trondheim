@@ -230,6 +230,27 @@ export function isSoftDeepSeekOutputFailure(error: string | undefined): boolean 
   return softDeepSeekOutputFailureMarkers.some((marker) => normalized.includes(marker));
 }
 
+function softDeepSeekOutputFailureDetail(error: string | undefined): string {
+  const normalized = error?.toLocaleLowerCase("en") ?? "";
+  if (normalized.includes("truncated by token limit")) {
+    return "Siste AI-respons traff token-grensen og ble forkastet før lagring.";
+  }
+  if (
+    normalized.includes("returned empty json content") ||
+    normalized.includes("returned no json object")
+  ) {
+    return "Siste AI-respons manglet et komplett JSON-objekt.";
+  }
+  if (
+    normalized.includes("unexpected end of json input") ||
+    normalized.includes("unexpected token") ||
+    normalized.includes("syntaxerror")
+  ) {
+    return "Siste AI-respons var ikke gyldig JSON.";
+  }
+  return "Siste AI-respons passet ikke den forventede trygge strukturen.";
+}
+
 function deepSeekOkHealthDetail(result: DeepSeekAnalysisResult): string {
   return [
     `${result.clusters.length} validerte kandidatgrupper`,
@@ -275,9 +296,9 @@ export function sourceHealthFromDeepSeekAnalysis(
     nextPollAt,
     detail: [
       softOutputFailure
-        ? "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering brukes fortsatt."
+        ? "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering og reservebrief brukes fortsatt."
         : "AI-analyse feilet, men deterministisk gruppering brukes fortsatt.",
-      analysis.run.error,
+      softOutputFailure ? softDeepSeekOutputFailureDetail(analysis.run.error) : analysis.run.error,
     ]
       .filter(Boolean)
       .join(" "),
