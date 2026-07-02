@@ -618,14 +618,26 @@ export const provenanceConfidenceSchema = z
   })
   .strict();
 
-export const articleQuerySchema = z.object({
-  scope: z.enum(["trondheim", "trondelag"]).optional(),
-  category: articleCategorySchema.optional(),
-  topic: articleTopicSchema.optional(),
-  q: z.string().trim().max(120).optional(),
-  cursor: z.string().trim().max(250).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(40),
-});
+export const articleQuerySchema = z
+  .object({
+    scope: z.enum(["trondheim", "trondelag"]).optional(),
+    category: articleCategorySchema.optional(),
+    topic: articleTopicSchema.optional(),
+    q: z.string().trim().max(120).optional(),
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    cursor: z.string().trim().max(250).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(40),
+  })
+  .superRefine((query, context) => {
+    if (!query.from || !query.to) return;
+    if (new Date(query.from).getTime() <= new Date(query.to).getTime()) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["from"],
+      message: "from must be before to",
+    });
+  });
 
 export const coverageBundleQuerySchema = z.object({
   kind: z.enum(["incident", "topic", "update"]).optional(),

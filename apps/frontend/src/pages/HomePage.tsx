@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Article, BootstrapPayload } from "@nytt/shared";
 import { api } from "../api.js";
@@ -8,6 +8,9 @@ import {
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
+  homeTimeWindowFrom,
+  homeTimeWindowLabels,
+  homeTimeWindows,
   parseHomeFilters,
   searchSummary,
   type ArticleCategoryFilter,
@@ -19,13 +22,26 @@ import {
   nearbyStorySummary,
   type NearbyStoryItem,
 } from "../homeNearby.js";
+import { rankHomeStoryCardsByLocalFocus, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
+import {
+  homeStoryCardsForGroups,
+  sourceClusterLabelForGroup,
+  type HomeStoryCard,
+} from "../homeStoryCards.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
 const NewsMap = lazy(() =>
   import("../components/NewsMap.js").then((module) => ({ default: module.NewsMap })),
 );
-const defaultHomeFeedKey = "trondheim\u0000Alle\u0000\u0000";
+const defaultHomeFeedKey = "trondheim\u0000Alle\u0000\u0000\u0000all";
+const localFocusRadiusKm = 10;
+
+type LocalFocusState =
+  | { status: "idle" }
+  | { status: "locating" }
+  | { status: "active"; point: HomeLocalFocusPoint }
+  | { status: "error"; message: string };
 
 function formatTime(date: string) {
   return new Intl.DateTimeFormat("nb-NO", {
@@ -107,19 +123,10 @@ function SituationBanner({
   );
 }
 
-function sourceClusterLabel(group: HomeArticleGroup): string {
-  if (group.bundle?.reason) {
-    return group.sourceLabels.length > 1
-      ? `${group.sourceLabels.length} kilder · ${group.bundle.reason.toLocaleLowerCase("nb")}`
-      : `${group.articles.length} oppdateringer · ${group.bundle.reason.toLocaleLowerCase("nb")}`;
-  }
-  if (group.sourceLabels.length > 1) return `${group.sourceLabels.length} kilder dekker samme sak`;
-  return `${group.articles.length} oppdateringer samlet`;
-}
-
 function SourceCluster({ group }: { group: HomeArticleGroup }) {
   if (group.articles.length < 2) return null;
-  const label = sourceClusterLabel(group);
+  const label = sourceClusterLabelForGroup(group);
+  if (!label) return null;
   return (
     <div className="source-cluster" aria-label={label}>
       <span>{label}</span>
@@ -156,33 +163,46 @@ function SourceCluster({ group }: { group: HomeArticleGroup }) {
 }
 
 function LeadStory({
-  group,
+  card,
   saving,
   onSave,
   canSave,
 }: {
-  group: HomeArticleGroup;
+  card: HomeStoryCard;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
   canSave: boolean;
 }) {
-  const article = group.primary;
+  const article = card.primary;
+  const group = card.group;
   const articleUrl = safeExternalUrl(article.url);
   return (
     <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
       {article.imageUrl ? <img src={article.imageUrl} alt="" /> : null}
       <div className="lead-copy">
-        <div className="metadata">
-          {article.sourceLabel} · {formatTime(article.publishedAt)}
+        <div className="story-kicker">
+          <p className="metadata">
+            {card.sourceSummary} · {formatTime(card.latestAt)}
+          </p>
+          {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
         </div>
         {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
         <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
+        <div className="story-card-tags lead-story-tags">
+          <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
+          {card.cardKind !== "sak" ? (
+            <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
+          ) : null}
+          {card.neighborhoodLabels.slice(1, 3).map((label) => (
+            <span className="story-place small" key={label}>
+              {label}
+            </span>
+          ))}
+        </div>
         <SourceCluster group={group} />
         <div className="lead-footer">
-          <span className={`topic ${article.category.toLowerCase()}`}>
-            {articleCategoryLabels[article.category]}
-          </span>
+          <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
           {articleUrl ? (
             <a href={articleUrl} target="_blank" rel="noreferrer noopener">
               Les mer <ArrowIcon />
@@ -194,39 +214,80 @@ function LeadStory({
   );
 }
 
-function NewsRow({
-  group,
+function storyKindLabel(kind: HomeStoryCard["cardKind"]): string {
+  switch (kind) {
+    case "situasjon":
+      return "Situasjon";
+    case "hendelse":
+      return "Hendelse";
+    case "tema":
+      return "Tema";
+    case "oppdatering":
+      return "Oppdatering";
+    case "sak":
+      return "Sak";
+  }
+}
+
+function StoryCard({
+  card,
   saving,
   onSave,
   canSave,
 }: {
-  group: HomeArticleGroup;
+  card: HomeStoryCard;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
   canSave: boolean;
 }) {
-  const article = group.primary;
+  const article = card.primary;
   const articleUrl = safeExternalUrl(article.url);
+  const count = card.sourceCount > 1 ? card.sourceCount : card.updateCount;
+  const countLabel = card.sourceCount > 1 ? "kilder" : "oppdateringer";
   return (
-    <article className="news-row">
-      <div>
-        <p className="metadata compact">
-          {article.sourceLabel.toUpperCase()} · {formatTime(article.publishedAt)}
-        </p>
+    <article className={`story-card story-card-${article.category.toLowerCase()}`}>
+      <div className="story-card-main">
+        <div className="story-card-kicker">
+          <p className="metadata compact">
+            {card.sourceSummary.toUpperCase()} · {formatTime(card.latestAt)}
+          </p>
+          {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
+        </div>
         {articleUrl ? (
-          <a className="headline" href={articleUrl} target="_blank" rel="noreferrer noopener">
+          <a
+            className="headline story-title"
+            href={articleUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
             {article.title}
           </a>
         ) : (
-          <span className="headline">{article.title}</span>
+          <span className="headline story-title">{article.title}</span>
         )}
         <p className="excerpt">{article.excerpt}</p>
-        <SourceCluster group={group} />
+        <div className="story-card-tags">
+          <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
+          {card.cardKind !== "sak" ? (
+            <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
+          ) : null}
+          {card.neighborhoodLabels.slice(1, 3).map((label) => (
+            <span className="story-place small" key={label}>
+              {label}
+            </span>
+          ))}
+        </div>
+        <SourceCluster group={card.group} />
       </div>
-      <span className={`topic ${article.category.toLowerCase()}`}>
-        {articleCategoryLabels[article.category]}
-      </span>
-      {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
+      <div className="story-card-side">
+        {card.isClustered ? (
+          <span className="story-card-count" aria-label={`${count} ${countLabel}`}>
+            <b>{count}</b>
+            <small>{countLabel}</small>
+          </span>
+        ) : null}
+        {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
+      </div>
     </article>
   );
 }
@@ -240,18 +301,28 @@ function nearbyMapTarget(item: NearbyStoryItem | undefined): { label: string; to
   return { label: "Åpne situasjonskart", to: "/situasjoner" };
 }
 
+function geolocationErrorMessage(error?: GeolocationPositionError): string {
+  if (!error) return "Kunne ikke hente posisjon.";
+  if (error.code === error.PERMISSION_DENIED) return "Posisjonstilgang ble ikke godkjent.";
+  if (error.code === error.POSITION_UNAVAILABLE) return "Posisjonen er ikke tilgjengelig nå.";
+  if (error.code === error.TIMEOUT) return "Posisjonssøk tok for lang tid.";
+  return "Kunne ikke hente posisjon.";
+}
+
 function NearbyRail({
   articles,
   data,
   groups,
+  localFocus,
 }: {
   articles: Article[];
   data: BootstrapPayload;
   groups: HomeArticleGroup[];
+  localFocus?: HomeLocalFocusPoint;
 }) {
   const allNearby = useMemo(
-    () => nearbyStoryItemsForGroups(groups, { limit: Number.MAX_SAFE_INTEGER }),
-    [groups],
+    () => nearbyStoryItemsForGroups(groups, { limit: Number.MAX_SAFE_INTEGER, localFocus }),
+    [groups, localFocus],
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
   const [selectedNearbyId, setSelectedNearbyId] = useState<string>();
@@ -413,7 +484,7 @@ export function HomePage({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
-  const { scope, category, topic, q: query } = filters;
+  const { scope, category, topic, timeWindow, q: query } = filters;
   const [articles, setArticles] = useState(initialData.articles);
   const [nextCursor, setNextCursor] = useState<string | undefined>(initialData.articleNextCursor);
   const [loading, setLoading] = useState(false);
@@ -422,11 +493,38 @@ export function HomePage({
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
   const articleSavedOverridesRef = useRef<Map<string, SavedOverride>>(new Map());
-  const feedKey = `${scope}\u0000${category}\u0000${topic ?? ""}\u0000${query}`;
+  const feedKey = `${scope}\u0000${category}\u0000${topic ?? ""}\u0000${query}\u0000${timeWindow}`;
   const feedKeyRef = useRef(feedKey);
   const loadMoreRequestIdRef = useRef(0);
   feedKeyRef.current = feedKey;
   const [saveError, setSaveError] = useState<string>();
+  const timeWindowFrom = useMemo(() => homeTimeWindowFrom(timeWindow), [timeWindow]);
+  const [localFocus, setLocalFocus] = useState<LocalFocusState>({ status: "idle" });
+  const activeLocalFocus = localFocus.status === "active" ? localFocus.point : undefined;
+
+  const requestLocalFocus = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocalFocus({ status: "error", message: "Nettleseren støtter ikke posisjon her." });
+      return;
+    }
+    setLocalFocus({ status: "locating" });
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocalFocus({
+          status: "active",
+          point: {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            radiusKm: localFocusRadiusKm,
+          },
+        });
+      },
+      (error) => setLocalFocus({ status: "error", message: geolocationErrorMessage(error) }),
+      { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 8000 },
+    );
+  }, []);
+
+  const clearLocalFocus = useCallback(() => setLocalFocus({ status: "idle" }), []);
 
   function updateFilters(next: Partial<HomeFilters>) {
     const merged: HomeFilters = { ...filters, ...next };
@@ -453,7 +551,7 @@ export function HomePage({
     const timeout = window.setTimeout(
       () => {
         void api
-          .articles({ scope, category, topic, q: query })
+          .articles({ scope, category, topic, q: query, from: timeWindowFrom })
           .then((page) => {
             if (!cancelled) {
               setArticles(() => {
@@ -489,14 +587,32 @@ export function HomePage({
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [category, feedKey, initialData.articleNextCursor, initialData.articles, query, scope, topic]);
+  }, [
+    category,
+    feedKey,
+    initialData.articleNextCursor,
+    initialData.articles,
+    query,
+    scope,
+    timeWindowFrom,
+    topic,
+  ]);
 
   const filtered = useMemo(() => articles, [articles]);
   const isTextSearch = query.trim().length > 0;
 
   const groupedArticles = useMemo(() => groupHomeArticles(filtered), [filtered]);
-  const leadGroup = groupedArticles[0];
-  const secondaryGroups = groupedArticles.slice(1);
+  const storyCards = useMemo(() => homeStoryCardsForGroups(groupedArticles), [groupedArticles]);
+  const displayedStoryCards = useMemo(
+    () => rankHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus),
+    [activeLocalFocus, storyCards],
+  );
+  const displayedGroups = useMemo(
+    () => displayedStoryCards.map((card) => card.group),
+    [displayedStoryCards],
+  );
+  const leadCard = displayedStoryCards[0];
+  const secondaryCards = displayedStoryCards.slice(1);
 
   async function updateSaved(id: string, saved: boolean) {
     if (savingArticleIdsRef.current.has(id)) return;
@@ -542,7 +658,14 @@ export function HomePage({
     setLoadingMore(true);
     setFeedError(undefined);
     try {
-      const page = await api.articles({ scope, category, topic, q: query, cursor: requestCursor });
+      const page = await api.articles({
+        scope,
+        category,
+        topic,
+        q: query,
+        from: timeWindowFrom,
+        cursor: requestCursor,
+      });
       if (loadMoreRequestIdRef.current !== requestId || feedKeyRef.current !== requestFeedKey) {
         return;
       }
@@ -610,6 +733,39 @@ export function HomePage({
             </button>
           </div>
         ) : null}
+        <div className="time-filters" aria-label="Tidsvindu">
+          {homeTimeWindows.map((item) => (
+            <button
+              type="button"
+              aria-pressed={timeWindow === item}
+              className={timeWindow === item ? "selected" : ""}
+              key={item}
+              onClick={() => updateFilters({ timeWindow: item })}
+            >
+              {homeTimeWindowLabels[item]}
+            </button>
+          ))}
+        </div>
+        <div className={`local-focus local-focus-${localFocus.status}`} aria-live="polite">
+          <button
+            type="button"
+            aria-pressed={localFocus.status === "active"}
+            className={localFocus.status === "active" ? "selected" : ""}
+            disabled={localFocus.status === "locating"}
+            onClick={localFocus.status === "active" ? clearLocalFocus : requestLocalFocus}
+          >
+            {localFocus.status === "locating"
+              ? "Finner posisjon"
+              : localFocus.status === "active"
+                ? "Nær meg aktiv"
+                : "Nær meg"}
+          </button>
+          {localFocus.status === "active" ? (
+            <span>Innen {localFocusRadiusKm} km</span>
+          ) : localFocus.status === "error" ? (
+            <span role="status">{localFocus.message}</span>
+          ) : null}
+        </div>
       </div>
       {!isTextSearch ? <SituationBanner situations={initialData.situations} /> : null}
       <div className="home-grid">
@@ -624,23 +780,23 @@ export function HomePage({
             </p>
           ) : null}
           {loading ? <p className="feed-state">Oppdaterer saker...</p> : null}
-          {leadGroup ? (
+          {leadCard ? (
             <LeadStory
-              group={leadGroup}
-              saving={savingArticleIds.has(leadGroup.primary.id)}
+              card={leadCard}
+              saving={savingArticleIds.has(leadCard.primary.id)}
               onSave={updateSaved}
               canSave={canSave}
             />
           ) : null}
-          {!loading && !leadGroup ? (
+          {!loading && !leadCard ? (
             <p className="feed-state">Ingen saker samsvarer med {searchSummary(filters)}.</p>
           ) : null}
-          <div className="news-list">
-            {secondaryGroups.map((group) => (
-              <NewsRow
-                key={group.id}
-                group={group}
-                saving={savingArticleIds.has(group.primary.id)}
+          <div className="news-list story-list" aria-label="Bypulssaker">
+            {secondaryCards.map((card) => (
+              <StoryCard
+                key={card.id}
+                card={card}
+                saving={savingArticleIds.has(card.primary.id)}
                 onSave={updateSaved}
                 canSave={canSave}
               />
@@ -652,7 +808,12 @@ export function HomePage({
             </button>
           ) : null}
         </section>
-        <NearbyRail articles={articles} groups={groupedArticles} data={initialData} />
+        <NearbyRail
+          articles={articles}
+          groups={displayedGroups}
+          localFocus={activeLocalFocus}
+          data={initialData}
+        />
       </div>
     </main>
   );

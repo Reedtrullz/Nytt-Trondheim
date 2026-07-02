@@ -80,6 +80,39 @@ describe("home nearby story model", () => {
     );
   });
 
+  it("orders nearby items by distance when local focus is active", () => {
+    const items = nearbyStoryItemsForGroups(
+      [
+        {
+          id: "far",
+          primary: article({
+            id: "far",
+            title: "Sak fra Orkanger",
+            location: { lat: 63.312, lng: 9.853, label: "Orkanger" },
+          }),
+          articles: [],
+          sourceLabels: ["NRK Trøndelag"],
+        },
+        {
+          id: "near",
+          primary: article({
+            id: "near",
+            title: "Sak fra Torvet",
+            publishedAt: "2026-06-01T15:00:00.000Z",
+            location: { lat: 63.4305, lng: 10.3951, label: "Torvet" },
+          }),
+          articles: [],
+          sourceLabels: ["NRK Trøndelag"],
+        },
+      ],
+      { limit: 2, localFocus: { lat: 63.4305, lng: 10.3951, radiusKm: 10 } },
+    );
+
+    expect(items.map((item) => item.id)).toEqual(["near", "far"]);
+    expect(items[0]).toMatchObject({ withinLocalRadius: true, markerLabel: "1" });
+    expect(items[1]?.distanceKm).toBeGreaterThan(20);
+  });
+
   it("labels located crime stories separately from generic local news", () => {
     const items = nearbyStoryItems([
       article({

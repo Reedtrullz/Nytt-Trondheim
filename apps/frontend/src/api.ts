@@ -174,6 +174,8 @@ export const api = {
       category?: string;
       topic?: ArticleTopic;
       q?: string;
+      from?: string;
+      to?: string;
       cursor?: string;
       limit?: number;
     } = {},

@@ -2024,6 +2024,14 @@ describe("private situation API", () => {
     await agent.get("/api/articles?category=Trafikk").expect(400);
   });
 
+  it("rejects invalid article time-window query values", async () => {
+    const { agent } = await ownerAgent();
+    await agent.get("/api/articles?from=not-a-date").expect(400);
+    await agent
+      .get("/api/articles?from=2026-07-02T10%3A00%3A00.000Z&to=2026-07-02T08%3A00%3A00.000Z")
+      .expect(400);
+  });
+
   it("serves coverage bundle metadata through article APIs, pagination and saved overlays", async () => {
     const { app, store } = await testApp();
     const agent = request.agent(app);

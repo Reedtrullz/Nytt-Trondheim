@@ -85,6 +85,8 @@ export interface ArticleFilters {
   category?: string;
   topic?: ArticleTopic;
   q?: string;
+  from?: string;
+  to?: string;
   cursor?: string;
   limit?: number;
 }
@@ -3510,6 +3512,14 @@ export class PgStore implements Store {
             WHERE place_name.value ILIKE $${params.length}
           ))`,
       );
+    }
+    if (filters.from) {
+      params.push(filters.from);
+      where.push(`a.published_at >= $${params.length}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      where.push(`a.published_at <= $${params.length}`);
     }
     if (filters.cursor) {
       const cursor = decodeCursor(filters.cursor);

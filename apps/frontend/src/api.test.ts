@@ -26,6 +26,24 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests article pages with time-window bounds", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ items: [], nextCursor: undefined }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.articles({
+      scope: "trondheim",
+      category: "Transport",
+      from: "2026-07-02T08:00:00.000Z",
+      to: "2026-07-02T10:00:00.000Z",
+      limit: 20,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/articles?scope=trondheim&category=Transport&from=2026-07-02T08%3A00%3A00.000Z&to=2026-07-02T10%3A00%3A00.000Z&limit=20",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("requests the map-first situation workspace with typed filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       okResponse({

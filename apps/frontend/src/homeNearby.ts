@@ -1,4 +1,5 @@
 import type { Article } from "@nytt/shared";
+import { distanceKmBetween, type HomeLocalFocusPoint } from "./homeLocalFocus.js";
 import { latLngFromLonLat } from "./mapCoordinates.js";
 
 export type NearbyStoryKind =
@@ -25,6 +26,8 @@ export interface NearbyStoryItem {
   relevanceLabel: string;
   relevanceDetail: string;
   score: number;
+  distanceKm?: number;
+  withinLocalRadius?: boolean;
 }
 
 interface NearbyArticleGroup {
@@ -131,7 +134,7 @@ function situationIdFor(group: NearbyArticleGroup): string | undefined {
 
 export function nearbyStoryItemsForGroups(
   groups: NearbyArticleGroup[],
-  { limit = 4 }: { limit?: number } = {},
+  { limit = 4, localFocus }: { limit?: number; localFocus?: HomeLocalFocusPoint } = {},
 ): NearbyStoryItem[] {
   return groups
     .flatMap((group) => {
@@ -144,6 +147,12 @@ export function nearbyStoryItemsForGroups(
       const representative = group.articles.find((article) => article.situationId) ?? group.primary;
       const kind = nearbyKind(representative);
       const copy = relevanceCopy(kind);
+      const distanceKm = localFocus
+        ? distanceKmBetween(localFocus, {
+            lat: locationArticle.location.lat,
+            lng: locationArticle.location.lng,
+          })
+        : undefined;
       return [
         {
           id: group.id,
@@ -160,16 +169,32 @@ export function nearbyStoryItemsForGroups(
           score: Math.max(
             ...group.articles.map((article) => nearbyScore(article, nearbyKind(article))),
           ),
+          ...(distanceKm !== undefined
+            ? {
+                distanceKm,
+                withinLocalRadius: distanceKm <= (localFocus?.radiusKm ?? 10),
+              }
+            : {}),
           ...copy,
         },
       ];
     })
-    .sort(
-      (left, right) =>
+    .sort((left, right) => {
+      if (localFocus) {
+        const leftRank = left.distanceKm === undefined ? 2 : left.withinLocalRadius ? 0 : 1;
+        const rightRank = right.distanceKm === undefined ? 2 : right.withinLocalRadius ? 0 : 1;
+        const localResult =
+          leftRank - rightRank ||
+          (left.distanceKm ?? Number.POSITIVE_INFINITY) -
+            (right.distanceKm ?? Number.POSITIVE_INFINITY);
+        if (localResult !== 0) return localResult;
+      }
+      return (
         right.score - left.score ||
         right.publishedAt.localeCompare(left.publishedAt) ||
-        left.title.localeCompare(right.title, "nb"),
-    )
+        left.title.localeCompare(right.title, "nb")
+      );
+    })
     .slice(0, limit)
     .map((item, index) => ({ ...item, markerLabel: String(index + 1) }));
 }

@@ -232,7 +232,10 @@ test("home nearby module links ranked local stories with the map", async ({ page
   await expectNoHorizontalPageOverflow(page);
 });
 
-test("home feed renders persisted coverage-bundle labels for similar stories", async ({ page }) => {
+test("home feed renders persisted coverage-bundle labels for similar stories", async ({
+  page,
+  context,
+}) => {
   const coverageBundle = {
     id: "coverage:incident:torvet-antibac",
     kind: "incident",
@@ -277,6 +280,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
       situationId: undefined,
     },
   ];
+  let timeWindowRequest: URL | undefined;
 
   await page.route("**/api/bootstrap", async (route) => {
     await route.fulfill({
@@ -290,6 +294,8 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
     });
   });
   await page.route("**/api/articles?**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("from")) timeWindowRequest = url;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -304,6 +310,9 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
     });
   });
 
+  await context.grantPermissions(["geolocation"]);
+  await context.setGeolocation({ latitude: 63.4305, longitude: 10.3951 });
+
   await page.goto("/");
 
   const lead = page.locator(".lead-story");
@@ -313,7 +322,19 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toBeVisible();
   await expect(sources.getByRole("link", { name: /Politiloggen/ })).toBeVisible();
   await expect(sources.getByText("Ro og orden: Trondheim, Torvet")).toBeVisible();
-  await expect(page.locator(".news-row .headline", { hasText: "Ro og orden" })).toHaveCount(0);
+  await expect(page.locator(".story-card .story-title", { hasText: "Ro og orden" })).toHaveCount(0);
+  await page.getByRole("button", { name: "24 timer" }).click();
+  await expect(page).toHaveURL(/window=24h/);
+  await expect
+    .poll(() => timeWindowRequest?.searchParams.get("from") ?? "")
+    .toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  expect(timeWindowRequest?.searchParams.get("scope")).toBe("trondheim");
+  await page.getByRole("button", { name: "Nær meg" }).click();
+  await expect(page.getByRole("button", { name: "Nær meg aktiv" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("Innen 10 km")).toBeVisible();
 });
 
 test("coverage bundle operations page renders persisted decisions and drawer detail", async ({

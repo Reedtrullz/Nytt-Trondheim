@@ -65,4 +65,44 @@ describe("article store", () => {
 
     expect(page.items).toEqual([{ ...article, saved: false }]);
   });
+
+  it("filters production articles by published time window before pagination", async () => {
+    const article: Article = {
+      id: "recent-crash",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Trafikkuhell på E6",
+      excerpt: "Et trafikkuhell skaper kø på E6.",
+      url: "https://example.test/recent-crash",
+      publishedAt: "2026-07-02T09:34:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["E6"],
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      const normalized = sql.replace(/\s+/g, " ").trim();
+      expect(normalized).toContain("a.published_at >= $2");
+      expect(normalized).toContain("a.published_at <= $3");
+      expect(normalized).toContain("ORDER BY a.published_at DESC, a.id DESC LIMIT $4");
+      expect(params).toEqual([
+        "Reedtrullz",
+        "2026-07-02T07:00:00.000Z",
+        "2026-07-02T10:00:00.000Z",
+        11,
+      ]);
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles(
+      {
+        from: "2026-07-02T07:00:00.000Z",
+        to: "2026-07-02T10:00:00.000Z",
+        limit: 10,
+      },
+      "Reedtrullz",
+    );
+
+    expect(page.items).toEqual([{ ...article, saved: false }]);
+  });
 });
