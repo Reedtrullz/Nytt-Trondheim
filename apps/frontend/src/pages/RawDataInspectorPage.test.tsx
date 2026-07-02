@@ -102,4 +102,35 @@ describe("RawDataInspectorDashboard", () => {
     expect(html).toContain("Velg et kildeelement for råpayload.");
     expect(html).toContain("Velg en AI-kjøring for resultatpayload.");
   });
+
+  it("renders searchable source-item metadata without exposing payloads in the list", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <RawDataInspectorDashboard
+          aiRuns={{ items: [] }}
+          filters={{ sourceQ: "Testkilde" }}
+          sourceItems={{
+            items: [
+              {
+                id: "source:test",
+                provider: "nrk",
+                kind: "article",
+                title: "Testkilde",
+                summary: "Normalisert sammendrag",
+                fetchedAt: "2026-07-02T09:00:00.000Z",
+                captureHash: "hash",
+                reliabilityTier: "trusted_media",
+                linkedSituationIds: [],
+              },
+            ],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Kildeelementer");
+    expect(html).toContain("Testkilde");
+    expect(html).toContain("Normalisert sammendrag");
+    expect(html).not.toContain("[redacted]");
+  });
 });

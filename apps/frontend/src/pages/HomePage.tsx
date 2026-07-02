@@ -11,8 +11,10 @@ import {
 import { Link, useSearchParams } from "react-router-dom";
 import {
   buildMorningBrief,
+  publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
+  type NotificationTriggerSeverity,
   type SourceConfidenceSummary,
 } from "@nytt/shared";
 import { api } from "../api.js";
@@ -78,6 +80,17 @@ function formatTime(date: string) {
     minute: "2-digit",
     timeZone: "Europe/Oslo",
   }).format(new Date(date));
+}
+
+function notificationSeverityLabel(severity: NotificationTriggerSeverity) {
+  switch (severity) {
+    case "critical":
+      return "Kritisk";
+    case "warning":
+      return "Varsel";
+    case "watch":
+      return "Følg med";
+  }
 }
 
 function SaveButton({
@@ -196,6 +209,16 @@ export function MorningBriefPanel({
           ))}
         </div>
         <small>{brief.sourceLine}</small>
+        {brief.aiRun ? (
+          <p className="morning-brief-ai-trace">
+            <span>AI-spor</span>
+            <span>
+              {brief.aiRun.provider === "deepseek" ? "DeepSeek" : "Deterministisk"} ·{" "}
+              {brief.aiRun.model} · {brief.aiRun.status.toUpperCase()} ·{" "}
+              {formatTime(brief.aiRun.completedAt)}
+            </span>
+          </p>
+        ) : null}
         {hasSourceLinks ? (
           <div className="morning-brief-sources" aria-label="Morgenbrief-grunnlag">
             <span>Grunnlag</span>
@@ -229,6 +252,45 @@ export function MorningBriefPanel({
   );
 }
 
+export function CityPulseSignalPanel({ brief }: { brief?: BootstrapPayload["morningBrief"] }) {
+  return (
+    <section className="city-pulse-signal-panel" aria-labelledby="city-pulse-signal-heading">
+      <div className="section-heading-row">
+        <div>
+          <p className="label">Varsel og AI-spor</p>
+          <h2 id="city-pulse-signal-heading">Slik vurderes høyeffekt-signaler</h2>
+        </div>
+        <Link to="/varsler">
+          Åpne varsler <ArrowIcon />
+        </Link>
+      </div>
+      <div className="city-pulse-signal-status">
+        <div>
+          <span>Morgenbrief</span>
+          <strong>{brief?.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief"}</strong>
+        </div>
+        <div>
+          <span>Siste analyse</span>
+          <strong>{brief?.aiRun ? formatTime(brief.aiRun.completedAt) : "Ikke lagret"}</strong>
+        </div>
+        <div>
+          <span>Varselregler</span>
+          <strong>{publicNotificationTriggerGuidance.length} offentlige kategorier</strong>
+        </div>
+      </div>
+      <div className="city-pulse-signal-guidance">
+        {publicNotificationTriggerGuidance.map((item) => (
+          <article key={item.kind}>
+            <span>{notificationSeverityLabel(item.severity)}</span>
+            <strong>{item.title}</strong>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
   const morningBrief = useMemo(
     () =>
@@ -255,6 +317,14 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
           situations={data.situations}
         />
       ),
+    });
+    nextWidgets.push({
+      id: "signal-trace",
+      title: "Varsel og AI-spor",
+      description: "Offentlig forklaring på høyeffekt-signaler.",
+      defaultSize: "full",
+      resizable: false,
+      children: <CityPulseSignalPanel brief={morningBrief} />,
     });
     if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
       nextWidgets.push({

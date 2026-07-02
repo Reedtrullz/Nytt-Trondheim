@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
-import type { Article, Situation } from "@nytt/shared";
+import type { Article, OfficialEvent, Situation } from "@nytt/shared";
 import { MemoryStore, PgStore } from "../src/store.js";
 
 describe("article store", () => {
@@ -228,6 +228,75 @@ describe("article store", () => {
       },
     });
     expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds DATEX public verification to matching traffic articles without requiring a situation link", async () => {
+    const article: Article = {
+      id: "article-road-official-match",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Kollisjon stenger E6 ved Sluppen",
+      excerpt: "En kollisjon gjør at E6 er stengt ved Sluppen.",
+      url: "https://example.test/e6-sluppen",
+      publishedAt: "2026-07-02T09:34:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["E6", "Sluppen"],
+      location: { lat: 63.3978, lng: 10.3995, label: "Sluppen" },
+    };
+    const geometry: OfficialEvent["geometry"] = {
+      type: "Point",
+      coordinates: [10.3995, 63.3978],
+    };
+    const officialEvent: OfficialEvent = {
+      id: "datex-e6-sluppen",
+      source: "datex",
+      eventType: "traffic",
+      title: "Kollisjon på E6 ved Sluppen",
+      detail: "E6 er stengt etter trafikkulykke.",
+      sourceUrl: "https://example.test/datex/e6-sluppen",
+      areaLabel: "Sluppen",
+      state: "active",
+      severity: "high",
+      publishedAt: "2026-07-02T09:30:00.000Z",
+      validFrom: "2026-07-02T09:20:00.000Z",
+      validTo: "2026-07-02T12:00:00.000Z",
+      geometry,
+      raw: {
+        datex: {
+          recordKind: "Accident",
+          roadName: "E6",
+        },
+      },
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("FROM situations")) {
+        expect(params).toEqual([["article-road-official-match"]]);
+        return { rows: [] };
+      }
+      if (sql.includes("FROM official_events")) {
+        expect(params).toEqual(["datex", 500]);
+        return { rows: [{ payload: officialEvent, state: "active", geometry }] };
+      }
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ limit: 10 }, "Reedtrullz");
+
+    expect(page.items[0]).toMatchObject({
+      id: "article-road-official-match",
+      saved: false,
+      publicVerification: {
+        status: "verified",
+        label: "Verifisert",
+        detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+        officialSources: ["datex"],
+        reportingSources: ["adressa"],
+      },
+    });
+    expect(page.items[0]?.situationId).toBeUndefined();
+    expect(query).toHaveBeenCalledTimes(3);
   });
 
   it("does not add a public verification badge without official DATEX evidence", async () => {

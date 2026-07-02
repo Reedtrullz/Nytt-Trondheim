@@ -108,6 +108,8 @@ import {
 import pg from "pg";
 import type { Profile } from "passport-github2";
 import type { AuthUser } from "./auth.js";
+import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
+import { findRelatedTrafficArticles } from "./traffic/related-articles.js";
 
 export interface ArticleFilters {
   scope?: string;
@@ -793,6 +795,76 @@ function publicVerificationForSituation(
     reportingSources,
     situationId: situation.id,
   };
+}
+
+function publicVerificationForTrafficOfficialEvent(
+  event: TrafficMapEvent,
+  reportingSources: SourceId[],
+): Article["publicVerification"] | undefined {
+  const newsroomSources = [
+    ...new Set(reportingSources.filter((source) => newsroomArticleSources.has(source))),
+  ];
+  if (event.source !== "datex" || newsroomSources.length === 0) return undefined;
+  return {
+    status: "verified",
+    label: "Verifisert",
+    detail: `Bekreftet av ${sourceIdLabel("datex")} og ${sourceLabelsForIds(newsroomSources)}.`,
+    officialSources: ["datex"],
+    reportingSources: newsroomSources,
+  };
+}
+
+function articleOverlapsTrafficEvent(article: Article, event: TrafficMapEvent): boolean {
+  const articleMs = Date.parse(article.publishedAt);
+  if (!Number.isFinite(articleMs)) return false;
+  const validFromMs = Date.parse(event.validFrom ?? event.updatedAt);
+  if (Number.isFinite(validFromMs) && articleMs < validFromMs - 24 * 60 * 60 * 1000) {
+    return false;
+  }
+  const validToMs = Date.parse(event.validTo ?? "");
+  if (Number.isFinite(validToMs) && articleMs > validToMs + 48 * 60 * 60 * 1000) {
+    return false;
+  }
+  return true;
+}
+
+function enrichArticlesWithTrafficOfficialVerification(
+  articles: Article[],
+  officialEvents: OfficialEvent[],
+): Article[] {
+  if (articles.length === 0 || officialEvents.length === 0) return articles;
+  const candidateArticles = articles.filter(
+    (article) =>
+      !article.publicVerification &&
+      article.category === "Transport" &&
+      Boolean(article.location) &&
+      newsroomArticleSources.has(article.source),
+  );
+  if (candidateArticles.length === 0) return articles;
+
+  const verificationByArticleId = new Map<string, Article["publicVerification"]>();
+  for (const officialEvent of officialEvents) {
+    const event = officialEventToTrafficMapEvent(officialEvent);
+    if (!event || event.state === "cancelled") continue;
+    const timedCandidates = candidateArticles.filter((article) =>
+      articleOverlapsTrafficEvent(article, event),
+    );
+    if (timedCandidates.length === 0) continue;
+    const matches = findRelatedTrafficArticles(event, timedCandidates);
+    const verification = publicVerificationForTrafficOfficialEvent(
+      event,
+      matches.map((match) => match.article.source),
+    );
+    if (!verification) continue;
+    for (const match of matches) {
+      verificationByArticleId.set(match.article.id, verification);
+    }
+  }
+  if (verificationByArticleId.size === 0) return articles;
+  return articles.map((article) => {
+    const publicVerification = verificationByArticleId.get(article.id);
+    return publicVerification ? { ...article, publicVerification } : article;
+  });
 }
 
 function enrichArticlesWithSituations(articles: Article[], situations: Situation[]): Article[] {
@@ -4570,7 +4642,18 @@ export class PgStore implements Store {
     const relatedSituations = await this.listSituationsForArticleIds(
       rawItems.map((article) => article.id),
     );
-    const items = enrichArticlesWithSituations(rawItems, relatedSituations);
+    const officialEvents = rawItems.some(
+      (article) =>
+        article.category === "Transport" &&
+        article.location &&
+        newsroomArticleSources.has(article.source),
+    )
+      ? await this.listOfficialEvents({ source: "datex", limit: 500 })
+      : [];
+    const items = enrichArticlesWithTrafficOfficialVerification(
+      enrichArticlesWithSituations(rawItems, relatedSituations),
+      officialEvents,
+    );
     return {
       items,
       nextCursor:

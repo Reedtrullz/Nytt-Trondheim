@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { Article, BootstrapPayload, MorningBrief } from "@nytt/shared";
 import {
   CityPulseDashboard,
+  CityPulseSignalPanel,
   LocalFocusSummaryPanel,
   MapTimeSlider,
   MorningBriefPanel,
@@ -77,6 +78,10 @@ describe("MorningBriefPanel", () => {
     expect(html).toContain("Morgenbrief");
     expect(html).toContain("Trafikktrøbbel sør i byen");
     expect(html).toContain("AI-assistert · 5/6 kilder OK");
+    expect(html).toContain("AI-spor");
+    expect(html).toContain("DeepSeek");
+    expect(html).toContain("deepseek-v4-flash");
+    expect(html).toContain("OK");
     expect(html).toContain("Morgenbrief-nøkkeltall");
     expect(html).toContain("Transport leder bildet");
     expect(html).toContain("Morgenbrief-grunnlag");
@@ -105,6 +110,10 @@ describe("CityPulseDashboard", () => {
     expect(html).toContain("dashboard-layout-city-pulse");
     expect(html).toContain("dashboard-widget-full");
     expect(html).toContain("Morgenbrief");
+    expect(html).toContain("Varsel og AI-spor");
+    expect(html).toContain("Slik vurderes høyeffekt-signaler");
+    expect(html).toContain("Liv og helse");
+    expect(html).toContain("Stengte hovedårer");
     expect(html).not.toContain("Flytt Morgenbrief senere");
     expect(html).not.toContain("Tilbakestill");
     expect(html).toContain("Steinsprang, vegen er stengt");
@@ -112,12 +121,35 @@ describe("CityPulseDashboard", () => {
 
   it("renders a deterministic morning brief fallback when no stored brief exists", () => {
     const html = renderToStaticMarkup(
-      <CityPulseDashboard data={{ articles: [], situations: [], sourceHealth: [] }} />,
+      <MemoryRouter>
+        <CityPulseDashboard data={{ articles: [], situations: [], sourceHealth: [] }} />
+      </MemoryRouter>,
     );
 
     expect(html).toContain("Reservebrief");
     expect(html).toContain("Morgenbildet er rolig");
     expect(html).toContain("dashboard-layout-city-pulse");
+  });
+});
+
+describe("CityPulseSignalPanel", () => {
+  it("renders public alert guidance and AI trace status without private delivery details", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CityPulseSignalPanel brief={brief} />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Varsel og AI-spor");
+    expect(html).toContain("AI-assistert");
+    expect(html).toContain("09:25");
+    expect(html).toContain("4 offentlige kategorier");
+    expect(html).toContain("Liv og helse");
+    expect(html).toContain("Viktige bortfall");
+    expect(html).toContain("/varsler");
+    expect(html).not.toContain("triggerId");
+    expect(html).not.toContain("endpoint");
+    expect(html).not.toContain("Abonnementer");
   });
 });
 

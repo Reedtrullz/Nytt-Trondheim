@@ -640,6 +640,23 @@ button {
   font-weight: 700;
 }
 
+.morning-brief-ai-trace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.morning-brief-ai-trace span:first-child {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .morning-brief-paragraphs {
   display: grid;
   gap: 8px;
@@ -731,6 +748,83 @@ button {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.25;
+}
+
+.city-pulse-signal-panel {
+  display: grid;
+  gap: 16px;
+  padding: 20px 0 0;
+}
+
+.city-pulse-signal-panel .section-heading-row {
+  margin-bottom: 0;
+}
+
+.city-pulse-signal-panel .section-heading-row h2 {
+  margin: 4px 0 0;
+  font: 28px/1.08 var(--serif);
+}
+
+.city-pulse-signal-panel .section-heading-row a {
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.city-pulse-signal-status,
+.city-pulse-signal-guidance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.city-pulse-signal-status div,
+.city-pulse-signal-guidance article {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.city-pulse-signal-status div {
+  padding: 13px;
+}
+
+.city-pulse-signal-status span,
+.city-pulse-signal-guidance span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.city-pulse-signal-status strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.city-pulse-signal-guidance {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.city-pulse-signal-guidance article {
+  padding: 12px;
+}
+
+.city-pulse-signal-guidance strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.city-pulse-signal-guidance p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .situation-banner {
@@ -5003,6 +5097,12 @@ button {
   margin-bottom: 14px;
 }
 
+.raw-inspector-list .raw-inspector-section-heading:not(:first-child) {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
 .raw-inspector-section-heading h2,
 .raw-inspector-detail h2 {
   margin: 0;
@@ -8398,6 +8498,10 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .city-pulse-signal-guidance {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .sport-hero-meta {
     justify-content: flex-start;
   }
@@ -8679,6 +8783,8 @@ button {
   .situation-banner,
   .lead-story,
   .morning-brief,
+  .city-pulse-signal-status,
+  .city-pulse-signal-guidance,
   .dashboard-layout-config,
   .workspace-panel,
   .operations-summary,

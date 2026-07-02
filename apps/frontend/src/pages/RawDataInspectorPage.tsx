@@ -7,11 +7,16 @@ import type {
   RawInspectorAiRunFilters,
   RawInspectorAiRunPage,
   RawInspectorSourceItemDetail,
+  SourceItemFilters,
+  SourceItemPage,
 } from "@nytt/shared";
 import { api } from "../api.js";
 
 interface RawInspectorViewFilters extends RawInspectorAiRunFilters {
   sourceItem?: string;
+  sourceKind?: SourceItemFilters["kind"];
+  sourceQ?: string;
+  sourceCursor?: string;
   run?: string;
 }
 
@@ -32,20 +37,37 @@ const aiProfileLabels: Record<AiAnalysisProfile, string> = {
   brief_only_recovery: "Kun morgenbrief",
 };
 
+const sourceKindLabels = {
+  article: "Artikkel",
+  official_event: "Offisiell hendelse",
+  warning: "Farevarsel",
+  reporter_note: "Redaksjonsnotat",
+  reader_tip: "Lesertips",
+  media_asset: "Medieobjekt",
+} as const satisfies Record<NonNullable<SourceItemFilters["kind"]>, string>;
+
 function parseRawInspectorFilters(search: string): RawInspectorViewFilters {
   const parameters = new URLSearchParams(search);
   const provider = parameters.get("provider");
   const status = parameters.get("status");
+  const sourceKind = parameters.get("sourceKind");
   const q = parameters.get("q")?.trim() || undefined;
+  const sourceQ = parameters.get("sourceQ")?.trim() || undefined;
   const cursor = parameters.get("cursor") || undefined;
+  const sourceCursor = parameters.get("sourceCursor") || undefined;
   const sourceItem = parameters.get("sourceItem")?.trim() || undefined;
   const run = parameters.get("run")?.trim() || undefined;
   return {
     limit: 20,
     ...(provider === "deepseek" || provider === "deterministic" ? { provider } : {}),
     ...(status === "ok" || status === "degraded" || status === "disabled" ? { status } : {}),
+    ...(sourceKind && sourceKind in sourceKindLabels
+      ? { sourceKind: sourceKind as SourceItemFilters["kind"] }
+      : {}),
     ...(q ? { q } : {}),
+    ...(sourceQ ? { sourceQ } : {}),
     ...(cursor ? { cursor } : {}),
+    ...(sourceCursor ? { sourceCursor } : {}),
     ...(sourceItem ? { sourceItem } : {}),
     ...(run ? { run } : {}),
   };
@@ -55,8 +77,11 @@ function buildRawInspectorSearch(filters: RawInspectorViewFilters) {
   const parameters = new URLSearchParams();
   if (filters.provider) parameters.set("provider", filters.provider);
   if (filters.status) parameters.set("status", filters.status);
+  if (filters.sourceKind) parameters.set("sourceKind", filters.sourceKind);
   if (filters.q) parameters.set("q", filters.q);
+  if (filters.sourceQ) parameters.set("sourceQ", filters.sourceQ);
   if (filters.cursor) parameters.set("cursor", filters.cursor);
+  if (filters.sourceCursor) parameters.set("sourceCursor", filters.sourceCursor);
   if (filters.sourceItem) parameters.set("sourceItem", filters.sourceItem);
   if (filters.run) parameters.set("run", filters.run);
   return parameters;
@@ -69,6 +94,15 @@ function aiRunQuery(filters: RawInspectorViewFilters): RawInspectorAiRunFilters 
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.q ? { q: filters.q } : {}),
     ...(filters.cursor ? { cursor: filters.cursor } : {}),
+  };
+}
+
+function sourceItemQuery(filters: RawInspectorViewFilters): SourceItemFilters {
+  return {
+    limit: 12,
+    ...(filters.sourceKind ? { kind: filters.sourceKind } : {}),
+    ...(filters.sourceQ ? { q: filters.sourceQ } : {}),
+    ...(filters.sourceCursor ? { cursor: filters.sourceCursor } : {}),
   };
 }
 
@@ -105,21 +139,29 @@ function PayloadPanel({ title, value, note }: { title: string; value: unknown; n
 export function RawDataInspectorDashboard({
   filters,
   aiRuns,
+  sourceItems = { items: [] },
   sourceItem,
   selectedAiRun,
   sourceError,
+  sourceItemsError,
   aiError,
   onFiltersChange,
 }: {
   filters: RawInspectorViewFilters;
   aiRuns: RawInspectorAiRunPage;
+  sourceItems?: SourceItemPage;
   sourceItem?: RawInspectorSourceItemDetail;
   selectedAiRun?: RawInspectorAiRunDetail;
   sourceError?: string;
+  sourceItemsError?: string;
   aiError?: string;
   onFiltersChange?: (filters: RawInspectorViewFilters) => void;
 }) {
   const [sourceInput, setSourceInput] = useState(filters.sourceItem ?? "");
+
+  useEffect(() => {
+    setSourceInput(filters.sourceItem ?? "");
+  }, [filters.sourceItem]);
 
   function update(next: Partial<RawInspectorViewFilters>) {
     onFiltersChange?.({ ...filters, cursor: undefined, ...next });
@@ -157,6 +199,41 @@ export function RawDataInspectorDashboard({
             </label>
             <button type="submit">Hent kildeelement</button>
           </form>
+          <label>
+            Kildesøk
+            <input
+              value={filters.sourceQ ?? ""}
+              onChange={(event) =>
+                update({ sourceQ: event.target.value || undefined, sourceCursor: undefined })
+              }
+              placeholder="Søk i tittel, sammendrag, hash"
+            />
+          </label>
+          <label>
+            Kildetype
+            <select
+              value={filters.sourceKind ?? ""}
+              onChange={(event) =>
+                update({
+                  sourceKind: (event.target.value ||
+                    undefined) as RawInspectorViewFilters["sourceKind"],
+                  sourceCursor: undefined,
+                })
+              }
+            >
+              <option value="">Alle</option>
+              {Object.entries(sourceKindLabels).map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {sourceItems.nextCursor ? (
+            <button type="button" onClick={() => update({ sourceCursor: sourceItems.nextCursor })}>
+              Neste kildeside
+            </button>
+          ) : null}
           <label>
             AI-søk
             <input
@@ -203,7 +280,36 @@ export function RawDataInspectorDashboard({
             </button>
           ) : null}
         </aside>
-        <section className="raw-inspector-list" aria-label="AI-kjøringer">
+        <section className="raw-inspector-list" aria-label="Kildeelementer og AI-kjøringer">
+          <div className="raw-inspector-section-heading">
+            <h2>Kildeelementer</h2>
+            <span>{sourceItems.items.length} vist</span>
+          </div>
+          {sourceItemsError ? <p className="raw-inspector-error">{sourceItemsError}</p> : null}
+          {sourceItems.items.length === 0 ? (
+            <p className="raw-inspector-empty">Ingen kildeelementer matcher filtrene.</p>
+          ) : (
+            sourceItems.items.map((item) => (
+              <button
+                className={
+                  item.id === filters.sourceItem
+                    ? "raw-inspector-run selected"
+                    : "raw-inspector-run"
+                }
+                key={item.id}
+                type="button"
+                onClick={() => update({ sourceItem: item.id })}
+              >
+                <span>
+                  {item.provider} · {sourceKindLabels[item.kind]}
+                </span>
+                <strong>{item.title ?? item.id}</strong>
+                <small>
+                  {item.summary ?? item.id} · hentet {time(item.fetchedAt)}
+                </small>
+              </button>
+            ))
+          )}
           <div className="raw-inspector-section-heading">
             <h2>AI-kjøringer</h2>
             <span>{aiRuns.items.length} vist</span>
@@ -330,10 +436,20 @@ export function RawDataInspectorPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseRawInspectorFilters(searchParams.toString()), [searchParams]);
   const [aiRuns, setAiRuns] = useState<RawInspectorAiRunPage>({ items: [] });
+  const [sourceItems, setSourceItems] = useState<SourceItemPage>({ items: [] });
   const [sourceItem, setSourceItem] = useState<RawInspectorSourceItemDetail>();
   const [selectedAiRun, setSelectedAiRun] = useState<RawInspectorAiRunDetail>();
   const [sourceError, setSourceError] = useState<string>();
+  const [sourceItemsError, setSourceItemsError] = useState<string>();
   const [aiError, setAiError] = useState<string>();
+
+  useEffect(() => {
+    setSourceItemsError(undefined);
+    void api
+      .sourceItems(sourceItemQuery(filters))
+      .then(setSourceItems)
+      .catch((reason: Error) => setSourceItemsError(reason.message));
+  }, [filters.sourceKind, filters.sourceQ, filters.sourceCursor]);
 
   useEffect(() => {
     setAiError(undefined);
@@ -374,6 +490,8 @@ export function RawDataInspectorPage() {
       selectedAiRun={selectedAiRun}
       sourceError={sourceError}
       sourceItem={sourceItem}
+      sourceItems={sourceItems}
+      sourceItemsError={sourceItemsError}
       onFiltersChange={setFilters}
     />
   );
