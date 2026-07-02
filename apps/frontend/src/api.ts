@@ -9,6 +9,7 @@ import type {
   ArticlePage,
   ArticleTopic,
   BootstrapPayload,
+  CommandCenterBriefingPayload,
   CommandCenterSpatialAnalyticsPayload,
   CommandCenterSpatialAnalyticsQueryInput,
   CoverageBundlePage,
@@ -372,6 +373,7 @@ export const api = {
   },
   savedArticles: () => request<ArticlePage["items"]>("/api/saved/articles"),
   operations: () => request<OperationsStatus>("/api/operations/status"),
+  commandBriefing: () => request<CommandCenterBriefingPayload>("/api/operations/briefing"),
   workspace: (id: string) => request<SituationWorkspace>(situationPath(id)),
   saveArticle: (id: string, saved: boolean) =>
     request<void>(`/api/saved/articles/${id}`, { method: saved ? "PUT" : "DELETE" }),

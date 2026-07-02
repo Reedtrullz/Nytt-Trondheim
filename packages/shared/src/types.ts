@@ -401,6 +401,16 @@ export interface RawInspectorAiRunFilters {
   limit?: number;
 }
 
+export interface CommandCenterBriefingArticleSummary {
+  id: string;
+  title: string;
+  sourceLabel: string;
+  publishedAt: string;
+  category: Article["category"];
+  excerpt: string;
+  url?: string;
+}
+
 export interface SourceFilterQueryState {
   providers?: SourceId[];
   kinds?: SourceItemKind[];
@@ -1190,6 +1200,42 @@ export interface RuntimeFreshness {
   ageSeconds?: number;
   startedAt?: string;
   durationSeconds?: number;
+}
+
+export type CommandCenterOperationsNoteKind =
+  | "situation_progress"
+  | "bundle_candidate"
+  | "category_relevance"
+  | "source_quality"
+  | "other";
+
+export interface CommandCenterOperationsNote {
+  kind: CommandCenterOperationsNoteKind;
+  subjectId: string;
+  summary: string;
+  citedClaims: Array<{
+    claim: string;
+    articleId: string;
+    supportingSnippet: string;
+  }>;
+}
+
+export interface CommandCenterBriefingPayload {
+  generatedAt: string;
+  morningBrief?: MorningBrief;
+  latestAiRun?: RawInspectorAiRunSummary;
+  operationsNotes: CommandCenterOperationsNote[];
+  supportingArticles: CommandCenterBriefingArticleSummary[];
+  supportingSituations: HomeSituationSummary[];
+  sourceHealthSummary: {
+    total: number;
+    ok: number;
+    attention: number;
+    degraded: number;
+    disabled: number;
+    staleAlerts: number;
+  };
+  attentionSources: SourceHealth[];
 }
 
 export interface OperationsStatus {

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { OperationsStatus } from "@nytt/shared";
+import type { CommandCenterBriefingPayload, OperationsStatus } from "@nytt/shared";
 import { OperationsDashboard } from "./OperationsPage.js";
 
 const status: OperationsStatus = {
@@ -74,9 +74,52 @@ const status: OperationsStatus = {
   },
 };
 
+const briefing: CommandCenterBriefingPayload = {
+  generatedAt: "2026-06-02T06:04:00.000Z",
+  morningBrief: {
+    generatedAt: "2026-06-02T06:04:00.000Z",
+    title: "Morgenbrief",
+    mode: "ai_assisted",
+    sourceLine: "AI-assistert · 1/2 kilder OK",
+    paragraphs: [
+      "Morgenbildet følger trafikk og åpne situasjoner.",
+      "DeepSeek samlet støttende saker uten private påstander.",
+      "Kildehelse viser ett tilsynspunkt.",
+    ],
+    highlights: [
+      { label: "Saker", value: "12", detail: "Hendelser leder bildet" },
+      { label: "Situasjoner", value: "3", detail: "Aktive eller til vurdering" },
+      { label: "Kilder", value: "1/2", detail: "Rapporterer OK" },
+    ],
+    articleIds: ["article:one"],
+    situationIds: [],
+  },
+  latestAiRun: {
+    id: "ai:one",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    status: "ok",
+    startedAt: "2026-06-02T06:03:00.000Z",
+    completedAt: "2026-06-02T06:04:00.000Z",
+    articleCount: 24,
+  },
+  operationsNotes: [],
+  supportingArticles: [],
+  supportingSituations: [],
+  sourceHealthSummary: {
+    total: 2,
+    ok: 1,
+    attention: 1,
+    degraded: 1,
+    disabled: 0,
+    staleAlerts: 0,
+  },
+  attentionSources: [],
+};
+
 describe("OperationsDashboard", () => {
   it("renders worker cycle metrics as operational telemetry", () => {
-    const html = renderToStaticMarkup(<OperationsDashboard status={status} />);
+    const html = renderToStaticMarkup(<OperationsDashboard status={status} briefing={briefing} />);
 
     expect(html).toContain("Worker-syklus");
     expect(html).toContain("Operasjonell telemetri");
@@ -92,6 +135,13 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Utdatert");
     expect(html).toContain("Gjenopprettingstest");
     expect(html).toContain("Kommandosenter");
+    expect(html).toContain("Intelligence Bridge");
+    expect(html).toContain("Morgenbrief, AI-spor");
+    expect(html).toContain("ai_assisted");
+    expect(html).toContain("deepseek-v4-flash");
+    expect(html).toContain("Kildehelse viser ett tilsynspunkt.");
+    expect(html).toContain("/command/brief");
+    expect(html).toContain("Åpne brief-revisjon");
     expect(html).toContain("/command/dekning");
     expect(html).toContain("Åpne dekningsgrupper");
     expect(html).toContain("/command/tidslinje");

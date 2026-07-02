@@ -1925,6 +1925,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  app.get("/api/operations/briefing", async (req, res, next) => {
+    try {
+      res.json(await store.getCommandCenterBriefing(currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/operations/notification-triggers", async (req, res, next) => {
     try {
       const filters = notificationTriggerQuerySchema.parse(req.query);

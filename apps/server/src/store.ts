@@ -16,6 +16,9 @@ import type {
   ArticleTopic,
   Attachment,
   BootstrapPayload,
+  CommandCenterBriefingArticleSummary,
+  CommandCenterBriefingPayload,
+  CommandCenterOperationsNote,
   CommandCenterSpatialAnalyticsQueryInput,
   CoverageBundleArticleSummary,
   CoverageBundleListItem,
@@ -317,6 +320,7 @@ export interface Store {
     login: string,
   ): Promise<OperationsTimelineResponse>;
   getOperationsStatus(): Promise<OperationsStatus>;
+  getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload>;
 }
 
 function clone<T>(value: T): T {
@@ -1048,6 +1052,101 @@ function rawAiRunDetailFromRow(row: AiProcessingRunRow): RawInspectorAiRunDetail
     redacted: result.redacted,
     truncated: result.truncated,
   };
+}
+
+function compactText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function briefingArticleSummary(article: Article): CommandCenterBriefingArticleSummary {
+  return {
+    id: article.id,
+    title: article.title,
+    sourceLabel: article.sourceLabel,
+    publishedAt: article.publishedAt,
+    category: article.category,
+    excerpt: compactText(article.excerpt, 220),
+    ...(article.url ? { url: article.url } : {}),
+  };
+}
+
+function briefingSourceHealthSummary(
+  sources: SourceHealth[],
+): CommandCenterBriefingPayload["sourceHealthSummary"] {
+  return {
+    total: sources.length,
+    ok: sources.filter((source) => source.state === "ok").length,
+    attention: sources.filter((source) => source.state !== "ok" || source.activeAlerts?.length)
+      .length,
+    degraded: sources.filter((source) => source.state === "degraded").length,
+    disabled: sources.filter((source) => source.state === "disabled").length,
+    staleAlerts: sources.reduce((sum, source) => sum + (source.activeAlerts?.length ?? 0), 0),
+  };
+}
+
+function isOperationsNoteKind(value: unknown): value is CommandCenterOperationsNote["kind"] {
+  return (
+    value === "situation_progress" ||
+    value === "bundle_candidate" ||
+    value === "category_relevance" ||
+    value === "source_quality" ||
+    value === "other"
+  );
+}
+
+function operationsNotesFromAiResult(result: unknown): CommandCenterOperationsNote[] {
+  if (!result || typeof result !== "object" || !("operationsNotes" in result)) return [];
+  const notes = (result as { operationsNotes?: unknown }).operationsNotes;
+  if (!Array.isArray(notes)) return [];
+  return notes.slice(0, 12).flatMap((note): CommandCenterOperationsNote[] => {
+    if (!note || typeof note !== "object") return [];
+    const candidate = note as {
+      kind?: unknown;
+      subjectId?: unknown;
+      summary?: unknown;
+      citedClaims?: unknown;
+    };
+    if (
+      !isOperationsNoteKind(candidate.kind) ||
+      typeof candidate.subjectId !== "string" ||
+      typeof candidate.summary !== "string"
+    ) {
+      return [];
+    }
+    const citedClaims = Array.isArray(candidate.citedClaims)
+      ? candidate.citedClaims.flatMap((claim): CommandCenterOperationsNote["citedClaims"] => {
+          if (!claim || typeof claim !== "object") return [];
+          const value = claim as {
+            claim?: unknown;
+            articleId?: unknown;
+            supportingSnippet?: unknown;
+          };
+          if (
+            typeof value.claim !== "string" ||
+            typeof value.articleId !== "string" ||
+            typeof value.supportingSnippet !== "string"
+          ) {
+            return [];
+          }
+          return [
+            {
+              claim: compactText(value.claim, 140),
+              articleId: value.articleId,
+              supportingSnippet: compactText(value.supportingSnippet, 180),
+            },
+          ];
+        })
+      : [];
+    return [
+      {
+        kind: candidate.kind,
+        subjectId: candidate.subjectId,
+        summary: compactText(candidate.summary, 220),
+        citedClaims,
+      },
+    ];
+  });
 }
 
 function numericRowValue(value: number | string | null | undefined): number {
@@ -3532,6 +3631,34 @@ export class MemoryStore implements Store {
       workerCycleMetrics: await this.getLatestWorkerCycleMetrics(),
     };
   }
+
+  async getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload> {
+    void login;
+    const bootstrap = await this.getBootstrap();
+    const sourceHealthSummary = briefingSourceHealthSummary(bootstrap.sourceHealth);
+    const articleIds = new Set(
+      bootstrap.morningBrief?.articleIds ??
+        bootstrap.articles.slice(0, 8).map((article) => article.id),
+    );
+    const situationIds = new Set(
+      bootstrap.morningBrief?.situationIds ?? bootstrap.situations.map((situation) => situation.id),
+    );
+    return {
+      generatedAt: bootstrap.morningBrief?.generatedAt ?? new Date().toISOString(),
+      ...(bootstrap.morningBrief ? { morningBrief: bootstrap.morningBrief } : {}),
+      operationsNotes: [],
+      supportingArticles: bootstrap.articles
+        .filter((article) => articleIds.has(article.id))
+        .map(briefingArticleSummary),
+      supportingSituations: bootstrap.situations.filter((situation) =>
+        situationIds.has(situation.id),
+      ),
+      sourceHealthSummary,
+      attentionSources: bootstrap.sourceHealth.filter(
+        (source) => source.state !== "ok" || source.activeAlerts?.length,
+      ),
+    };
+  }
 }
 
 export class PgStore implements Store {
@@ -4196,6 +4323,62 @@ export class PgStore implements Store {
           }
         : undefined,
     );
+  }
+
+  async getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload> {
+    const [bootstrap, latestAiRunResult] = await Promise.all([
+      this.getBootstrap(login),
+      this.pool.query<AiProcessingRunRow>(
+        `SELECT id, provider, model, status, started_at, completed_at,
+          to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS completed_at_cursor,
+          article_ids, result, error
+         FROM ai_processing_runs
+         ORDER BY completed_at DESC, id DESC
+         LIMIT 1`,
+      ),
+    ]);
+    const morningBrief = bootstrap.morningBrief;
+    const articleIds = [...new Set(morningBrief?.articleIds ?? [])];
+    const situationIds = [...new Set(morningBrief?.situationIds ?? [])];
+    const [articleResult, situationResult] = await Promise.all([
+      articleIds.length
+        ? this.pool.query<{ payload: Article }>(
+            "SELECT payload FROM articles WHERE id = ANY($1::text[])",
+            [articleIds],
+          )
+        : Promise.resolve({ rows: [] as Array<{ payload: Article }> }),
+      situationIds.length
+        ? this.pool.query<{ payload: Situation }>(
+            "SELECT payload FROM situations WHERE id = ANY($1::text[])",
+            [situationIds],
+          )
+        : Promise.resolve({ rows: [] as Array<{ payload: Situation }> }),
+    ]);
+    const articlesById = new Map(articleResult.rows.map((row) => [row.payload.id, row.payload]));
+    const situationsById = new Map(
+      situationResult.rows.map((row) => [row.payload.id, homeSituationSummary(row.payload)]),
+    );
+    const latestAiRun = latestAiRunResult.rows[0];
+    const sourceHealthSummary = briefingSourceHealthSummary(bootstrap.sourceHealth);
+    return {
+      generatedAt:
+        morningBrief?.generatedAt ??
+        (latestAiRun ? new Date(latestAiRun.completed_at).toISOString() : new Date().toISOString()),
+      ...(morningBrief ? { morningBrief } : {}),
+      ...(latestAiRun ? { latestAiRun: rawAiRunSummaryFromRow(latestAiRun) } : {}),
+      operationsNotes: latestAiRun ? operationsNotesFromAiResult(latestAiRun.result) : [],
+      supportingArticles: articleIds
+        .map((id) => articlesById.get(id))
+        .filter((article): article is Article => Boolean(article))
+        .map(briefingArticleSummary),
+      supportingSituations: situationIds
+        .map((id) => situationsById.get(id))
+        .filter((situation): situation is HomeSituationSummary => Boolean(situation)),
+      sourceHealthSummary,
+      attentionSources: bootstrap.sourceHealth.filter(
+        (source) => source.state !== "ok" || source.activeAlerts?.length,
+      ),
+    };
   }
 
   async listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage> {

@@ -2619,6 +2619,56 @@ button {
   gap: 10px;
 }
 
+.intelligence-bridge-widget {
+  display: grid;
+  gap: 12px;
+}
+
+.intelligence-bridge-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.intelligence-bridge-meta article {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.intelligence-bridge-meta span,
+.intelligence-bridge-meta small,
+.intelligence-bridge-paragraphs {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.intelligence-bridge-meta span {
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.intelligence-bridge-meta strong {
+  display: block;
+  margin: 4px 0 2px;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.intelligence-bridge-paragraphs {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.intelligence-bridge-paragraphs li {
+  padding-left: 2px;
+}
+
 .source-state-list {
   display: grid;
   gap: 0;
@@ -4709,6 +4759,249 @@ button {
   color: var(--accent);
   font-size: 12px;
   font-weight: 700;
+}
+
+.command-briefing-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 44px 32px 80px;
+}
+
+.command-briefing-hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.command-briefing-hero h1 {
+  margin: 4px 0 8px;
+  font: 50px/1.02 var(--serif);
+}
+
+.command-briefing-hero p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.command-briefing-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.command-briefing-summary article,
+.command-briefing-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.command-briefing-summary article {
+  padding: 14px;
+}
+
+.command-briefing-summary span,
+.command-briefing-summary small,
+.command-briefing-empty,
+.command-briefing-story-list span,
+.command-briefing-story-list p,
+.command-briefing-note-list small,
+.command-briefing-note-list em,
+.command-briefing-situation-list span,
+.command-briefing-source-list small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.command-briefing-summary strong {
+  display: block;
+  margin: 5px 0 3px;
+  font-size: 24px;
+  overflow-wrap: anywhere;
+}
+
+.command-briefing-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.command-briefing-card {
+  padding: 18px;
+}
+
+.command-briefing-card-large {
+  grid-column: span 1;
+}
+
+.command-briefing-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.command-briefing-section-heading h2 {
+  margin: 3px 0 0;
+  font: 28px/1.1 var(--serif);
+}
+
+.command-briefing-section-heading > span,
+.command-briefing-section-heading a {
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.command-briefing-paragraphs,
+.command-briefing-story-list,
+.command-briefing-note-list,
+.command-briefing-situation-list,
+.command-briefing-source-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.command-briefing-paragraphs li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.command-briefing-paragraphs span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.command-briefing-paragraphs p,
+.command-briefing-story-list p {
+  margin: 0;
+}
+
+.command-briefing-highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.command-briefing-highlights article,
+.command-briefing-ai-meta div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.command-briefing-highlights span,
+.command-briefing-ai-meta dt,
+.command-briefing-note-list span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-briefing-highlights strong {
+  display: block;
+  margin: 4px 0 2px;
+  font-size: 24px;
+}
+
+.command-briefing-ai-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.command-briefing-ai-meta dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.command-briefing-story-list li,
+.command-briefing-note-list > li,
+.command-briefing-situation-list li,
+.command-briefing-source-list li {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.command-briefing-story-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+}
+
+.command-briefing-story-list strong,
+.command-briefing-note-list strong,
+.command-briefing-source-list strong {
+  display: block;
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+
+.command-briefing-note-list > li {
+  display: grid;
+  gap: 4px;
+}
+
+.command-briefing-note-list ul {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.command-briefing-note-list em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+}
+
+.command-briefing-situation-list a {
+  display: block;
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.command-briefing-source-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+}
+
+.command-briefing-source-list small {
+  grid-column: 1 / -1;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -7687,6 +7980,7 @@ button {
   .source-audit-page,
   .operations-timeline-page,
   .coverage-bundles-page,
+  .command-briefing-page,
   .notification-triggers-page,
   .notification-settings-page,
   .spatial-analytics-page,
@@ -7733,6 +8027,8 @@ button {
   .source-audit-grid,
   .operations-timeline-grid,
   .coverage-bundles-grid,
+  .command-briefing-summary,
+  .command-briefing-layout,
   .notification-triggers-grid,
   .notification-push-status,
   .notification-delivery-list,
@@ -7804,6 +8100,12 @@ button {
 
   .notification-push-status dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .command-briefing-highlights,
+  .command-briefing-ai-meta,
+  .intelligence-bridge-meta {
+    grid-template-columns: 1fr;
   }
 
   .weather-current-panel,

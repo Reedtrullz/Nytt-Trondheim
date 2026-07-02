@@ -1203,6 +1203,39 @@ describe("private situation API", () => {
     expect(JSON.stringify(response.body)).not.toContain("raw_payload");
   });
 
+  it("returns a derived owner-only briefing review without raw payloads", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent.get("/api/operations/briefing").expect(200);
+
+    expect(response.body).toMatchObject({
+      generatedAt: expect.any(String),
+      morningBrief: expect.objectContaining({
+        title: "Morgenbrief",
+        paragraphs: expect.arrayContaining([expect.any(String)]),
+      }),
+      operationsNotes: expect.any(Array),
+      supportingArticles: expect.arrayContaining([
+        expect.objectContaining({
+          id: expect.any(String),
+          title: expect.any(String),
+          sourceLabel: expect.any(String),
+        }),
+      ]),
+      supportingSituations: expect.any(Array),
+      sourceHealthSummary: expect.objectContaining({
+        total: expect.any(Number),
+        ok: expect.any(Number),
+        attention: expect.any(Number),
+      }),
+      attentionSources: expect.any(Array),
+    });
+    const serialized = JSON.stringify(response.body);
+    expect(serialized).not.toContain("rawPayload");
+    expect(serialized).not.toContain("normalizedPayload");
+    expect(serialized).not.toContain("raw_payload");
+    expect(serialized).not.toContain("normalized_payload");
+  });
+
   it("rejects private feature provenance links that are not attached to the situation", async () => {
     const { agent, csrf } = await ownerAgent();
     await agent

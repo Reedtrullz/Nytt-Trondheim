@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  CommandCenterBriefingPayload,
   OperationsStatus,
   RuntimeFreshness,
   TrafficPulseCorridor,
@@ -92,6 +93,9 @@ function freshnessDetail(entry?: RuntimeFreshness) {
 function CommandLinksWidget() {
   return (
     <div className="command-link-grid">
+      <a className="operations-audit-link" href="/command/brief">
+        Åpne brief-revisjon
+      </a>
       <a className="operations-audit-link" href="/command/tilgang">
         Åpne tilgangsforespørsler
       </a>
@@ -270,7 +274,64 @@ function BackupStateWidget({ status }: { status: OperationsStatus }) {
   );
 }
 
-export function OperationsDashboard({ status }: { status: OperationsStatus }) {
+function IntelligenceBridgeWidget({ briefing }: { briefing?: CommandCenterBriefingPayload }) {
+  if (!briefing) {
+    return (
+      <div className="intelligence-bridge-widget">
+        <p className="dashboard-widget-note">
+          Brief-revisjon hentes separat fra driftsstatus. Åpne verktøyet for siste lagrede brief.
+        </p>
+        <a className="operations-audit-link" href="/command/brief">
+          Åpne brief-revisjon
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="intelligence-bridge-widget">
+      <div className="intelligence-bridge-meta">
+        <article>
+          <span>Brief</span>
+          <strong>{briefing.morningBrief?.mode ?? "Mangler"}</strong>
+          <small>{time(briefing.morningBrief?.generatedAt ?? briefing.generatedAt)}</small>
+        </article>
+        <article>
+          <span>AI</span>
+          <strong>{briefing.latestAiRun?.status ?? "Ikke registrert"}</strong>
+          <small>{briefing.latestAiRun?.model ?? "Ingen kjøring"}</small>
+        </article>
+        <article>
+          <span>Tilsyn</span>
+          <strong>{briefing.sourceHealthSummary.attention}</strong>
+          <small>
+            {briefing.sourceHealthSummary.ok}/{briefing.sourceHealthSummary.total} kilder OK
+          </small>
+        </article>
+      </div>
+      {briefing.morningBrief ? (
+        <ol className="intelligence-bridge-paragraphs">
+          {briefing.morningBrief.paragraphs.map((paragraph, index) => (
+            <li key={`${index}:${paragraph}`}>{paragraph}</li>
+          ))}
+        </ol>
+      ) : (
+        <p className="dashboard-widget-note">Ingen lagret morgenbrief ennå.</p>
+      )}
+      <a className="operations-audit-link" href="/command/brief">
+        Åpne brief-revisjon
+      </a>
+    </div>
+  );
+}
+
+export function OperationsDashboard({
+  status,
+  briefing,
+}: {
+  status: OperationsStatus;
+  briefing?: CommandCenterBriefingPayload;
+}) {
   const trafficPulse = status.trafficPulse ?? [];
   const workerMetrics = status.workerCycleMetrics;
   const slowest = slowestSource(workerMetrics, status.sources);
@@ -303,6 +364,13 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
         ),
       },
       {
+        id: "briefing",
+        title: "Intelligence Bridge",
+        description: "Morgenbrief, AI-spor og støttegrunnlag for offentlig bypuls.",
+        defaultSize: "wide",
+        children: <IntelligenceBridgeWidget briefing={briefing} />,
+      },
+      {
         id: "traffic-pulse",
         title: "Trafikkpuls fra Vegvesen",
         description: "Målt/estimert reisetid per korridor uten å anta årsak.",
@@ -331,7 +399,16 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
         children: <BackupStateWidget status={status} />,
       },
     ],
-    [parseFailures, slowest, sourceItems, staleSources, status, trafficPulse, workerMetrics],
+    [
+      briefing,
+      parseFailures,
+      slowest,
+      sourceItems,
+      staleSources,
+      status,
+      trafficPulse,
+      workerMetrics,
+    ],
   );
 
   return (
@@ -352,15 +429,35 @@ export function OperationsDashboard({ status }: { status: OperationsStatus }) {
 
 export function OperationsPage() {
   const [status, setStatus] = useState<OperationsStatus>();
+  const [briefing, setBriefing] = useState<CommandCenterBriefingPayload>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
     setError(undefined);
+    setStatus(undefined);
+    setBriefing(undefined);
     void api
       .operations()
-      .then(setStatus)
-      .catch((reason: Error) => setError(reason.message));
+      .then((nextStatus) => {
+        if (cancelled) return;
+        setStatus(nextStatus);
+        void api
+          .commandBriefing()
+          .then((nextBriefing) => {
+            if (!cancelled) setBriefing(nextBriefing);
+          })
+          .catch(() => {
+            // Keep the Command Center usable if the derived briefing review is temporarily unavailable.
+          });
+      })
+      .catch((reason: Error) => {
+        if (!cancelled) setError(reason.message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [attempt]);
 
   if (error) {
@@ -375,5 +472,5 @@ export function OperationsPage() {
   }
   if (!status) return <main className="operations-page">Henter driftstatus...</main>;
 
-  return <OperationsDashboard status={status} />;
+  return <OperationsDashboard status={status} briefing={briefing} />;
 }

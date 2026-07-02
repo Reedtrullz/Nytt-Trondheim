@@ -501,6 +501,20 @@ test("coverage bundle operations page renders persisted decisions and drawer det
   );
 });
 
+test("command briefing page shows AI brief traceability", async ({ page }) => {
+  await page.goto("/command/brief");
+
+  await expect(page.getByRole("heading", { name: "Brief-revisjon" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Morgenbrief" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Siste analyse" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Historier bak briefen" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Rådata" })).toHaveAttribute(
+    "href",
+    "/command/radata",
+  );
+  await expectNoHorizontalPageOverflow(page);
+});
+
 test("traffic page shows summary cards semantic layers ranked list and detail drawer", async ({
   page,
 }) => {
@@ -1509,7 +1523,13 @@ test("viewer shell keeps command center tools out of the public traffic map", as
   await openTrafficLayersIfHidden(page);
   await expect(page.getByText("Private notater/tegninger")).toHaveCount(0);
 
-  for (const ownerOnlyPath of ["/command", "/command/radata", "/drift", "/lagret"]) {
+  for (const ownerOnlyPath of [
+    "/command",
+    "/command/brief",
+    "/command/radata",
+    "/drift",
+    "/lagret",
+  ]) {
     await page.goto(ownerOnlyPath);
     await expect(page.getByRole("heading", { name: "Dette krever eiertilgang" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Til forsiden" })).toHaveAttribute("href", "/");
@@ -2082,6 +2102,13 @@ test("owner can open the real situation index and operations status", async ({ p
   ).toBeVisible();
   await page.getByRole("link", { name: "Kommandosenter" }).click();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Intelligence Bridge" })).toBeVisible();
+  const intelligenceBridge = page.locator(".dashboard-widget", {
+    has: page.getByRole("heading", { name: "Intelligence Bridge" }),
+  });
+  await expect(
+    intelligenceBridge.getByRole("link", { name: "Åpne brief-revisjon" }),
+  ).toHaveAttribute("href", "/command/brief");
   await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();
   await expect(page.getByText("Innhentede saker", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Åpne kilderevisjon" }).click();
