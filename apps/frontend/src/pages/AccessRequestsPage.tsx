@@ -160,7 +160,7 @@ export function AccessRequestsDashboard({
   return (
     <main className="access-requests-page">
       <header className="page-heading">
-        <p className="label">Privat drift</p>
+        <p className="label">Privat kommandosenter</p>
         <h1>Tilgangsforespørsler</h1>
         <p>
           {page.summary.pending} venter på vurdering. {page.summary.unverified} mangler

@@ -43,7 +43,7 @@ The weekly restore check validates archive readability only. Run [Full Restore R
 - Confirm DNS for `nytt.reidar.tech` resolves to the VPS.
 - Run origin provisioning to repair TLS/Cloudflare routing before release; the endpoint returned HTTP `525` before the `nytt.reidar.tech` Caddy hostname existed.
 - Confirm Docker, Caddy and the `deploy` SSH key are available on the same VPS used by RFMC.
-- Configure DATEX Basic Auth secrets as described in [DATEX Credentials](#datex-credentials). Production currently treats `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD` as required deployment secrets because the Drift/source-health and traffic-pulse surfaces depend on Vegvesen access.
+- Configure DATEX Basic Auth secrets as described in [DATEX Credentials](#datex-credentials). Production currently treats `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD` as required deployment secrets because the Command Center source-health and traffic-pulse surfaces depend on Vegvesen access.
 
 ## SMTP Email Auth
 
@@ -289,12 +289,12 @@ Expected results:
 - `/health` returns `200` with Postgres-backed `status: ok`.
 - Anonymous `/api/bootstrap` returns `401`.
 - `accidental_auth_source_items` is zero. Auth and access-review data are administrative application data, not upstream evidence.
-- In an authenticated owner browser session, verify `/drift/tilgang` shows unverified/pending/approved/rejected filters and user controls. Approving a verified request should create/reactivate a viewer and send an invite/login email.
-- In a viewer browser session, verify `/` and public situation pages load, while `/drift`, `/lagret`, source audit/linking, private workspace mutations, attachments and exports return an owner-only 403.
+- In an authenticated owner browser session, verify `/command/tilgang` shows unverified/pending/approved/rejected filters and user controls. Approving a verified request should create/reactivate a viewer and send an invite/login email.
+- In a viewer browser session, verify `/` and public situation pages load, while `/command`, `/lagret`, source audit/linking, private workspace mutations, attachments and exports return an owner-only 403.
 
 ## Coverage Bundle Production Verification
 
-Coverage bundles are derived article-analysis rows for the owner-only Drift surface. After a CI-verified SHA deploys and the worker has completed at least one cycle, verify live health, authentication behavior, persisted decisions and the browser surface:
+Coverage bundles are derived article-analysis rows for the owner-only Command Center surface. After a CI-verified SHA deploys and the worker has completed at least one cycle, verify live health, authentication behavior, persisted decisions and the browser surface:
 
 ```bash
 HEAD_SHA=$(git rev-parse HEAD)
@@ -329,9 +329,9 @@ Expected results:
 
 - `/health` returns `200` with Postgres-backed `status: ok`.
 - Anonymous `/api/bootstrap` returns `401`; the coverage endpoint is under the same authenticated `/api` boundary.
-- `recent_coverage_bundles` may be zero immediately after deploy if the worker has not yet ingested matching stories, but the query must succeed and `/drift/dekning` must show either live rows or an honest empty state.
+- `recent_coverage_bundles` may be zero immediately after deploy if the worker has not yet ingested matching stories, but the query must succeed and `/command/dekning` must show either live rows or an honest empty state.
 - `accidental_coverage_source_items` must be zero. Coverage grouping explains feed bundling; it is not upstream provenance.
-- In an authenticated browser session, verify `/`, `/drift`, and `/drift/dekning`. The home feed should still show existing bundle labels, `/drift` should link to `Dekningsgrupper`, and `/drift/dekning` should show bundle rows with member stories, signals, near misses and timestamps, or the empty state.
+- In an authenticated browser session, verify `/`, `/command`, and `/command/dekning`. The home feed should still show existing bundle labels, `/command` should link to `Dekningsgrupper`, and `/command/dekning` should show bundle rows with member stories, signals, near misses and timestamps, or the empty state.
 
 ## Rollback
 
@@ -342,7 +342,7 @@ The deployment preserves the prior API and worker images as `:previous` before b
 The application is live at `https://nytt.reidar.tech`; `/health` returns healthy Postgres-backed status through Caddy and Cloudflare. Production is promoted from successful `main` CI through `Deploy to VPS`; verify the current commit with `git ls-remote origin refs/heads/main`, the latest successful GitHub Actions runs, and the VPS checkout under `/home/deploy/nytt-trondheim` rather than relying on a commit SHA embedded in this document.
 
 - DATEX Basic Auth credentials are configured as GitHub repository secrets `NYTT_DATEX_USERNAME` and `NYTT_DATEX_PASSWORD`, mapped to runtime `DATEX_USERNAME` and `DATEX_PASSWORD` by the deploy workflow/playbook. DATEX TravelTime uses the same credentials. Leave `NYTT_DATEX_ENDPOINT` blank unless intentionally overriding the SRTI-filtered default; leave `DATEX_TRAVEL_TIME_LOCATIONS_ENDPOINT` and `DATEX_TRAVEL_TIME_DATA_ENDPOINT` blank unless intentionally overriding the Vegvesen TravelTime defaults.
-- DATEX TravelTime production verification should check `source_health.source='datex_travel_time'` and the `datex_travel_times` table. Treat the data as Drift/source-health traffic pulse only, not as incident cause or situation activation evidence.
+- DATEX TravelTime production verification should check `source_health.source='datex_travel_time'` and the `datex_travel_times` table. Treat the data as Command Center source-health traffic pulse only, not as incident cause or situation activation evidence.
 - Production DATEX source health can legitimately report `0 relevante DATEX trafikkhendelser hentet`; that means the current SRTI snapshot had no relevant Trondheim/Trøndelag events when credentials, worker logs and source health are otherwise OK.
 - The incident-correctness release was manually verified and `NYTT_DEPLOY_ENABLED=true`; successful `main` CI runs now trigger production promotion.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.

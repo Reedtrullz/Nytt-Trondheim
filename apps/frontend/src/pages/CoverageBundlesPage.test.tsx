@@ -82,8 +82,8 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Generisk steds-hendelse");
     expect(html).toContain("Konflikt i spesifikt sted");
     expect(html).toContain("Rykka til Flatåsen etter røykutvikling");
-    expect(html).toContain("/drift/tidslinje");
-    expect(html).toContain("/drift/kilder");
+    expect(html).toContain("/command/tidslinje");
+    expect(html).toContain("/command/kilder");
   });
 
   it("renders the empty state", () => {

@@ -106,7 +106,7 @@ function Header({
           <NavLink to="/vaer">Vær</NavLink>
           <NavLink to="/sport">Sport</NavLink>
           {isOwner ? <NavLink to="/lagret">Lagret</NavLink> : null}
-          {isOwner ? <NavLink to="/drift">Drift</NavLink> : null}
+          {isOwner ? <NavLink to="/command">Kommandosenter</NavLink> : null}
         </nav>
         <label className="search">
           <span className="sr-only">Søk i saker</span>
@@ -209,6 +209,7 @@ function AuthenticatedApp() {
 
   const freshnessLabel = headerFreshnessLabel(data?.sourceHealth ?? []);
   const isOwner = session?.user.role === "owner";
+  const ownerOnly = (children: ReactNode) => <OwnerOnly isOwner={isOwner}>{children}</OwnerOnly>;
 
   return (
     <>
@@ -231,54 +232,17 @@ function AuthenticatedApp() {
             <Route path="/trafikk" element={<TrafficMapPage />} />
             <Route path="/vaer" element={<WeatherPage />} />
             <Route path="/sport" element={<SportPage initialArticles={data.articles} />} />
-            <Route
-              path="/lagret"
-              element={
-                <OwnerOnly isOwner={isOwner}>
-                  <SavedPage />
-                </OwnerOnly>
-              }
-            />
-            <Route
-              path="/drift"
-              element={
-                <OwnerOnly isOwner={isOwner}>
-                  <OperationsPage />
-                </OwnerOnly>
-              }
-            />
-            <Route
-              path="/drift/tilgang"
-              element={
-                <OwnerOnly isOwner={isOwner}>
-                  <AccessRequestsPage />
-                </OwnerOnly>
-              }
-            />
-            <Route
-              path="/drift/dekning"
-              element={
-                <OwnerOnly isOwner={isOwner}>
-                  <CoverageBundlesPage />
-                </OwnerOnly>
-              }
-            />
-            <Route
-              path="/drift/kilder"
-              element={
-                <OwnerOnly isOwner={isOwner}>
-                  <SourceAuditPage />
-                </OwnerOnly>
-              }
-            />
-            <Route
-              path="/drift/tidslinje"
-              element={
-                <OwnerOnly isOwner={isOwner}>
-                  <OperationsTimelinePage />
-                </OwnerOnly>
-              }
-            />
+            <Route path="/lagret" element={ownerOnly(<SavedPage />)} />
+            <Route path="/command" element={ownerOnly(<OperationsPage />)} />
+            <Route path="/command/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
+            <Route path="/command/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
+            <Route path="/command/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route path="/command/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
+            <Route path="/drift" element={ownerOnly(<OperationsPage />)} />
+            <Route path="/drift/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
+            <Route path="/drift/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
+            <Route path="/drift/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route path="/drift/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Suspense>

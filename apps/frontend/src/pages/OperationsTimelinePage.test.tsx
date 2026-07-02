@@ -24,7 +24,7 @@ const timeline: OperationsTimelineResponse = {
         {
           kind: "source_audit",
           label: "Kilderevisjon",
-          href: "/drift/kilder?sources=datex_travel_time&detail=datex_travel_time",
+          href: "/command/kilder?sources=datex_travel_time&detail=datex_travel_time",
           sourceId: "datex_travel_time",
         },
       ],

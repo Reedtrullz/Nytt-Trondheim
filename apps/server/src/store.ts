@@ -1540,7 +1540,7 @@ function sourceAuditLink(source?: SourceId): OperationsTimelineEvent["links"][nu
     {
       kind: "source_audit",
       label: "Kildeaudit",
-      href: `/drift/kilder?sources=${encodeURIComponent(source)}&detail=${encodeURIComponent(
+      href: `/command/kilder?sources=${encodeURIComponent(source)}&detail=${encodeURIComponent(
         source,
       )}`,
       sourceId: source,

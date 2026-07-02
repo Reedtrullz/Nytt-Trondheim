@@ -257,13 +257,13 @@ export function OperationsTimelineDashboard({
     <main className="operations-timeline-page">
       <header className="operations-timeline-hero">
         <div>
-          <p className="label">Privat drift</p>
+          <p className="label">Privat kommandosenter</p>
           <h1>Operasjonstidslinje</h1>
           <p>Aktive situasjoner, kildeoppdateringer, worker-kjøringer og private arbeidsgrep.</p>
         </div>
         <div className="operations-timeline-actions">
-          <Link to="/drift">Drift</Link>
-          <Link to="/drift/kilder">Kilderevisjon</Link>
+          <Link to="/command">Kommandosenter</Link>
+          <Link to="/command/kilder">Kilderevisjon</Link>
         </div>
       </header>
 

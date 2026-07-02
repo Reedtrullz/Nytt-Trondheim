@@ -211,14 +211,14 @@ export function CoverageBundlesDashboard({
     <main className="coverage-bundles-page">
       <header className="coverage-bundles-hero">
         <div>
-          <p className="label">Privat drift</p>
+          <p className="label">Privat kommandosenter</p>
           <h1>Dekningsgrupper</h1>
           <p>Siste generering {time(page.summary.latestGeneratedAt)}</p>
         </div>
         <div className="coverage-bundles-actions">
-          <Link to="/drift">Drift</Link>
-          <Link to="/drift/tidslinje">Tidslinje</Link>
-          <Link to="/drift/kilder">Kilderevisjon</Link>
+          <Link to="/command">Kommandosenter</Link>
+          <Link to="/command/tidslinje">Tidslinje</Link>
+          <Link to="/command/kilder">Kilderevisjon</Link>
         </div>
       </header>
       <section className="coverage-bundles-summary" aria-label="Dekningsoppsummering">

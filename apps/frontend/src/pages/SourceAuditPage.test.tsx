@@ -168,7 +168,7 @@ describe("SourceAuditDashboard", () => {
     expect(html).toContain("Diagnostikk");
     expect(html).toContain("Trafikkhendelse på E6");
     expect(html).toContain("/situasjoner/datex-e6");
-    expect(html).toContain("/drift/tidslinje");
+    expect(html).toContain("/command/tidslinje");
     expect(html).toContain("Ingen kjøring");
     expect(html).toContain("Neste side");
   });

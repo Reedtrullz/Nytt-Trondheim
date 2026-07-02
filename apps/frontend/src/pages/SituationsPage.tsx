@@ -461,7 +461,7 @@ function SituationDetailDrawer({
       {canSeePrivate ? (
         <Link
           className="secondary-link"
-          to={`/drift/tidslinje?s=${encodeURIComponent(situation.id)}`}
+          to={`/command/tidslinje?s=${encodeURIComponent(situation.id)}`}
         >
           Se i operasjonstidslinje
         </Link>

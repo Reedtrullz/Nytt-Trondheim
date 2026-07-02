@@ -195,7 +195,7 @@ curl -fsS -o "$SCRATCH_DIR/trafikk.html" \
   -w '%{http_code} %{content_type}\n' \
   "http://127.0.0.1:${SCRATCH_APP_PORT}/trafikk"
 
-grep -Eq 'Trafikk|Nå i trafikken|Drift' "$SCRATCH_DIR/trafikk.html"
+grep -Eq 'Trafikk|Nå i trafikken|Kommandosenter' "$SCRATCH_DIR/trafikk.html"
 ```
 
 Verify source-health rows directly from the scratch DB:

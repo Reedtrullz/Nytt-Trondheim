@@ -388,7 +388,7 @@ test("coverage bundle operations page renders persisted decisions and drawer det
     });
   });
 
-  await page.goto("/drift/dekning");
+  await page.goto("/command/dekning");
 
   await expect(page.getByRole("heading", { name: "Dekningsgrupper" })).toBeVisible();
   await expect(page.getByText("Samme hendelse på tvers av kilder").first()).toBeVisible();
@@ -396,11 +396,11 @@ test("coverage bundle operations page renders persisted decisions and drawer det
   await expect(page.getByText("Konflikt i spesifikt sted")).toBeVisible();
   await expect(page.getByRole("link", { name: "Tidslinje" })).toHaveAttribute(
     "href",
-    "/drift/tidslinje",
+    "/command/tidslinje",
   );
   await expect(page.getByRole("link", { name: "Kilderevisjon" })).toHaveAttribute(
     "href",
-    "/drift/kilder",
+    "/command/kilder",
   );
 });
 
@@ -1803,16 +1803,16 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(
     situationDetails.getByRole("link", { name: "Se i operasjonstidslinje" }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Drift" }).click();
-  await expect(page.getByRole("heading", { name: "Kilder og systemstatus" })).toBeVisible();
+  await page.getByRole("link", { name: "Kommandosenter" }).click();
+  await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sikkerhetskopi" })).toBeVisible();
   await expect(page.getByText("Innhentede saker")).toBeVisible();
   await page.getByRole("link", { name: "Åpne kilderevisjon" }).click();
-  await expect(page).toHaveURL(/\/drift\/kilder$/);
+  await expect(page).toHaveURL(/\/command\/kilder$/);
   await expect(page.getByRole("heading", { name: "Kildehelse og proveniens" })).toBeVisible();
   await expect(page.getByText("Kilder i filter")).toBeVisible();
   await page.getByRole("link", { name: "Tidslinje" }).click();
-  await expect(page).toHaveURL(/\/drift\/tidslinje$/);
+  await expect(page).toHaveURL(/\/command\/tidslinje$/);
   await expect(page.getByRole("heading", { name: "Operasjonstidslinje" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Siste operative spor" })).toBeVisible();
   await page.getByRole("link", { name: "Lagret" }).click();

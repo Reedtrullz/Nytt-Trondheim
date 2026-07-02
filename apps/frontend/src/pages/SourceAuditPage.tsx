@@ -397,7 +397,7 @@ export function SourceAuditDashboard({
     <main className="source-audit-page">
       <header className="source-audit-hero">
         <div>
-          <p className="label">Privat drift</p>
+          <p className="label">Privat kommandosenter</p>
           <h1>Kildehelse og proveniens</h1>
           <p>
             Revisjon av innhenting, kontrakter og kildekoblinger. Viser bare ikke-hemmelig
@@ -405,11 +405,11 @@ export function SourceAuditDashboard({
           </p>
         </div>
         <div className="source-audit-actions">
-          <Link className="source-audit-backlink" to="/drift/tidslinje">
+          <Link className="source-audit-backlink" to="/command/tidslinje">
             Tidslinje
           </Link>
-          <Link className="source-audit-backlink" to="/drift">
-            Til drift
+          <Link className="source-audit-backlink" to="/command">
+            Til kommandosenter
           </Link>
         </div>
       </header>

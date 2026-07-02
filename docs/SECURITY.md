@@ -1,7 +1,7 @@
 # Security
 
 - Owner access is restricted through GitHub App user authorization and the `GITHUB_ALLOWED_LOGIN=Reedtrullz` allowlist. Non-GitHub users can request restricted-beta access, verify email, wait for owner approval, and then log in with one-time email links as read-only `viewer` users.
-- Viewer users can read the main news, situation, traffic and weather surfaces. Owner-only APIs still protect Drift/operations, saved items, source audit/source linking, private workspace mutations, notes, drawings, attachments and exports. The route-planner API is authenticated; free-text origin/destination queries are sent server-side to Nominatim/OpenStreetMap and OSRM only for transient geocoding/routing and are not persisted by Nytt.
+- Viewer users can read the main news, situation, traffic and weather surfaces. Owner-only APIs still protect the Command Center, saved items, source audit/source linking, private workspace mutations, notes, drawings, attachments and exports. The route-planner API is authenticated; free-text origin/destination queries are sent server-side to Nominatim/OpenStreetMap and OSRM only for transient geocoding/routing and are not persisted by Nytt.
 - Secrets are supplied through GitHub Actions/VPS-managed environment files and must never be committed.
 - Uploaded files are stored outside the web root, size-limited, and checksum-recorded.
 - State-changing authenticated API requests require a CSRF token and same-origin browser requests. Viewer sessions are rejected before owner-only mutations.
