@@ -58,6 +58,37 @@ describe("home story cards", () => {
     expect(card.locationLabel).toBe("Torvet");
     expect(card.neighborhoodLabels).toEqual(["Torvet"]);
     expect(card.isClustered).toBe(true);
+    expect(card.verification).toBeUndefined();
+  });
+
+  it("adds a public verification badge when DATEX and newsroom evidence back the story", () => {
+    const group = groupHomeArticles([
+      article({
+        id: "adressa-e6",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Kollisjon stenger E6",
+        excerpt: "En kollisjon gjør at E6 er stengt.",
+        category: "Transport",
+        publicVerification: {
+          status: "verified",
+          label: "Verifisert",
+          detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+          officialSources: ["datex"],
+          reportingSources: ["adressa"],
+          situationId: "datex-e6",
+        },
+      }),
+    ])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.verification).toEqual({
+      label: "Verifisert",
+      detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+      sourceSummary: "Statens vegvesen DATEX + Adresseavisen",
+      situationId: "datex-e6",
+    });
   });
 
   it("uses specific places before broad geography labels", () => {

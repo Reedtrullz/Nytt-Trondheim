@@ -1,6 +1,11 @@
 import type { Article } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
-import { nearbyStoryItems, nearbyStoryItemsForGroups, nearbyStorySummary } from "./homeNearby.js";
+import {
+  nearbyDistanceLabel,
+  nearbyStoryItems,
+  nearbyStoryItemsForGroups,
+  nearbyStorySummary,
+} from "./homeNearby.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -136,6 +141,14 @@ describe("home nearby story model", () => {
       relevanceLabel: "Politi og kriminalitet",
       locationLabel: "Solsiden",
     });
+  });
+
+  it("formats nearby distance labels for local-focus explanations", () => {
+    expect(nearbyDistanceLabel(undefined)).toBeUndefined();
+    expect(nearbyDistanceLabel(Number.NaN)).toBeUndefined();
+    expect(nearbyDistanceLabel(0.4)).toBe("under 1 km unna");
+    expect(nearbyDistanceLabel(2.25)).toBe("2,3 km unna");
+    expect(nearbyDistanceLabel(14.6)).toBe("15 km unna");
   });
 
   it("uses one nearby marker for a grouped case covered by multiple providers", () => {

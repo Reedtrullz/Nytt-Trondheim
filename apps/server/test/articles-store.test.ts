@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
-import type { Article } from "@nytt/shared";
+import type { Article, Situation } from "@nytt/shared";
 import { MemoryStore, PgStore } from "../src/store.js";
 
 describe("article store", () => {
@@ -30,6 +30,11 @@ describe("article store", () => {
       places: ["Flatåsen", "Trondheim"],
     };
     const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["flatåsen-smoke"]]);
+        return { rows: [] };
+      }
       const normalized = sql.replace(/\s+/g, " ").trim();
       expect(normalized).toContain("FROM articles a");
       expect(normalized).toContain("a.payload->>'title' ILIKE $2");
@@ -46,6 +51,7 @@ describe("article store", () => {
 
     expect(page.items).toEqual([{ ...article, saved: false }]);
     expect(page.nextCursor).toBeUndefined();
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it("filters production articles by Rosenborg topic without requiring a category migration", async () => {
@@ -63,6 +69,11 @@ describe("article store", () => {
       places: ["Rosenborg"],
     };
     const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["rosenborg-trener"]]);
+        return { rows: [] };
+      }
       const normalized = sql.replace(/\s+/g, " ").trim();
       expect(normalized).toContain("COALESCE(a.payload->'topics', '[]'::jsonb) ? $3");
       expect(normalized).toContain("NOT (a.payload ? 'topics')");
@@ -76,6 +87,7 @@ describe("article store", () => {
     const page = await store.listArticles({ category: "Sport", topic: "rosenborg" }, "Reedtrullz");
 
     expect(page.items).toEqual([{ ...article, saved: false }]);
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it("filters production articles by published time window before pagination", async () => {
@@ -92,6 +104,11 @@ describe("article store", () => {
       places: ["E6"],
     };
     const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["recent-crash"]]);
+        return { rows: [] };
+      }
       const normalized = sql.replace(/\s+/g, " ").trim();
       expect(normalized).toContain("a.published_at >= $2");
       expect(normalized).toContain("a.published_at <= $3");
@@ -116,5 +133,100 @@ describe("article store", () => {
     );
 
     expect(page.items).toEqual([{ ...article, saved: false }]);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds DATEX public verification and situation links to related production articles", async () => {
+    const article: Article = {
+      id: "article-road",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Kollisjon stenger E6",
+      excerpt: "En kollisjon gjør at E6 er stengt.",
+      url: "https://example.test/e6",
+      publishedAt: "2026-07-02T09:34:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["E6"],
+    };
+    const situation: Situation = {
+      id: "datex-e6",
+      type: "traffic",
+      title: "Kollisjon på E6",
+      summary: "DATEX melder om stengt veg.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      importance: "high",
+      updatedAt: "2026-07-02T09:40:00.000Z",
+      createdAt: "2026-07-02T09:20:00.000Z",
+      locationLabel: "E6",
+      officialSource: "datex",
+      officialEventId: "datex-e6",
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["datex"],
+        articleIds: [],
+        activatedAt: "2026-07-02T09:20:00.000Z",
+      },
+      relatedArticleIds: ["article-road"],
+      evidence: [
+        {
+          id: "datex-evidence",
+          situationId: "datex-e6",
+          source: "datex",
+          sourceLabel: "Statens vegvesen DATEX",
+          sourceUrl: "https://example.test/datex",
+          supportingSnippet: "Stengt veg",
+          claim: "E6 er stengt",
+          claimType: "official_traffic_status",
+          provenance: "official",
+          confidence: 1,
+          extractedAt: "2026-07-02T09:40:00.000Z",
+          publishedAt: "2026-07-02T09:20:00.000Z",
+        },
+        {
+          id: "article-evidence",
+          situationId: "datex-e6",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          sourceUrl: "https://example.test/e6",
+          supportingSnippet: "En kollisjon gjør at E6 er stengt.",
+          claim: "Kollisjon stenger E6",
+          claimType: "reporting_match",
+          provenance: "reporting_estimate",
+          confidence: 0.72,
+          extractedAt: "2026-07-02T09:40:00.000Z",
+          publishedAt: "2026-07-02T09:34:00.000Z",
+        },
+      ],
+      features: [],
+      timeline: [],
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["article-road"]]);
+        return { rows: [{ payload: situation }] };
+      }
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ limit: 10 }, "Reedtrullz");
+
+    expect(page.items[0]).toMatchObject({
+      id: "article-road",
+      saved: false,
+      situationId: "datex-e6",
+      publicVerification: {
+        status: "verified",
+        label: "Verifisert",
+        detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+        officialSources: ["datex"],
+        reportingSources: ["adressa"],
+        situationId: "datex-e6",
+      },
+    });
+    expect(query).toHaveBeenCalledTimes(2);
   });
 });

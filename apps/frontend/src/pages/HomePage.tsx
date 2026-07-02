@@ -18,10 +18,16 @@ import {
 } from "../homeFilters.js";
 import { groupHomeArticles, type HomeArticleGroup } from "../homeArticleGroups.js";
 import {
+  nearbyDistanceLabel,
   nearbyStoryItemsForGroups,
   nearbyStorySummary,
   type NearbyStoryItem,
 } from "../homeNearby.js";
+import {
+  homeNeighborhoodFocusOption,
+  homeNeighborhoodFocusOptions,
+  homeNeighborhoodFocusStorageKey,
+} from "../homeNeighborhoodFocus.js";
 import { rankHomeStoryCardsByLocalFocus, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
 import {
   homeStoryCardsForGroups,
@@ -40,7 +46,7 @@ const localFocusRadiusKm = 10;
 type LocalFocusState =
   | { status: "idle" }
   | { status: "locating" }
-  | { status: "active"; point: HomeLocalFocusPoint }
+  | { status: "active"; point: HomeLocalFocusPoint; label: string; persistent: boolean }
   | { status: "error"; message: string };
 
 function formatTime(date: string) {
@@ -230,6 +236,11 @@ function LeadStory({
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
+          {card.verification ? (
+            <span className="story-badge story-badge-verified" title={card.verification.detail}>
+              {card.verification.label}
+            </span>
+          ) : null}
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
@@ -307,6 +318,11 @@ function StoryCard({
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
+          {card.verification ? (
+            <span className="story-badge story-badge-verified" title={card.verification.detail}>
+              {card.verification.label}
+            </span>
+          ) : null}
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
@@ -372,6 +388,7 @@ function NearbyRail({
   const selectedArticleUrl = selectedNearby
     ? safeExternalUrl(selectedNearby.article.url)
     : undefined;
+  const selectedDistance = localFocus ? nearbyDistanceLabel(selectedNearby?.distanceKm) : undefined;
   const municipalityArchiveUrl = safeExternalUrl(
     "https://www.trondheim.kommune.no/aktuelt/nyheter/",
   );
@@ -423,6 +440,9 @@ function NearbyRail({
                       <b>{item.title}</b>
                       <small>
                         {item.locationLabel} · {item.sourceLabel}
+                        {localFocus
+                          ? ` · ${nearbyDistanceLabel(item.distanceKm) ?? "uten avstand"}`
+                          : ""}
                       </small>
                     </span>
                     <em className={`nearby-kind nearby-kind-${item.kind}`}>
@@ -439,6 +459,7 @@ function NearbyRail({
               </p>
               <h3>{selectedNearby?.title}</h3>
               <p>{selectedNearby?.relevanceDetail}</p>
+              {selectedDistance ? <p className="nearby-distance">{selectedDistance}</p> : null}
               <div className="nearby-detail-actions">
                 <Link to={selectedTarget.to}>
                   {selectedTarget.label} <ArrowIcon />
@@ -547,18 +568,50 @@ export function HomePage({
   const [saveError, setSaveError] = useState<string>();
   const timeWindowFrom = useMemo(() => homeTimeWindowFrom(timeWindow), [timeWindow]);
   const [localFocus, setLocalFocus] = useState<LocalFocusState>({ status: "idle" });
+  const [neighborhoodFocusId, setNeighborhoodFocusId] = useState("");
   const activeLocalFocus = localFocus.status === "active" ? localFocus.point : undefined;
+  const activeLocalFocusRadiusKm = activeLocalFocus?.radiusKm ?? localFocusRadiusKm;
+
+  useEffect(() => {
+    try {
+      const option = homeNeighborhoodFocusOption(
+        window.localStorage.getItem(homeNeighborhoodFocusStorageKey),
+      );
+      if (!option) return;
+      setNeighborhoodFocusId(option.id);
+      setLocalFocus({
+        status: "active",
+        point: option.point,
+        label: option.label,
+        persistent: true,
+      });
+    } catch {
+      // Local focus is a convenience hint. Storage failures should not block the feed.
+    }
+  }, []);
+
+  const clearStoredNeighborhoodFocus = useCallback(() => {
+    try {
+      window.localStorage.removeItem(homeNeighborhoodFocusStorageKey);
+    } catch {
+      // Ignore storage failures; the UI state is still cleared for this session.
+    }
+  }, []);
 
   const requestLocalFocus = useCallback(() => {
     if (!navigator.geolocation) {
       setLocalFocus({ status: "error", message: "Nettleseren støtter ikke posisjon her." });
       return;
     }
+    setNeighborhoodFocusId("");
+    clearStoredNeighborhoodFocus();
     setLocalFocus({ status: "locating" });
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocalFocus({
           status: "active",
+          label: "din posisjon",
+          persistent: false,
           point: {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
@@ -569,9 +622,36 @@ export function HomePage({
       (error) => setLocalFocus({ status: "error", message: geolocationErrorMessage(error) }),
       { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 8000 },
     );
-  }, []);
+  }, [clearStoredNeighborhoodFocus]);
 
-  const clearLocalFocus = useCallback(() => setLocalFocus({ status: "idle" }), []);
+  const clearLocalFocus = useCallback(() => {
+    setNeighborhoodFocusId("");
+    clearStoredNeighborhoodFocus();
+    setLocalFocus({ status: "idle" });
+  }, [clearStoredNeighborhoodFocus]);
+
+  const selectNeighborhoodFocus = useCallback(
+    (value: string) => {
+      const option = homeNeighborhoodFocusOption(value);
+      if (!option) {
+        clearLocalFocus();
+        return;
+      }
+      setNeighborhoodFocusId(option.id);
+      try {
+        window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+      } catch {
+        // The chosen focus still works for this session even when persistence is unavailable.
+      }
+      setLocalFocus({
+        status: "active",
+        point: option.point,
+        label: option.label,
+        persistent: true,
+      });
+    },
+    [clearLocalFocus],
+  );
 
   function updateFilters(next: Partial<HomeFilters>) {
     const merged: HomeFilters = { ...filters, ...next };
@@ -804,11 +884,26 @@ export function HomePage({
             {localFocus.status === "locating"
               ? "Finner posisjon"
               : localFocus.status === "active"
-                ? "Nær meg aktiv"
+                ? "Lokalt fokus aktivt"
                 : "Nær meg"}
           </button>
+          <select
+            aria-label="Velg nærområde"
+            value={neighborhoodFocusId}
+            onChange={(event) => selectNeighborhoodFocus(event.target.value)}
+          >
+            <option value="">Velg område</option>
+            {homeNeighborhoodFocusOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           {localFocus.status === "active" ? (
-            <span>Innen {localFocusRadiusKm} km</span>
+            <span>
+              Nær {localFocus.label} · innen {activeLocalFocusRadiusKm} km
+              {localFocus.persistent ? " · huskes her" : ""}
+            </span>
           ) : localFocus.status === "error" ? (
             <span role="status">{localFocus.message}</span>
           ) : null}

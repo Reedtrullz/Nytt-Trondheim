@@ -426,6 +426,17 @@ button {
   font-weight: 700;
 }
 
+.local-focus select {
+  min-height: 32px;
+  max-width: 140px;
+  padding: 5px 28px 5px 9px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+  font-weight: 700;
+}
+
 .local-focus button.selected {
   border-color: rgba(20, 104, 75, 0.45);
   color: var(--green);
@@ -787,6 +798,11 @@ button {
 .story-badge {
   border-color: rgba(20, 104, 75, 0.28);
   color: var(--green);
+}
+
+.story-badge-verified {
+  border-color: rgba(20, 104, 75, 0.45);
+  background: rgba(20, 104, 75, 0.08);
 }
 
 .story-card-tags {
@@ -1265,6 +1281,12 @@ button {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.nearby-detail .nearby-distance {
+  margin-top: 6px;
+  color: var(--green);
+  font-weight: 800;
 }
 
 .nearby-detail-actions {

@@ -1,4 +1,4 @@
-import type { Article } from "@nytt/shared";
+import { sourceIdLabel, type Article } from "@nytt/shared";
 import { articleCategoryLabels } from "./homeFilters.js";
 import type { HomeArticleGroup } from "./homeArticleGroups.js";
 
@@ -19,6 +19,14 @@ export interface HomeStoryCard {
   latestAt: string;
   isClustered: boolean;
   cardKind: "situasjon" | "hendelse" | "tema" | "oppdatering" | "sak";
+  verification?: HomeStoryVerification;
+}
+
+export interface HomeStoryVerification {
+  label: string;
+  detail: string;
+  sourceSummary: string;
+  situationId?: string;
 }
 
 const genericPlaces = new Set(["norge", "trondheim", "trondelag", "trøndelag"]);
@@ -77,6 +85,22 @@ function cardKindFor(group: HomeArticleGroup): HomeStoryCard["cardKind"] {
   return "sak";
 }
 
+function storyVerification(group: HomeArticleGroup): HomeStoryVerification | undefined {
+  const verification =
+    group.primary.publicVerification ??
+    group.articles.find((article) => article.publicVerification)?.publicVerification;
+  if (!verification) return undefined;
+  return {
+    label: verification.label,
+    detail: verification.detail,
+    sourceSummary: [
+      ...verification.officialSources.map((source) => sourceIdLabel(source)),
+      ...verification.reportingSources.map((source) => sourceIdLabel(source)),
+    ].join(" + "),
+    situationId: verification.situationId,
+  };
+}
+
 export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
   const places = storyPlaces(group);
   return {
@@ -96,6 +120,7 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     latestAt: group.primary.publishedAt,
     isClustered: group.articles.length > 1,
     cardKind: cardKindFor(group),
+    verification: storyVerification(group),
   };
 }
 

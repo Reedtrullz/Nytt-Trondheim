@@ -220,3 +220,12 @@ export function nearbyStorySummary(items: NearbyStoryItem[], locatedCount: numbe
   const suffix = locatedCount > shown ? ` av ${locatedCount}` : "";
   return `${shown}${suffix} stedsfestede saker fra nyhetslisten.`;
 }
+
+export function nearbyDistanceLabel(distanceKm: number | undefined): string | undefined {
+  if (distanceKm === undefined || !Number.isFinite(distanceKm)) return undefined;
+  if (distanceKm < 1) return "under 1 km unna";
+  if (distanceKm < 10) {
+    return `${distanceKm.toFixed(1).replace(".", ",")} km unna`;
+  }
+  return `${Math.round(distanceKm)} km unna`;
+}

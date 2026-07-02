@@ -96,6 +96,7 @@ import {
   sampleSituation,
   sampleTasks,
   sampleWorkspace,
+  sourceIdLabel,
 } from "@nytt/shared";
 import pg from "pg";
 import type { Profile } from "passport-github2";
@@ -699,6 +700,85 @@ function sourceItemRoleForProvider(provider: SourceId): SourceItem["role"] {
   if (role === "private") return "private";
   if (provider === "deepseek") return "ai_summary";
   return "ignored";
+}
+
+const newsroomArticleSources = new Set<SourceId>([
+  "nrk",
+  "adressa",
+  "avisa_st",
+  "snasningen",
+  "merakerposten",
+  "frostingen",
+  "ytringen",
+  "steinkjer_avisa",
+  "innherred",
+  "namdalsavisa",
+  "malviknytt",
+  "selbyggen",
+  "fjell_ljom",
+  "retten",
+  "hitra_froya",
+  "tronderbladet",
+  "nidaros",
+  "t_a",
+  "vg",
+  "dagbladet",
+]);
+
+function sourceLabelsForIds(sources: SourceId[]): string {
+  return sources.map((source) => sourceIdLabel(source)).join(", ");
+}
+
+function publicVerificationForSituation(
+  situation: Situation,
+): Article["publicVerification"] | undefined {
+  if (situation.officialSource !== "datex") return undefined;
+  if (situation.status !== "active" && situation.status !== "preliminary") return undefined;
+  const reportingSources = [
+    ...new Set(
+      situation.evidence
+        .filter(
+          (item) =>
+            item.provenance === "reporting_estimate" && newsroomArticleSources.has(item.source),
+        )
+        .map((item) => item.source),
+    ),
+  ];
+  if (reportingSources.length === 0) return undefined;
+  return {
+    status: "verified",
+    label: "Verifisert",
+    detail: `Bekreftet av ${sourceIdLabel("datex")} og ${sourceLabelsForIds(reportingSources)}.`,
+    officialSources: ["datex"],
+    reportingSources,
+    situationId: situation.id,
+  };
+}
+
+function enrichArticlesWithSituations(articles: Article[], situations: Situation[]): Article[] {
+  if (articles.length === 0 || situations.length === 0) return articles;
+  const articleIds = new Set(articles.map((article) => article.id));
+  const situationByArticleId = new Map<string, Situation>();
+  for (const situation of [...situations].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  )) {
+    if (situation.status !== "active" && situation.status !== "preliminary") continue;
+    for (const articleId of situation.relatedArticleIds) {
+      if (!articleIds.has(articleId) || situationByArticleId.has(articleId)) continue;
+      situationByArticleId.set(articleId, situation);
+    }
+  }
+  if (situationByArticleId.size === 0) return articles;
+  return articles.map((article) => {
+    const situation = situationByArticleId.get(article.id);
+    if (!situation) return article;
+    const publicVerification = publicVerificationForSituation(situation);
+    return {
+      ...article,
+      situationId: article.situationId ?? situation.id,
+      ...(publicVerification ? { publicVerification } : {}),
+    };
+  });
 }
 
 interface SourceItemRow {
@@ -2770,7 +2850,14 @@ export class MemoryStore implements Store {
     const page = items.slice(0, limit);
     const last = page.at(-1);
     return {
-      items: clone(page),
+      items: clone(
+        enrichArticlesWithSituations(
+          page,
+          [...this.situations.values()].filter(
+            (situation) => situation.status === "preliminary" || situation.status === "active",
+          ),
+        ),
+      ),
       nextCursor:
         items.length > limit && last ? encodeCursor(last.publishedAt, last.id) : undefined,
     };
@@ -3394,6 +3481,23 @@ export class MemoryStore implements Store {
 
 export class PgStore implements Store {
   constructor(private readonly pool: pg.Pool) {}
+
+  private async listSituationsForArticleIds(articleIds: string[]): Promise<Situation[]> {
+    if (articleIds.length === 0) return [];
+    const result = await this.pool.query<{ payload: Situation }>(
+      `SELECT payload
+       FROM situations
+       WHERE status IN ('preliminary', 'active')
+         AND EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements_text(COALESCE(payload->'relatedArticleIds', '[]'::jsonb)) related(id)
+           WHERE related.id = ANY($1::text[])
+         )
+       ORDER BY updated_at DESC`,
+      [articleIds],
+    );
+    return result.rows.map((row) => row.payload);
+  }
 
   private async listHomeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
     const result = await this.pool.query<{
@@ -4112,7 +4216,13 @@ export class PgStore implements Store {
       params,
     );
     const limit = filters.limit ?? 40;
-    const items = result.rows.slice(0, limit).map((row) => ({ ...row.payload, saved: row.saved }));
+    const rawItems = result.rows
+      .slice(0, limit)
+      .map((row) => ({ ...row.payload, saved: row.saved }));
+    const relatedSituations = await this.listSituationsForArticleIds(
+      rawItems.map((article) => article.id),
+    );
+    const items = enrichArticlesWithSituations(rawItems, relatedSituations);
     return {
       items,
       nextCursor:

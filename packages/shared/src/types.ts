@@ -127,6 +127,16 @@ export interface Article {
   situationId?: string;
   imageUrl?: string;
   coverageBundle?: ArticleCoverageBundle;
+  publicVerification?: ArticlePublicVerification;
+}
+
+export interface ArticlePublicVerification {
+  status: "verified";
+  label: string;
+  detail: string;
+  officialSources: SourceId[];
+  reportingSources: SourceId[];
+  situationId?: string;
 }
 
 export type ArticleCoverageBundleKind = "incident" | "topic" | "update";
