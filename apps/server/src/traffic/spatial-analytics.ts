@@ -1,4 +1,12 @@
-import type { Article, TrafficCorridorImpact, UnexplainedDelayCandidate } from "@nytt/shared";
+import {
+  sourceMixConfidenceSummary,
+  type Article,
+  type SpatialHeatmapCell,
+  type SpatialInvestigationQueueItem,
+  type TrafficCounterSnapshot,
+  type TrafficCorridorImpact,
+  type UnexplainedDelayCandidate,
+} from "@nytt/shared";
 
 const defaultMinDelaySeconds = 180;
 const trafficKeywordPattern =
@@ -39,6 +47,137 @@ function confidenceForDelay(delaySeconds: number | undefined, state: string) {
 function delayMinutes(delaySeconds: number | undefined): number | undefined {
   if (delaySeconds === undefined) return undefined;
   return Math.max(1, Math.round(delaySeconds / 60));
+}
+
+function investigationDelayPriority(
+  confidence: UnexplainedDelayCandidate["confidence"],
+): SpatialInvestigationQueueItem["priority"] {
+  switch (confidence) {
+    case "critical":
+      return "critical";
+    case "warning":
+      return "high";
+    case "watch":
+      return "watch";
+  }
+}
+
+function investigationHotspotPriority(
+  cell: SpatialHeatmapCell,
+): SpatialInvestigationQueueItem["priority"] {
+  if (cell.maxSeverity === "critical" || cell.trafficEventCount >= 3 || cell.count >= 10) {
+    return "critical";
+  }
+  if (
+    cell.maxSeverity === "high" ||
+    cell.trafficEventCount > 0 ||
+    cell.activeDayCount >= 3 ||
+    cell.count >= 4 ||
+    (cell.articleCount > 0 && cell.sourceItemCount > 0)
+  ) {
+    return "high";
+  }
+  return "watch";
+}
+
+function priorityRank(priority: SpatialInvestigationQueueItem["priority"]): number {
+  switch (priority) {
+    case "critical":
+      return 3;
+    case "high":
+      return 2;
+    case "watch":
+      return 1;
+  }
+  return 0;
+}
+
+function confidenceScore(item: { sourceConfidence?: { score?: number } }) {
+  return item.sourceConfidence?.score ?? 0;
+}
+
+function trafficCounterPriority(
+  counter: TrafficCounterSnapshot,
+): SpatialInvestigationQueueItem["priority"] {
+  const anomalyRatio = counter.anomalyRatio ?? 0;
+  if (anomalyRatio >= 3 || (counter.volumeLastHour ?? 0) >= 3000) return "critical";
+  if (anomalyRatio >= 1.7 || (counter.volumeLastHour ?? 0) >= 1500) return "high";
+  return "watch";
+}
+
+function articleTitleLookup(articles: Article[]) {
+  return new Map(articles.map((article) => [article.id, article.title]));
+}
+
+function countPhrase(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function activeDayPhrase(activeDayCount: number) {
+  return countPhrase(activeDayCount, "aktiv dag", "aktive dager");
+}
+
+function delayEvidence(
+  candidate: UnexplainedDelayCandidate,
+  articleTitles: Map<string, string>,
+): string[] {
+  const evidence = [`DATEX reisetid: ${delayMinutes(candidate.delaySeconds) ?? "ukjent"} min`];
+  if (candidate.matchedArticleIds.length > 0) {
+    const titles = candidate.matchedArticleIds
+      .flatMap((id) => {
+        const title = articleTitles.get(id);
+        return title ? [title] : [];
+      })
+      .slice(0, 2);
+    evidence.push(
+      titles.length > 0
+        ? `Mulige saker: ${titles.join(" · ")}`
+        : `${candidate.matchedArticleIds.length} mulige saker uten tittel i payload`,
+    );
+  } else {
+    evidence.push("Ingen tydelig nyhetsforklaring");
+  }
+  evidence.push("Ingen romlig koblet trafikkhendelse");
+  return evidence;
+}
+
+function hotspotEvidence(cell: SpatialHeatmapCell): string[] {
+  const evidence = [countPhrase(cell.count, "observasjon", "observasjoner")];
+  evidence.push(activeDayPhrase(cell.activeDayCount));
+  if (cell.articleCount > 0)
+    evidence.push(countPhrase(cell.articleCount, "nyhetssak", "nyhetssaker"));
+  if (cell.trafficEventCount > 0)
+    evidence.push(countPhrase(cell.trafficEventCount, "trafikkhendelse", "trafikkhendelser"));
+  if (cell.sourceItemCount > 0)
+    evidence.push(countPhrase(cell.sourceItemCount, "råobservasjon", "råobservasjoner"));
+  if (cell.maxSeverity) evidence.push(`Høyeste alvorlighet: ${cell.maxSeverity}`);
+  return evidence;
+}
+
+function trafficCounterEvidence(counter: TrafficCounterSnapshot): string[] {
+  const evidence: string[] = [];
+  if (counter.volumeLastHour !== undefined) {
+    evidence.push(
+      countPhrase(counter.volumeLastHour, "kjøretøy siste time", "kjøretøy siste time"),
+    );
+  }
+  if (counter.baselineVolumeLastHour !== undefined) {
+    evidence.push(`Normalnivå: ${counter.baselineVolumeLastHour}`);
+  }
+  if (counter.anomalyRatio !== undefined) {
+    evidence.push(`${counter.anomalyRatio.toFixed(1)}x normal trafikk`);
+  }
+  if (counter.coveragePercent !== undefined) {
+    evidence.push(`${Math.round(counter.coveragePercent)} % dekning`);
+  }
+  if (counter.roadCategory || counter.roadNumber) {
+    evidence.push([counter.roadCategory, counter.roadNumber].filter(Boolean).join(" "));
+  }
+  return evidence.length > 0 ? evidence : ["Trafikkdata-volum avviker fra forventet nivå"];
+}
+
+function isTrafficCounterAnomaly(counter: TrafficCounterSnapshot, minAnomalyRatio: number) {
+  return (counter.anomalyRatio ?? 0) >= minAnomalyRatio;
 }
 
 export function buildUnexplainedDelayCandidates(
@@ -94,4 +233,91 @@ export function buildUnexplainedDelayCandidates(
         right.updatedAt.localeCompare(left.updatedAt)
       );
     });
+}
+
+export function buildSpatialInvestigationQueue(
+  delayCandidates: UnexplainedDelayCandidate[],
+  heatmapCells: SpatialHeatmapCell[],
+  articles: Article[],
+  trafficCounters: TrafficCounterSnapshot[] = [],
+  options: { limit?: number; minCounterAnomalyRatio?: number; from?: string; to?: string } = {},
+): SpatialInvestigationQueueItem[] {
+  const limit = Math.max(1, Math.min(options.limit ?? 8, 20));
+  const minCounterAnomalyRatio = options.minCounterAnomalyRatio ?? 1.7;
+  const articleTitles = articleTitleLookup(articles);
+  const delayItems = delayCandidates.map((candidate): SpatialInvestigationQueueItem => {
+    const priority = investigationDelayPriority(candidate.confidence);
+    return {
+      id: `investigation:${candidate.id}`,
+      kind: "unexplained_delay",
+      priority,
+      title: candidate.corridorName,
+      summary: `${delayMinutes(candidate.delaySeconds) ?? "Ukjent"} min forsinkelse uten kjent årsak`,
+      reason: candidate.reason,
+      updatedAt: candidate.updatedAt,
+      evidence: delayEvidence(candidate, articleTitles),
+      articleIds: candidate.matchedArticleIds,
+      sourceItemIds: [],
+      ...(candidate.sourceConfidence ? { sourceConfidence: candidate.sourceConfidence } : {}),
+      targetUrl: candidate.sourceUrl,
+    };
+  });
+  const hotspotItems = heatmapCells.map((cell): SpatialInvestigationQueueItem => {
+    const priority = investigationHotspotPriority(cell);
+    return {
+      id: `investigation:${cell.id}`,
+      kind: "hotspot",
+      priority,
+      title: `Varmepunkt ${cell.id.replace(/^cell:/u, "")}`,
+      summary: `${cell.count} observasjoner over ${activeDayPhrase(cell.activeDayCount)} ved ${cell.center.lat.toFixed(3)}, ${cell.center.lng.toFixed(3)}`,
+      reason:
+        priority === "watch"
+          ? "Lavere tetthet, men synlig i romlig analyse."
+          : "Tetthet, gjentakelse eller tverrkildesignal bør kontrolleres i kart og rådata.",
+      updatedAt: cell.lastSeenAt,
+      evidence: hotspotEvidence(cell),
+      articleIds: [],
+      sourceItemIds: cell.sourceItemIds ?? [],
+      ...(cell.sourceConfidence ? { sourceConfidence: cell.sourceConfidence } : {}),
+    };
+  });
+  const counterItems = trafficCounters
+    .filter((counter) => isTrafficCounterAnomaly(counter, minCounterAnomalyRatio))
+    .filter((counter) => {
+      if (options.from && counter.updatedAt < options.from) return false;
+      if (options.to && counter.updatedAt > options.to) return false;
+      return true;
+    })
+    .map((counter): SpatialInvestigationQueueItem => {
+      const priority = trafficCounterPriority(counter);
+      const anomalyRatio = counter.anomalyRatio?.toFixed(1) ?? "ukjent";
+      return {
+        id: `investigation:traffic-counter:${counter.pointId}`,
+        kind: "traffic_counter_anomaly",
+        priority,
+        title: counter.name,
+        summary: `Trafikkdata viser ${anomalyRatio}x normal trafikk`,
+        reason:
+          "Trafikkdata er et kontekstsignal og bør kontrolleres mot kart, nyheter og DATEX før tiltak.",
+        updatedAt: counter.updatedAt,
+        evidence: trafficCounterEvidence(counter),
+        articleIds: [],
+        sourceItemIds: [],
+        sourceConfidence: sourceMixConfidenceSummary(["trafikkdata"], {
+          updatedAt: counter.updatedAt,
+        }),
+      };
+    });
+
+  return [...delayItems, ...hotspotItems, ...counterItems]
+    .sort((left, right) => {
+      const priorityDifference = priorityRank(right.priority) - priorityRank(left.priority);
+      if (priorityDifference !== 0) return priorityDifference;
+      const confidenceDifference = confidenceScore(right) - confidenceScore(left);
+      if (confidenceDifference !== 0) return confidenceDifference;
+      const recencyDifference = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      if (recencyDifference !== 0 && Number.isFinite(recencyDifference)) return recencyDifference;
+      return left.id.localeCompare(right.id);
+    })
+    .slice(0, limit);
 }

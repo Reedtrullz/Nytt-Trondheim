@@ -32,6 +32,62 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       speculative: 1,
     },
   },
+  investigationQueue: [
+    {
+      id: "investigation:delay:e6-south:100141",
+      kind: "unexplained_delay",
+      priority: "high",
+      title: "E6 Okstadbakken - E6 Sluppenrampene",
+      summary: "6 min forsinkelse uten kjent årsak",
+      reason: "DATEX viser ca. 6 min forsinkelse uten koblet trafikkhendelse.",
+      updatedAt: "2026-07-02T09:40:00.000Z",
+      evidence: [
+        "DATEX reisetid: 6 min",
+        "Mulige saker: Kø på E6 ved Sluppen",
+        "Ingen romlig koblet trafikkhendelse",
+      ],
+      articleIds: ["article-one"],
+      sourceItemIds: [],
+      sourceConfidence: {
+        level: "likely",
+        label: "Sannsynlig",
+        score: 0.7,
+        rationale: "Redaksjonell dekning støttes av kontekstsignaler.",
+      },
+      targetUrl: "https://example.test/datex",
+    },
+    {
+      id: "investigation:cell:1039:6339",
+      kind: "hotspot",
+      priority: "high",
+      title: "Varmepunkt 1039:6339",
+      summary: "4 observasjoner ved 63.390, 10.390",
+      reason: "Tetthet eller tverrkildesignal bør kontrolleres i kart og rådata.",
+      updatedAt: "2026-07-02T09:40:00.000Z",
+      evidence: ["4 observasjoner", "2 nyhetssaker", "1 trafikkhendelse"],
+      articleIds: [],
+      sourceItemIds: ["source:one"],
+    },
+    {
+      id: "investigation:traffic-counter:06970V72811",
+      kind: "traffic_counter_anomaly",
+      priority: "high",
+      title: "E6 Sluppen",
+      summary: "Trafikkdata viser 2.8x normal trafikk",
+      reason:
+        "Trafikkdata er et kontekstsignal og bør kontrolleres mot kart, nyheter og DATEX før tiltak.",
+      updatedAt: "2026-07-02T09:40:00.000Z",
+      evidence: ["2200 kjøretøy siste time", "Normalnivå: 800", "2.8x normal trafikk"],
+      articleIds: [],
+      sourceItemIds: [],
+      sourceConfidence: {
+        level: "uncertain",
+        label: "Usikker",
+        score: 0.46,
+        rationale: "Kontekstsignal fra Trafikkdata.",
+      },
+    },
+  ],
   heatmapCells: [
     {
       id: "cell:weak",
@@ -41,7 +97,9 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       sourceItemCount: 1,
       articleCount: 0,
       trafficEventCount: 0,
+      firstSeenAt: "2026-07-02T09:44:00.000Z",
       lastSeenAt: "2026-07-02T09:44:00.000Z",
+      activeDayCount: 1,
       sourceIds: ["deepseek"],
       maxSeverity: "low",
     },
@@ -54,7 +112,9 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       sourceItemIds: ["source:one", "source:two", "source:three", "source:four"],
       articleCount: 2,
       trafficEventCount: 1,
+      firstSeenAt: "2026-06-30T09:40:00.000Z",
       lastSeenAt: "2026-07-02T09:40:00.000Z",
+      activeDayCount: 3,
       sourceIds: ["nrk", "vegvesen_traffic_info"],
       maxSeverity: "high",
     },
@@ -146,6 +206,16 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Tidsrom");
     expect(html).toContain("Siste døgn");
     expect(html).toContain("Analysevindu: Hele tilgjengelige datasett");
+    expect(html).toContain("Operatørkø");
+    expect(html).toContain("Signaler å undersøke");
+    expect(html).toContain("3 signaler");
+    expect(html).toContain("Høy prioritet · Uforklart forsinkelse");
+    expect(html).toContain("Høy prioritet · Trafikkdata-avvik");
+    expect(html).toContain("E6 Sluppen");
+    expect(html).toContain("2.8x normal trafikk");
+    expect(html).toContain("DATEX reisetid: 6 min");
+    expect(html).toContain("Mulige saker: Kø på E6 ved Sluppen");
+    expect(html).toContain("1 mulige saker");
     expect(html).toContain("Uforklarte forsinkelser");
     expect(html).toContain("Bekreftet/sannsynlig");
     expect(html).toContain("E6 Okstadbakken");
@@ -157,6 +227,8 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Høy prioritet");
     expect(html).toContain("Bekreftet tillit");
     expect(html).toContain("4 observasjoner");
+    expect(html).toContain("Først sett 30. juni 2026");
+    expect(html).toContain("3 aktive dager");
     expect(html).toContain("høy alvorlighet");
     expect(html).toContain("1 trafikkhendelse");
     expect(html).toContain("Offisielle kilder og redaksjonelle kilder");
@@ -200,6 +272,7 @@ describe("SpatialAnalyticsDashboard", () => {
                 speculative: 0,
               },
             },
+            investigationQueue: [],
             heatmapCells: [],
             unexplainedDelays: [],
           }}
@@ -209,6 +282,7 @@ describe("SpatialAnalyticsDashboard", () => {
     );
 
     expect(html).toContain("Ingen store DATEX-forsinkelser uten koblet trafikkhendelse");
+    expect(html).toContain("Ingen prioriterte romlige signaler");
     expect(html).toContain("Ingen stedfestede observasjoner");
   });
 });

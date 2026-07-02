@@ -79,7 +79,10 @@ import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
-import { buildUnexplainedDelayCandidates } from "./traffic/spatial-analytics.js";
+import {
+  buildSpatialInvestigationQueue,
+  buildUnexplainedDelayCandidates,
+} from "./traffic/spatial-analytics.js";
 import {
   buildTravelPlanPayload,
   resolveTravelPlanPlacesAndRoute,
@@ -1971,30 +1974,37 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = commandCenterSpatialAnalyticsQuerySchema.parse(req.query);
       const login = currentLogin(req);
-      const [heatmapCells, trafficInfoEvents, officialEvents, articlesPage, trafficPulse] =
-        await Promise.all([
-          store.listSpatialHeatmapCells(query, login),
-          store.listTrafficMapEvents(
-            {
-              sources: ["vegvesen_traffic_info"],
-              states: ["active", "planned"],
-              from: query.from,
-              to: query.to,
-              limit: null,
-            },
-            login,
-          ),
-          store.listOfficialEvents({ source: "datex" }, login),
-          store.listArticles(
-            {
-              limit: 500,
-              ...(query.from ? { from: query.from } : {}),
-              ...(query.to ? { to: query.to } : {}),
-            },
-            login,
-          ),
-          store.listTrafficPulseCorridors(50),
-        ]);
+      const [
+        heatmapCells,
+        trafficInfoEvents,
+        officialEvents,
+        articlesPage,
+        trafficPulse,
+        trafficCounters,
+      ] = await Promise.all([
+        store.listSpatialHeatmapCells(query, login),
+        store.listTrafficMapEvents(
+          {
+            sources: ["vegvesen_traffic_info"],
+            states: ["active", "planned"],
+            from: query.from,
+            to: query.to,
+            limit: null,
+          },
+          login,
+        ),
+        store.listOfficialEvents({ source: "datex" }, login),
+        store.listArticles(
+          {
+            limit: 500,
+            ...(query.from ? { from: query.from } : {}),
+            ...(query.to ? { to: query.to } : {}),
+          },
+          login,
+        ),
+        store.listTrafficPulseCorridors(50),
+        store.listTrafficCounterSnapshots(),
+      ]);
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
 
@@ -2036,6 +2046,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           sourceConfidence:
             candidate.sourceConfidence ?? sourceConfidenceForDelayCandidate(candidate),
         }));
+      const investigationQueue = buildSpatialInvestigationQueue(
+        unexplainedDelays,
+        enrichedHeatmapCells,
+        articlesPage.items,
+        trafficCounters,
+        {
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+        },
+      );
       const confidenceItems = [...enrichedHeatmapCells, ...unexplainedDelays];
 
       res.json({
@@ -2053,6 +2073,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           ).length,
           bySourceConfidence: sourceConfidenceCounts(confidenceItems),
         },
+        investigationQueue,
         heatmapCells: enrichedHeatmapCells,
         unexplainedDelays,
       });

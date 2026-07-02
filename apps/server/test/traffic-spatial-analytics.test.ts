@@ -1,6 +1,9 @@
 import type { Article, TrafficCorridorImpact } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
-import { buildUnexplainedDelayCandidates } from "../src/traffic/spatial-analytics.js";
+import {
+  buildSpatialInvestigationQueue,
+  buildUnexplainedDelayCandidates,
+} from "../src/traffic/spatial-analytics.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -92,5 +95,124 @@ describe("spatial analytics unexplained delay candidates", () => {
     );
 
     expect(candidates).toEqual([]);
+  });
+
+  it("builds a prioritized operator investigation queue from delays and hot cells", () => {
+    const candidates = buildUnexplainedDelayCandidates([corridorImpact()], [article()], {
+      minDelaySeconds: 180,
+    }).map((candidate) => ({
+      ...candidate,
+      sourceConfidence: {
+        level: "likely" as const,
+        label: "Sannsynlig",
+        score: 0.72,
+        rationale: "DATEX reisetid støttes av mulig nyhetssak.",
+      },
+    }));
+    const queue = buildSpatialInvestigationQueue(
+      candidates,
+      [
+        {
+          id: "cell:1039:6339",
+          center: { lat: 63.39, lng: 10.39 },
+          radiusMeters: 650,
+          count: 4,
+          sourceItemCount: 2,
+          sourceItemIds: ["source:item-one", "source:item-two"],
+          articleCount: 1,
+          trafficEventCount: 1,
+          firstSeenAt: "2026-06-30T09:38:00.000Z",
+          lastSeenAt: "2026-07-02T09:38:00.000Z",
+          activeDayCount: 3,
+          sourceIds: ["nrk", "vegvesen_traffic_info"],
+          maxSeverity: "high",
+        },
+      ],
+      [article()],
+    );
+
+    expect(queue).toEqual([
+      expect.objectContaining({
+        kind: "unexplained_delay",
+        priority: "high",
+        title: "E6 Okstadbakken - E6 Sluppenrampene",
+        articleIds: ["article-e6-delay"],
+        sourceItemIds: [],
+        evidence: expect.arrayContaining([
+          "DATEX reisetid: 6 min",
+          "Mulige saker: Kø på E6 ved Sluppen",
+          "Ingen romlig koblet trafikkhendelse",
+        ]),
+        sourceConfidence: expect.objectContaining({ level: "likely" }),
+        targetUrl: "https://example.test/datex-travel-time",
+      }),
+      expect.objectContaining({
+        kind: "hotspot",
+        priority: "high",
+        sourceItemIds: ["source:item-one", "source:item-two"],
+        evidence: expect.arrayContaining([
+          "4 observasjoner",
+          "3 aktive dager",
+          "1 nyhetssak",
+          "1 trafikkhendelse",
+        ]),
+      }),
+    ]);
+  });
+
+  it("adds Trafikkdata counter anomalies as context-only investigation items", () => {
+    const queue = buildSpatialInvestigationQueue(
+      [],
+      [],
+      [],
+      [
+        {
+          id: "trafikkdata:06970V72811",
+          source: "trafikkdata",
+          pointId: "06970V72811",
+          name: "E6 Sluppen",
+          updatedAt: "2026-07-02T09:40:00.000Z",
+          geometry: { type: "Point", coordinates: [10.39, 63.39] },
+          roadCategory: "E",
+          roadNumber: "6",
+          volumeLastHour: 2200,
+          baselineVolumeLastHour: 800,
+          anomalyRatio: 2.75,
+          coveragePercent: 94,
+        },
+        {
+          id: "trafikkdata:normal",
+          source: "trafikkdata",
+          pointId: "normal",
+          name: "Normal teller",
+          updatedAt: "2026-07-02T09:40:00.000Z",
+          geometry: { type: "Point", coordinates: [10.4, 63.4] },
+          anomalyRatio: 1.1,
+        },
+      ],
+      { minCounterAnomalyRatio: 1.7 },
+    );
+
+    expect(queue).toEqual([
+      expect.objectContaining({
+        kind: "traffic_counter_anomaly",
+        priority: "high",
+        title: "E6 Sluppen",
+        summary: "Trafikkdata viser 2.8x normal trafikk",
+        articleIds: [],
+        sourceItemIds: [],
+        evidence: expect.arrayContaining([
+          "2200 kjøretøy siste time",
+          "Normalnivå: 800",
+          "2.8x normal trafikk",
+          "94 % dekning",
+          "E 6",
+        ]),
+        sourceConfidence: expect.objectContaining({
+          level: "uncertain",
+          label: "Usikker",
+        }),
+      }),
+    ]);
   });
 });

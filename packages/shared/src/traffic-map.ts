@@ -238,7 +238,9 @@ export interface SpatialHeatmapCell {
   sourceItemIds?: string[];
   articleCount: number;
   trafficEventCount: number;
+  firstSeenAt: string;
   lastSeenAt: string;
+  activeDayCount: number;
   sourceIds: Array<SourceId | TrafficMapEventSource>;
   maxSeverity?: TrafficEventSeverity;
   sourceConfidence?: SourceConfidenceSummary;
@@ -261,6 +263,21 @@ export interface UnexplainedDelayCandidate {
   sourceConfidence?: SourceConfidenceSummary;
 }
 
+export interface SpatialInvestigationQueueItem {
+  id: string;
+  kind: "unexplained_delay" | "hotspot" | "traffic_counter_anomaly";
+  priority: "critical" | "high" | "watch";
+  title: string;
+  summary: string;
+  reason: string;
+  updatedAt: string;
+  evidence: string[];
+  articleIds: string[];
+  sourceItemIds: string[];
+  sourceConfidence?: SourceConfidenceSummary;
+  targetUrl?: string;
+}
+
 export interface CommandCenterSpatialAnalyticsPayload {
   generatedAt: string;
   window: {
@@ -274,6 +291,7 @@ export interface CommandCenterSpatialAnalyticsPayload {
     criticalDelays: number;
     bySourceConfidence: Record<SourceConfidenceLevel, number>;
   };
+  investigationQueue: SpatialInvestigationQueueItem[];
   heatmapCells: SpatialHeatmapCell[];
   unexplainedDelays: UnexplainedDelayCandidate[];
 }

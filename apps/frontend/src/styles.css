@@ -4764,6 +4764,7 @@ button {
 
 .spatial-analytics-sidebar,
 .spatial-analytics-cells,
+.spatial-investigation-panel,
 .spatial-delay-panel {
   border: 1px solid var(--line);
   background: var(--paper);
@@ -4842,6 +4843,7 @@ button {
   color: var(--muted);
 }
 
+.spatial-investigation-panel,
 .spatial-delay-panel,
 .spatial-analytics-cells {
   padding: 18px;
@@ -4868,15 +4870,82 @@ button {
 }
 
 .spatial-delay-list,
+.spatial-investigation-list,
 .spatial-cell-list {
   display: grid;
   gap: 10px;
 }
 
 .spatial-delay-row,
+.spatial-investigation-row,
 .spatial-cell-row {
   border: 1px solid var(--line);
   background: var(--page);
+}
+
+.spatial-investigation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.55fr) minmax(120px, 0.28fr);
+  gap: 13px;
+  align-items: start;
+  padding: 13px;
+  border-left: 5px solid var(--line);
+}
+
+.spatial-investigation-row.priority-watch {
+  border-left-color: rgba(20, 104, 75, 0.45);
+}
+
+.spatial-investigation-row.priority-high {
+  border-left-color: #c07818;
+}
+
+.spatial-investigation-row.priority-critical {
+  border-left-color: var(--rust);
+}
+
+.spatial-investigation-row h3 {
+  margin: 3px 0 5px;
+  font: 21px/1.1 var(--serif);
+}
+
+.spatial-investigation-row p,
+.spatial-investigation-row small {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.spatial-investigation-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.spatial-investigation-evidence span,
+.spatial-investigation-actions > span {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.spatial-investigation-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.spatial-investigation-actions a {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 850;
+  text-decoration: none;
 }
 
 .spatial-delay-row {
@@ -8860,6 +8929,7 @@ button {
     height: 440px;
   }
 
+  .spatial-investigation-row,
   .spatial-delay-row,
   .spatial-delay-row dl {
     grid-template-columns: 1fr;

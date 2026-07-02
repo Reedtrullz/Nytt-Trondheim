@@ -2714,7 +2714,9 @@ describe("private situation API", () => {
         sourceItemIds: ["source:item-one", "source:item-two"],
         articleCount: 1,
         trafficEventCount: 1,
+        firstSeenAt: "2026-07-01T09:40:00.000Z",
         lastSeenAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 2,
         sourceIds: ["nrk", "vegvesen_traffic_info"],
         maxSeverity: "high",
       },
@@ -2732,6 +2734,20 @@ describe("private situation API", () => {
         measurementTo: "2026-07-02T09:40:00.000Z",
         updatedAt: "2026-07-02T09:40:20.000Z",
         sourceUrl: "https://example.test/datex-travel-time",
+      },
+    ]);
+    vi.spyOn(store, "listTrafficCounterSnapshots").mockResolvedValue([
+      {
+        id: "trafikkdata:06970V72811",
+        source: "trafikkdata",
+        pointId: "06970V72811",
+        name: "E6 Sluppen",
+        updatedAt: "2026-07-02T09:40:00.000Z",
+        geometry: { type: "Point", coordinates: [10.39, 63.39] },
+        volumeLastHour: 2200,
+        baselineVolumeLastHour: 800,
+        anomalyRatio: 2.75,
+        coveragePercent: 94,
       },
     ]);
 
@@ -2752,10 +2768,30 @@ describe("private situation API", () => {
           speculative: expect.any(Number),
         }),
       },
+      investigationQueue: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "traffic_counter_anomaly",
+          priority: "high",
+          title: "E6 Sluppen",
+          evidence: expect.arrayContaining(["2.8x normal trafikk"]),
+          sourceItemIds: [],
+          articleIds: [],
+        }),
+        expect.objectContaining({
+          kind: expect.stringMatching(/^(hotspot|unexplained_delay)$/u),
+          priority: expect.stringMatching(/^(critical|high|watch)$/u),
+          title: expect.any(String),
+          evidence: expect.any(Array),
+          sourceItemIds: expect.any(Array),
+          articleIds: expect.any(Array),
+        }),
+      ]),
       heatmapCells: [
         expect.objectContaining({
           id: "cell:1039:6339",
           count: 3,
+          firstSeenAt: "2026-07-01T09:40:00.000Z",
+          activeDayCount: 2,
           sourceItemIds: ["source:item-one", "source:item-two"],
           sourceIds: ["nrk", "vegvesen_traffic_info"],
           sourceConfidence: expect.objectContaining({
@@ -2931,6 +2967,59 @@ describe("private situation API", () => {
     );
     expect(capturedParams).toEqual([["active"], 10.2, 63.3, 10.5, 63.5]);
     expect(alerts).toEqual([alert]);
+  });
+
+  it("PgStore includes temporal evidence when listing spatial heatmap cells", async () => {
+    let capturedSql = "";
+    let capturedParams: unknown[] | undefined;
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        capturedSql = sql.replace(/\s+/g, " ").trim();
+        capturedParams = params;
+        return {
+          rows: [
+            {
+              id: "cell:1039:6339",
+              center_lng: "10.39",
+              center_lat: "63.39",
+              observation_count: "4",
+              source_item_count: "3",
+              source_item_ids: ["source:item-one", "source:item-two"],
+              article_count: "2",
+              traffic_event_count: "1",
+              first_seen_at: "2026-06-30T09:40:00.000Z",
+              last_seen_at: "2026-07-02T09:40:00.000Z",
+              active_day_count: "3",
+              source_ids: ["nrk", "vegvesen_traffic_info"],
+              severity_rank: "3",
+            },
+          ],
+        };
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await expect(
+      store.listSpatialHeatmapCells(
+        {
+          from: "2026-06-30T00:00:00.000Z",
+          to: "2026-07-02T23:59:59.000Z",
+          limit: 5,
+        },
+        "Reedtrullz",
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "cell:1039:6339",
+        firstSeenAt: "2026-06-30T09:40:00.000Z",
+        lastSeenAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 3,
+        maxSeverity: "high",
+      }),
+    ]);
+    expect(capturedSql).toContain("min(observed_at) AS first_seen_at");
+    expect(capturedSql).toContain("count(DISTINCT observed_at::date)::text AS active_day_count");
+    expect(capturedParams).toEqual(["2026-06-30T00:00:00.000Z", "2026-07-02T23:59:59.000Z", 5]);
   });
 
   it("PgStore lists road weather, camera, and counter rows with bounds SQL filters", async () => {

@@ -941,7 +941,9 @@ interface SpatialHeatmapCellRow {
   source_item_ids: string[] | null;
   article_count: string | number;
   traffic_event_count: string | number;
+  first_seen_at: Date | string;
   last_seen_at: Date | string;
+  active_day_count: string | number;
   source_ids: string[] | null;
   severity_rank: number | string | null;
 }
@@ -1316,7 +1318,9 @@ function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCe
     ...(sourceItemIds.length ? { sourceItemIds } : {}),
     articleCount: numericRowValue(row.article_count),
     trafficEventCount: numericRowValue(row.traffic_event_count),
+    firstSeenAt: new Date(row.first_seen_at).toISOString(),
     lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    activeDayCount: numericRowValue(row.active_day_count),
     sourceIds,
     ...(maxSeverity ? { maxSeverity } : {}),
   };
@@ -3389,7 +3393,9 @@ export class MemoryStore implements Store {
         sourceItemIds: string[];
         articleCount: number;
         trafficEventCount: number;
+        firstSeenAt: string;
         lastSeenAt: string;
+        activeDays: Set<string>;
         sourceIds: Set<SpatialHeatmapCell["sourceIds"][number]>;
       }
     >();
@@ -3418,7 +3424,9 @@ export class MemoryStore implements Store {
         sourceItemIds: [],
         articleCount: 0,
         trafficEventCount: 0,
+        firstSeenAt: observedAt,
         lastSeenAt: observedAt,
+        activeDays: new Set<string>(),
         sourceIds: new Set<SpatialHeatmapCell["sourceIds"][number]>(),
       };
       current.lngSum += lng;
@@ -3427,7 +3435,9 @@ export class MemoryStore implements Store {
       current.sourceItemCount += 1;
       if (current.sourceItemIds.length < 12) current.sourceItemIds.push(item.id);
       if (item.kind === "article") current.articleCount += 1;
+      if (observedAt < current.firstSeenAt) current.firstSeenAt = observedAt;
       if (observedAt > current.lastSeenAt) current.lastSeenAt = observedAt;
+      current.activeDays.add(observedAt.slice(0, 10));
       current.sourceIds.add(item.provider);
       cells.set(key, current);
     }
@@ -3442,7 +3452,9 @@ export class MemoryStore implements Store {
         ...(cell.sourceItemIds.length ? { sourceItemIds: cell.sourceItemIds } : {}),
         articleCount: cell.articleCount,
         trafficEventCount: cell.trafficEventCount,
+        firstSeenAt: cell.firstSeenAt,
         lastSeenAt: cell.lastSeenAt,
+        activeDayCount: cell.activeDays.size,
         sourceIds: [...cell.sourceIds],
       }))
       .sort(
@@ -5149,7 +5161,9 @@ export class PgStore implements Store {
          ) AS source_item_ids,
          count(*) FILTER (WHERE observation_type = 'source_item' AND item_kind = 'article')::text AS article_count,
          count(*) FILTER (WHERE observation_type = 'traffic_event')::text AS traffic_event_count,
+         min(observed_at) AS first_seen_at,
          max(observed_at) AS last_seen_at,
+         count(DISTINCT observed_at::date)::text AS active_day_count,
          array_agg(DISTINCT source_id ORDER BY source_id) AS source_ids,
          max(CASE severity
            WHEN 'critical' THEN 4

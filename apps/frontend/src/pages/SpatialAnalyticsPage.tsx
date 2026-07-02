@@ -8,6 +8,7 @@ import {
   type CommandCenterSpatialAnalyticsQueryInput,
   type SourceConfidenceSummary,
   type SpatialHeatmapCell,
+  type SpatialInvestigationQueueItem,
   type UnexplainedDelayCandidate,
 } from "@nytt/shared";
 import { api } from "../api.js";
@@ -39,11 +40,24 @@ const confidenceLabels: Record<UnexplainedDelayCandidate["confidence"], string> 
 };
 
 type HotspotPriority = "watch" | "high" | "critical";
+type InvestigationPriority = SpatialInvestigationQueueItem["priority"];
 
 const hotspotPriorityLabels: Record<HotspotPriority, string> = {
   watch: "Følg med",
   high: "Høy prioritet",
   critical: "Kritisk varmepunkt",
+};
+
+const investigationPriorityLabels: Record<InvestigationPriority, string> = {
+  watch: "Følg med",
+  high: "Høy prioritet",
+  critical: "Kritisk",
+};
+
+const investigationKindLabels: Record<SpatialInvestigationQueueItem["kind"], string> = {
+  unexplained_delay: "Uforklart forsinkelse",
+  hotspot: "Varmepunkt",
+  traffic_counter_anomaly: "Trafikkdata-avvik",
 };
 
 const severityLabels: Record<NonNullable<SpatialHeatmapCell["maxSeverity"]>, string> = {
@@ -105,6 +119,10 @@ function delayText(delaySeconds?: number) {
   return `${Math.max(1, Math.round(delaySeconds / 60))} min forsinkelse`;
 }
 
+function activeDaysLabel(activeDayCount: number) {
+  return `${activeDayCount} ${activeDayCount === 1 ? "aktiv dag" : "aktive dager"}`;
+}
+
 function sourceLabel(source: SpatialHeatmapCell["sourceIds"][number]) {
   switch (source) {
     case "datex":
@@ -131,6 +149,7 @@ function hotspotPriority(cell: SpatialHeatmapCell): HotspotPriority {
   if (
     cell.maxSeverity === "high" ||
     cell.trafficEventCount > 0 ||
+    cell.activeDayCount >= 3 ||
     cell.count >= 4 ||
     (cell.articleCount > 0 && cell.sourceItemCount > 0)
   ) {
@@ -141,6 +160,9 @@ function hotspotPriority(cell: SpatialHeatmapCell): HotspotPriority {
 
 function hotspotReason(cell: SpatialHeatmapCell) {
   const signals: string[] = [];
+  if (cell.activeDayCount > 1) {
+    signals.push(activeDaysLabel(cell.activeDayCount));
+  }
   if (cell.maxSeverity) {
     signals.push(`${severityLabels[cell.maxSeverity]} alvorlighet`);
   }
@@ -158,7 +180,9 @@ function hotspotReason(cell: SpatialHeatmapCell) {
   if (cell.count >= 4) {
     signals.push(`${cell.count} samlede observasjoner`);
   }
-  return signals.length > 0 ? signals.join(" · ") : "Lav tetthet uten tydelig tverrkilde-signal.";
+  return signals.length > 0
+    ? signals.join(" · ")
+    : "Lav tetthet uten tydelig tids- eller tverrkilde-signal.";
 }
 
 function hotspotConfidence(cell: SpatialHeatmapCell): SourceConfidenceSummary {
@@ -318,6 +342,9 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
                   <p>
                     {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser
                   </p>
+                  <p>
+                    Først sett {time(cell.firstSeenAt)} · {activeDaysLabel(cell.activeDayCount)}
+                  </p>
                   <p>{hotspotReason(cell)}</p>
                   <p>{confidence.rationale}</p>
                   <p>{cell.sourceIds.map(sourceLabel).join(", ")}</p>
@@ -392,6 +419,41 @@ function DelayCandidateRow({ candidate }: { candidate: UnexplainedDelayCandidate
           Åpne kilde
         </a>
       ) : null}
+    </article>
+  );
+}
+
+function InvestigationQueueItemRow({ item }: { item: SpatialInvestigationQueueItem }) {
+  const sourceUrl = safeExternalUrl(item.targetUrl);
+  return (
+    <article className={`spatial-investigation-row priority-${item.priority}`}>
+      <div>
+        <p className={`spatial-hotspot-priority priority-${item.priority}`}>
+          {investigationPriorityLabels[item.priority]} · {investigationKindLabels[item.kind]}
+        </p>
+        <h3>{item.title}</h3>
+        {item.sourceConfidence ? (
+          <p className={`spatial-hotspot-confidence confidence-${item.sourceConfidence.level}`}>
+            {item.sourceConfidence.label} tillit · {confidenceScoreLabel(item.sourceConfidence)}
+          </p>
+        ) : null}
+        <p>{item.summary}</p>
+        <small>{item.reason}</small>
+      </div>
+      <div className="spatial-investigation-evidence">
+        {item.evidence.slice(0, 4).map((evidence) => (
+          <span key={evidence}>{evidence}</span>
+        ))}
+      </div>
+      <div className="spatial-investigation-actions">
+        {item.articleIds.length > 0 ? <span>{item.articleIds.length} mulige saker</span> : null}
+        <SourceItemLinks sourceItemIds={item.sourceItemIds} />
+        {sourceUrl ? (
+          <a href={sourceUrl} rel="noreferrer" target="_blank">
+            Åpne kilde
+          </a>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -514,6 +576,29 @@ export function SpatialAnalyticsDashboard({
           </label>
         </aside>
         <div className="spatial-analytics-main">
+          <section
+            className="spatial-investigation-panel"
+            aria-labelledby="spatial-investigation-heading"
+          >
+            <div className="spatial-section-heading">
+              <div>
+                <p className="label">Operatørkø</p>
+                <h2 id="spatial-investigation-heading">Signaler å undersøke</h2>
+              </div>
+              <span>{payload.investigationQueue.length} signaler</span>
+            </div>
+            {payload.investigationQueue.length === 0 ? (
+              <p className="spatial-empty-state">
+                Ingen prioriterte romlige signaler i analysevinduet.
+              </p>
+            ) : (
+              <div className="spatial-investigation-list">
+                {payload.investigationQueue.map((item) => (
+                  <InvestigationQueueItemRow item={item} key={item.id} />
+                ))}
+              </div>
+            )}
+          </section>
           {showMap ? <SpatialAnalyticsMap payload={payload} /> : null}
           <section className="spatial-delay-panel" aria-labelledby="spatial-delay-heading">
             <div className="spatial-section-heading">
@@ -562,6 +647,9 @@ export function SpatialAnalyticsDashboard({
                     <span>
                       {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser · sist
                       sett {time(cell.lastSeenAt)}
+                    </span>
+                    <span>
+                      Først sett {time(cell.firstSeenAt)} · {activeDaysLabel(cell.activeDayCount)}
                     </span>
                     <small>{hotspotReason(cell)}</small>
                     <small>{confidence.rationale}</small>
