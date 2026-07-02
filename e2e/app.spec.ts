@@ -31,6 +31,26 @@ async function expectNoHorizontalPageOverflow(page: Page): Promise<void> {
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
 }
 
+async function useViewerSession(page: Page): Promise<void> {
+  await page.route("**/api/session", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        csrfToken: "viewer-csrf-token",
+        user: {
+          id: "viewer-one",
+          login: "viewer@example.test",
+          displayName: "Ingrid Leser",
+          role: "viewer",
+          status: "active",
+          email: "viewer@example.test",
+        },
+      }),
+    });
+  });
+}
+
 test("Situation Room explains provenance and keeps private map controls distinct", async ({
   page,
 }) => {
@@ -1258,6 +1278,35 @@ test("unknown viewer route is a missing page, not an owner-only denial", async (
   await expect(page.getByRole("heading", { name: "Fant ikke siden" })).toBeVisible();
   await expect(page.getByText("Dette krever eiertilgang")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Sport" })).toHaveAttribute("href", "/sport");
+});
+
+test("viewer shell keeps command center tools out of the public traffic map", async ({ page }) => {
+  await useViewerSession(page);
+
+  for (const route of [
+    { path: "/", heading: "Siste nytt i Trondheim" },
+    { path: "/trafikk", heading: "Nå i trafikken" },
+    { path: "/vaer", heading: "Vær" },
+    { path: "/sport", heading: "VM 2026" },
+    { path: "/situasjoner", heading: "Trondheim situasjonskart" },
+  ]) {
+    await page.goto(route.path);
+    await expect(page.locator(".session-role")).toContainText("Lesetilgang · Ingrid Leser");
+    await expect(page.getByRole("heading", { name: route.heading, exact: true })).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: "Hovedmeny" });
+    await expect(navigation.getByRole("link", { name: "Kommandosenter" })).toHaveCount(0);
+    await expect(navigation.getByRole("link", { name: "Lagret" })).toHaveCount(0);
+  }
+
+  await page.goto("/trafikk");
+  await openTrafficLayersIfHidden(page);
+  await expect(page.getByText("Private notater/tegninger")).toHaveCount(0);
+
+  for (const ownerOnlyPath of ["/command", "/command/radata", "/drift", "/lagret"]) {
+    await page.goto(ownerOnlyPath);
+    await expect(page.getByRole("heading", { name: "Dette krever eiertilgang" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Til forsiden" })).toHaveAttribute("href", "/");
+  }
 });
 
 test("article save missing target rolls back optimistic state", async ({ page }) => {

@@ -33,6 +33,7 @@ import {
   homeStoryCardsForGroups,
   sourceClusterLabelForGroup,
   type HomeStoryCard,
+  type HomeStoryVerification,
 } from "../homeStoryCards.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
@@ -129,9 +130,33 @@ function SituationBanner({
   );
 }
 
-export function MorningBriefPanel({ brief }: { brief?: BootstrapPayload["morningBrief"] }) {
+export function MorningBriefPanel({
+  brief,
+  articles = [],
+  situations = [],
+}: {
+  brief?: BootstrapPayload["morningBrief"];
+  articles?: Article[];
+  situations?: BootstrapPayload["situations"];
+}) {
   if (!brief) return null;
   const modeLabel = brief.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief";
+  const articlesById = new Map(articles.map((article) => [article.id, article]));
+  const situationsById = new Map(situations.map((situation) => [situation.id, situation]));
+  const linkedArticles = brief.articleIds
+    .flatMap((id) => {
+      const article = articlesById.get(id);
+      const href = article ? safeExternalUrl(article.url) : undefined;
+      return article && href ? [{ article, href }] : [];
+    })
+    .slice(0, 3);
+  const linkedSituations = brief.situationIds
+    .flatMap((id) => {
+      const situation = situationsById.get(id);
+      return situation ? [situation] : [];
+    })
+    .slice(0, 2);
+  const hasSourceLinks = linkedArticles.length > 0 || linkedSituations.length > 0;
   return (
     <section
       className={`morning-brief morning-brief-${brief.mode}`}
@@ -149,6 +174,23 @@ export function MorningBriefPanel({ brief }: { brief?: BootstrapPayload["morning
           ))}
         </div>
         <small>{brief.sourceLine}</small>
+        {hasSourceLinks ? (
+          <div className="morning-brief-sources" aria-label="Morgenbrief-grunnlag">
+            <span>Grunnlag</span>
+            <div>
+              {linkedArticles.map(({ article, href }) => (
+                <a href={href} key={article.id} rel="noreferrer noopener" target="_blank">
+                  {article.title}
+                </a>
+              ))}
+              {linkedSituations.map((situation) => (
+                <a href={`/situasjoner/${situation.id}`} key={situation.id}>
+                  {situation.title}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
       <dl className="morning-brief-highlights" aria-label="Morgenbrief-nøkkeltall">
         {brief.highlights.map((highlight) => (
@@ -247,6 +289,7 @@ function LeadStory({
             </span>
           ))}
         </div>
+        <StoryVerificationProof verification={card.verification} />
         <SourceCluster group={group} />
         <div className="lead-footer">
           <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
@@ -274,6 +317,17 @@ function storyKindLabel(kind: HomeStoryCard["cardKind"]): string {
     case "sak":
       return "Sak";
   }
+}
+
+export function StoryVerificationProof({ verification }: { verification?: HomeStoryVerification }) {
+  if (!verification) return null;
+  return (
+    <p className="story-verification-proof">
+      <span>{verification.label}</span>
+      <span>{verification.sourceSummary}</span>
+      <span className="sr-only">{verification.detail}</span>
+    </p>
+  );
 }
 
 function StoryCard({
@@ -329,6 +383,7 @@ function StoryCard({
             </span>
           ))}
         </div>
+        <StoryVerificationProof verification={card.verification} />
         <SourceCluster group={card.group} />
       </div>
       <div className="story-card-side">
@@ -909,7 +964,13 @@ export function HomePage({
           ) : null}
         </div>
       </div>
-      {!isTextSearch ? <MorningBriefPanel brief={initialData.morningBrief} /> : null}
+      {!isTextSearch ? (
+        <MorningBriefPanel
+          articles={initialData.articles}
+          brief={initialData.morningBrief}
+          situations={initialData.situations}
+        />
+      ) : null}
       {!isTextSearch ? <SituationBanner situations={initialData.situations} /> : null}
       <div className="home-grid">
         <section className="news-section">
