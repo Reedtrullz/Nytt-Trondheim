@@ -225,6 +225,26 @@ function heatmapColor(cell: SpatialHeatmapCell) {
   return "#0f6f4f";
 }
 
+function rawSourceItemHref(sourceItemId: string) {
+  return `/command/radata?sourceItem=${encodeURIComponent(sourceItemId)}`;
+}
+
+function SourceItemLinks({ sourceItemIds }: { sourceItemIds?: string[] }) {
+  const visibleIds = (sourceItemIds ?? []).slice(0, 3);
+  if (visibleIds.length === 0) return null;
+  const remaining = Math.max(0, (sourceItemIds?.length ?? 0) - visibleIds.length);
+  return (
+    <div className="spatial-source-links" aria-label="Rådata for varmepunkt">
+      {visibleIds.map((sourceItemId, index) => (
+        <Link key={sourceItemId} to={rawSourceItemHref(sourceItemId)}>
+          Rådata {index + 1}
+        </Link>
+      ))}
+      {remaining > 0 ? <span>+{remaining} flere</span> : null}
+    </div>
+  );
+}
+
 function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
   return (
     <div className="spatial-analytics-map">
@@ -262,6 +282,7 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
                   <p>{hotspotReason(cell)}</p>
                   <p>{confidence.rationale}</p>
                   <p>{cell.sourceIds.map(sourceLabel).join(", ")}</p>
+                  <SourceItemLinks sourceItemIds={cell.sourceItemIds} />
                   <small>Sist sett {time(cell.lastSeenAt)}</small>
                 </article>
               </Popup>
@@ -474,6 +495,7 @@ export function SpatialAnalyticsDashboard({
                     <small>{hotspotReason(cell)}</small>
                     <small>{confidence.rationale}</small>
                     <small>{cell.sourceIds.map(sourceLabel).join(", ")}</small>
+                    <SourceItemLinks sourceItemIds={cell.sourceItemIds} />
                   </article>
                 );
               })}

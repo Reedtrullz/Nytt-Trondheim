@@ -959,7 +959,13 @@ export type HomeSituationSummary = Pick<
   | "updatedAt"
   | "createdAt"
   | "locationLabel"
->;
+> & {
+  primaryLocation?: {
+    lat: number;
+    lng: number;
+    label: string;
+  };
+};
 
 export interface MapViewport {
   north: number;

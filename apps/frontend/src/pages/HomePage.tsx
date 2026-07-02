@@ -30,7 +30,7 @@ import {
 import { groupHomeArticles, type HomeArticleGroup } from "../homeArticleGroups.js";
 import {
   nearbyDistanceLabel,
-  nearbyStoryItemsForGroups,
+  nearbyStoryItemsForGroupsAndSituations,
   nearbyStorySummary,
   type NearbyStoryItem,
 } from "../homeNearby.js";
@@ -495,8 +495,12 @@ function NearbyRail({
   timeWindowLabel?: string;
 }) {
   const allNearby = useMemo(
-    () => nearbyStoryItemsForGroups(groups, { limit: Number.MAX_SAFE_INTEGER, localFocus }),
-    [groups, localFocus],
+    () =>
+      nearbyStoryItemsForGroupsAndSituations(groups, data.situations, {
+        limit: Number.MAX_SAFE_INTEGER,
+        localFocus,
+      }),
+    [data.situations, groups, localFocus],
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
   const mapNearby = useMemo(() => allNearby.slice(0, 24), [allNearby]);
@@ -506,7 +510,7 @@ function NearbyRail({
   const selectedNearby = mapNearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
   const selectedTarget = nearbyMapTarget(selectedNearby);
   const selectedArticleUrl = selectedNearby
-    ? safeExternalUrl(selectedNearby.article.url)
+    ? safeExternalUrl(selectedNearby.article?.url)
     : undefined;
   const selectedDistance = localFocus ? nearbyDistanceLabel(selectedNearby?.distanceKm) : undefined;
   const municipalityArchiveUrl = safeExternalUrl(

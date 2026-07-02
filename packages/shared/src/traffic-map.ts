@@ -235,6 +235,7 @@ export interface SpatialHeatmapCell {
   radiusMeters: number;
   count: number;
   sourceItemCount: number;
+  sourceItemIds?: string[];
   articleCount: number;
   trafficEventCount: number;
   lastSeenAt: string;

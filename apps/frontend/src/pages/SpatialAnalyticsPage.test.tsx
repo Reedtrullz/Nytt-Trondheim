@@ -48,6 +48,7 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       radiusMeters: 650,
       count: 4,
       sourceItemCount: 3,
+      sourceItemIds: ["source:one", "source:two", "source:three", "source:four"],
       articleCount: 2,
       trafficEventCount: 1,
       lastSeenAt: "2026-07-02T09:40:00.000Z",
@@ -137,6 +138,9 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Offisielle kilder og redaksjonelle kilder");
     expect(html).toContain("NRK");
     expect(html).toContain("Vegvesen trafikk");
+    expect(html).toContain("/command/radata?sourceItem=source%3Aone");
+    expect(html).toContain("Rådata 1");
+    expect(html).toContain("+1 flere");
     expect(html).toContain("/command/radata");
 
     const highPriorityIndex = html.indexOf("4 observasjoner");

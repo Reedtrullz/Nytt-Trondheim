@@ -4321,6 +4321,29 @@ button {
   color: var(--muted);
 }
 
+.spatial-source-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.spatial-source-links a,
+.spatial-source-links span {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 6px 8px;
+  text-decoration: none;
+}
+
+.spatial-source-links span {
+  color: var(--muted);
+}
+
 .spatial-delay-panel,
 .spatial-analytics-cells {
   padding: 18px;

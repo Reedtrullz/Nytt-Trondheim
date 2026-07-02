@@ -1,8 +1,9 @@
-import type { Article } from "@nytt/shared";
+import type { Article, HomeSituationSummary } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
 import {
   nearbyDistanceLabel,
   nearbyStoryItems,
+  nearbyStoryItemsForGroupsAndSituations,
   nearbyStoryItemsForGroups,
   nearbyStorySummary,
 } from "./homeNearby.js";
@@ -20,6 +21,21 @@ function article(overrides: Partial<Article> = {}): Article {
     category: "Nyheter",
     places: ["Sluppen"],
     location: { lat: 63.4, lng: 10.4, label: "Sluppen" },
+    ...overrides,
+  };
+}
+
+function situation(overrides: Partial<HomeSituationSummary> = {}): HomeSituationSummary {
+  return {
+    id: "datex-gangasvegen",
+    title: "Steinsprang/steinsprang, vegen er stengt",
+    summary: "Gangåsvegen er stengt.",
+    status: "active",
+    verificationStatus: "Offentlig bekreftet",
+    updatedAt: "2026-07-02T09:00:00.000Z",
+    createdAt: "2026-07-02T08:30:00.000Z",
+    locationLabel: "Gangåsvegen",
+    primaryLocation: { lat: 63.311, lng: 10.21, label: "Gangåsvegen" },
     ...overrides,
   };
 }
@@ -81,7 +97,7 @@ describe("home nearby story model", () => {
   it("summarizes shown versus available located stories honestly", () => {
     expect(nearbyStorySummary([], 0)).toBe("Ingen stedsfestede saker i denne visningen.");
     expect(nearbyStorySummary([nearbyStoryItems([article()])[0]!], 3)).toBe(
-      "1 av 3 stedsfestede saker fra nyhetslisten.",
+      "1 av 3 stedsfestede saker og situasjoner.",
     );
   });
 
@@ -189,6 +205,53 @@ describe("home nearby story model", () => {
       sourceLabel: "2 kilder",
       situationId: "politiloggen-tiller",
       kind: "situation",
+    });
+  });
+
+  it("adds official active situations to the nearby map even without matching articles", () => {
+    const items = nearbyStoryItemsForGroupsAndSituations([], [situation()], { limit: 4 });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: "situation:datex-gangasvegen",
+      situationId: "datex-gangasvegen",
+      markerLabel: "1",
+      title: "Steinsprang/steinsprang, vegen er stengt",
+      locationLabel: "Gangåsvegen",
+      sourceLabel: "Offentlig bekreftet",
+      category: "Hendelser",
+      kind: "situation",
+      relevanceLabel: "Tilknyttet situasjon",
+    });
+  });
+
+  it("does not duplicate a situation when a nearby article already links to it", () => {
+    const linkedArticle = article({
+      id: "article-gangasvegen",
+      title: "Ras kan stenge vegen i flere uker",
+      category: "Transport",
+      location: { lat: 63.311, lng: 10.21, label: "Gangåsvegen" },
+      situationId: "datex-gangasvegen",
+    });
+
+    const items = nearbyStoryItemsForGroupsAndSituations(
+      [
+        {
+          id: "article-gangasvegen",
+          primary: linkedArticle,
+          articles: [linkedArticle],
+          sourceLabels: ["Adresseavisen"],
+        },
+      ],
+      [situation()],
+      { limit: 4 },
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: "article-gangasvegen",
+      situationId: "datex-gangasvegen",
+      title: "Ras kan stenge vegen i flere uker",
     });
   });
 });

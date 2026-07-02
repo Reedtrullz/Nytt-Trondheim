@@ -252,6 +252,13 @@ describe("private situation API", () => {
           locationLabel: expect.any(String),
         }),
       );
+      expect(situation.primaryLocation).toEqual(
+        expect.objectContaining({
+          lat: expect.any(Number),
+          lng: expect.any(Number),
+          label: expect.any(String),
+        }),
+      );
       expect(situation).not.toHaveProperty("evidence");
       expect(situation).not.toHaveProperty("features");
       expect(situation).not.toHaveProperty("timeline");
@@ -2591,6 +2598,7 @@ describe("private situation API", () => {
         radiusMeters: 650,
         count: 3,
         sourceItemCount: 2,
+        sourceItemIds: ["source:item-one", "source:item-two"],
         articleCount: 1,
         trafficEventCount: 1,
         lastSeenAt: "2026-07-02T09:40:00.000Z",
@@ -2635,6 +2643,7 @@ describe("private situation API", () => {
         expect.objectContaining({
           id: "cell:1039:6339",
           count: 3,
+          sourceItemIds: ["source:item-one", "source:item-two"],
           sourceIds: ["nrk", "vegvesen_traffic_info"],
           sourceConfidence: expect.objectContaining({
             level: "confirmed",
@@ -2646,6 +2655,7 @@ describe("private situation API", () => {
     });
     expect(response.body).not.toHaveProperty("rawPayload");
     expect(response.body).not.toHaveProperty("sourceItems");
+    expect(JSON.stringify(response.body)).not.toContain("raw_payload");
   });
 
   it("stores uploaded private attachment metadata with a content checksum", async () => {

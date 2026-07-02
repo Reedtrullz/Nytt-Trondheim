@@ -223,7 +223,7 @@ test("home nearby module links ranked local stories with the map", async ({ page
 
   const nearby = page.locator(".nearby-module");
   await expect(nearby.getByRole("heading", { name: "I nærheten" })).toBeVisible();
-  await expect(nearby.getByText("4 stedsfestede saker fra nyhetslisten.")).toBeVisible();
+  await expect(nearby.getByText("4 stedsfestede saker og situasjoner.")).toBeVisible();
   await expect(nearby.getByRole("link", { name: "Åpne situasjonskart" })).toHaveAttribute(
     "href",
     "/situasjoner",
@@ -255,6 +255,50 @@ test("home nearby module links ranked local stories with the map", async ({ page
   await expect(page).toHaveURL(/window=24h/);
   await expect(mapAgeSlider).toHaveValue("2");
   await expect(nearby.getByText(/Kartet følger 24 timer/i)).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("home nearby module shows located active situations without matching articles", async ({
+  page,
+}) => {
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleBootstrap,
+        articles: [],
+        morningBrief: undefined,
+        situations: [
+          {
+            id: "datex-gangasvegen",
+            title: "Steinsprang, vegen er stengt",
+            summary: "Gangåsvegen er stengt etter ras.",
+            status: "active",
+            verificationStatus: "Offentlig bekreftet",
+            createdAt: "2026-07-02T08:00:00.000Z",
+            updatedAt: "2026-07-02T09:00:00.000Z",
+            locationLabel: "Gangåsvegen",
+            primaryLocation: { lat: 63.311, lng: 10.21, label: "Gangåsvegen" },
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+
+  const nearby = page.locator(".nearby-module");
+  await expect(nearby.getByRole("heading", { name: "I nærheten" })).toBeVisible();
+  await expect(nearby.getByText("1 stedsfestede saker og situasjoner.")).toBeVisible();
+  const situationRow = nearby.getByRole("button", { name: /Steinsprang, vegen er stengt/ });
+  await expect(situationRow).toHaveAttribute("aria-current", "true");
+  await expect(situationRow.getByText("Offentlig bekreftet")).toBeVisible();
+  await expect(nearby.getByRole("link", { name: "Åpne situasjon", exact: true })).toHaveAttribute(
+    "href",
+    "/situasjoner/datex-gangasvegen",
+  );
+  await expect(nearby.getByRole("link", { name: /Les saken/ })).toHaveCount(0);
   await expectNoHorizontalPageOverflow(page);
 });
 

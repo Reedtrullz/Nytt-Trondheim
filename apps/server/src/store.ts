@@ -361,7 +361,32 @@ function normalizeAccessRequestEmail(email: string): string {
   return email.trim().toLocaleLowerCase("nb");
 }
 
+function publicPrimaryLocationForSituation(
+  situation: Situation,
+): HomeSituationSummary["primaryLocation"] {
+  const point = situation.features.find(
+    (feature) =>
+      feature.geometry.type === "Point" && feature.properties.provenance !== "private_annotation",
+  );
+  if (point?.geometry.type !== "Point") return undefined;
+  const [lng, lat] = point.geometry.coordinates;
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
+    return undefined;
+  }
+  return {
+    lat,
+    lng,
+    label: point.properties.label || situation.locationLabel,
+  };
+}
+
 function homeSituationSummary(situation: Situation): HomeSituationSummary {
+  const primaryLocation = publicPrimaryLocationForSituation(situation);
   return {
     id: situation.id,
     title: situation.title,
@@ -371,6 +396,7 @@ function homeSituationSummary(situation: Situation): HomeSituationSummary {
     updatedAt: situation.updatedAt,
     createdAt: situation.createdAt,
     locationLabel: situation.locationLabel,
+    ...(primaryLocation ? { primaryLocation } : {}),
   };
 }
 
@@ -828,6 +854,7 @@ interface SpatialHeatmapCellRow {
   center_lat: number | string;
   observation_count: string | number;
   source_item_count: string | number;
+  source_item_ids: string[] | null;
   article_count: string | number;
   traffic_event_count: string | number;
   last_seen_at: Date | string;
@@ -1047,6 +1074,9 @@ function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCe
   const sourceIds = (row.source_ids ?? []).filter(
     (source): source is SpatialHeatmapCell["sourceIds"][number] => typeof source === "string",
   );
+  const sourceItemIds = (row.source_item_ids ?? []).filter(
+    (sourceItemId): sourceItemId is string => typeof sourceItemId === "string",
+  );
   const maxSeverity = severityFromRank(row.severity_rank);
   return {
     id: row.id,
@@ -1057,6 +1087,7 @@ function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCe
     radiusMeters: 650,
     count: numericRowValue(row.observation_count),
     sourceItemCount: numericRowValue(row.source_item_count),
+    ...(sourceItemIds.length ? { sourceItemIds } : {}),
     articleCount: numericRowValue(row.article_count),
     trafficEventCount: numericRowValue(row.traffic_event_count),
     lastSeenAt: new Date(row.last_seen_at).toISOString(),
@@ -3074,6 +3105,7 @@ export class MemoryStore implements Store {
         latSum: number;
         count: number;
         sourceItemCount: number;
+        sourceItemIds: string[];
         articleCount: number;
         trafficEventCount: number;
         lastSeenAt: string;
@@ -3102,6 +3134,7 @@ export class MemoryStore implements Store {
         latSum: 0,
         count: 0,
         sourceItemCount: 0,
+        sourceItemIds: [],
         articleCount: 0,
         trafficEventCount: 0,
         lastSeenAt: observedAt,
@@ -3111,6 +3144,7 @@ export class MemoryStore implements Store {
       current.latSum += lat;
       current.count += 1;
       current.sourceItemCount += 1;
+      if (current.sourceItemIds.length < 12) current.sourceItemIds.push(item.id);
       if (item.kind === "article") current.articleCount += 1;
       if (observedAt > current.lastSeenAt) current.lastSeenAt = observedAt;
       current.sourceIds.add(item.provider);
@@ -3124,6 +3158,7 @@ export class MemoryStore implements Store {
         radiusMeters: 650,
         count: cell.count,
         sourceItemCount: cell.sourceItemCount,
+        ...(cell.sourceItemIds.length ? { sourceItemIds: cell.sourceItemIds } : {}),
         articleCount: cell.articleCount,
         trafficEventCount: cell.trafficEventCount,
         lastSeenAt: cell.lastSeenAt,
@@ -4698,6 +4733,7 @@ export class PgStore implements Store {
       `WITH observations AS (
          SELECT
            'source_item'::text AS observation_type,
+           si.id::text AS source_item_id,
            si.provider::text AS source_id,
            si.kind::text AS item_kind,
            NULL::text AS severity,
@@ -4708,6 +4744,7 @@ export class PgStore implements Store {
          UNION ALL
          SELECT
            'traffic_event'::text AS observation_type,
+           NULL::text AS source_item_id,
            tme.source::text AS source_id,
            tme.category::text AS item_kind,
            tme.severity::text AS severity,
@@ -4730,6 +4767,10 @@ export class PgStore implements Store {
          avg(ST_Y(point)) AS center_lat,
          count(*)::text AS observation_count,
          count(*) FILTER (WHERE observation_type = 'source_item')::text AS source_item_count,
+         COALESCE(
+           (array_agg(source_item_id ORDER BY observed_at DESC) FILTER (WHERE source_item_id IS NOT NULL))[1:12],
+           ARRAY[]::text[]
+         ) AS source_item_ids,
          count(*) FILTER (WHERE observation_type = 'source_item' AND item_kind = 'article')::text AS article_count,
          count(*) FILTER (WHERE observation_type = 'traffic_event')::text AS traffic_event_count,
          max(observed_at) AS last_seen_at,
