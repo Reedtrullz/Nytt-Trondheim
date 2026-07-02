@@ -40,7 +40,12 @@ import {
   homeNeighborhoodFocusOptionForQuery,
   homeNeighborhoodFocusStorageKey,
 } from "../homeNeighborhoodFocus.js";
-import { rankHomeStoryCardsByLocalFocus, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
+import {
+  rankHomeStoryCardsByLocalFocus,
+  summarizeHomeStoryCardsByLocalFocus,
+  type HomeLocalFocusPoint,
+  type HomeLocalFocusSummary,
+} from "../homeLocalFocus.js";
 import {
   homeStoryCardsForGroups,
   sourceClusterLabelForGroup,
@@ -475,6 +480,46 @@ function geolocationErrorMessage(error?: GeolocationPositionError): string {
   if (error.code === error.POSITION_UNAVAILABLE) return "Posisjonen er ikke tilgjengelig nå.";
   if (error.code === error.TIMEOUT) return "Posisjonssøk tok for lang tid.";
   return "Kunne ikke hente posisjon.";
+}
+
+export function LocalFocusSummaryPanel({
+  label,
+  radiusKm,
+  summary,
+}: {
+  label: string;
+  radiusKm: number;
+  summary: HomeLocalFocusSummary;
+}) {
+  const radiusLabel = `${radiusKm} km`;
+  return (
+    <section className="local-focus-summary" aria-label="Lokalt fokus">
+      <div>
+        <p className="label">Lokalt fokus</p>
+        <h2>Nær {label}</h2>
+        <p>
+          {summary.locatedCount > 0
+            ? `${summary.withinRadiusCount} av ${summary.locatedCount} stedsfestede saker er innen ${radiusLabel}.`
+            : `Ingen stedsfestede saker i utvalget kan måles mot ${label} ennå.`}
+        </p>
+      </div>
+      {summary.closestItems.length > 0 ? (
+        <ol>
+          {summary.closestItems.map((item) => (
+            <li key={item.id}>
+              <span>
+                <b>{item.title}</b>
+                {item.locationLabel ? <small>{item.locationLabel}</small> : null}
+              </span>
+              <em className={item.withinRadius ? "near" : undefined}>
+                {nearbyDistanceLabel(item.distanceKm)}
+              </em>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
 }
 
 function NearbyRail({
@@ -939,6 +984,13 @@ export function HomePage({
     () => displayedStoryCards.map((card) => card.group),
     [displayedStoryCards],
   );
+  const localFocusSummary = useMemo(
+    () =>
+      activeLocalFocus
+        ? summarizeHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus, 3)
+        : undefined,
+    [activeLocalFocus, storyCards],
+  );
   const leadCard = displayedStoryCards[0];
   const secondaryCards = displayedStoryCards.slice(1);
 
@@ -1120,6 +1172,13 @@ export function HomePage({
           ) : null}
         </div>
       </div>
+      {localFocus.status === "active" && localFocusSummary ? (
+        <LocalFocusSummaryPanel
+          label={localFocus.label}
+          radiusKm={activeLocalFocusRadiusKm}
+          summary={localFocusSummary}
+        />
+      ) : null}
       {!isTextSearch ? <CityPulseDashboard data={initialData} /> : null}
       <div className="home-grid">
         <section className="news-section">

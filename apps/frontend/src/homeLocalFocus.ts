@@ -11,6 +11,20 @@ export interface HomeLocalFocusMeta {
   withinRadius: boolean;
 }
 
+export interface HomeLocalFocusSummaryItem {
+  id: string;
+  title: string;
+  locationLabel?: string;
+  distanceKm: number;
+  withinRadius: boolean;
+}
+
+export interface HomeLocalFocusSummary {
+  locatedCount: number;
+  withinRadiusCount: number;
+  closestItems: HomeLocalFocusSummaryItem[];
+}
+
 const defaultRadiusKm = 10;
 const earthRadiusKm = 6371;
 
@@ -84,4 +98,37 @@ export function rankHomeStoryCardsByLocalFocus(
       );
     })
     .map((item) => item.card);
+}
+
+export function summarizeHomeStoryCardsByLocalFocus(
+  cards: HomeStoryCard[],
+  focus: HomeLocalFocusPoint,
+  limit = 3,
+): HomeLocalFocusSummary {
+  const located = cards.flatMap((card) => {
+    const point = cardPoint(card);
+    if (!point) return [];
+    const meta = localFocusMetaForCard(card, focus);
+    if (meta.distanceKm === undefined) return [];
+    return [
+      {
+        id: card.id,
+        title: card.title,
+        locationLabel: card.locationLabel,
+        distanceKm: meta.distanceKm,
+        withinRadius: meta.withinRadius,
+      },
+    ];
+  });
+  located.sort(
+    (left, right) =>
+      Number(right.withinRadius) - Number(left.withinRadius) ||
+      left.distanceKm - right.distanceKm ||
+      left.title.localeCompare(right.title, "nb"),
+  );
+  return {
+    locatedCount: located.length,
+    withinRadiusCount: located.filter((item) => item.withinRadius).length,
+    closestItems: located.slice(0, limit),
+  };
 }

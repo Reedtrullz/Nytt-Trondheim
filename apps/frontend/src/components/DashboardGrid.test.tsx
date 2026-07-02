@@ -28,6 +28,12 @@ describe("DashboardGrid", () => {
     expect(html).toContain("Modulært oppsett");
     expect(html).toContain("Command Center-arbeidsflate");
     expect(html).toContain("dashboard-widget-wide");
+    expect(html).toContain("Dashboard-oppsett");
+    expect(html).toContain("Oppsett");
+    expect(html).toContain("Bred");
+    expect(html).toContain("Kompakt");
+    expect(html).toContain("Flytt Situasjonsbilde ned i oppsettet");
+    expect(html).toContain("Bytt modulstørrelse for Kilder");
     expect(html).toContain("Flytt Situasjonsbilde senere");
     expect(html).toContain("Endre størrelse på Kilder");
     expect(html).toContain("Tilbakestill");
@@ -64,6 +70,7 @@ describe("DashboardGrid", () => {
     expect(html).toContain("dashboard-widget-full");
     expect(html).toContain("dashboard-widget-bare");
     expect(html).not.toContain("Endre størrelse på Morgenbrief");
+    expect(html).not.toContain("Dashboard-oppsett");
     expect(html).toContain("Flytt Morgenbrief senere");
   });
 });

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { Article, BootstrapPayload, MorningBrief } from "@nytt/shared";
 import {
   CityPulseDashboard,
+  LocalFocusSummaryPanel,
   MapTimeSlider,
   MorningBriefPanel,
   StoryVerificationProof,
@@ -126,6 +127,44 @@ describe("MapTimeSlider", () => {
     expect(html).toContain('type="range"');
     expect(html).toContain('aria-label="Filtrer kart etter alder"');
     expect(html).toContain('aria-valuetext="24 timer"');
+  });
+});
+
+describe("LocalFocusSummaryPanel", () => {
+  it("explains how many located stories are inside the chosen neighborhood radius", () => {
+    const html = renderToStaticMarkup(
+      <LocalFocusSummaryPanel
+        label="Elgeseter"
+        radiusKm={4}
+        summary={{
+          locatedCount: 3,
+          withinRadiusCount: 2,
+          closestItems: [
+            {
+              id: "story-one",
+              title: "Fallulykke i Trondheim",
+              locationLabel: "Elgeseter",
+              distanceKm: 0.4,
+              withinRadius: true,
+            },
+            {
+              id: "story-two",
+              title: "Trafikk ved Sluppen",
+              locationLabel: "Sluppen",
+              distanceKm: 2.25,
+              withinRadius: true,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain("Lokalt fokus");
+    expect(html).toContain("Nær Elgeseter");
+    expect(html).toContain("2 av 3 stedsfestede saker er innen 4 km.");
+    expect(html).toContain("Fallulykke i Trondheim");
+    expect(html).toContain("under 1 km unna");
+    expect(html).toContain("2,3 km unna");
   });
 });
 

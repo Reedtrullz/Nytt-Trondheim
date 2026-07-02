@@ -404,7 +404,11 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
     "aria-pressed",
     "true",
   );
-  await expect(page.getByText(/innen 10 km/i)).toBeVisible();
+  await expect(page.getByText(/^Nær din posisjon · innen 10 km/i)).toBeVisible();
+  await expect(page.getByLabel("Lokalt fokus").getByText("Nær din posisjon")).toBeVisible();
+  await expect(
+    page.getByLabel("Lokalt fokus").getByText("2 av 2 stedsfestede saker er innen 10 km."),
+  ).toBeVisible();
   await page.getByLabel("Postnummer eller sted").fill("7041");
   await page.getByRole("button", { name: "Bruk" }).click();
   await expect(page.getByText(/Nær Lade · innen 5 km/i)).toBeVisible();

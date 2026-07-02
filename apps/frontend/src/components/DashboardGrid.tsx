@@ -36,6 +36,15 @@ const sizeLabels: Record<DashboardWidgetSize, string> = {
   full: "F",
 };
 
+const sizeNames: Record<DashboardWidgetSize, string> = {
+  compact: "Kompakt",
+  standard: "Normal",
+  wide: "Bred",
+  tall: "Høy",
+  large: "Stor",
+  full: "Full bredde",
+};
+
 function layoutFromStorage(storageKey: string | undefined): Partial<DashboardLayoutState> {
   if (typeof window === "undefined" || !storageKey) return {};
   return parseDashboardLayout(window.localStorage.getItem(storageKey));
@@ -135,6 +144,57 @@ export function DashboardGrid({
               Tilbakestill
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {editable && orderedWidgets.length > 1 ? (
+        <div className="dashboard-layout-config" aria-label="Dashboard-oppsett">
+          <div>
+            <strong>Oppsett</strong>
+            <span>Dra moduler, eller bruk knappene for rekkefølge og størrelse.</span>
+          </div>
+          <ol>
+            {orderedWidgets.map((widget, index) => {
+              const size = layout.sizes[widget.id] ?? widget.defaultSize ?? "standard";
+              const resizable = widget.resizable ?? true;
+              return (
+                <li key={widget.id}>
+                  <span>
+                    <b>{widget.title}</b>
+                    <small>{sizeNames[size]}</small>
+                  </span>
+                  <div aria-label={`${widget.title} layout`}>
+                    <button
+                      type="button"
+                      aria-label={`Flytt ${widget.title} opp i oppsettet`}
+                      disabled={index === 0}
+                      onClick={() => moveWidget(widget.id, index - 1)}
+                    >
+                      Opp
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Flytt ${widget.title} ned i oppsettet`}
+                      disabled={index === orderedWidgets.length - 1}
+                      onClick={() => moveWidget(widget.id, index + 1)}
+                    >
+                      Ned
+                    </button>
+                    {resizable ? (
+                      <button
+                        type="button"
+                        aria-label={`Bytt modulstørrelse for ${widget.title}`}
+                        onClick={() =>
+                          setLayout((current) => cycleDashboardWidgetSize(current, widget.id))
+                        }
+                      >
+                        {sizeLabels[size]}
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
         </div>
       ) : null}
       <div className="dashboard-widget-grid">

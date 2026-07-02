@@ -491,6 +491,91 @@ button {
   font-weight: 700;
 }
 
+.local-focus-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(280px, 1fr);
+  gap: 18px 28px;
+  align-items: start;
+  margin-top: 16px;
+  padding: 15px 18px;
+  border: 1px solid color-mix(in srgb, var(--green) 26%, var(--line));
+  border-left: 4px solid var(--green);
+  background: color-mix(in srgb, var(--green-soft) 45%, var(--paper));
+}
+
+.local-focus-summary .label {
+  margin: 0 0 3px;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.local-focus-summary h2 {
+  margin: 0;
+  font: 25px/1.05 var(--serif);
+}
+
+.local-focus-summary p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.local-focus-summary ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-focus-summary li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.local-focus-summary li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.local-focus-summary b,
+.local-focus-summary small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-focus-summary b {
+  font-size: 13px;
+}
+
+.local-focus-summary small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.local-focus-summary em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.local-focus-summary em.near {
+  color: var(--green);
+}
+
 @media (max-width: 1320px) {
   .view-controls {
     height: auto;
@@ -509,6 +594,10 @@ button {
     min-width: 0;
     padding-left: 0;
     border-left: 0;
+  }
+
+  .local-focus-summary {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -2484,6 +2573,98 @@ button {
 
 .dashboard-layout-toolbar button {
   padding: 9px 12px;
+}
+
+.dashboard-layout-config {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.35fr) minmax(0, 1fr);
+  gap: 12px 18px;
+  align-items: start;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--blue-soft) 55%, var(--paper));
+}
+
+.dashboard-layout-config strong,
+.dashboard-layout-config b {
+  display: block;
+}
+
+.dashboard-layout-config > div > strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.dashboard-layout-config span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.dashboard-layout-config ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-layout-config li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  background: var(--paper);
+}
+
+.dashboard-layout-config li > span {
+  min-width: 0;
+}
+
+.dashboard-layout-config b,
+.dashboard-layout-config small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-layout-config b {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.dashboard-layout-config small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dashboard-layout-config li > div {
+  display: flex;
+  gap: 4px;
+}
+
+.dashboard-layout-config button {
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--page);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.dashboard-layout-config button:disabled {
+  opacity: 0.35;
 }
 
 .dashboard-widget-grid {
@@ -8408,6 +8589,7 @@ button {
   .situation-banner,
   .lead-story,
   .morning-brief,
+  .dashboard-layout-config,
   .workspace-panel,
   .operations-summary,
   .operations-timeline-summary,
@@ -8424,6 +8606,10 @@ button {
   .raw-inspector-detail dl,
   .source-audit-facts,
   .source-audit-trace-table article {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-layout-config ol {
     grid-template-columns: 1fr;
   }
 

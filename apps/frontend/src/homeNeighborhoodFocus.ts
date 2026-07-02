@@ -25,10 +25,59 @@ export const homeNeighborhoodFocusOptions: HomeNeighborhoodFocusOption[] = [
     postalCodes: ["7040", "7041", "7042", "7043"],
   },
   {
+    id: "strindheim",
+    label: "Strindheim",
+    point: { lat: 63.4378, lng: 10.4532, radiusKm: 4 },
+    postalCodes: ["7045", "7046"],
+    aliases: ["leangen", "valentinlyst"],
+  },
+  {
+    id: "moholt",
+    label: "Moholt",
+    point: { lat: 63.4081, lng: 10.4347, radiusKm: 4 },
+    postalCodes: ["7050", "7051"],
+    aliases: ["tyholt"],
+  },
+  {
+    id: "nardo",
+    label: "Nardo",
+    point: { lat: 63.3978, lng: 10.4164, radiusKm: 4 },
+    postalCodes: ["7032", "7033"],
+    aliases: ["nidarvoll"],
+  },
+  {
+    id: "elgeseter",
+    label: "Elgeseter",
+    point: { lat: 63.4166, lng: 10.3966, radiusKm: 3 },
+    postalCodes: ["7030", "7031"],
+    aliases: ["st olav", "st. olav", "gloshaugen", "gløshaugen"],
+  },
+  {
+    id: "mollenberg",
+    label: "Møllenberg",
+    point: { lat: 63.4315, lng: 10.4143, radiusKm: 3 },
+    postalCodes: ["7014", "7015"],
+    aliases: ["mollenberg", "bakklandet"],
+  },
+  {
+    id: "ila",
+    label: "Ila",
+    point: { lat: 63.4302, lng: 10.3672, radiusKm: 3 },
+    postalCodes: ["7018"],
+    aliases: ["skansen"],
+  },
+  {
     id: "ranheim",
     label: "Ranheim",
     point: { lat: 63.4271, lng: 10.539, radiusKm: 6 },
     postalCodes: ["7054", "7055", "7056"],
+  },
+  {
+    id: "charlottenlund",
+    label: "Charlottenlund",
+    point: { lat: 63.4244, lng: 10.4967, radiusKm: 5 },
+    postalCodes: ["7058", "7059"],
+    aliases: ["jakobsli", "brundalen"],
   },
   {
     id: "byasen",
@@ -61,6 +110,12 @@ export const homeNeighborhoodFocusOptions: HomeNeighborhoodFocusOption[] = [
     point: { lat: 63.3749, lng: 10.3455, radiusKm: 5 },
     postalCodes: ["7079", "7081"],
     aliases: ["flatasen"],
+  },
+  {
+    id: "kattem",
+    label: "Kattem",
+    point: { lat: 63.3416, lng: 10.3354, radiusKm: 4 },
+    postalCodes: ["7082"],
   },
 ];
 
