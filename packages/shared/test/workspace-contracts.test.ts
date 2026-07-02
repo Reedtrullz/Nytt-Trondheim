@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   privateAnnotationCreateRequestSchema,
   privateAnnotationUpdateRequestSchema,
+  notificationTriggerPageSchema,
+  notificationTriggerQuerySchema,
   operationsTimelineQuerySchema,
   operationsTimelineResponseSchema,
   sourceAuditFilterQuerySchema,
@@ -19,6 +21,7 @@ import {
 } from "../src/types.js";
 import type {
   PrivateAnnotationCreateResponse,
+  NotificationTriggerPage,
   OperationsTimelineResponse,
   SituationMapWorkspace,
   SourceAuditWorkspaceResponse,
@@ -164,6 +167,76 @@ describe("workspace contract schemas", () => {
 
     expect(operationsTimelineResponseSchema.parse(response)).toMatchObject({
       events: [{ id: "timeline:t1", private: false }],
+    });
+  });
+
+  it("validates notification trigger filters and candidate-only response envelopes", () => {
+    expect(
+      notificationTriggerQuerySchema.parse({
+        kinds: "public_safety,traffic_disruption",
+        severities: "critical,warning",
+        q: "røyk",
+        limit: "12",
+      }),
+    ).toMatchObject({
+      kinds: ["public_safety", "traffic_disruption"],
+      severities: ["critical", "warning"],
+      q: "røyk",
+      limit: 12,
+    });
+
+    const response = {
+      generatedAt: "2026-07-02T09:45:00.000Z",
+      filters: {
+        limit: 30,
+        severities: ["critical"],
+      },
+      items: [
+        {
+          id: "notification:situation:one",
+          kind: "traffic_disruption",
+          severity: "critical",
+          deliveryState: "candidate_only",
+          title: "Steinsprang, vegen er stengt",
+          body: "Gangåsvegen: Vegen er stengt.",
+          detail: "Kandidat for systemvarsel. Ingen push er sendt.",
+          score: 0.91,
+          confidence: {
+            level: "confirmed",
+            score: 0.91,
+            sourceCount: 2,
+            updatedAt: "2026-07-02T09:45:00.000Z",
+          },
+          generatedAt: "2026-07-02T09:45:00.000Z",
+          eventUpdatedAt: "2026-07-02T09:40:00.000Z",
+          situationId: "one",
+          articleIds: ["article-one"],
+          sourceIds: ["datex", "adressa"],
+          sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+          matchedKeywords: ["stengt"],
+          reasons: ["Har offentlig kildegrunnlag."],
+          links: [
+            {
+              kind: "situation",
+              label: "Åpne situasjon",
+              href: "/situasjoner/one",
+              situationId: "one",
+            },
+          ],
+        },
+      ],
+      summary: {
+        total: 1,
+        critical: 1,
+        warning: 0,
+        watch: 0,
+        officialBacked: 1,
+        highConfidence: 1,
+      },
+    } satisfies NotificationTriggerPage;
+
+    expect(notificationTriggerPageSchema.parse(response)).toMatchObject({
+      items: [{ deliveryState: "candidate_only", title: "Steinsprang, vegen er stengt" }],
     });
   });
 

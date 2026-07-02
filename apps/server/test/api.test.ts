@@ -332,6 +332,7 @@ describe("private situation API", () => {
     });
     await request(app).get("/api/bootstrap").expect(401);
     await request(app).get("/api/operations/coverage-bundles").expect(401);
+    await request(app).get("/api/operations/notification-triggers").expect(401);
     await request(app).get("/api/operations/spatial-analytics").expect(401);
     await request(app).get("/api/operations/raw/ai-runs").expect(401);
     await request(app).get("/api/access-requests").expect(401);
@@ -2346,6 +2347,40 @@ describe("private situation API", () => {
       )
       .expect(200);
     expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
+  });
+
+  it("serves notification trigger candidates as private derived operations data", async () => {
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent
+      .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      generatedAt: expect.any(String),
+      summary: expect.objectContaining({
+        total: expect.any(Number),
+        critical: expect.any(Number),
+        warning: expect.any(Number),
+        officialBacked: expect.any(Number),
+      }),
+      items: expect.any(Array),
+    });
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(response.body.items[0]).toMatchObject({
+      id: expect.stringContaining("notification:"),
+      deliveryState: "candidate_only",
+      title: expect.any(String),
+      score: expect.any(Number),
+      confidence: expect.objectContaining({ level: expect.any(String) }),
+      reasons: expect.arrayContaining([expect.any(String)]),
+      links: expect.arrayContaining([expect.objectContaining({ label: expect.any(String) })]),
+    });
+    expect(JSON.stringify(response.body)).not.toContain("rawPayload");
+    expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
+    expect(JSON.stringify(response.body)).not.toContain("raw_payload");
   });
 
   it("serves command center spatial analytics as derived operations data", async () => {

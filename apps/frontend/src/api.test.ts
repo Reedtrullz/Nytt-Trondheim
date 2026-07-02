@@ -164,6 +164,37 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests notification trigger candidates with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        generatedAt: "2026-07-02T09:45:00.000Z",
+        filters: {},
+        items: [],
+        summary: {
+          total: 0,
+          critical: 0,
+          warning: 0,
+          watch: 0,
+          officialBacked: 0,
+          highConfidence: 0,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.notificationTriggers({
+      kinds: ["public_safety", "traffic_disruption"],
+      severities: ["critical", "warning"],
+      q: "røyk",
+      limit: 20,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/notification-triggers?kinds=public_safety%2Ctraffic_disruption&severities=critical%2Cwarning&q=r%C3%B8yk&limit=20",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("requests command center spatial analytics with typed filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       okResponse({

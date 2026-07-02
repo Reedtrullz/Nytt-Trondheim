@@ -25,6 +25,8 @@ import type {
   EvidenceItem,
   MapFeature,
   MorningBrief,
+  NotificationTriggerPage,
+  NotificationTriggerQueryInput,
   OfficialEvent,
   OperationsTimelineEvent,
   OperationsTimelineQuery,
@@ -81,6 +83,7 @@ import {
   analyzeArticleCoverage,
   activationPolicyForSource,
   bootstrapWithMorningBrief,
+  buildNotificationTriggerPage,
   sampleArticles,
   sampleBootstrap,
   sampleNotes,
@@ -213,6 +216,10 @@ export interface Store {
     filters: CoverageBundleQueryInput,
     login: string,
   ): Promise<CoverageBundlePage>;
+  listNotificationTriggers(
+    filters: NotificationTriggerQueryInput,
+    login: string,
+  ): Promise<NotificationTriggerPage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   getRawSourceItem(id: string, login: string): Promise<RawInspectorSourceItemDetail | undefined>;
   listRawAiRuns(filters: RawInspectorAiRunFilters, login: string): Promise<RawInspectorAiRunPage>;
@@ -2700,6 +2707,21 @@ export class MemoryStore implements Store {
     };
   }
 
+  async listNotificationTriggers(
+    filters: NotificationTriggerQueryInput,
+  ): Promise<NotificationTriggerPage> {
+    const [situations, articles] = await Promise.all([
+      this.listSituations({ includeDismissed: false, limit: 100 }),
+      this.listArticles({ limit: 500 }),
+    ]);
+    return buildNotificationTriggerPage({
+      situations: situations.items,
+      articles: articles.items,
+      generatedAt: new Date().toISOString(),
+      filters,
+    });
+  }
+
   async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {
     const search = filters.q?.toLocaleLowerCase("nb");
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
@@ -4038,6 +4060,22 @@ export class PgStore implements Store {
           ? encodeCursor(lastRow.last_seen_at_cursor, lastRow.id)
           : undefined,
     };
+  }
+
+  async listNotificationTriggers(
+    filters: NotificationTriggerQueryInput,
+    login: string,
+  ): Promise<NotificationTriggerPage> {
+    const [situations, articles] = await Promise.all([
+      this.listSituations({ includeDismissed: false, limit: 100 }, login),
+      this.listArticles({ limit: 500 }, login),
+    ]);
+    return buildNotificationTriggerPage({
+      situations: situations.items,
+      articles: articles.items,
+      generatedAt: new Date().toISOString(),
+      filters,
+    });
   }
 
   async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {

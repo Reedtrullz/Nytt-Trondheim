@@ -756,6 +756,58 @@ export interface OperationsTimelineResponse {
   nextCursor?: string;
 }
 
+export type NotificationTriggerKind =
+  | "public_safety"
+  | "traffic_disruption"
+  | "weather_hazard"
+  | "service_disruption";
+export type NotificationTriggerSeverity = "critical" | "warning" | "watch";
+export type NotificationTriggerDeliveryState = "candidate_only";
+
+export interface NotificationTriggerCandidate {
+  id: string;
+  kind: NotificationTriggerKind;
+  severity: NotificationTriggerSeverity;
+  deliveryState: NotificationTriggerDeliveryState;
+  title: string;
+  body: string;
+  detail: string;
+  score: number;
+  confidence: SourceConfidenceSummary;
+  generatedAt: string;
+  eventUpdatedAt: string;
+  situationId?: string;
+  articleIds: string[];
+  sourceIds: SourceId[];
+  sourceLabels: string[];
+  matchedKeywords: string[];
+  reasons: string[];
+  links: OperationsTimelineEventLink[];
+}
+
+export interface NotificationTriggerSummary {
+  total: number;
+  critical: number;
+  warning: number;
+  watch: number;
+  officialBacked: number;
+  highConfidence: number;
+}
+
+export interface NotificationTriggerQuery {
+  kinds?: NotificationTriggerKind[];
+  severities?: NotificationTriggerSeverity[];
+  q?: string;
+  limit?: number;
+}
+
+export interface NotificationTriggerPage {
+  generatedAt: string;
+  filters: NotificationTriggerQuery;
+  items: NotificationTriggerCandidate[];
+  summary: NotificationTriggerSummary;
+}
+
 export interface SituationSourceItemLink {
   situationId: string;
   sourceItemId: string;

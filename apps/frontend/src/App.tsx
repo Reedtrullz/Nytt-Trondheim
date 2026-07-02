@@ -33,6 +33,11 @@ const OperationsTimelinePage = lazy(() =>
     default: module.OperationsTimelinePage,
   })),
 );
+const NotificationTriggerCandidatesPage = lazy(() =>
+  import("./pages/NotificationTriggerCandidatesPage.js").then((module) => ({
+    default: module.NotificationTriggerCandidatesPage,
+  })),
+);
 const RawDataInspectorPage = lazy(() =>
   import("./pages/RawDataInspectorPage.js").then((module) => ({
     default: module.RawDataInspectorPage,
@@ -247,6 +252,10 @@ function AuthenticatedApp() {
             <Route path="/command/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/command/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/command/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route
+              path="/command/varsler"
+              element={ownerOnly(<NotificationTriggerCandidatesPage />)}
+            />
             <Route path="/command/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
             <Route path="/command/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/command/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
@@ -254,6 +263,10 @@ function AuthenticatedApp() {
             <Route path="/drift/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/drift/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/drift/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route
+              path="/drift/varsler"
+              element={ownerOnly(<NotificationTriggerCandidatesPage />)}
+            />
             <Route path="/drift/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
             <Route path="/drift/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/drift/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />

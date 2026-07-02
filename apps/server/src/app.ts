@@ -17,6 +17,7 @@ import {
   emailLoginRequestSchema,
   lifecycleInputSchema,
   noteInputSchema,
+  notificationTriggerQuerySchema,
   operationsTimelineQuerySchema,
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
@@ -1854,6 +1855,15 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const filters = coverageBundleQuerySchema.parse(req.query);
       res.json(await store.listCoverageBundles(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/notification-triggers", async (req, res, next) => {
+    try {
+      const filters = notificationTriggerQuerySchema.parse(req.query);
+      res.json(await store.listNotificationTriggers(filters, currentLogin(req)));
     } catch (error) {
       next(error);
     }

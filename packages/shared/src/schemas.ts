@@ -967,6 +967,67 @@ export const operationsTimelineResponseSchema = z
   })
   .strict();
 
+export const notificationTriggerKindSchema = z.enum([
+  "public_safety",
+  "traffic_disruption",
+  "weather_hazard",
+  "service_disruption",
+]);
+
+export const notificationTriggerSeveritySchema = z.enum(["critical", "warning", "watch"]);
+
+export const notificationTriggerQuerySchema = z.object({
+  kinds: csvListSchema(notificationTriggerKindSchema),
+  severities: csvListSchema(notificationTriggerSeveritySchema),
+  q: z.string().trim().max(160).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+export type NotificationTriggerQueryInput = z.infer<typeof notificationTriggerQuerySchema>;
+
+export const notificationTriggerCandidateSchema = z
+  .object({
+    id: z.string().trim().min(1).max(260),
+    kind: notificationTriggerKindSchema,
+    severity: notificationTriggerSeveritySchema,
+    deliveryState: z.literal("candidate_only"),
+    title: z.string().trim().min(1).max(220),
+    body: z.string().trim().min(1).max(1000),
+    detail: z.string().trim().min(1).max(1000),
+    score: z.number().min(0).max(1),
+    confidence: sourceConfidenceSummarySchema,
+    generatedAt: z.string().datetime(),
+    eventUpdatedAt: z.string().datetime(),
+    situationId: z.string().trim().min(1).max(200).optional(),
+    articleIds: z.array(z.string().trim().min(1).max(200)).max(100),
+    sourceIds: z.array(sourceIdSchema).max(40),
+    sourceLabels: z.array(z.string().trim().min(1).max(160)).max(40),
+    matchedKeywords: z.array(z.string().trim().min(1).max(80)).max(40),
+    reasons: z.array(z.string().trim().min(1).max(300)).max(20),
+    links: z.array(operationsTimelineEventLinkSchema).max(20),
+  })
+  .strict();
+
+export const notificationTriggerSummarySchema = z
+  .object({
+    total: z.number().int().nonnegative().max(100_000),
+    critical: z.number().int().nonnegative().max(100_000),
+    warning: z.number().int().nonnegative().max(100_000),
+    watch: z.number().int().nonnegative().max(100_000),
+    officialBacked: z.number().int().nonnegative().max(100_000),
+    highConfidence: z.number().int().nonnegative().max(100_000),
+  })
+  .strict();
+
+export const notificationTriggerPageSchema = z
+  .object({
+    generatedAt: z.string().datetime(),
+    filters: notificationTriggerQuerySchema,
+    items: z.array(notificationTriggerCandidateSchema).max(100),
+    summary: notificationTriggerSummarySchema,
+  })
+  .strict();
+
 export const privateAnnotationQuerySchema = z.object({
   scenario: privateMapScenarioSchema.optional(),
   confidence: privateMapConfidenceSchema.optional(),

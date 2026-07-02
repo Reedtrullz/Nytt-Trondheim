@@ -96,6 +96,8 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Åpne dekningsgrupper");
     expect(html).toContain("/command/tidslinje");
     expect(html).toContain("Åpne tidslinje");
+    expect(html).toContain("/command/varsler");
+    expect(html).toContain("Åpne varselutløsere");
     expect(html).toContain("/command/romlig");
     expect(html).toContain("Åpne romlig analyse");
     expect(html).toContain("/command/radata");

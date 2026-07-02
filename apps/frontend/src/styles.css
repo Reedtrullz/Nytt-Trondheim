@@ -3545,6 +3545,167 @@ button {
   max-width: 720px;
 }
 
+.notification-triggers-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 44px 32px 80px;
+}
+
+.notification-triggers-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 380px;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.notification-triggers-sidebar,
+.notification-trigger-list,
+.notification-trigger-drawer {
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.notification-trigger-list,
+.notification-trigger-drawer {
+  padding: 18px;
+}
+
+.notification-trigger-drawer {
+  position: sticky;
+  top: 92px;
+  display: grid;
+  gap: 18px;
+}
+
+.notification-trigger-drawer h2 {
+  margin: 2px 0 0;
+  font: 30px/1.08 var(--serif);
+}
+
+.notification-trigger-drawer h3 {
+  margin: 0 0 10px;
+  font: 18px/1.15 var(--serif);
+}
+
+.notification-trigger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  margin-top: 8px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-left-width: 5px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+}
+
+.notification-trigger-row:first-of-type {
+  margin-top: 0;
+}
+
+.notification-trigger-row.critical {
+  border-left-color: var(--rust);
+}
+
+.notification-trigger-row.warning {
+  border-left-color: #c07818;
+}
+
+.notification-trigger-row.watch {
+  border-left-color: var(--blue);
+}
+
+.notification-trigger-row:hover,
+.notification-trigger-row.selected {
+  background: color-mix(in srgb, var(--paper) 84%, var(--blue) 16%);
+}
+
+.notification-trigger-row-main,
+.notification-trigger-row-meta {
+  min-width: 0;
+}
+
+.notification-trigger-row-main span,
+.notification-trigger-row-main strong,
+.notification-trigger-row-main small {
+  display: block;
+}
+
+.notification-trigger-row-main span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.notification-trigger-row-main strong {
+  margin: 2px 0 3px;
+  font-size: 14px;
+}
+
+.notification-trigger-row-main small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.notification-trigger-row-meta,
+.notification-trigger-badges,
+.notification-trigger-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.notification-trigger-row-meta {
+  justify-content: flex-end;
+}
+
+.notification-trigger-row-meta span,
+.notification-trigger-badges span,
+.notification-trigger-keywords span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.notification-trigger-filter {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.notification-trigger-filter legend {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.notification-trigger-filter label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: none;
+}
+
 .spatial-analytics-page {
   max-width: 1440px;
   margin: 0 auto;
@@ -6075,7 +6236,8 @@ button {
 @media (max-width: 720px) {
   .source-audit-row,
   .source-audit-row.header,
-  .coverage-bundle-row {
+  .coverage-bundle-row,
+  .notification-trigger-row {
     grid-template-columns: 1fr;
   }
 
@@ -6084,7 +6246,8 @@ button {
     display: block;
   }
 
-  .coverage-bundle-row-meta {
+  .coverage-bundle-row-meta,
+  .notification-trigger-row-meta {
     justify-content: flex-start;
   }
 }
@@ -6831,6 +6994,7 @@ button {
   .source-audit-page,
   .operations-timeline-page,
   .coverage-bundles-page,
+  .notification-triggers-page,
   .spatial-analytics-page,
   .raw-inspector-page,
   .saved-page,
@@ -6874,6 +7038,7 @@ button {
   .source-audit-grid,
   .operations-timeline-grid,
   .coverage-bundles-grid,
+  .notification-triggers-grid,
   .spatial-analytics-grid,
   .raw-inspector-grid,
   .worker-metrics-grid,
@@ -6911,6 +7076,8 @@ button {
   .operations-timeline-drawer,
   .coverage-bundles-sidebar,
   .coverage-bundle-drawer,
+  .notification-triggers-sidebar,
+  .notification-trigger-drawer,
   .spatial-analytics-sidebar,
   .spatial-analytics-cells,
   .raw-inspector-sidebar,
@@ -6921,6 +7088,7 @@ button {
   .source-audit-sidebar,
   .operations-timeline-sidebar,
   .coverage-bundles-sidebar,
+  .notification-triggers-sidebar,
   .spatial-analytics-sidebar,
   .raw-inspector-sidebar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
