@@ -32,6 +32,7 @@ import type {
   UserGrantInput,
   UserPage,
   UserUpdateInput,
+  WorldCupDashboardPayload,
   WorkspaceNote,
   WorkspaceTask,
 } from "@nytt/shared";
@@ -183,6 +184,7 @@ export const api = {
     }
     return request<ArticlePage>(`/api/articles?${parameters.toString()}`);
   },
+  worldCupDashboard: () => request<WorldCupDashboardPayload>("/api/sport/world-cup"),
   sourceItems: (query: SourceItemFilters = {}) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

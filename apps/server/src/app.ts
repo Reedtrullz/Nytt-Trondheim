@@ -64,6 +64,7 @@ import {
 } from "./auth.js";
 import { createEmailSender } from "./email.js";
 import { buildWorkspaceExport, safeFilename } from "./export.js";
+import { loadWorldCupDashboard } from "./sport/world-cup.js";
 import { MemoryStore, PgStore, type Store } from "./store.js";
 import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
 import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
@@ -999,6 +1000,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = articleQuerySchema.parse(req.query);
       res.json(await store.listArticles(query, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/sport/world-cup", async (_req, res, next) => {
+    try {
+      const dashboard = await loadWorldCupDashboard();
+      res.set("Cache-Control", "private, max-age=60");
+      res.json(dashboard);
     } catch (error) {
       next(error);
     }

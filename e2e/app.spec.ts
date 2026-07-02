@@ -1,6 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { sampleBootstrap, sampleWorkspace, type Article } from "@nytt/shared";
+import {
+  fallbackWorldCupDashboard,
+  sampleBootstrap,
+  sampleWorkspace,
+  type Article,
+} from "@nytt/shared";
 
 async function openTrafficLayersIfHidden(page: Page): Promise<void> {
   const layersButton = page.getByRole("button", { name: "Kartlag og filtre" });
@@ -13,6 +18,17 @@ async function openTrafficLayersIfHidden(page: Page): Promise<void> {
   if ((await layersButton.isVisible().catch(() => false)) && expanded !== "true") {
     await layersButton.click();
   }
+}
+
+async function expectNoHorizontalPageOverflow(page: Page): Promise<void> {
+  const metrics = await page.evaluate(() => ({
+    bodyScrollWidth: document.body.scrollWidth,
+    documentScrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+
+  expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
+  expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
 }
 
 test("Situation Room explains provenance and keeps private map controls distinct", async ({
@@ -213,9 +229,7 @@ test("home nearby module links ranked local stories with the map", async ({ page
 
   await page.getByTitle(/Ny bru over Nidelva/).click();
   await expect(nearby.getByRole("heading", { name: /Ny bru over Nidelva/ })).toBeVisible();
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
-  ).toBe(true);
+  await expectNoHorizontalPageOverflow(page);
 });
 
 test("home feed renders persisted coverage-bundle labels for similar stories", async ({ page }) => {
@@ -1149,6 +1163,19 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
     }
     await route.fallback();
   });
+  await page.route("**/api/sport/world-cup", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...fallbackWorldCupDashboard,
+        generatedAt: "2026-07-02T10:40:00.000Z",
+        sourceMode: "live",
+        sourceLabel: "ESPN livefeed",
+        sourceDetail: "Kampstatus og tabeller normalisert fra ESPN.",
+      }),
+    });
+  });
 
   await page.goto("/sport");
 
@@ -1157,7 +1184,8 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
   const nextMatches = page.locator(".sport-match-panel");
   await expect(nextMatches).toContainText("Elfenbenskysten");
   await expect(nextMatches).toContainText("Norge");
-  await expect(page.locator(".sport-data-status")).toContainText("ikke live-resultater");
+  await expect(page.locator(".sport-data-status")).toContainText("ESPN livefeed");
+  await expect(page.locator(".sport-data-status")).toContainText("Oppdateres automatisk");
   await expect(page.getByRole("heading", { name: "Veien videre" })).toBeVisible();
   await expect(page.locator(".sport-path-panel")).toContainText("Brasil");
   await expect(page.getByRole("heading", { name: "Sluttspillstatus" })).toBeVisible();
@@ -1174,9 +1202,33 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
   await page.getByRole("button", { name: "Norge" }).click();
   await expect(page.locator(".sport-match-list")).toContainText("Elfenbenskysten");
   await expect(page.locator(".sport-match-list")).toContainText("Brasil");
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
-  ).toBe(true);
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("frontpage and sport stay responsive on phone and tablet viewports", async ({ page }) => {
+  await page.route("**/api/sport/world-cup", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(fallbackWorldCupDashboard),
+    });
+  });
+
+  for (const viewport of [
+    { width: 360, height: 780 },
+    { width: 820, height: 1180 },
+  ]) {
+    await page.setViewportSize(viewport);
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+    await expect(page.locator(".filters")).toHaveCSS("flex-wrap", "wrap");
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.goto("/sport");
+    await expect(page.getByRole("heading", { name: "VM 2026" })).toBeVisible();
+    await expectNoHorizontalPageOverflow(page);
+  }
 });
 
 test("unknown viewer route is a missing page, not an owner-only denial", async ({ page }) => {
@@ -1474,9 +1526,7 @@ test("mobile traffic page prioritizes the map before long summaries and filters"
     expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
     expect((box?.width ?? Number.POSITIVE_INFINITY) + (box?.x ?? 0)).toBeLessThanOrEqual(391);
   }
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
-  ).toBe(true);
+  await expectNoHorizontalPageOverflow(page);
 });
 
 test("situation map exposes private fire and SAR planning tools", async ({ page }) => {

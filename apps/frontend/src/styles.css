@@ -88,7 +88,9 @@ button {
   height: 100%;
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   border-bottom: 2px solid transparent;
+  white-space: nowrap;
 }
 
 .masthead nav a.active {
@@ -425,6 +427,8 @@ button {
 .situation-heading h2 {
   margin: 0;
   font: 35px/1.06 var(--serif);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .status {
@@ -434,6 +438,7 @@ button {
   background: var(--terracotta-soft);
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .status-time {
@@ -454,6 +459,7 @@ button {
 
 .additional-situations {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   margin-top: 17px;
   color: var(--blue);
@@ -5382,6 +5388,27 @@ button {
   gap: 18px;
 }
 
+.sport-page > *,
+.sport-hero,
+.sport-summary-grid,
+.sport-data-status,
+.sport-phase-strip,
+.sport-workspace,
+.sport-path-list,
+.sport-match-list,
+.sport-bracket-grid,
+.sport-table-grid,
+.sport-panel,
+.sport-bracket-panel,
+.sport-table-panel,
+.sport-summary-card,
+.sport-data-status article,
+.sport-phase-strip article,
+.sport-path-list article,
+.sport-match {
+  min-width: 0;
+}
+
 .sport-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
@@ -5784,6 +5811,7 @@ button {
 
 .sport-table-scroll {
   overflow-x: auto;
+  max-width: 100%;
 }
 
 .sport-table-panel table {
@@ -6129,6 +6157,7 @@ button {
   }
 
   .home-grid,
+  .situation-banner,
   .situation-layout,
   .situation-explanation,
   .operations-detail,
@@ -6263,6 +6292,33 @@ button {
   }
 }
 
+@media (max-width: 900px) {
+  .view-controls {
+    height: auto;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px 28px;
+    padding-bottom: 8px;
+  }
+
+  .filters,
+  .topic-filters {
+    flex-wrap: wrap;
+    gap: 0 18px;
+    overflow-x: visible;
+  }
+
+  .filters button,
+  .topic-filters button {
+    padding-block: 12px;
+  }
+
+  .topic-filters {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
 @media (max-width: 720px) {
   .site-header {
     height: auto;
@@ -6324,13 +6380,21 @@ button {
     height: auto;
     flex-direction: column;
     align-items: flex-start;
-    gap: 2px;
+    gap: 6px;
+    padding-bottom: 10px;
   }
 
   .filters,
   .topic-filters {
-    overflow-x: auto;
+    flex-wrap: wrap;
+    gap: 0 18px;
     max-width: 100%;
+    overflow-x: visible;
+  }
+
+  .filters button,
+  .topic-filters button {
+    padding-block: 10px;
   }
 
   .topic-filters {
@@ -6340,7 +6404,12 @@ button {
 
   .masthead nav {
     overflow-x: auto;
-    gap: 22px;
+    gap: 16px;
+    scrollbar-width: none;
+  }
+
+  .masthead nav::-webkit-scrollbar {
+    display: none;
   }
 
   .situation-banner,
@@ -6416,6 +6485,62 @@ button {
 
   .home-grid {
     margin-top: 25px;
+  }
+
+  .situation-banner {
+    gap: 18px;
+    padding: 18px 16px;
+  }
+
+  .situation-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+  }
+
+  .situation-heading h2 {
+    font-size: 34px;
+  }
+
+  .status {
+    width: max-content;
+    max-width: 100%;
+  }
+
+  .status-time {
+    line-height: 1.35;
+  }
+
+  .situation-copy ul {
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 18px;
+    list-style-position: outside;
+  }
+
+  .additional-situations {
+    gap: 8px 14px;
+  }
+
+  .additional-situations a {
+    overflow-wrap: anywhere;
+  }
+
+  .situation-preview {
+    min-height: 150px;
+    padding: 14px;
+  }
+
+  .preview-shape {
+    right: 28px;
+    width: min(44vw, 118px);
+  }
+
+  .preview-point {
+    left: 34px;
+    max-width: calc(100% - 52px);
+    overflow-wrap: anywhere;
   }
 
   .rail-title {

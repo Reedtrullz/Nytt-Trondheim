@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import type { Article } from "@nytt/shared";
+import {
+  fallbackWorldCupDashboard,
+  type Article,
+  type WorldCupDashboardPayload,
+} from "@nytt/shared";
 import { WorldCupSportDashboard } from "./SportPage.js";
 
 const sportArticle: Article = {
@@ -18,11 +22,17 @@ const sportArticle: Article = {
 };
 
 function renderDashboard({
+  worldCup,
+  loadingWorldCup,
+  worldCupError,
   articles = [sportArticle],
   loadingArticles = false,
   articleError,
   now = new Date("2026-07-01T10:45:00.000Z"),
 }: {
+  worldCup?: WorldCupDashboardPayload;
+  loadingWorldCup?: boolean;
+  worldCupError?: string;
   articles?: Article[];
   loadingArticles?: boolean;
   articleError?: string;
@@ -31,6 +41,9 @@ function renderDashboard({
   return renderToStaticMarkup(
     <MemoryRouter>
       <WorldCupSportDashboard
+        worldCup={worldCup}
+        loadingWorldCup={loadingWorldCup}
+        worldCupError={worldCupError}
         articles={articles}
         loadingArticles={loadingArticles}
         articleError={articleError}
@@ -48,11 +61,12 @@ describe("WorldCupSportDashboard", () => {
     expect(html).toContain("32-delsfinaler");
     expect(html).toContain("Elfenbenskysten");
     expect(html).toContain("Norge");
-    expect(html).toContain("Elfenbenskysten 1–2 Norge");
-    expect(html).toContain("Brasil – Norge");
+    expect(html).toContain("Elfenbenskysten 1-2 Norge");
+    expect(html).toContain("Brasil - Norge");
     expect(html).toContain("Veien videre");
     expect(html).toContain("Datastatus");
-    expect(html).toContain("ikke live-resultater");
+    expect(html).toContain("Viser kuratert fallback");
+    expect(html).toContain("Kuratert VM-snapshot");
     expect(html).toContain("Åttedelsfinale");
     expect(html).toContain("MF");
     expect(html).toContain("MM");
@@ -86,7 +100,25 @@ describe("WorldCupSportDashboard", () => {
   it("warns when the curated World Cup snapshot should be checked", () => {
     const html = renderDashboard({ now: new Date("2026-07-02T10:45:00.000Z") });
 
-    expect(html).toContain("Bør kontrolleres mot live score");
+    expect(html).toContain("Fallback bør kontrolleres");
+  });
+
+  it("renders live World Cup feed status when the API payload is fresh", () => {
+    const liveWorldCup: WorldCupDashboardPayload = {
+      ...fallbackWorldCupDashboard,
+      generatedAt: "2026-07-02T10:40:00.000Z",
+      sourceMode: "live",
+      sourceLabel: "ESPN livefeed",
+      sourceDetail: "Kampstatus og tabeller normalisert fra ESPN.",
+    };
+    const html = renderDashboard({
+      worldCup: liveWorldCup,
+      now: new Date("2026-07-02T10:45:00.000Z"),
+    });
+
+    expect(html).toContain("Live · sist oppdatert");
+    expect(html).toContain("ESPN livefeed");
+    expect(html).toContain("Oppdateres automatisk fra livefeed.");
   });
 
   it("does not link unsafe article URLs", () => {

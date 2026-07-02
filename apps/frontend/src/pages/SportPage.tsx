@@ -1,417 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Article } from "@nytt/shared";
+import {
+  fallbackWorldCupDashboard,
+  type Article,
+  type WorldCupDashboardPayload,
+  type WorldCupGroupTable,
+  type WorldCupMatch,
+  type WorldCupMatchStatus,
+  type WorldCupSourceLink,
+} from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 
-type MatchStatus = "finished" | "live" | "upcoming";
 type MatchFilter = "featured" | "norway" | "all";
-
-interface SourceLink {
-  label: string;
-  href: string;
-}
-
-interface GroupRow {
-  team: string;
-  played: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  goalsFor: number;
-  goalsAgainst: number;
-  goalDifference: number;
-  points: number;
-  note: string;
-}
-
-interface GroupTable {
-  id: string;
-  title: string;
-  reason: string;
-  rows: GroupRow[];
-}
-
-interface WorldCupMatch {
-  id: string;
-  stage: string;
-  home: string;
-  away: string;
-  status: MatchStatus;
-  kickoff?: string;
-  result?: string;
-  penaltyResult?: string;
-  venue: string;
-  note: string;
-  consequence: string;
-  source: string;
-  featured?: boolean;
-  norwayFocus?: boolean;
-}
 
 interface SportPageProps {
   initialArticles?: Article[];
 }
 
 interface WorldCupSportDashboardProps {
+  worldCup?: WorldCupDashboardPayload;
+  loadingWorldCup?: boolean;
+  worldCupError?: string;
   articles?: Article[];
   loadingArticles?: boolean;
   articleError?: string;
   now?: Date;
 }
-
-const sourceLinks: SourceLink[] = [
-  {
-    label: "FIFA format",
-    href: "https://www.fifa.com/en/articles/article-fifa-world-cup-2026-mexico-canada-usa-new-format-tournament-football-soccer",
-  },
-  {
-    label: "FIFA kampoversikt",
-    href: "https://www.fifa.com/en/tournaments/mens/worldcup/canadamexicousa2026/scores-fixtures",
-  },
-  {
-    label: "ESPN kampoppsett",
-    href: "https://www.espn.com/soccer/story/_/id/48939282/2026-fifa-world-cup-fixtures-results-match-schedule-group-stage-knockout-rounds-bracket",
-  },
-  {
-    label: "FOX live score",
-    href: "https://www.foxsports.com/soccer/fifa-world-cup/scores",
-  },
-  {
-    label: "FOX tabeller",
-    href: "https://www.foxsports.com/soccer/fifa-world-cup/standings",
-  },
-];
-
-const worldCupSnapshotUpdatedAt = "2026-07-01T10:30:00.000Z";
-
-const tournamentPhases = [
-  {
-    id: "groups",
-    label: "Gruppespill",
-    value: "Ferdig",
-    note: "12 grupper à fire lag.",
-  },
-  {
-    id: "round-of-32",
-    label: "32-delsfinaler",
-    value: "Pågår",
-    note: "Ekstra utslagsrunde i 48-lagsformatet.",
-  },
-  {
-    id: "round-of-16",
-    label: "Åttedelsfinaler",
-    value: "4.–7. juli",
-    note: "Norge møter Brasil 5. juli.",
-  },
-  {
-    id: "final",
-    label: "Finale",
-    value: "19. juli",
-    note: "Åtte kamper kreves for mesteren.",
-  },
-];
-
-const norwayPath = [
-  {
-    label: "Forrige",
-    title: "Elfenbenskysten 1–2 Norge",
-    note: "Norge videre fra 32-delsfinalen.",
-  },
-  {
-    label: "Neste",
-    title: "Brasil – Norge",
-    note: "Åttedelsfinale i New York/New Jersey.",
-  },
-  {
-    label: "Mulig etterpå",
-    title: "Kvartfinale-sporet",
-    note: "Vinneren går inn mot kamp 92-vinneren.",
-  },
-];
-
-const groupTables: GroupTable[] = [
-  {
-    id: "group-i",
-    title: "Gruppe I",
-    reason: "Norge-gruppa",
-    rows: [
-      {
-        team: "Frankrike",
-        played: 3,
-        wins: 3,
-        draws: 0,
-        losses: 0,
-        goalsFor: 10,
-        goalsAgainst: 2,
-        goalDifference: 8,
-        points: 9,
-        note: "Vant gruppa",
-      },
-      {
-        team: "Norge",
-        played: 3,
-        wins: 2,
-        draws: 0,
-        losses: 1,
-        goalsFor: 8,
-        goalsAgainst: 7,
-        goalDifference: 1,
-        points: 6,
-        note: "Videre, slo Elfenbenskysten",
-      },
-      {
-        team: "Senegal",
-        played: 3,
-        wins: 1,
-        draws: 0,
-        losses: 2,
-        goalsFor: 8,
-        goalsAgainst: 6,
-        goalDifference: 2,
-        points: 3,
-        note: "Ute",
-      },
-      {
-        team: "Irak",
-        played: 3,
-        wins: 0,
-        draws: 0,
-        losses: 3,
-        goalsFor: 1,
-        goalsAgainst: 12,
-        goalDifference: -11,
-        points: 0,
-        note: "Ute",
-      },
-    ],
-  },
-  {
-    id: "group-e",
-    title: "Gruppe E",
-    reason: "Motstander-sporet",
-    rows: [
-      {
-        team: "Tyskland",
-        played: 3,
-        wins: 2,
-        draws: 0,
-        losses: 1,
-        goalsFor: 10,
-        goalsAgainst: 4,
-        goalDifference: 6,
-        points: 6,
-        note: "Videre",
-      },
-      {
-        team: "Elfenbenskysten",
-        played: 3,
-        wins: 2,
-        draws: 0,
-        losses: 1,
-        goalsFor: 4,
-        goalsAgainst: 2,
-        goalDifference: 2,
-        points: 6,
-        note: "Ute mot Norge",
-      },
-      {
-        team: "Ecuador",
-        played: 3,
-        wins: 1,
-        draws: 1,
-        losses: 1,
-        goalsFor: 2,
-        goalsAgainst: 2,
-        goalDifference: 0,
-        points: 4,
-        note: "Videre som treer",
-      },
-      {
-        team: "Curaçao",
-        played: 3,
-        wins: 0,
-        draws: 1,
-        losses: 2,
-        goalsFor: 1,
-        goalsAgainst: 9,
-        goalDifference: -8,
-        points: 1,
-        note: "Ute",
-      },
-    ],
-  },
-];
-
-const roundOf32Matches: WorldCupMatch[] = [
-  {
-    id: "canada-south-africa",
-    stage: "32-delsfinale",
-    home: "Canada",
-    away: "Sør-Afrika",
-    status: "finished",
-    result: "1–0",
-    venue: "Dallas",
-    note: "Canada videre til åttedelsfinale.",
-    consequence: "Møter Marokko.",
-    source: "ESPN",
-  },
-  {
-    id: "brazil-japan",
-    stage: "32-delsfinale",
-    home: "Brasil",
-    away: "Japan",
-    status: "finished",
-    result: "2–1",
-    venue: "Philadelphia",
-    note: "Brasil avgjorde sent.",
-    consequence: "Møter Norge.",
-    source: "ESPN",
-  },
-  {
-    id: "paraguay-germany",
-    stage: "32-delsfinale",
-    home: "Paraguay",
-    away: "Tyskland",
-    status: "finished",
-    result: "1–1",
-    penaltyResult: "4–3 str.",
-    venue: "Kansas City",
-    note: "Paraguay videre etter straffer.",
-    consequence: "Tyskland ute.",
-    source: "ESPN",
-  },
-  {
-    id: "morocco-netherlands",
-    stage: "32-delsfinale",
-    home: "Marokko",
-    away: "Nederland",
-    status: "finished",
-    result: "1–1",
-    penaltyResult: "3–2 str.",
-    venue: "Guadalupe",
-    note: "Marokko møter Canada.",
-    consequence: "Nederland ute.",
-    source: "ESPN",
-  },
-  {
-    id: "ivory-coast-norway",
-    stage: "32-delsfinale",
-    home: "Elfenbenskysten",
-    away: "Norge",
-    status: "finished",
-    kickoff: "2026-06-30T17:00:00.000Z",
-    result: "1–2",
-    venue: "Arlington / Dallas",
-    note: "Norge vant første utslagskamp.",
-    consequence: "Møter Brasil i åttedelsfinalen.",
-    source: "FOX / ESPN",
-    featured: true,
-    norwayFocus: true,
-  },
-  {
-    id: "brazil-norway",
-    stage: "Åttedelsfinale",
-    home: "Brasil",
-    away: "Norge",
-    status: "upcoming",
-    kickoff: "2026-07-05T20:00:00.000Z",
-    venue: "New York/New Jersey",
-    note: "Neste Norge-kamp i sluttspillet.",
-    consequence: "Vinneren går til kvartfinale-sporet.",
-    source: "FOX / ESPN",
-    featured: true,
-    norwayFocus: true,
-  },
-  {
-    id: "france-sweden",
-    stage: "32-delsfinale",
-    home: "Frankrike",
-    away: "Sverige",
-    status: "live",
-    kickoff: "2026-06-30T21:00:00.000Z",
-    venue: "East Rutherford",
-    note: "Gruppevinneren fra Norges gruppe møter Sverige.",
-    consequence: "Sjekk live score før publisering.",
-    source: "FOX / ESPN",
-  },
-  {
-    id: "mexico-ecuador",
-    stage: "32-delsfinale",
-    home: "Mexico",
-    away: "Ecuador",
-    status: "upcoming",
-    kickoff: "2026-07-01T01:00:00.000Z",
-    venue: "Mexico by",
-    note: "Nattkamp norsk tid.",
-    consequence: "Vinneren går inn i Norges side av bracketen.",
-    source: "FOX / ESPN",
-  },
-  {
-    id: "england-dr-congo",
-    stage: "32-delsfinale",
-    home: "England",
-    away: "DR Kongo",
-    status: "upcoming",
-    kickoff: "2026-07-01T16:00:00.000Z",
-    venue: "Miami",
-    note: "Neste sluttspilldag.",
-    consequence: "Aktuell i dagens kampvindu.",
-    source: "FOX / ESPN",
-    featured: true,
-  },
-  {
-    id: "belgium-senegal",
-    stage: "32-delsfinale",
-    home: "Belgia",
-    away: "Senegal",
-    status: "upcoming",
-    kickoff: "2026-07-01T20:00:00.000Z",
-    venue: "Houston",
-    note: "Senegal videre som tredjelag.",
-    consequence: "Aktuell i kveldsvinduet.",
-    source: "FOX / ESPN",
-    featured: true,
-  },
-  {
-    id: "usa-bosnia",
-    stage: "32-delsfinale",
-    home: "USA",
-    away: "Bosnia-Hercegovina",
-    status: "upcoming",
-    kickoff: "2026-07-02T00:00:00.000Z",
-    venue: "Los Angeles",
-    note: "Vertsnasjon i kveldskamp amerikansk tid.",
-    consequence: "Avslutter dagens norske nattvindu.",
-    source: "FOX / ESPN",
-    featured: true,
-  },
-  {
-    id: "spain-austria",
-    stage: "32-delsfinale",
-    home: "Spania",
-    away: "Østerrike",
-    status: "upcoming",
-    kickoff: "2026-07-02T19:00:00.000Z",
-    venue: "Seattle",
-    note: "Spania inn i sluttspillet.",
-    consequence: "Neste runde etter dagens kamper.",
-    source: "ESPN",
-  },
-  {
-    id: "portugal-croatia",
-    stage: "32-delsfinale",
-    home: "Portugal",
-    away: "Kroatia",
-    status: "upcoming",
-    kickoff: "2026-07-02T23:00:00.000Z",
-    venue: "Atlanta",
-    note: "Europeisk tungvekterkamp.",
-    consequence: "Neste runde etter dagens kamper.",
-    source: "ESPN",
-  },
-];
 
 function formatKickoff(value: string | undefined): string {
   if (!value) return "Tid ikke bekreftet";
@@ -437,7 +53,7 @@ function formatArticleTime(value: string): string {
   }).format(date);
 }
 
-function statusLabel(status: MatchStatus): string {
+function statusLabel(status: WorldCupMatchStatus): string {
   switch (status) {
     case "finished":
       return "Ferdig";
@@ -453,21 +69,26 @@ function formatGoalDifference(value: number): string {
   return String(value);
 }
 
-function snapshotAgeHours(now: Date): number | undefined {
-  const snapshotDate = new Date(worldCupSnapshotUpdatedAt);
-  if (Number.isNaN(snapshotDate.getTime()) || Number.isNaN(now.getTime())) return undefined;
-  return Math.max(0, Math.round((now.getTime() - snapshotDate.getTime()) / 36_000) / 100);
+function dataAgeHours(now: Date, generatedAt: string): number | undefined {
+  const generatedDate = new Date(generatedAt);
+  if (Number.isNaN(generatedDate.getTime()) || Number.isNaN(now.getTime())) return undefined;
+  return Math.max(0, Math.round((now.getTime() - generatedDate.getTime()) / 36_000) / 100);
 }
 
-function snapshotStatusLabel(now: Date): string {
-  const age = snapshotAgeHours(now);
-  if (age === undefined) return "Kuratert øyeblikksbilde";
-  if (age < 2) return "Nylig kontrollert";
-  if (age < 12) return "Kuratert i dag";
-  return "Bør kontrolleres mot live score";
+function worldCupStatusLabel(worldCup: WorldCupDashboardPayload, now: Date): string {
+  const age = dataAgeHours(now, worldCup.generatedAt);
+  if (worldCup.sourceMode === "live") {
+    if (age === undefined) return "Livefeed aktiv";
+    if (age < 0.25) return "Livefeed oppdatert nå";
+    if (age < 2) return "Livefeed nylig oppdatert";
+    return "Livefeed bør oppdateres";
+  }
+  if (age === undefined) return "Kuratert fallback";
+  if (age < 12) return "Kuratert fallback";
+  return "Fallback bør kontrolleres";
 }
 
-function ExternalLink({ link }: { link: SourceLink }) {
+function ExternalLink({ link }: { link: WorldCupSourceLink }) {
   const href = safeExternalUrl(link.href);
   if (!href) return null;
   return (
@@ -506,21 +127,40 @@ function MatchCard({ match }: { match: WorldCupMatch }) {
   );
 }
 
-function SportDataStatus({ now }: { now: Date }) {
-  const age = snapshotAgeHours(now);
+function SportDataStatus({
+  worldCup,
+  now,
+  loading,
+  error,
+}: {
+  worldCup: WorldCupDashboardPayload;
+  now: Date;
+  loading?: boolean;
+  error?: string;
+}) {
+  const age = dataAgeHours(now, worldCup.generatedAt);
   const ageLabel = age === undefined ? "Alder ukjent" : `${age.toLocaleString("nb-NO")} t gammel`;
 
   return (
     <section className="sport-data-status" aria-label="Datastatus">
       <article>
         <span>VM-kamper</span>
-        <strong>{snapshotStatusLabel(now)}</strong>
-        <p>Kuratert snapshot, ikke live-resultater.</p>
+        <strong>{loading ? "Oppdaterer..." : worldCupStatusLabel(worldCup, now)}</strong>
+        <p>
+          {worldCup.sourceMode === "live"
+            ? "Oppdateres automatisk fra livefeed."
+            : "Viser kuratert fallback når livefeed ikke svarer."}
+        </p>
       </article>
       <article>
-        <span>Sist kontrollert</span>
-        <strong>{formatKickoff(worldCupSnapshotUpdatedAt)}</strong>
+        <span>Sist oppdatert</span>
+        <strong>{formatKickoff(worldCup.generatedAt)}</strong>
         <p>{ageLabel}.</p>
+      </article>
+      <article>
+        <span>Kilde</span>
+        <strong>{worldCup.sourceLabel}</strong>
+        <p>{error ?? worldCup.sourceDetail}</p>
       </article>
       <article>
         <span>Lokale saker</span>
@@ -531,10 +171,10 @@ function SportDataStatus({ now }: { now: Date }) {
   );
 }
 
-function TournamentPhaseStrip() {
+function TournamentPhaseStrip({ phases }: { phases: WorldCupDashboardPayload["phases"] }) {
   return (
     <section className="sport-phase-strip" aria-label="Turneringsfase">
-      {tournamentPhases.map((phase) => (
+      {phases.map((phase) => (
         <article key={phase.id}>
           <span>{phase.label}</span>
           <strong>{phase.value}</strong>
@@ -545,7 +185,7 @@ function TournamentPhaseStrip() {
   );
 }
 
-function NorwayPathPanel() {
+function NorwayPathPanel({ path }: { path: WorldCupDashboardPayload["norwayPath"] }) {
   return (
     <section className="sport-panel sport-path-panel" aria-labelledby="sport-path-heading">
       <header className="sport-panel-heading">
@@ -555,7 +195,7 @@ function NorwayPathPanel() {
         </div>
       </header>
       <div className="sport-path-list">
-        {norwayPath.map((step) => (
+        {path.map((step) => (
           <article key={step.label}>
             <span>{step.label}</span>
             <strong>{step.title}</strong>
@@ -595,7 +235,7 @@ function BracketStatusTable({ matches }: { matches: WorldCupMatch[] }) {
   );
 }
 
-function GroupTableCard({ table }: { table: GroupTable }) {
+function GroupTableCard({ table }: { table: WorldCupGroupTable }) {
   return (
     <section className="sport-table-panel" aria-labelledby={`${table.id}-heading`}>
       <header>
@@ -686,27 +326,29 @@ function SportArticleList({
 }
 
 export function WorldCupSportDashboard({
+  worldCup = fallbackWorldCupDashboard,
+  loadingWorldCup = false,
+  worldCupError,
   articles = [],
   loadingArticles = false,
   articleError,
   now = new Date(),
 }: WorldCupSportDashboardProps) {
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("featured");
+  const matches = worldCup.matches;
   const featuredMatches = useMemo(
-    () => roundOf32Matches.filter((match) => match.featured || match.status === "live"),
-    [],
+    () => matches.filter((match) => match.featured || match.status === "live"),
+    [matches],
   );
   const visibleMatches = useMemo(() => {
-    if (matchFilter === "norway") return roundOf32Matches.filter((match) => match.norwayFocus);
+    if (matchFilter === "norway") return matches.filter((match) => match.norwayFocus);
     if (matchFilter === "featured") return featuredMatches;
-    return roundOf32Matches;
-  }, [featuredMatches, matchFilter]);
-  const finishedCount = roundOf32Matches.filter((match) => match.status === "finished").length;
-  const liveCount = roundOf32Matches.filter((match) => match.status === "live").length;
-  const upcomingCount = roundOf32Matches.filter((match) => match.status === "upcoming").length;
-  const nextNorwayMatch = roundOf32Matches.find(
-    (match) => match.norwayFocus && match.status !== "finished",
-  );
+    return matches;
+  }, [featuredMatches, matchFilter, matches]);
+  const finishedCount = matches.filter((match) => match.status === "finished").length;
+  const liveCount = matches.filter((match) => match.status === "live").length;
+  const upcomingCount = matches.filter((match) => match.status === "upcoming").length;
+  const nextNorwayMatch = matches.find((match) => match.norwayFocus && match.status !== "finished");
 
   return (
     <main className="sport-page">
@@ -715,20 +357,28 @@ export function WorldCupSportDashboard({
           <p className="label">Sport · VM 2026</p>
           <h1 id="sport-title">VM 2026</h1>
           <p>
-            Sluttspill, Norge-spor og lokale sportssaker samlet på ett sted. Kampdata er et kuratert
-            øyeblikksbilde med offisielle kildelenker.
+            Sluttspill, Norge-spor, tabeller og lokale sportssaker samlet på ett sted. Kampdata
+            oppdateres automatisk når livefeeden er tilgjengelig.
           </p>
         </div>
         <div className="sport-hero-meta" aria-label="VM-kilder">
-          <span>Sist oppdatert {formatKickoff(worldCupSnapshotUpdatedAt)}</span>
-          {sourceLinks.map((link) => (
+          <span>
+            {worldCup.sourceMode === "live" ? "Live" : "Fallback"} · sist oppdatert{" "}
+            {formatKickoff(worldCup.generatedAt)}
+          </span>
+          {worldCup.sourceLinks.map((link) => (
             <ExternalLink key={link.href} link={link} />
           ))}
         </div>
       </section>
 
-      <SportDataStatus now={now} />
-      <TournamentPhaseStrip />
+      <SportDataStatus
+        worldCup={worldCup}
+        now={now}
+        loading={loadingWorldCup}
+        error={worldCupError}
+      />
+      <TournamentPhaseStrip phases={worldCup.phases} />
 
       <section className="sport-summary-grid" aria-label="VM-status">
         <article className="sport-summary-card sport-summary-card-norway">
@@ -741,21 +391,23 @@ export function WorldCupSportDashboard({
         <article className="sport-summary-card">
           <span>Pågående</span>
           <strong>{liveCount}</strong>
-          <p>Live-status krever kontroll mot FOX/FIFA før bruk.</p>
+          <p>{worldCup.sourceMode === "live" ? "Direkte fra livefeed." : "Fra fallback-data."}</p>
         </article>
         <article className="sport-summary-card">
           <span>Sluttspill</span>
-          <strong>{finishedCount}/16</strong>
-          <p>Ferdigspilte 32-delsfinaler i denne visningen.</p>
+          <strong>
+            {finishedCount}/{matches.length}
+          </strong>
+          <p>Ferdigspilte kamper i VM-visningen.</p>
         </article>
         <article className="sport-summary-card">
           <span>Neste vindu</span>
           <strong>{upcomingCount}</strong>
-          <p>Kamper med tidspunkt i snapshotet.</p>
+          <p>Kamper med tidspunkt i aktivt datasett.</p>
         </article>
       </section>
 
-      <NorwayPathPanel />
+      <NorwayPathPanel path={worldCup.norwayPath} />
 
       <section className="sport-workspace">
         <section className="sport-panel sport-match-panel" aria-labelledby="sport-next-heading">
@@ -792,9 +444,11 @@ export function WorldCupSportDashboard({
             </div>
           </header>
           <div className="sport-match-list">
-            {visibleMatches.map((match) => (
-              <MatchCard key={match.id} match={match} />
-            ))}
+            {visibleMatches.length > 0 ? (
+              visibleMatches.map((match) => <MatchCard key={match.id} match={match} />)
+            ) : (
+              <p className="sport-news-state">Ingen kamper i dette filteret akkurat nå.</p>
+            )}
           </div>
         </section>
 
@@ -819,13 +473,13 @@ export function WorldCupSportDashboard({
             <p className="label">Bracket</p>
             <h2 id="sport-bracket-heading">Sluttspillstatus</h2>
           </div>
-          <span>Resultat, neste steg og kontrollbehov</span>
+          <span>Resultat, neste steg og kildeoppdatert status</span>
         </header>
-        <BracketStatusTable matches={roundOf32Matches} />
+        <BracketStatusTable matches={matches} />
       </section>
 
       <section className="sport-table-grid" aria-label="VM-tabeller">
-        {groupTables.map((table) => (
+        {worldCup.groups.map((table) => (
           <GroupTableCard key={table.id} table={table} />
         ))}
       </section>
@@ -841,6 +495,47 @@ export function SportPage({ initialArticles = [] }: SportPageProps) {
   const [articles, setArticles] = useState<Article[]>(initialSportArticles);
   const [loadingArticles, setLoadingArticles] = useState(initialSportArticles.length === 0);
   const [articleError, setArticleError] = useState<string>();
+  const [worldCup, setWorldCup] = useState<WorldCupDashboardPayload>(fallbackWorldCupDashboard);
+  const [loadingWorldCup, setLoadingWorldCup] = useState(true);
+  const [worldCupError, setWorldCupError] = useState<string>();
+
+  useEffect(() => {
+    let ignore = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    function scheduleRefresh(seconds: number) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(
+        () => {
+          void loadWorldCup();
+        },
+        Math.max(60, seconds) * 1000,
+      );
+    }
+
+    async function loadWorldCup() {
+      setLoadingWorldCup(true);
+      try {
+        const dashboard = await api.worldCupDashboard();
+        if (ignore) return;
+        setWorldCup(dashboard);
+        setWorldCupError(undefined);
+        scheduleRefresh(dashboard.nextRefreshSeconds);
+      } catch (reason: unknown) {
+        if (ignore) return;
+        setWorldCupError(reason instanceof Error ? reason.message : "Kunne ikke hente VM-data.");
+        scheduleRefresh(fallbackWorldCupDashboard.nextRefreshSeconds);
+      } finally {
+        if (!ignore) setLoadingWorldCup(false);
+      }
+    }
+
+    void loadWorldCup();
+    return () => {
+      ignore = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -871,6 +566,9 @@ export function SportPage({ initialArticles = [] }: SportPageProps) {
       articles={articles}
       loadingArticles={loadingArticles}
       articleError={articleError}
+      worldCup={worldCup}
+      loadingWorldCup={loadingWorldCup}
+      worldCupError={worldCupError}
     />
   );
 }

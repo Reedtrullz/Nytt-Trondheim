@@ -12,6 +12,8 @@ GitHub remains the owner/admin login. Approved non-GitHub accounts are `viewer` 
 
 Normalized incident records are authoritative: situation/article associations, evidence, timeline entries, official events, AI processing runs, saved situations and export manifests are stored separately from the summary payload returned for the dashboard.
 
+The World Cup sport dashboard is authenticated read-only context. `/api/sport/world-cup` fetches ESPN scoreboard/standings JSON through a short server-side cache, normalizes compact match/table fields into `WorldCupDashboardPayload`, and returns a shared curated fallback when the live feed is unavailable. It does not persist raw sports payloads, create `source_items`, write source health, or participate in situation activation.
+
 ## Provenance Model
 
 Map features carry one required provenance classification:

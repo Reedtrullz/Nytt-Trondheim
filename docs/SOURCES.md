@@ -39,6 +39,10 @@ Articles and official MET/NVE/DATEX/Politiloggen situation events, Entur service
 
 Coverage bundles are not a collected source. They are worker-derived article grouping decisions stored in `coverage_bundles` for owner-only operations review at `/drift/dekning`. They may reference article ids and source labels, but they do not write raw upstream payloads, do not require a source contract, and must not be mirrored into `source_items`.
 
+## Sport Dashboard Context
+
+`/sport` reads a server-normalized FIFA World Cup 2026 dashboard from ESPN public scoreboard and standings JSON. This is covered by `docs/source-contracts/espn-world-cup.md`. The endpoint is authenticated, read-through cached, and returns only compact match/table fields plus source links. It does not persist raw ESPN payloads, does not create `source_items`, does not update `source_health`, and cannot promote situations. If ESPN is unavailable, the API returns the shared curated VM fallback with `sourceMode="fallback"` so the page remains honest instead of showing stale live claims.
+
 ## Official And Geographic Layers
 
 - Kartverket WMTS `topo` provides the map underlay and must be attributed `© Kartverket`.
