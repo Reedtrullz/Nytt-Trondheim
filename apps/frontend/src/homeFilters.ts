@@ -5,6 +5,7 @@ export const articleCategories = [
   "Hendelser",
   "Krim",
   "Transport",
+  "Vær",
   "Sport",
   "Politikk",
   "Byutvikling",

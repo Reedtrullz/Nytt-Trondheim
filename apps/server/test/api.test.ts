@@ -323,7 +323,7 @@ describe("private situation API", () => {
         { label: "Kilder", value: "5/6", detail: "Rapporterer OK" },
       ],
       articleIds: [article.id],
-      situationIds: [],
+      situationIds: [sampleSituation.id],
     };
     const captured: string[] = [];
     const fakePool = {
@@ -335,7 +335,7 @@ describe("private situation API", () => {
           return { rows: [{ payload: article, saved: false }] };
         }
         if (normalizedSql.includes("FROM situations WHERE status IN")) {
-          return { rows: [] };
+          return { rows: [{ payload: sampleSituation }] };
         }
         if (normalizedSql.includes("FROM source_health")) {
           return {
@@ -373,6 +373,16 @@ describe("private situation API", () => {
     const bootstrap = await store.getBootstrap("Reedtrullz");
 
     expect(bootstrap.articles).toEqual([{ ...article, saved: false }]);
+    expect(bootstrap.situations).toEqual([
+      expect.objectContaining({
+        id: sampleSituation.id,
+        primaryLocation: expect.objectContaining({
+          lat: expect.any(Number),
+          lng: expect.any(Number),
+          label: expect.any(String),
+        }),
+      }),
+    ]);
     expect(bootstrap.morningBrief).toBe(storedBrief);
     expect(captured.some((sql) => sql.includes("FROM morning_briefs"))).toBe(true);
   });

@@ -4344,25 +4344,8 @@ export class PgStore implements Store {
   }
 
   private async listHomeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
-    const result = await this.pool.query<{
-      id: string;
-      title: string;
-      summary: string;
-      status: Situation["status"];
-      verificationStatus: Situation["verificationStatus"];
-      updatedAt: Date | string;
-      createdAt: string;
-      locationLabel: string;
-    }>(
-      `SELECT
-         id,
-         payload->>'title' AS "title",
-         payload->>'summary' AS "summary",
-         status,
-         payload->>'verificationStatus' AS "verificationStatus",
-         updated_at AS "updatedAt",
-         payload->>'createdAt' AS "createdAt",
-         payload->>'locationLabel' AS "locationLabel"
+    const result = await this.pool.query<{ payload: Situation }>(
+      `SELECT payload
        FROM situations
        WHERE status IN ('preliminary', 'active')
          AND COALESCE(payload->>'publicVisibility', 'public') = 'public'
@@ -4370,16 +4353,7 @@ export class PgStore implements Store {
        LIMIT $1`,
       [limit],
     );
-    return result.rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      summary: row.summary,
-      status: row.status,
-      verificationStatus: row.verificationStatus,
-      updatedAt: isoString(row.updatedAt),
-      createdAt: isoString(row.createdAt),
-      locationLabel: row.locationLabel,
-    }));
+    return result.rows.map((row) => homeSituationSummary(row.payload));
   }
 
   private async latestMorningBrief(): Promise<MorningBrief | undefined> {

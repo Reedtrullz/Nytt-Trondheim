@@ -192,6 +192,16 @@ function LoadingPage({ message }: { message: string }) {
   );
 }
 
+export type AuthenticatedShellApi = Pick<typeof api, "bootstrap" | "session">;
+
+export async function loadAuthenticatedShellData(client: AuthenticatedShellApi = api) {
+  const [sessionPayload, bootstrapPayload] = await Promise.all([
+    client.session(),
+    client.bootstrap(),
+  ]);
+  return { sessionPayload, bootstrapPayload };
+}
+
 function LegacyCommandRedirect({ to }: { to: string }) {
   const location = useLocation();
   return <Navigate to={`${to}${location.search}${location.hash}`} replace />;
@@ -208,11 +218,7 @@ function AuthenticatedApp() {
     let ignore = false;
     setLoading(true);
     setError(undefined);
-    api
-      .session()
-      .then((sessionPayload) =>
-        api.bootstrap().then((bootstrapPayload) => ({ sessionPayload, bootstrapPayload })),
-      )
+    loadAuthenticatedShellData()
       .then(({ sessionPayload, bootstrapPayload }) => {
         if (!ignore) {
           setSession(sessionPayload);

@@ -69,6 +69,7 @@ describe("home filter query params", () => {
       "Hendelser",
       "Krim",
       "Transport",
+      "Vær",
       "Sport",
       "Politikk",
       "Byutvikling",
@@ -106,12 +107,12 @@ describe("home filter query params", () => {
     });
   });
 
-  it("keeps Vær out of article category filters because it has its own page", () => {
-    expect(articleCategories).not.toContain("Vær");
+  it("accepts Vær as a thematic City Pulse category", () => {
+    expect(articleCategories).toContain("Vær");
     expect(parseHomeFilters("?q=bru&scope=trondelag&category=V%C3%A6r")).toEqual({
       q: "bru",
       scope: "trondelag",
-      category: "Alle",
+      category: "Vær",
       timeWindow: "all",
     });
   });
@@ -123,6 +124,9 @@ describe("home filter query params", () => {
     expect(
       searchSummary({ q: "", scope: "trondelag", category: "Transport", timeWindow: "24h" }),
     ).toBe("Trafikk siste 24 timer i Trøndelag");
+    expect(searchSummary({ q: "", scope: "trondheim", category: "Vær", timeWindow: "all" })).toBe(
+      "Vær i Trondheim",
+    );
     expect(searchSummary({ q: "", scope: "trondheim", category: "Krim", timeWindow: "all" })).toBe(
       "Krim i Trondheim",
     );
