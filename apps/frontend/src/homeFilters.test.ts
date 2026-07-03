@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   articleCategories,
+  articleCategoryIcons,
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
@@ -75,6 +76,8 @@ describe("home filter query params", () => {
     expect(articleCategoryLabels.Transport).toBe("Trafikk");
     expect(articleCategoryLabels.Krim).toBe("Krim");
     expect(articleCategoryLabels.Vær).toBe("Vær");
+    expect(articleCategoryIcons.Transport).toBe("→");
+    expect(articleCategoryIcons.Hendelser).toBe("!");
     expect(articleTopicLabels.rosenborg).toBe("Rosenborg");
     expect(parseHomeFilters("?category=Transport").category).toBe("Transport");
     expect(parseHomeFilters("?window=2h").timeWindow).toBe("2h");

@@ -395,6 +395,35 @@ button {
   white-space: nowrap;
 }
 
+.filters button.channel-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding-inline: 0;
+}
+
+.channel-filter-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.channel-filter.selected .channel-filter-icon {
+  border-color: currentColor;
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
 .scope-switch button.selected {
   color: var(--ink);
   font-weight: 600;
@@ -1554,6 +1583,84 @@ button {
   width: 38px;
   height: 38px;
   outline-color: rgba(23, 35, 46, 0.24);
+}
+
+.story-marker-popup {
+  display: grid;
+  gap: 10px;
+  min-width: 220px;
+  max-width: 280px;
+  color: var(--ink);
+  font-family: var(--sans);
+}
+
+.story-marker-popup-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.story-marker-popup-heading span,
+.story-marker-popup-list small,
+.story-marker-popup-more {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.story-marker-popup-heading strong {
+  font-size: 15px;
+}
+
+.story-marker-popup-list {
+  display: grid;
+  gap: 6px;
+}
+
+.story-marker-popup-list button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 7px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.story-marker-popup-list button.selected {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.story-marker-popup-list button > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--blue);
+  color: #fff;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.story-marker-popup-list b,
+.story-marker-popup-list small {
+  display: block;
+}
+
+.story-marker-popup-list b {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+}
+
+.story-marker-popup-more {
+  margin: 0;
 }
 
 .nearby-list {

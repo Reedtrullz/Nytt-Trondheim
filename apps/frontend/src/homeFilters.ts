@@ -27,6 +27,19 @@ export const articleCategoryLabels = {
   Vær: "Vær",
 } as const satisfies Record<ArticleCategory | "Alle", string>;
 
+export const articleCategoryIcons = {
+  Alle: "•",
+  Hendelser: "!",
+  Krim: "§",
+  Transport: "→",
+  Sport: "⚑",
+  Politikk: "⌂",
+  Byutvikling: "▦",
+  Kultur: "♪",
+  Nyheter: "N",
+  Vær: "☁",
+} as const satisfies Record<ArticleCategory | "Alle", string>;
+
 export const articleTopicLabels = {
   rosenborg: "Rosenborg",
 } as const satisfies Record<ArticleTopic, string>;

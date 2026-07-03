@@ -22,6 +22,7 @@ import { DashboardGrid, type DashboardWidgetDefinition } from "../components/Das
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
 import {
   articleCategories,
+  articleCategoryIcons,
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
@@ -1194,11 +1195,16 @@ export function HomePage({
             <button
               type="button"
               aria-pressed={category === item}
-              className={category === item ? "selected" : ""}
+              className={`channel-filter channel-filter-${item.toLocaleLowerCase("nb")}${
+                category === item ? " selected" : ""
+              }`}
               key={item}
               onClick={() => updateFilters({ category: item })}
             >
-              {articleCategoryLabels[item]}
+              <span className="channel-filter-icon" aria-hidden="true">
+                {articleCategoryIcons[item]}
+              </span>
+              <span>{articleCategoryLabels[item]}</span>
             </button>
           ))}
         </div>
