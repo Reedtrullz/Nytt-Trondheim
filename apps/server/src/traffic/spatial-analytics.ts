@@ -66,13 +66,22 @@ function investigationDelayPriority(
 function investigationHotspotPriority(
   cell: SpatialHeatmapCell,
 ): SpatialInvestigationQueueItem["priority"] {
-  if (cell.maxSeverity === "critical" || cell.trafficEventCount >= 3 || cell.count >= 10) {
+  const activeBuckets = heatmapActiveBucketCount(cell);
+  const peakCount = heatmapPeakBucket(cell)?.count ?? 0;
+  if (
+    cell.maxSeverity === "critical" ||
+    cell.trafficEventCount >= 3 ||
+    cell.count >= 10 ||
+    (activeBuckets >= 5 && peakCount >= 4 && (cell.trafficEventCount > 0 || cell.articleCount > 0))
+  ) {
     return "critical";
   }
   if (
     cell.maxSeverity === "high" ||
     cell.trafficEventCount > 0 ||
     cell.activeDayCount >= 3 ||
+    activeBuckets >= 3 ||
+    peakCount >= 4 ||
     cell.count >= 4 ||
     (cell.articleCount > 0 && cell.sourceItemCount > 0)
   ) {
@@ -140,6 +149,55 @@ function activeDayPhrase(activeDayCount: number) {
   return countPhrase(activeDayCount, "aktiv dag", "aktive dager");
 }
 
+function bucketDayPhrase(bucketStart: string) {
+  const date = new Date(bucketStart);
+  if (!Number.isFinite(date.getTime())) return bucketStart.slice(0, 10);
+  return new Intl.DateTimeFormat("nb-NO", {
+    day: "numeric",
+    month: "long",
+    timeZone: "Europe/Oslo",
+  }).format(date);
+}
+
+function heatmapBuckets(cell: SpatialHeatmapCell) {
+  return (cell.timeBuckets ?? [])
+    .filter((bucket) => Number.isFinite(bucket.count) && bucket.count > 0)
+    .sort((left, right) => left.bucketStart.localeCompare(right.bucketStart));
+}
+
+function heatmapActiveBucketCount(cell: SpatialHeatmapCell) {
+  return Math.max(cell.activeDayCount, heatmapBuckets(cell).length);
+}
+
+function heatmapPeakBucket(cell: SpatialHeatmapCell) {
+  return heatmapBuckets(cell).reduce<
+    NonNullable<SpatialHeatmapCell["timeBuckets"]>[number] | undefined
+  >((peak, bucket) => (!peak || bucket.count > peak.count ? bucket : peak), undefined);
+}
+
+function hotspotTemporalSummary(cell: SpatialHeatmapCell): string | undefined {
+  const peak = heatmapPeakBucket(cell);
+  if (!peak) return undefined;
+  return `topp ${countPhrase(peak.count, "observasjon", "observasjoner")} ${bucketDayPhrase(peak.bucketStart)}`;
+}
+
+function hotspotReason(
+  cell: SpatialHeatmapCell,
+  priority: SpatialInvestigationQueueItem["priority"],
+) {
+  const activeBuckets = heatmapActiveBucketCount(cell);
+  const peak = heatmapPeakBucket(cell);
+  if (activeBuckets >= 3) {
+    return `Tidsprofilen viser gjentatte observasjoner over ${activeDayPhrase(activeBuckets)}. Vurder som mulig svart punkt og kontroller mot kart og rådata.`;
+  }
+  if (peak && peak.count >= 4) {
+    return `Tidsprofilen viser en tydelig topp ${bucketDayPhrase(peak.bucketStart)}. Kontroller om dette er en enkelthendelse eller start på et gjentakende punkt.`;
+  }
+  return priority === "watch"
+    ? "Lavere tetthet, men synlig i romlig analyse."
+    : "Tetthet, gjentakelse eller tverrkildesignal bør kontrolleres i kart og rådata.";
+}
+
 function delayEvidence(
   candidate: UnexplainedDelayCandidate,
   articleTitles: Map<string, string>,
@@ -167,6 +225,16 @@ function delayEvidence(
 function hotspotEvidence(cell: SpatialHeatmapCell): string[] {
   const evidence = [countPhrase(cell.count, "observasjon", "observasjoner")];
   evidence.push(activeDayPhrase(cell.activeDayCount));
+  const peak = heatmapPeakBucket(cell);
+  if (peak) {
+    evidence.push(
+      `Toppdag ${bucketDayPhrase(peak.bucketStart)}: ${countPhrase(
+        peak.count,
+        "observasjon",
+        "observasjoner",
+      )}`,
+    );
+  }
   if (cell.articleCount > 0)
     evidence.push(countPhrase(cell.articleCount, "nyhetssak", "nyhetssaker"));
   if (cell.trafficEventCount > 0)
@@ -289,16 +357,16 @@ export function buildSpatialInvestigationQueue(
   });
   const hotspotItems = heatmapCells.map((cell): SpatialInvestigationQueueItem => {
     const priority = investigationHotspotPriority(cell);
+    const temporalSummary = hotspotTemporalSummary(cell);
     return {
       id: `investigation:${cell.id}`,
       kind: "hotspot",
       priority,
       title: `Varmepunkt ${cell.id.replace(/^cell:/u, "")}`,
-      summary: `${cell.count} observasjoner over ${activeDayPhrase(cell.activeDayCount)} ved ${cell.center.lat.toFixed(3)}, ${cell.center.lng.toFixed(3)}`,
-      reason:
-        priority === "watch"
-          ? "Lavere tetthet, men synlig i romlig analyse."
-          : "Tetthet, gjentakelse eller tverrkildesignal bør kontrolleres i kart og rådata.",
+      summary: `${cell.count} observasjoner over ${activeDayPhrase(
+        heatmapActiveBucketCount(cell),
+      )}${temporalSummary ? `, ${temporalSummary}` : ""} ved ${cell.center.lat.toFixed(3)}, ${cell.center.lng.toFixed(3)}`,
+      reason: hotspotReason(cell, priority),
       updatedAt: cell.lastSeenAt,
       evidence: hotspotEvidence(cell),
       articleIds: [],

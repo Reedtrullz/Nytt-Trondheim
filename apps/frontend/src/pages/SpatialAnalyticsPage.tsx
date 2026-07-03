@@ -92,6 +92,14 @@ function time(value?: string) {
     : "Ikke registrert";
 }
 
+function shortDate(value: string) {
+  return new Intl.DateTimeFormat("nb-NO", {
+    day: "numeric",
+    month: "long",
+    timeZone: "Europe/Oslo",
+  }).format(new Date(value));
+}
+
 export function spatialAnalyticsFiltersForTimeWindow(
   window: SpatialAnalyticsTimeWindow,
   base: Date = new Date(),
@@ -371,6 +379,39 @@ function SourceItemLinks({ sourceItemIds }: { sourceItemIds?: string[] }) {
   );
 }
 
+function HeatmapTimeProfile({ cell }: { cell: SpatialHeatmapCell }) {
+  const buckets = (cell.timeBuckets ?? [])
+    .filter((bucket) => Number.isFinite(bucket.count) && bucket.count > 0)
+    .slice(-7);
+  if (buckets.length === 0) return null;
+  const maxCount = Math.max(1, ...buckets.map((bucket) => bucket.count));
+  return (
+    <div className="spatial-time-profile" aria-label="Tidsprofil for varmepunkt">
+      <div className="spatial-time-profile-heading">
+        <span>Tidsprofil</span>
+        <small>{buckets.length} dager</small>
+      </div>
+      <div className="spatial-time-profile-bars">
+        {buckets.map((bucket) => {
+          const height = Math.max(16, Math.round((bucket.count / maxCount) * 100));
+          const label = `${shortDate(bucket.bucketStart)}: ${bucket.count} observasjoner`;
+          return (
+            <div
+              className="spatial-time-profile-bucket"
+              aria-label={label}
+              key={bucket.bucketStart}
+            >
+              <i aria-hidden="true" style={{ height: `${height}%` }} />
+              <b>{bucket.count} obs</b>
+              <small>{shortDate(bucket.bucketStart)}</small>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function RawTelemetryLinks({ rawRefs }: { rawRefs?: SpatialRawDataRef[] }) {
   const visibleRefs = (rawRefs ?? []).slice(0, 3);
   if (visibleRefs.length === 0) return null;
@@ -425,6 +466,7 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
                     Først sett {time(cell.firstSeenAt)} · {activeDaysLabel(cell.activeDayCount)}
                   </p>
                   <p>{hotspotReason(cell)}</p>
+                  <HeatmapTimeProfile cell={cell} />
                   <p>{confidence.rationale}</p>
                   <p>{cell.sourceIds.map(sourceLabel).join(", ")}</p>
                   <SourceItemLinks sourceItemIds={cell.sourceItemIds} />
@@ -871,6 +913,7 @@ export function SpatialAnalyticsDashboard({
                     <small>{hotspotReason(cell)}</small>
                     <small>{confidence.rationale}</small>
                     <small>{cell.sourceIds.map(sourceLabel).join(", ")}</small>
+                    <HeatmapTimeProfile cell={cell} />
                     <SourceItemLinks sourceItemIds={cell.sourceItemIds} />
                   </article>
                 );

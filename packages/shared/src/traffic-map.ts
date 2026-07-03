@@ -227,6 +227,14 @@ export interface TravelPlanPayload {
   generatedAt: string;
 }
 
+export interface SpatialHeatmapTimeBucket {
+  bucketStart: string;
+  count: number;
+  sourceItemCount: number;
+  articleCount: number;
+  trafficEventCount: number;
+}
+
 export interface SpatialHeatmapCell {
   id: string;
   center: {
@@ -242,6 +250,7 @@ export interface SpatialHeatmapCell {
   firstSeenAt: string;
   lastSeenAt: string;
   activeDayCount: number;
+  timeBuckets?: SpatialHeatmapTimeBucket[];
   sourceIds: Array<SourceId | TrafficMapEventSource>;
   maxSeverity?: TrafficEventSeverity;
   sourceConfidence?: SourceConfidenceSummary;

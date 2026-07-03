@@ -5254,6 +5254,77 @@ button {
   color: var(--muted);
 }
 
+.spatial-time-profile {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.spatial-time-profile-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.spatial-time-profile-heading span,
+.spatial-time-profile-heading small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.spatial-time-profile-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(28px, 1fr));
+  gap: 5px;
+  align-items: end;
+  min-height: 62px;
+}
+
+.spatial-time-profile-bucket {
+  display: grid;
+  grid-template-rows: 42px auto auto;
+  gap: 3px;
+  align-items: end;
+  min-width: 0;
+  text-align: center;
+}
+
+.spatial-time-profile-bucket i {
+  display: block;
+  align-self: end;
+  justify-self: center;
+  width: min(100%, 22px);
+  min-height: 4px;
+  border: 1px solid rgba(15, 111, 79, 0.35);
+  background: rgba(15, 111, 79, 0.62);
+}
+
+.spatial-time-profile-bucket b,
+.spatial-time-profile-bucket small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spatial-time-profile-bucket b {
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1.1;
+}
+
+.spatial-time-profile-bucket small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.1;
+}
+
 .spatial-investigation-panel,
 .spatial-delay-panel,
 .spatial-analytics-cells {

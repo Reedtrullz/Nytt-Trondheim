@@ -975,10 +975,15 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
             kind: "hotspot",
             priority: "high",
             title: "Varmepunkt Sluppen",
-            summary: "4 observasjoner ved Sluppen.",
+            summary: "4 observasjoner over 2 aktive dager, topp 3 observasjoner 2. juli.",
             reason: "Tetthet og tverrkilde-signal bør kontrolleres i kart og rådata.",
             updatedAt: "2026-07-02T09:40:00.000Z",
-            evidence: ["4 observasjoner", "1 trafikkhendelse", "1 nyhetssak"],
+            evidence: [
+              "4 observasjoner",
+              "2 aktive dager",
+              "Toppdag 2. juli: 3 observasjoner",
+              "1 trafikkhendelse",
+            ],
             articleIds: [],
             sourceItemIds: ["source:one"],
             sourceConfidence: {
@@ -1029,6 +1034,22 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
             firstSeenAt: "2026-07-01T09:40:00.000Z",
             lastSeenAt: "2026-07-02T09:40:00.000Z",
             activeDayCount: 2,
+            timeBuckets: [
+              {
+                bucketStart: "2026-07-01T00:00:00.000Z",
+                count: 1,
+                sourceItemCount: 1,
+                articleCount: 0,
+                trafficEventCount: 0,
+              },
+              {
+                bucketStart: "2026-07-02T00:00:00.000Z",
+                count: 3,
+                sourceItemCount: 1,
+                articleCount: 1,
+                trafficEventCount: 1,
+              },
+            ],
             sourceIds: ["nrk", "vegvesen_traffic_info"],
             maxSeverity: "high",
             sourceConfidence: {
@@ -1184,6 +1205,9 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
   await expect(page.getByRole("heading", { name: "Romlig analyse" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Signaler å undersøke" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Varmepunkt Sluppen" })).toBeVisible();
+  await expect(page.getByText("Toppdag 2. juli: 3 observasjoner")).toBeVisible();
+  await expect(page.getByLabel("Tidsprofil for varmepunkt").first()).toBeVisible();
+  await expect(page.getByText("3 obs").first()).toBeVisible();
   await page.getByRole("link", { name: "Rådata 1" }).first().click();
 
   await expect(page).toHaveURL(/\/command\/radata\?sourceItem=source%3Aone/);

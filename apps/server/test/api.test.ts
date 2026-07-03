@@ -3130,6 +3130,22 @@ describe("private situation API", () => {
         firstSeenAt: "2026-07-01T09:40:00.000Z",
         lastSeenAt: "2026-07-02T09:40:00.000Z",
         activeDayCount: 2,
+        timeBuckets: [
+          {
+            bucketStart: "2026-07-01T00:00:00.000Z",
+            count: 1,
+            sourceItemCount: 1,
+            articleCount: 0,
+            trafficEventCount: 0,
+          },
+          {
+            bucketStart: "2026-07-02T00:00:00.000Z",
+            count: 2,
+            sourceItemCount: 1,
+            articleCount: 1,
+            trafficEventCount: 1,
+          },
+        ],
         sourceIds: ["nrk", "vegvesen_traffic_info"],
         maxSeverity: "high",
       },
@@ -3239,6 +3255,13 @@ describe("private situation API", () => {
       ],
       investigationQueue: expect.arrayContaining([
         expect.objectContaining({
+          kind: "hotspot",
+          priority: "high",
+          summary:
+            "3 observasjoner over 2 aktive dager, topp 2 observasjoner 2. juli ved 63.390, 10.390",
+          evidence: expect.arrayContaining(["Toppdag 2. juli: 2 observasjoner"]),
+        }),
+        expect.objectContaining({
           kind: "traffic_counter_anomaly",
           priority: "high",
           title: "E6 Sluppen",
@@ -3270,6 +3293,17 @@ describe("private situation API", () => {
           count: 3,
           firstSeenAt: "2026-07-01T09:40:00.000Z",
           activeDayCount: 2,
+          timeBuckets: [
+            expect.objectContaining({
+              bucketStart: "2026-07-01T00:00:00.000Z",
+              count: 1,
+            }),
+            expect.objectContaining({
+              bucketStart: "2026-07-02T00:00:00.000Z",
+              count: 2,
+              trafficEventCount: 1,
+            }),
+          ],
           sourceItemIds: ["source:item-one", "source:item-two"],
           sourceIds: ["nrk", "vegvesen_traffic_info"],
           sourceConfidence: expect.objectContaining({
@@ -3623,6 +3657,29 @@ describe("private situation API", () => {
               first_seen_at: "2026-06-30T09:40:00.000Z",
               last_seen_at: "2026-07-02T09:40:00.000Z",
               active_day_count: "3",
+              time_buckets: [
+                {
+                  bucketStart: "2026-06-30T00:00:00.000Z",
+                  count: 1,
+                  sourceItemCount: 1,
+                  articleCount: 0,
+                  trafficEventCount: 0,
+                },
+                {
+                  bucketStart: "2026-07-01T00:00:00.000Z",
+                  count: 1,
+                  sourceItemCount: 1,
+                  articleCount: 1,
+                  trafficEventCount: 0,
+                },
+                {
+                  bucketStart: "2026-07-02T00:00:00.000Z",
+                  count: 2,
+                  sourceItemCount: 1,
+                  articleCount: 1,
+                  trafficEventCount: 1,
+                },
+              ],
               source_ids: ["nrk", "vegvesen_traffic_info"],
               severity_rank: "3",
             },
@@ -3647,11 +3704,36 @@ describe("private situation API", () => {
         firstSeenAt: "2026-06-30T09:40:00.000Z",
         lastSeenAt: "2026-07-02T09:40:00.000Z",
         activeDayCount: 3,
+        timeBuckets: [
+          {
+            bucketStart: "2026-06-30T00:00:00.000Z",
+            count: 1,
+            sourceItemCount: 1,
+            articleCount: 0,
+            trafficEventCount: 0,
+          },
+          {
+            bucketStart: "2026-07-01T00:00:00.000Z",
+            count: 1,
+            sourceItemCount: 1,
+            articleCount: 1,
+            trafficEventCount: 0,
+          },
+          {
+            bucketStart: "2026-07-02T00:00:00.000Z",
+            count: 2,
+            sourceItemCount: 1,
+            articleCount: 1,
+            trafficEventCount: 1,
+          },
+        ],
         maxSeverity: "high",
       }),
     ]);
     expect(capturedSql).toContain("min(observed_at) AS first_seen_at");
     expect(capturedSql).toContain("count(DISTINCT observed_at::date)::text AS active_day_count");
+    expect(capturedSql).toContain("date_trunc('day', observed_at) AS bucket_start");
+    expect(capturedSql).toContain("jsonb_agg( jsonb_build_object");
     expect(capturedParams).toEqual(["2026-06-30T00:00:00.000Z", "2026-07-02T23:59:59.000Z", 5]);
   });
 

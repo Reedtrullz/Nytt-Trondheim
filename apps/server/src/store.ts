@@ -1196,6 +1196,7 @@ interface SpatialHeatmapCellRow {
   first_seen_at: Date | string;
   last_seen_at: Date | string;
   active_day_count: string | number;
+  time_buckets: unknown;
   source_ids: string[] | null;
   severity_rank: number | string | null;
 }
@@ -1568,6 +1569,51 @@ function severityFromRank(rank: number | string | null): TrafficEventSeverity | 
   }
 }
 
+function numericBucketValue(value: unknown): number {
+  return numericRowValue(
+    typeof value === "number" || typeof value === "string" || value === null ? value : undefined,
+  );
+}
+
+function dateBucketValue(value: unknown): string | undefined {
+  const date =
+    value instanceof Date
+      ? value
+      : typeof value === "string" || typeof value === "number"
+        ? new Date(value)
+        : undefined;
+  return date && Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+}
+
+function spatialHeatmapTimeBucketsFromRow(
+  value: SpatialHeatmapCellRow["time_buckets"],
+): NonNullable<SpatialHeatmapCell["timeBuckets"]> {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((bucket) => {
+    if (!bucket || typeof bucket !== "object") return [];
+    const record = bucket as Record<string, unknown>;
+    const bucketStart = dateBucketValue(record.bucketStart);
+    if (!bucketStart) return [];
+    return [
+      {
+        bucketStart,
+        count: numericBucketValue(record.count),
+        sourceItemCount: numericBucketValue(record.sourceItemCount),
+        articleCount: numericBucketValue(record.articleCount),
+        trafficEventCount: numericBucketValue(record.trafficEventCount),
+      },
+    ];
+  });
+}
+
 function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCell {
   const sourceIds = (row.source_ids ?? []).filter(
     (source): source is SpatialHeatmapCell["sourceIds"][number] => typeof source === "string",
@@ -1576,6 +1622,7 @@ function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCe
     (sourceItemId): sourceItemId is string => typeof sourceItemId === "string",
   );
   const maxSeverity = severityFromRank(row.severity_rank);
+  const timeBuckets = spatialHeatmapTimeBucketsFromRow(row.time_buckets);
   return {
     id: row.id,
     center: {
@@ -1591,6 +1638,7 @@ function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCe
     firstSeenAt: new Date(row.first_seen_at).toISOString(),
     lastSeenAt: new Date(row.last_seen_at).toISOString(),
     activeDayCount: numericRowValue(row.active_day_count),
+    ...(timeBuckets.length ? { timeBuckets } : {}),
     sourceIds,
     ...(maxSeverity ? { maxSeverity } : {}),
   };
@@ -3689,6 +3737,7 @@ export class MemoryStore implements Store {
         firstSeenAt: string;
         lastSeenAt: string;
         activeDays: Set<string>;
+        timeBuckets: Map<string, NonNullable<SpatialHeatmapCell["timeBuckets"]>[number]>;
         sourceIds: Set<SpatialHeatmapCell["sourceIds"][number]>;
       }
     >();
@@ -3720,6 +3769,7 @@ export class MemoryStore implements Store {
         firstSeenAt: observedAt,
         lastSeenAt: observedAt,
         activeDays: new Set<string>(),
+        timeBuckets: new Map<string, NonNullable<SpatialHeatmapCell["timeBuckets"]>[number]>(),
         sourceIds: new Set<SpatialHeatmapCell["sourceIds"][number]>(),
       };
       current.lngSum += lng;
@@ -3731,25 +3781,43 @@ export class MemoryStore implements Store {
       if (observedAt < current.firstSeenAt) current.firstSeenAt = observedAt;
       if (observedAt > current.lastSeenAt) current.lastSeenAt = observedAt;
       current.activeDays.add(observedAt.slice(0, 10));
+      const bucketStart = `${observedAt.slice(0, 10)}T00:00:00.000Z`;
+      const bucket = current.timeBuckets.get(bucketStart) ?? {
+        bucketStart,
+        count: 0,
+        sourceItemCount: 0,
+        articleCount: 0,
+        trafficEventCount: 0,
+      };
+      bucket.count += 1;
+      bucket.sourceItemCount += 1;
+      if (item.kind === "article") bucket.articleCount += 1;
+      current.timeBuckets.set(bucketStart, bucket);
       current.sourceIds.add(item.provider);
       cells.set(key, current);
     }
 
     return [...cells.entries()]
-      .map(([id, cell]) => ({
-        id,
-        center: { lng: cell.lngSum / cell.count, lat: cell.latSum / cell.count },
-        radiusMeters: 650,
-        count: cell.count,
-        sourceItemCount: cell.sourceItemCount,
-        ...(cell.sourceItemIds.length ? { sourceItemIds: cell.sourceItemIds } : {}),
-        articleCount: cell.articleCount,
-        trafficEventCount: cell.trafficEventCount,
-        firstSeenAt: cell.firstSeenAt,
-        lastSeenAt: cell.lastSeenAt,
-        activeDayCount: cell.activeDays.size,
-        sourceIds: [...cell.sourceIds],
-      }))
+      .map(([id, cell]) => {
+        const timeBuckets = [...cell.timeBuckets.values()]
+          .sort((left, right) => left.bucketStart.localeCompare(right.bucketStart))
+          .slice(-14);
+        return {
+          id,
+          center: { lng: cell.lngSum / cell.count, lat: cell.latSum / cell.count },
+          radiusMeters: 650,
+          count: cell.count,
+          sourceItemCount: cell.sourceItemCount,
+          ...(cell.sourceItemIds.length ? { sourceItemIds: cell.sourceItemIds } : {}),
+          articleCount: cell.articleCount,
+          trafficEventCount: cell.trafficEventCount,
+          firstSeenAt: cell.firstSeenAt,
+          lastSeenAt: cell.lastSeenAt,
+          activeDayCount: cell.activeDays.size,
+          ...(timeBuckets.length ? { timeBuckets } : {}),
+          sourceIds: [...cell.sourceIds],
+        };
+      })
       .sort(
         (left, right) =>
           right.count - left.count || right.lastSeenAt.localeCompare(left.lastSeenAt),
@@ -5609,41 +5677,107 @@ export class PgStore implements Store {
          FROM traffic_map_events tme
          WHERE ${trafficWhere.join(" AND ")}
        ),
-       valid_points AS (
-         SELECT *,
-           floor(ST_X(point) * 100)::int AS lng_cell,
-           floor(ST_Y(point) * 100)::int AS lat_cell
-         FROM observations
-         WHERE ST_X(point) BETWEEN 9.5 AND 11.2
-           AND ST_Y(point) BETWEEN 62.9 AND 64.1
-       )
-       SELECT
-         concat('cell:', lng_cell, ':', lat_cell) AS id,
-         avg(ST_X(point)) AS center_lng,
-         avg(ST_Y(point)) AS center_lat,
-         count(*)::text AS observation_count,
-         count(*) FILTER (WHERE observation_type = 'source_item')::text AS source_item_count,
-         COALESCE(
-           (array_agg(source_item_id ORDER BY observed_at DESC) FILTER (WHERE source_item_id IS NOT NULL))[1:12],
-           ARRAY[]::text[]
-         ) AS source_item_ids,
-         count(*) FILTER (WHERE observation_type = 'source_item' AND item_kind = 'article')::text AS article_count,
-         count(*) FILTER (WHERE observation_type = 'traffic_event')::text AS traffic_event_count,
-         min(observed_at) AS first_seen_at,
-         max(observed_at) AS last_seen_at,
-         count(DISTINCT observed_at::date)::text AS active_day_count,
-         array_agg(DISTINCT source_id ORDER BY source_id) AS source_ids,
-         max(CASE severity
-           WHEN 'critical' THEN 4
-           WHEN 'high' THEN 3
-           WHEN 'medium' THEN 2
-           WHEN 'low' THEN 1
-           ELSE 0
-         END) AS severity_rank
-       FROM valid_points
-       GROUP BY lng_cell, lat_cell
-       ORDER BY observation_count DESC, last_seen_at DESC
-       LIMIT $${params.length}`,
+	       valid_points AS (
+	         SELECT *,
+	           floor(ST_X(point) * 100)::int AS lng_cell,
+	           floor(ST_Y(point) * 100)::int AS lat_cell
+	         FROM observations
+	         WHERE ST_X(point) BETWEEN 9.5 AND 11.2
+	           AND ST_Y(point) BETWEEN 62.9 AND 64.1
+	       ),
+	       bucketed AS (
+	         SELECT
+	           lng_cell,
+	           lat_cell,
+	           date_trunc('day', observed_at) AS bucket_start,
+	           count(*)::int AS bucket_count,
+	           count(*) FILTER (WHERE observation_type = 'source_item')::int AS source_item_count,
+	           count(*) FILTER (
+	             WHERE observation_type = 'source_item' AND item_kind = 'article'
+	           )::int AS article_count,
+	           count(*) FILTER (WHERE observation_type = 'traffic_event')::int AS traffic_event_count
+	         FROM valid_points
+	         GROUP BY lng_cell, lat_cell, date_trunc('day', observed_at)
+	       ),
+	       recent_buckets AS (
+	         SELECT *,
+	           row_number() OVER (
+	             PARTITION BY lng_cell, lat_cell
+	             ORDER BY bucket_start DESC
+	           ) AS bucket_rank
+	         FROM bucketed
+	       ),
+	       bucket_json AS (
+	         SELECT
+	           lng_cell,
+	           lat_cell,
+	           jsonb_agg(
+	             jsonb_build_object(
+	               'bucketStart',
+	               to_char(bucket_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+	               'count',
+	               bucket_count,
+	               'sourceItemCount',
+	               source_item_count,
+	               'articleCount',
+	               article_count,
+	               'trafficEventCount',
+	               traffic_event_count
+	             )
+	             ORDER BY bucket_start
+	           ) AS time_buckets
+	         FROM recent_buckets
+	         WHERE bucket_rank <= 14
+	         GROUP BY lng_cell, lat_cell
+	       ),
+	       grouped AS (
+	         SELECT
+	           lng_cell,
+	           lat_cell,
+	           concat('cell:', lng_cell, ':', lat_cell) AS id,
+	           avg(ST_X(point)) AS center_lng,
+	           avg(ST_Y(point)) AS center_lat,
+	           count(*)::text AS observation_count,
+	           count(*) FILTER (WHERE observation_type = 'source_item')::text AS source_item_count,
+	           COALESCE(
+	             (array_agg(source_item_id ORDER BY observed_at DESC) FILTER (WHERE source_item_id IS NOT NULL))[1:12],
+	             ARRAY[]::text[]
+	           ) AS source_item_ids,
+	           count(*) FILTER (WHERE observation_type = 'source_item' AND item_kind = 'article')::text AS article_count,
+	           count(*) FILTER (WHERE observation_type = 'traffic_event')::text AS traffic_event_count,
+	           min(observed_at) AS first_seen_at,
+	           max(observed_at) AS last_seen_at,
+	           count(DISTINCT observed_at::date)::text AS active_day_count,
+	           array_agg(DISTINCT source_id ORDER BY source_id) AS source_ids,
+	           max(CASE severity
+	             WHEN 'critical' THEN 4
+	             WHEN 'high' THEN 3
+	             WHEN 'medium' THEN 2
+	             WHEN 'low' THEN 1
+	             ELSE 0
+	           END) AS severity_rank
+	         FROM valid_points
+	         GROUP BY lng_cell, lat_cell
+	       )
+	       SELECT
+	         concat('cell:', lng_cell, ':', lat_cell) AS id,
+	         grouped.center_lng,
+	         grouped.center_lat,
+	         grouped.observation_count,
+	         grouped.source_item_count,
+	         grouped.source_item_ids,
+	         grouped.article_count,
+	         grouped.traffic_event_count,
+	         grouped.first_seen_at,
+	         grouped.last_seen_at,
+	         grouped.active_day_count,
+	         COALESCE(bucket_json.time_buckets, '[]'::jsonb) AS time_buckets,
+	         grouped.source_ids,
+	         grouped.severity_rank
+	       FROM grouped
+	       LEFT JOIN bucket_json USING (lng_cell, lat_cell)
+	       ORDER BY grouped.observation_count::bigint DESC, grouped.last_seen_at DESC
+	       LIMIT $${params.length}`,
       params,
     );
     return result.rows.map(spatialHeatmapCellFromRow);

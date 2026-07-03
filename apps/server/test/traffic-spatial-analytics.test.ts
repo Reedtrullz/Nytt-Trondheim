@@ -133,6 +133,29 @@ describe("spatial analytics unexplained delay candidates", () => {
           firstSeenAt: "2026-06-30T09:38:00.000Z",
           lastSeenAt: "2026-07-02T09:38:00.000Z",
           activeDayCount: 3,
+          timeBuckets: [
+            {
+              bucketStart: "2026-06-30T00:00:00.000Z",
+              count: 1,
+              sourceItemCount: 1,
+              articleCount: 0,
+              trafficEventCount: 0,
+            },
+            {
+              bucketStart: "2026-07-01T00:00:00.000Z",
+              count: 1,
+              sourceItemCount: 1,
+              articleCount: 1,
+              trafficEventCount: 0,
+            },
+            {
+              bucketStart: "2026-07-02T00:00:00.000Z",
+              count: 2,
+              sourceItemCount: 0,
+              articleCount: 0,
+              trafficEventCount: 1,
+            },
+          ],
           sourceIds: ["nrk", "vegvesen_traffic_info"],
           maxSeverity: "high",
         },
@@ -167,10 +190,15 @@ describe("spatial analytics unexplained delay candidates", () => {
       expect.objectContaining({
         kind: "hotspot",
         priority: "high",
+        summary:
+          "4 observasjoner over 3 aktive dager, topp 2 observasjoner 2. juli ved 63.390, 10.390",
+        reason:
+          "Tidsprofilen viser gjentatte observasjoner over 3 aktive dager. Vurder som mulig svart punkt og kontroller mot kart og rådata.",
         sourceItemIds: ["source:item-one", "source:item-two"],
         evidence: expect.arrayContaining([
           "4 observasjoner",
           "3 aktive dager",
+          "Toppdag 2. juli: 2 observasjoner",
           "1 nyhetssak",
           "1 trafikkhendelse",
         ]),

@@ -129,10 +129,17 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       kind: "hotspot",
       priority: "high",
       title: "Varmepunkt 1039:6339",
-      summary: "4 observasjoner ved 63.390, 10.390",
-      reason: "Tetthet eller tverrkildesignal bør kontrolleres i kart og rådata.",
+      summary:
+        "4 observasjoner over 3 aktive dager, topp 4 observasjoner 2. juli ved 63.390, 10.390",
+      reason:
+        "Tidsprofilen viser gjentatte observasjoner over 3 aktive dager. Vurder som mulig svart punkt og kontroller mot kart og rådata.",
       updatedAt: "2026-07-02T09:40:00.000Z",
-      evidence: ["4 observasjoner", "2 nyhetssaker", "1 trafikkhendelse"],
+      evidence: [
+        "4 observasjoner",
+        "3 aktive dager",
+        "Toppdag 2. juli: 4 observasjoner",
+        "1 trafikkhendelse",
+      ],
       articleIds: [],
       sourceItemIds: ["source:one"],
     },
@@ -192,6 +199,29 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       firstSeenAt: "2026-06-30T09:40:00.000Z",
       lastSeenAt: "2026-07-02T09:40:00.000Z",
       activeDayCount: 3,
+      timeBuckets: [
+        {
+          bucketStart: "2026-06-30T00:00:00.000Z",
+          count: 1,
+          sourceItemCount: 1,
+          articleCount: 0,
+          trafficEventCount: 0,
+        },
+        {
+          bucketStart: "2026-07-01T00:00:00.000Z",
+          count: 1,
+          sourceItemCount: 1,
+          articleCount: 1,
+          trafficEventCount: 0,
+        },
+        {
+          bucketStart: "2026-07-02T00:00:00.000Z",
+          count: 4,
+          sourceItemCount: 1,
+          articleCount: 1,
+          trafficEventCount: 1,
+        },
+      ],
       sourceIds: ["nrk", "vegvesen_traffic_info"],
       maxSeverity: "high",
     },
@@ -319,6 +349,7 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Signaler å undersøke");
     expect(html).toContain("3 signaler");
     expect(html).toContain("Høy prioritet · Uforklart forsinkelse");
+    expect(html).toContain("Toppdag 2. juli: 4 observasjoner");
     expect(html).toContain("Høy prioritet · Trafikkdata-avvik");
     expect(html).toContain("E6 Sluppen");
     expect(html).toContain("2.8x normal trafikk");
@@ -344,6 +375,8 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("4 observasjoner");
     expect(html).toContain("Først sett 30. juni 2026");
     expect(html).toContain("3 aktive dager");
+    expect(html).toContain("Tidsprofil");
+    expect(html).toContain("4 obs");
     expect(html).toContain("høy alvorlighet");
     expect(html).toContain("1 trafikkhendelse");
     expect(html).toContain("Offisielle kilder og redaksjonelle kilder");
