@@ -81,6 +81,11 @@ function sourceItemCountText(metrics?: WorkerCycleMetrics) {
   return `${count} operasjonelle objekter i siste syklus`;
 }
 
+function sourceItemCount(metrics?: WorkerCycleMetrics) {
+  if (!metrics) return 0;
+  return Object.values(metrics.sourceItemCounts).reduce((sum, count) => sum + count, 0);
+}
+
 const nonActionableAttentionSources = new Set<SourceHealth["source"]>([
   "deepseek",
   "internal",
@@ -107,33 +112,138 @@ function freshnessDetail(entry?: RuntimeFreshness) {
   return entry?.detail ?? "Ingen status registrert.";
 }
 
-function CommandLinksWidget() {
+type CommandToolTone = "ok" | "watch" | "idle";
+
+interface CommandTool {
+  title: string;
+  capability: string;
+  href: string;
+  cta: string;
+  status: string;
+  detail: string;
+  tone: CommandToolTone;
+}
+
+function commandTools({
+  status,
+  briefing,
+  notificationTriggers,
+  staleSources,
+  sourceItems,
+}: {
+  status: OperationsStatus;
+  briefing?: CommandCenterBriefingPayload;
+  notificationTriggers?: NotificationTriggerPage;
+  staleSources: number;
+  sourceItems: number;
+}): CommandTool[] {
+  const activeSituations = status.situationCounts.preliminary + status.situationCounts.active;
+  const readyPush = notificationTriggers?.pushStatus?.readyCandidates ?? 0;
+  const blockedPush = notificationTriggers?.pushStatus?.blockedCandidates ?? 0;
+  const sourceAttention = staleSources;
+
+  return [
+    {
+      title: "Brief-revisjon",
+      capability: "AI Summary Generator",
+      href: "/command/brief",
+      cta: "Åpne brief-revisjon",
+      status: briefing?.morningBrief ? "Brief klar" : "Venter på brief",
+      detail: briefing?.latestAiRun?.model ?? "Viser AI-spor når worker har kjørt.",
+      tone: briefing?.morningBrief ? "ok" : "idle",
+    },
+    {
+      title: "Dekningsgrupper",
+      capability: "Event Clustering",
+      href: "/command/dekning",
+      cta: "Åpne dekningsgrupper",
+      status: "Lesbar audit",
+      detail: "Forklarer hvorfor saker ble samlet eller holdt adskilt.",
+      tone: "ok",
+    },
+    {
+      title: "Operasjonstidslinje",
+      capability: "Source Traceability",
+      href: "/command/tidslinje",
+      cta: "Åpne tidslinje",
+      status: `${activeSituations} aktuelle situasjoner`,
+      detail: `Siste innhenting ${time(status.latestCollectionAt)}.`,
+      tone: activeSituations > 0 ? "ok" : "idle",
+    },
+    {
+      title: "Varselutløsere",
+      capability: "Push Notification Trigger",
+      href: "/command/varsler",
+      cta: "Åpne varselutløsere",
+      status: `${readyPush} klare · ${blockedPush} blokkert`,
+      detail: notificationTriggers?.pushStatus?.detail ?? "Krever Web Push-status fra API.",
+      tone: blockedPush > 0 ? "watch" : readyPush > 0 ? "ok" : "idle",
+    },
+    {
+      title: "Romlig analyse",
+      capability: "PostGIS Heatmaps",
+      href: "/command/romlig",
+      cta: "Åpne romlig analyse",
+      status: `${status.trafficPulse?.length ?? 0} korridorer`,
+      detail: "Varmepunkt og uforklarte DATEX-forsinkelser.",
+      tone: (status.trafficPulse?.length ?? 0) > 0 ? "ok" : "idle",
+    },
+    {
+      title: "Rådata-inspektør",
+      capability: "Raw Data Inspector",
+      href: "/command/radata",
+      cta: "Åpne rådata",
+      status: sourceItems > 0 ? `${sourceItems} objekter` : "Venter på objekter",
+      detail: "Sanitert råpayload for kilder, telemetri og AI-kjøringer.",
+      tone: sourceItems > 0 ? "ok" : "idle",
+    },
+    {
+      title: "Kilderevisjon",
+      capability: "Source Health",
+      href: "/command/kilder",
+      cta: "Åpne kilderevisjon",
+      status: sourceAttention > 0 ? `${sourceAttention} trenger tilsyn` : "Ingen åpne tilsyn",
+      detail: "Adapterferskhet, kontraktstatus og spor til tidslinje.",
+      tone: sourceAttention > 0 ? "watch" : "ok",
+    },
+    {
+      title: "Tilgang",
+      capability: "Auth Gate",
+      href: "/command/tilgang",
+      cta: "Åpne tilgang",
+      status: "Eierstyrt",
+      detail: "Godkjenn, avvis eller gi lesetilgang uten forespørsel.",
+      tone: "ok",
+    },
+  ];
+}
+
+function CommandLinksWidget({
+  status,
+  briefing,
+  notificationTriggers,
+  staleSources,
+  sourceItems,
+}: {
+  status: OperationsStatus;
+  briefing?: CommandCenterBriefingPayload;
+  notificationTriggers?: NotificationTriggerPage;
+  staleSources: number;
+  sourceItems: number;
+}) {
+  const tools = commandTools({ status, briefing, notificationTriggers, staleSources, sourceItems });
+
   return (
-    <div className="command-link-grid">
-      <a className="operations-audit-link" href="/command/brief">
-        Åpne brief-revisjon
-      </a>
-      <a className="operations-audit-link" href="/command/tilgang">
-        Åpne tilgangsforespørsler
-      </a>
-      <a className="operations-audit-link" href="/command/dekning">
-        Åpne dekningsgrupper
-      </a>
-      <a className="operations-audit-link" href="/command/tidslinje">
-        Åpne tidslinje
-      </a>
-      <a className="operations-audit-link" href="/command/varsler">
-        Åpne varselutløsere
-      </a>
-      <a className="operations-audit-link" href="/command/romlig">
-        Åpne romlig analyse
-      </a>
-      <a className="operations-audit-link" href="/command/radata">
-        Åpne rådata
-      </a>
-      <a className="operations-audit-link" href="/command/kilder">
-        Åpne kilderevisjon
-      </a>
+    <div className="command-tool-grid">
+      {tools.map((tool) => (
+        <a className={`command-tool-card ${tool.tone}`} href={tool.href} key={tool.href}>
+          <span>{tool.capability}</span>
+          <strong>{tool.title}</strong>
+          <small>{tool.status}</small>
+          <p>{tool.detail}</p>
+          <b>{tool.cta}</b>
+        </a>
+      ))}
     </div>
   );
 }
@@ -443,6 +553,7 @@ export function OperationsDashboard({
   const slowest = slowestSource(workerMetrics, status.sources);
   const parseFailures = parseFailureText(workerMetrics);
   const sourceItems = sourceItemCountText(workerMetrics);
+  const sourceItemTotal = sourceItemCount(workerMetrics);
   const staleSources = staleSourceCount(status);
   const widgets = useMemo<DashboardWidgetDefinition[]>(
     () => [
@@ -492,10 +603,18 @@ export function OperationsDashboard({
       },
       {
         id: "shortcuts",
-        title: "Analyseverktøy",
-        description: "Direkte innganger til de private Command Center-flatene.",
-        defaultSize: "standard",
-        children: <CommandLinksWidget />,
+        title: "Command Center-matrise",
+        description: "Hva hver privat flate beviser, og hvor den henter status fra.",
+        defaultSize: "large",
+        children: (
+          <CommandLinksWidget
+            status={status}
+            briefing={briefing}
+            notificationTriggers={notificationTriggers}
+            staleSources={staleSources}
+            sourceItems={sourceItemTotal}
+          />
+        ),
       },
       {
         id: "sources",

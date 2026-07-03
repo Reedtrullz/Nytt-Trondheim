@@ -2928,6 +2928,9 @@ test("owner can open the real situation index and operations status", async ({ p
   ).toBeVisible();
   await page.getByRole("link", { name: "Kommandosenter" }).click();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Command Center-matrise" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Raw Data Inspector/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Push Notification Trigger/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Intelligence Bridge" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Varselbro" })).toBeVisible();
   const intelligenceBridge = page.locator(".dashboard-widget", {

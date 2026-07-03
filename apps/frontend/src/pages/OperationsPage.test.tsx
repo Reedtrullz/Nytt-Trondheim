@@ -239,12 +239,22 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Kildehelse viser ett tilsynspunkt.");
     expect(html).toContain("/command/brief");
     expect(html).toContain("Åpne brief-revisjon");
+    expect(html).toContain("Command Center-matrise");
+    expect(html).toContain("Hva hver privat flate beviser");
+    expect(html).toContain("AI Summary Generator");
+    expect(html).toContain("Brief klar");
     expect(html).toContain("/command/dekning");
+    expect(html).toContain("Event Clustering");
+    expect(html).toContain("Lesbar audit");
     expect(html).toContain("Åpne dekningsgrupper");
     expect(html).toContain("/command/tidslinje");
+    expect(html).toContain("Source Traceability");
+    expect(html).toContain("3 aktuelle situasjoner");
     expect(html).toContain("Åpne tidslinje");
     expect(html).toContain("/command/varsler");
     expect(html).toContain("Åpne varselutløsere");
+    expect(html).toContain("Push Notification Trigger");
+    expect(html).toContain("1 klare · 1 blokkert");
     expect(html).toContain("Varselbro");
     expect(html).toContain("Høyeffektskandidater");
     expect(html).toContain("Mangler match");
@@ -253,9 +263,17 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Vegvesen DATEX, Adresseavisen");
     expect(html).toContain("91 %");
     expect(html).toContain("/command/romlig");
+    expect(html).toContain("PostGIS Heatmaps");
+    expect(html).toContain("0 korridorer");
     expect(html).toContain("Åpne romlig analyse");
     expect(html).toContain("/command/radata");
+    expect(html).toContain("Raw Data Inspector");
+    expect(html).toContain("3 objekter");
     expect(html).toContain("Åpne rådata");
+    expect(html).toContain("Source Health");
+    expect(html).toContain("1 trenger tilsyn");
+    expect(html).toContain("Auth Gate");
+    expect(html).toContain("Eierstyrt");
   });
 
   it("does not imply zero failures before worker metrics exist", () => {

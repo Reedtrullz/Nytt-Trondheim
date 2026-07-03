@@ -3143,10 +3143,59 @@ button {
   background: transparent;
 }
 
-.command-link-grid {
+.command-tool-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.command-tool-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+  background: var(--page);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.command-tool-card.watch {
+  border-left-color: var(--amber);
+}
+
+.command-tool-card.idle {
+  border-left-color: var(--muted);
+}
+
+.command-tool-card span,
+.command-tool-card small,
+.command-tool-card p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.command-tool-card span {
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-tool-card strong {
+  font-size: 16px;
+}
+
+.command-tool-card p {
+  margin: 0;
+}
+
+.command-tool-card b {
+  margin-top: 4px;
+  color: var(--blue);
+  font-size: 12px;
+  text-transform: uppercase;
 }
 
 .intelligence-bridge-widget {
@@ -9955,7 +10004,7 @@ button {
     flex: 1;
   }
 
-  .command-link-grid {
+  .command-tool-grid {
     grid-template-columns: 1fr;
   }
 
