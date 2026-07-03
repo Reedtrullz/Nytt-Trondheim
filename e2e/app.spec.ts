@@ -548,6 +548,167 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
     .toBe("lade");
 });
 
+test("verified public story proof opens the linked situation room for viewers", async ({
+  page,
+}) => {
+  await useViewerSession(page);
+  const article: Article = {
+    id: "adressa-lade-violence",
+    source: "adressa",
+    sourceLabel: "Adresseavisen",
+    title: "Ung mann kritisk skadd på Lade",
+    excerpt:
+      "En ung mann er kritisk skadet etter en voldshendelse på Lade i Trondheim. Politiet leter etter flere navngitte personer.",
+    url: "https://example.test/lade-vold",
+    publishedAt: "2026-07-02T18:59:00.000Z",
+    scope: "trondheim",
+    category: "Krim",
+    places: ["Lade", "Trondheim"],
+    location: { lat: 63.4402, lng: 10.437, label: "Lade" },
+    situationId: "politiloggen-lade-vold",
+    publicVerification: {
+      status: "verified",
+      label: "Verifisert",
+      detail: "Bekreftet av Politiloggen og Adresseavisen.",
+      officialSources: ["politiloggen"],
+      reportingSources: ["adressa"],
+      situationId: "politiloggen-lade-vold",
+    },
+  };
+  const situation = {
+    id: "politiloggen-lade-vold",
+    title: "Voldshendelse på Lade",
+    summary: "Politiloggen og Adresseavisen omtaler samme voldshendelse på Lade.",
+    status: "active",
+    verificationStatus: "Offentlig bekreftet",
+    updatedAt: "2026-07-02T19:05:00.000Z",
+    createdAt: "2026-07-02T18:34:00.000Z",
+    locationLabel: "Lade",
+    primaryLocation: { lat: 63.4402, lng: 10.437, label: "Lade" },
+  } as const;
+
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        articles: [article],
+        situations: [situation],
+        sourceHealth: sampleBootstrap.sourceHealth,
+        morningBrief: undefined,
+      }),
+    });
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [article] }),
+    });
+  });
+  await page.route("**/api/situations/politiloggen-lade-vold", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleWorkspace,
+        situation: {
+          ...sampleWorkspace.situation,
+          id: situation.id,
+          title: situation.title,
+          summary: situation.summary,
+          status: situation.status,
+          verificationStatus: situation.verificationStatus,
+          updatedAt: situation.updatedAt,
+          createdAt: situation.createdAt,
+          locationLabel: situation.locationLabel,
+          officialSource: "politiloggen",
+          officialEventId: "lade-vold",
+          relatedArticleIds: [article.id],
+          timeline: [
+            {
+              id: "timeline-lade-official",
+              timestamp: situation.createdAt,
+              title: "Politiet bekrefter hendelsen",
+              detail: "Politiloggen omtaler voldshendelsen på Lade.",
+              sourceLabel: "Politiloggen",
+            },
+          ],
+          features: [
+            {
+              id: "feature-lade",
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [10.437, 63.4402] },
+              properties: {
+                label: "Lade",
+                provenance: "official",
+                source: "politiloggen",
+                sourceLabel: "Politiloggen",
+                updatedAt: situation.updatedAt,
+              },
+            },
+          ],
+          evidence: [
+            {
+              id: "politiloggen-lade-evidence",
+              situationId: situation.id,
+              source: "politiloggen",
+              sourceLabel: "Politiloggen",
+              sourceUrl: "https://example.test/politiloggen/lade-vold",
+              supportingSnippet: "Voldshendelse: Trondheim, Lade",
+              claim: "Politiet undersøker voldshendelse på Lade",
+              claimType: "official_police_log",
+              provenance: "official",
+              confidence: 1,
+              extractedAt: situation.updatedAt,
+              publishedAt: situation.createdAt,
+            },
+          ],
+        },
+        explanation: {
+          createdBecause: ["Offisiell politilogg og redaksjonell dekning peker på samme hendelse."],
+          sourceRoles: [
+            { provider: "politiloggen", role: "evidence" },
+            { provider: "adressa", role: "evidence" },
+          ],
+          locationConfidence: "official",
+        },
+        relatedArticles: [article],
+        tasks: [],
+        notes: [],
+        attachments: [],
+      }),
+    });
+  });
+  await page.route("**/api/situations/politiloggen-lade-vold/source-items", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.goto("/");
+
+  const lead = page.locator(".lead-story");
+  await expect(lead.getByRole("heading", { name: "Ung mann kritisk skadd på Lade" })).toBeVisible();
+  const proof = lead.locator(".story-verification-proof");
+  await expect(proof).toContainText("Politiloggen + Adresseavisen");
+  await expect(proof.getByRole("link", { name: "Åpne situasjonsrom" })).toHaveAttribute(
+    "href",
+    "/situasjoner/politiloggen-lade-vold",
+  );
+
+  await proof.getByRole("link", { name: "Åpne situasjonsrom" }).click();
+
+  await expect(page).toHaveURL(/\/situasjoner\/politiloggen-lade-vold$/);
+  await expect(page.getByRole("heading", { name: "Voldshendelse på Lade" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hvorfor vises dette?" })).toBeVisible();
+  const explanation = page.locator(".situation-explanation");
+  await expect(explanation.getByText("Politiloggen", { exact: true })).toBeVisible();
+  await expect(explanation.getByText("Adresseavisen", { exact: true })).toBeVisible();
+  await expect(
+    page.locator(".related").getByRole("link", { name: /Ung mann kritisk skadd på Lade/ }),
+  ).toHaveAttribute("href", "https://example.test/lade-vold");
+  await expect(page.getByText("Private analyser")).toHaveCount(0);
+});
+
 test("coverage bundle operations page renders persisted decisions and drawer detail", async ({
   page,
 }) => {
