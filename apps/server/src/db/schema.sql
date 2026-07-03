@@ -858,6 +858,30 @@ CREATE TABLE IF NOT EXISTS datex_travel_times (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS datex_travel_time_history (
+  corridor_id text NOT NULL,
+  observed_at timestamptz NOT NULL,
+  name text NOT NULL,
+  state text NOT NULL CHECK (state IN ('free_flow', 'slow', 'congested', 'stale')),
+  travel_time_seconds real,
+  free_flow_seconds real,
+  delay_seconds real,
+  delay_ratio real,
+  trend text,
+  measurement_from timestamptz,
+  measurement_to timestamptz,
+  source_url text NOT NULL,
+  payload jsonb NOT NULL,
+  inserted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (corridor_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS datex_travel_time_history_observed_at_idx
+  ON datex_travel_time_history (observed_at DESC);
+CREATE INDEX IF NOT EXISTS datex_travel_time_history_corridor_observed_idx
+  ON datex_travel_time_history (corridor_id, observed_at DESC);
+CREATE INDEX IF NOT EXISTS datex_travel_time_history_delay_idx
+  ON datex_travel_time_history (delay_seconds DESC NULLS LAST, observed_at DESC);
+
 CREATE TABLE IF NOT EXISTS road_weather_observations (
   station_id text PRIMARY KEY,
   payload jsonb NOT NULL,
@@ -884,6 +908,27 @@ CREATE TABLE IF NOT EXISTS traffic_counter_snapshots (
 );
 CREATE INDEX IF NOT EXISTS traffic_counter_snapshots_geometry_idx
   ON traffic_counter_snapshots USING gist (geometry);
+
+CREATE TABLE IF NOT EXISTS traffic_counter_snapshot_history (
+  point_id text NOT NULL,
+  observed_at timestamptz NOT NULL,
+  payload jsonb NOT NULL,
+  volume_last_hour integer,
+  baseline_volume_last_hour integer,
+  anomaly_ratio real,
+  coverage_percent real,
+  inserted_at timestamptz NOT NULL DEFAULT now(),
+  geometry geometry(Point, 4326) NOT NULL,
+  PRIMARY KEY (point_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_observed_at_idx
+  ON traffic_counter_snapshot_history (observed_at DESC);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_point_observed_idx
+  ON traffic_counter_snapshot_history (point_id, observed_at DESC);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_anomaly_idx
+  ON traffic_counter_snapshot_history (anomaly_ratio DESC NULLS LAST, observed_at DESC);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_geometry_idx
+  ON traffic_counter_snapshot_history USING gist (geometry);
 
 CREATE TABLE IF NOT EXISTS traffic_map_events (
   id text PRIMARY KEY,

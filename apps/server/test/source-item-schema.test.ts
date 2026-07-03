@@ -56,7 +56,13 @@ describe("source item schema", () => {
     expect(schema).toContain("s.payload->>'officialEventId'");
     expect(schema).toContain("WHERE si.kind = 'official_event'");
     expect(schema).toContain("ON CONFLICT (situation_id, source_item_id) DO NOTHING");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS datex_travel_time_history");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS traffic_counter_snapshot_history");
     expect(schema).not.toMatch(/INSERT INTO source_items[\s\S]*FROM datex_travel_times/);
+    expect(schema).not.toMatch(/INSERT INTO source_items[\s\S]*FROM datex_travel_time_history/);
+    expect(schema).not.toMatch(
+      /INSERT INTO source_items[\s\S]*FROM traffic_counter_snapshot_history/,
+    );
     expect(schema).not.toContain("datex_travel_time', 'official_event'");
   });
 

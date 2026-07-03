@@ -1981,6 +1981,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         articlesPage,
         trafficPulse,
         trafficCounters,
+        telemetryHistory,
+        telemetryPatterns,
       ] = await Promise.all([
         store.listSpatialHeatmapCells(query, login),
         store.listTrafficMapEvents(
@@ -2004,6 +2006,15 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         ),
         store.listTrafficPulseCorridors(50),
         store.listTrafficCounterSnapshots(),
+        store.getTrafficTelemetryHistorySummary({
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+        }),
+        store.listTrafficTelemetryPatterns({
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+          limit: 12,
+        }),
       ]);
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
@@ -2073,6 +2084,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           ).length,
           bySourceConfidence: sourceConfidenceCounts(confidenceItems),
         },
+        telemetryHistory,
+        telemetryPatterns,
         investigationQueue,
         heatmapCells: enrichedHeatmapCells,
         unexplainedDelays,

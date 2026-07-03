@@ -1030,6 +1030,29 @@ export class WorkerRepository {
            geometry=EXCLUDED.geometry`,
         [counter.pointId, counter, counter.updatedAt, JSON.stringify(counter.geometry)],
       );
+      await this.pool.query(
+        `INSERT INTO traffic_counter_snapshot_history
+         (point_id, observed_at, payload, volume_last_hour, baseline_volume_last_hour,
+          anomaly_ratio, coverage_percent, geometry)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,ST_SetSRID(ST_GeomFromGeoJSON($8),4326))
+         ON CONFLICT (point_id, observed_at) DO UPDATE SET
+           payload=EXCLUDED.payload,
+           volume_last_hour=EXCLUDED.volume_last_hour,
+           baseline_volume_last_hour=EXCLUDED.baseline_volume_last_hour,
+           anomaly_ratio=EXCLUDED.anomaly_ratio,
+           coverage_percent=EXCLUDED.coverage_percent,
+           geometry=EXCLUDED.geometry`,
+        [
+          counter.pointId,
+          counter.updatedAt,
+          counter,
+          counter.volumeLastHour ?? null,
+          counter.baselineVolumeLastHour ?? null,
+          counter.anomalyRatio ?? null,
+          counter.coveragePercent ?? null,
+          JSON.stringify(counter.geometry),
+        ],
+      );
     }
   }
 
@@ -1096,6 +1119,7 @@ export class WorkerRepository {
 
   async upsertDatexTravelTimes(corridors: TrafficPulseCorridor[]): Promise<void> {
     for (const corridor of corridors) {
+      const observedAt = corridor.measurementTo ?? corridor.updatedAt;
       await this.pool.query(
         `INSERT INTO datex_travel_times
          (id, name, state, travel_time_seconds, free_flow_seconds, delay_seconds, delay_ratio,
@@ -1114,6 +1138,39 @@ export class WorkerRepository {
            updated_at=now()`,
         [
           corridor.id,
+          corridor.name,
+          corridor.state,
+          corridor.travelTimeSeconds ?? null,
+          corridor.freeFlowSeconds ?? null,
+          corridor.delaySeconds ?? null,
+          corridor.delayRatio ?? null,
+          corridor.trend ?? null,
+          corridor.measurementFrom ?? null,
+          corridor.measurementTo ?? null,
+          corridor.sourceUrl,
+          corridor,
+        ],
+      );
+      await this.pool.query(
+        `INSERT INTO datex_travel_time_history
+         (corridor_id, observed_at, name, state, travel_time_seconds, free_flow_seconds,
+          delay_seconds, delay_ratio, trend, measurement_from, measurement_to, source_url, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         ON CONFLICT (corridor_id, observed_at) DO UPDATE SET
+           name=EXCLUDED.name,
+           state=EXCLUDED.state,
+           travel_time_seconds=EXCLUDED.travel_time_seconds,
+           free_flow_seconds=EXCLUDED.free_flow_seconds,
+           delay_seconds=EXCLUDED.delay_seconds,
+           delay_ratio=EXCLUDED.delay_ratio,
+           trend=EXCLUDED.trend,
+           measurement_from=EXCLUDED.measurement_from,
+           measurement_to=EXCLUDED.measurement_to,
+           source_url=EXCLUDED.source_url,
+           payload=EXCLUDED.payload`,
+        [
+          corridor.id,
+          observedAt,
           corridor.name,
           corridor.state,
           corridor.travelTimeSeconds ?? null,

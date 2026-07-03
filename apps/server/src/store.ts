@@ -23,6 +23,7 @@ import type {
   CommandCenterBriefingPayload,
   CommandCenterOperationsNote,
   CommandCenterSpatialAnalyticsQueryInput,
+  CommandCenterTelemetryHistorySummary,
   CoverageBundleArticleSummary,
   CoverageBundleListItem,
   CoverageBundlePage,
@@ -87,6 +88,7 @@ import type {
   TrafficEventSeverity,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  TelemetryHistoryPattern,
   SpatialHeatmapCell,
   WorkerCycleMetrics,
   WorkspaceNote,
@@ -104,9 +106,11 @@ import {
   sampleTasks,
   sampleWorkspace,
   sourceIdLabel,
+  sourceMixConfidenceSummary,
 } from "@nytt/shared";
 import pg from "pg";
 import type { Profile } from "passport-github2";
+import type { Point as GeoJsonPoint } from "geojson";
 import type { AuthUser } from "./auth.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { findRelatedTrafficArticles } from "./traffic/related-articles.js";
@@ -268,6 +272,12 @@ export interface Store {
   listRoadCameras(bounds?: Bounds): Promise<RoadCamera[]>;
   listTrafficCounterSnapshots(bounds?: Bounds): Promise<TrafficCounterSnapshot[]>;
   listTrafficPulseCorridors(limit?: number): Promise<TrafficPulseCorridor[]>;
+  getTrafficTelemetryHistorySummary(
+    filters?: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to">,
+  ): Promise<CommandCenterTelemetryHistorySummary>;
+  listTrafficTelemetryPatterns(
+    filters?: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to"> & { limit?: number },
+  ): Promise<TelemetryHistoryPattern[]>;
   listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
   linkSourceItem(
     situationId: string,
@@ -558,6 +568,88 @@ type PushDeliveryRow = {
 
 function isoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+type TelemetryHistorySummaryRow = {
+  observations: string;
+  tracked_entities: string;
+  first_observed_at: Date | string | null;
+  last_observed_at: Date | string | null;
+  active_day_count: string;
+  notable_observations: string;
+};
+
+type TelemetryHistoryPatternRow = {
+  source: TelemetryHistoryPattern["source"];
+  entity_id: string;
+  title: string | null;
+  observation_count: string;
+  notable_observation_count: string;
+  active_day_count: string;
+  first_observed_at: Date | string | null;
+  last_observed_at: Date | string | null;
+  max_delay_seconds: number | string | null;
+  max_anomaly_ratio: number | string | null;
+  geometry: GeoJsonPoint | null;
+};
+
+function telemetryHistorySummaryFromRow(
+  row: TelemetryHistorySummaryRow | undefined,
+): CommandCenterTelemetryHistorySummary["datexTravelTime"] {
+  return {
+    observations: Number(row?.observations ?? 0),
+    trackedEntities: Number(row?.tracked_entities ?? 0),
+    ...(row?.first_observed_at ? { firstObservedAt: isoString(row.first_observed_at) } : {}),
+    ...(row?.last_observed_at ? { lastObservedAt: isoString(row.last_observed_at) } : {}),
+    activeDayCount: Number(row?.active_day_count ?? 0),
+    notableObservations: Number(row?.notable_observations ?? 0),
+  };
+}
+
+function optionalNumber(value: number | string | null | undefined): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function delayDescription(seconds: number | undefined): string {
+  if (seconds === undefined) return "Gjentatt reisetidssignal i historikken.";
+  return `Maks ${Math.max(1, Math.round(seconds / 60))} min forsinkelse i historikken.`;
+}
+
+function counterDescription(ratio: number | undefined): string {
+  if (ratio === undefined) return "Gjentatt trafikktellersignal i historikken.";
+  return `Maks ${ratio.toFixed(1)}x normal trafikk i historikken.`;
+}
+
+function telemetryHistoryPatternFromRow(row: TelemetryHistoryPatternRow): TelemetryHistoryPattern {
+  const maxDelaySeconds = optionalNumber(row.max_delay_seconds);
+  const maxAnomalyRatio = optionalNumber(row.max_anomaly_ratio);
+  const title =
+    row.title ??
+    (row.source === "datex_travel_time"
+      ? `DATEX reisetid ${row.entity_id}`
+      : `Trafikkdata ${row.entity_id}`);
+  return {
+    id: `telemetry-pattern:${row.source}:${row.entity_id}`,
+    source: row.source,
+    title,
+    description:
+      row.source === "datex_travel_time"
+        ? delayDescription(maxDelaySeconds)
+        : counterDescription(maxAnomalyRatio),
+    observationCount: Number(row.observation_count),
+    notableObservationCount: Number(row.notable_observation_count),
+    activeDayCount: Number(row.active_day_count),
+    ...(row.first_observed_at ? { firstObservedAt: isoString(row.first_observed_at) } : {}),
+    ...(row.last_observed_at ? { lastObservedAt: isoString(row.last_observed_at) } : {}),
+    ...(maxDelaySeconds !== undefined ? { maxDelaySeconds } : {}),
+    ...(maxAnomalyRatio !== undefined ? { maxAnomalyRatio } : {}),
+    ...(row.geometry ? { geometry: row.geometry } : {}),
+    sourceConfidence: sourceMixConfidenceSummary([row.source], {
+      ...(row.last_observed_at ? { updatedAt: isoString(row.last_observed_at) } : {}),
+    }),
+  };
 }
 
 function accessRequestFromRow(row: AccessRequestRow): AccessRequest {
@@ -3496,6 +3588,27 @@ export class MemoryStore implements Store {
     return [];
   }
 
+  async getTrafficTelemetryHistorySummary(): Promise<CommandCenterTelemetryHistorySummary> {
+    return {
+      datexTravelTime: {
+        observations: 0,
+        trackedEntities: 0,
+        activeDayCount: 0,
+        notableObservations: 0,
+      },
+      trafficCounters: {
+        observations: 0,
+        trackedEntities: 0,
+        activeDayCount: 0,
+        notableObservations: 0,
+      },
+    };
+  }
+
+  async listTrafficTelemetryPatterns(): Promise<TelemetryHistoryPattern[]> {
+    return [];
+  }
+
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
     if (!this.situations.has(situationId)) return [];
     const links = [...this.sourceLinks.values()]
@@ -6013,6 +6126,152 @@ export class PgStore implements Store {
     return result.rows.map((row) =>
       withTrafficPulseStaleOverlay(row.payload, row.measurementTo, row.updatedAt, responseTimeMs),
     );
+  }
+
+  async getTrafficTelemetryHistorySummary(
+    filters: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to"> = {},
+  ): Promise<CommandCenterTelemetryHistorySummary> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.from) {
+      params.push(filters.from);
+      where.push(`observed_at >= $${params.length}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      where.push(`observed_at <= $${params.length}`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const [travelTime, trafficCounters] = await Promise.all([
+      this.pool.query<TelemetryHistorySummaryRow>(
+        `SELECT
+           count(*)::text AS observations,
+           count(DISTINCT corridor_id)::text AS tracked_entities,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           )::text AS notable_observations
+         FROM datex_travel_time_history
+         ${whereSql}`,
+        params,
+      ),
+      this.pool.query<TelemetryHistorySummaryRow>(
+        `SELECT
+           count(*)::text AS observations,
+           count(DISTINCT point_id)::text AS tracked_entities,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7)::text AS notable_observations
+         FROM traffic_counter_snapshot_history
+         ${whereSql}`,
+        params,
+      ),
+    ]);
+
+    return {
+      datexTravelTime: telemetryHistorySummaryFromRow(travelTime.rows[0]),
+      trafficCounters: telemetryHistorySummaryFromRow(trafficCounters.rows[0]),
+    };
+  }
+
+  async listTrafficTelemetryPatterns(
+    filters: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to"> & { limit?: number } = {},
+  ): Promise<TelemetryHistoryPattern[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.from) {
+      params.push(filters.from);
+      where.push(`observed_at >= $${params.length}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      where.push(`observed_at <= $${params.length}`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const limit = Math.min(30, Math.max(1, filters.limit ?? 12));
+    const limitParam = params.length + 1;
+    const queryParams = [...params, limit];
+    const [travelTime, trafficCounters] = await Promise.all([
+      this.pool.query<TelemetryHistoryPatternRow>(
+        `SELECT
+           'datex_travel_time'::text AS source,
+           corridor_id AS entity_id,
+           (array_agg(name ORDER BY observed_at DESC))[1] AS title,
+           count(*)::text AS observation_count,
+           count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           )::text AS notable_observation_count,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           max(delay_seconds) AS max_delay_seconds,
+           NULL::real AS max_anomaly_ratio,
+           NULL::json AS geometry
+         FROM datex_travel_time_history
+         ${whereSql}
+         GROUP BY corridor_id
+         HAVING count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           ) >= 2
+           OR count(DISTINCT observed_at::date) >= 2
+         ORDER BY count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           ) DESC,
+           count(DISTINCT observed_at::date) DESC,
+           max(delay_seconds) DESC NULLS LAST,
+           max(observed_at) DESC
+         LIMIT $${limitParam}`,
+        queryParams,
+      ),
+      this.pool.query<TelemetryHistoryPatternRow>(
+        `SELECT
+           'trafikkdata'::text AS source,
+           point_id AS entity_id,
+           COALESCE(
+             (array_remove(array_agg(NULLIF(payload->>'name', '') ORDER BY observed_at DESC), NULL))[1],
+             point_id
+           ) AS title,
+           count(*)::text AS observation_count,
+           count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7)::text AS notable_observation_count,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           NULL::real AS max_delay_seconds,
+           max(anomaly_ratio) AS max_anomaly_ratio,
+           (array_agg(ST_AsGeoJSON(geometry)::json ORDER BY observed_at DESC))[1] AS geometry
+         FROM traffic_counter_snapshot_history
+         ${whereSql}
+         GROUP BY point_id
+         HAVING count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7) >= 2
+           OR count(DISTINCT observed_at::date) >= 2
+         ORDER BY count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7) DESC,
+           count(DISTINCT observed_at::date) DESC,
+           max(anomaly_ratio) DESC NULLS LAST,
+           max(observed_at) DESC
+         LIMIT $${limitParam}`,
+        queryParams,
+      ),
+    ]);
+
+    return [...travelTime.rows, ...trafficCounters.rows]
+      .map(telemetryHistoryPatternFromRow)
+      .sort(
+        (left, right) =>
+          right.notableObservationCount - left.notableObservationCount ||
+          right.activeDayCount - left.activeDayCount ||
+          (right.maxDelaySeconds ?? 0) - (left.maxDelaySeconds ?? 0) ||
+          (right.maxAnomalyRatio ?? 0) - (left.maxAnomalyRatio ?? 0) ||
+          (right.lastObservedAt ?? "").localeCompare(left.lastObservedAt ?? "") ||
+          left.id.localeCompare(right.id),
+      )
+      .slice(0, limit);
   }
 
   async getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined> {

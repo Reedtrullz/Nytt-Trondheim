@@ -2750,6 +2750,38 @@ describe("private situation API", () => {
         coveragePercent: 94,
       },
     ]);
+    vi.spyOn(store, "getTrafficTelemetryHistorySummary").mockResolvedValue({
+      datexTravelTime: {
+        observations: 144,
+        trackedEntities: 12,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        activeDayCount: 3,
+        notableObservations: 18,
+      },
+      trafficCounters: {
+        observations: 96,
+        trackedEntities: 8,
+        firstObservedAt: "2026-07-01T07:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 2,
+        notableObservations: 5,
+      },
+    });
+    vi.spyOn(store, "listTrafficTelemetryPatterns").mockResolvedValue([
+      {
+        id: "telemetry-pattern:datex_travel_time:e6-sluppen",
+        source: "datex_travel_time",
+        title: "E6 Sluppen",
+        description: "Maks 8 min forsinkelse i historikken.",
+        observationCount: 18,
+        notableObservationCount: 7,
+        activeDayCount: 3,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        maxDelaySeconds: 480,
+      },
+    ]);
 
     const response = await agent
       .get("/api/operations/spatial-analytics?minDelaySeconds=180&limit=20")
@@ -2768,6 +2800,30 @@ describe("private situation API", () => {
           speculative: expect.any(Number),
         }),
       },
+      telemetryHistory: {
+        datexTravelTime: {
+          observations: 144,
+          trackedEntities: 12,
+          activeDayCount: 3,
+          notableObservations: 18,
+        },
+        trafficCounters: {
+          observations: 96,
+          trackedEntities: 8,
+          activeDayCount: 2,
+          notableObservations: 5,
+        },
+      },
+      telemetryPatterns: [
+        expect.objectContaining({
+          id: "telemetry-pattern:datex_travel_time:e6-sluppen",
+          source: "datex_travel_time",
+          title: "E6 Sluppen",
+          notableObservationCount: 7,
+          activeDayCount: 3,
+          maxDelaySeconds: 480,
+        }),
+      ],
       investigationQueue: expect.arrayContaining([
         expect.objectContaining({
           kind: "traffic_counter_anomaly",
@@ -3088,6 +3144,181 @@ describe("private situation API", () => {
     expect(captured[2]?.sql).toContain("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
     expect(captured[2]?.sql).toContain("ORDER BY updated_at DESC, point_id ASC");
     expect(captured[2]?.params).toEqual([10.2, 63.3, 10.5, 63.5]);
+  });
+
+  it("PgStore summarizes telemetry history with the spatial analytics time window", async () => {
+    const captured: Array<{ sql: string; params: unknown[] | undefined }> = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push({ sql: normalizedSql, params });
+        if (normalizedSql.includes("FROM datex_travel_time_history")) {
+          return {
+            rows: [
+              {
+                observations: "144",
+                tracked_entities: "12",
+                first_observed_at: new Date("2026-06-30T09:00:00.000Z"),
+                last_observed_at: new Date("2026-07-02T09:45:00.000Z"),
+                active_day_count: "3",
+                notable_observations: "18",
+              },
+            ],
+          };
+        }
+        if (normalizedSql.includes("FROM traffic_counter_snapshot_history")) {
+          return {
+            rows: [
+              {
+                observations: "96",
+                tracked_entities: "8",
+                first_observed_at: "2026-07-01T07:00:00.000Z",
+                last_observed_at: "2026-07-02T09:40:00.000Z",
+                active_day_count: "2",
+                notable_observations: "5",
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await expect(
+      store.getTrafficTelemetryHistorySummary({
+        from: "2026-06-30T00:00:00.000Z",
+        to: "2026-07-02T23:59:59.000Z",
+      }),
+    ).resolves.toEqual({
+      datexTravelTime: {
+        observations: 144,
+        trackedEntities: 12,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        activeDayCount: 3,
+        notableObservations: 18,
+      },
+      trafficCounters: {
+        observations: 96,
+        trackedEntities: 8,
+        firstObservedAt: "2026-07-01T07:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 2,
+        notableObservations: 5,
+      },
+    });
+    expect(captured).toHaveLength(2);
+    expect(captured[0]?.sql).toContain("FROM datex_travel_time_history");
+    expect(captured[0]?.sql).toContain("observed_at >= $1");
+    expect(captured[0]?.sql).toContain("observed_at <= $2");
+    expect(captured[0]?.sql).toContain("count(DISTINCT corridor_id)");
+    expect(captured[0]?.sql).toContain("COALESCE(delay_seconds, 0) >= 180");
+    expect(captured[1]?.sql).toContain("FROM traffic_counter_snapshot_history");
+    expect(captured[1]?.sql).toContain("count(DISTINCT point_id)");
+    expect(captured[1]?.sql).toContain("COALESCE(anomaly_ratio, 0) >= 1.7");
+    expect(captured[0]?.params).toEqual(["2026-06-30T00:00:00.000Z", "2026-07-02T23:59:59.000Z"]);
+    expect(captured[1]?.params).toEqual(["2026-06-30T00:00:00.000Z", "2026-07-02T23:59:59.000Z"]);
+  });
+
+  it("PgStore ranks recurring telemetry patterns from history tables", async () => {
+    const captured: Array<{ sql: string; params: unknown[] | undefined }> = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push({ sql: normalizedSql, params });
+        if (normalizedSql.includes("FROM datex_travel_time_history")) {
+          return {
+            rows: [
+              {
+                source: "datex_travel_time",
+                entity_id: "e6-sluppen",
+                title: "E6 Sluppen",
+                observation_count: "18",
+                notable_observation_count: "7",
+                active_day_count: "3",
+                first_observed_at: new Date("2026-06-30T09:00:00.000Z"),
+                last_observed_at: new Date("2026-07-02T09:45:00.000Z"),
+                max_delay_seconds: 480,
+                max_anomaly_ratio: null,
+                geometry: null,
+              },
+            ],
+          };
+        }
+        if (normalizedSql.includes("FROM traffic_counter_snapshot_history")) {
+          return {
+            rows: [
+              {
+                source: "trafikkdata",
+                entity_id: "06970V72811",
+                title: "Kroppanbrua",
+                observation_count: "12",
+                notable_observation_count: "5",
+                active_day_count: "2",
+                first_observed_at: "2026-07-01T07:00:00.000Z",
+                last_observed_at: "2026-07-02T09:40:00.000Z",
+                max_delay_seconds: null,
+                max_anomaly_ratio: 2.75,
+                geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await expect(
+      store.listTrafficTelemetryPatterns({
+        from: "2026-06-30T00:00:00.000Z",
+        to: "2026-07-02T23:59:59.000Z",
+        limit: 8,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "telemetry-pattern:datex_travel_time:e6-sluppen",
+        source: "datex_travel_time",
+        title: "E6 Sluppen",
+        description: "Maks 8 min forsinkelse i historikken.",
+        observationCount: 18,
+        notableObservationCount: 7,
+        activeDayCount: 3,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        maxDelaySeconds: 480,
+        sourceConfidence: expect.objectContaining({ level: "uncertain" }),
+      }),
+      expect.objectContaining({
+        id: "telemetry-pattern:trafikkdata:06970V72811",
+        source: "trafikkdata",
+        title: "Kroppanbrua",
+        description: "Maks 2.8x normal trafikk i historikken.",
+        observationCount: 12,
+        notableObservationCount: 5,
+        activeDayCount: 2,
+        maxAnomalyRatio: 2.75,
+        geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+      }),
+    ]);
+    expect(captured[0]?.sql).toContain("FROM datex_travel_time_history");
+    expect(captured[0]?.sql).toContain("GROUP BY corridor_id");
+    expect(captured[0]?.sql).toContain("HAVING count(*) FILTER");
+    expect(captured[0]?.sql).toContain("LIMIT $3");
+    expect(captured[1]?.sql).toContain("FROM traffic_counter_snapshot_history");
+    expect(captured[1]?.sql).toContain("GROUP BY point_id");
+    expect(captured[1]?.sql).toContain("ST_AsGeoJSON(geometry)::json");
+    expect(captured[0]?.params).toEqual([
+      "2026-06-30T00:00:00.000Z",
+      "2026-07-02T23:59:59.000Z",
+      8,
+    ]);
+    expect(captured[1]?.params).toEqual([
+      "2026-06-30T00:00:00.000Z",
+      "2026-07-02T23:59:59.000Z",
+      8,
+    ]);
   });
 
   it("includes DATEX traffic pulse rows in PgStore operations status with stale overlay", async () => {

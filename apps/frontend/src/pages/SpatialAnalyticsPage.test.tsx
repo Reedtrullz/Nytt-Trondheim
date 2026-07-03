@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { CommandCenterSpatialAnalyticsPayload } from "@nytt/shared";
 
 vi.mock("react-leaflet", () => ({
-  CircleMarker: () => null,
+  CircleMarker: ({ children }: { children?: ReactNode }) => (
+    <div data-map-marker="circle">{children}</div>
+  ),
   MapContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Polyline: () => null,
   Popup: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
@@ -32,6 +34,63 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       speculative: 1,
     },
   },
+  telemetryHistory: {
+    datexTravelTime: {
+      observations: 144,
+      trackedEntities: 12,
+      firstObservedAt: "2026-06-30T09:00:00.000Z",
+      lastObservedAt: "2026-07-02T09:45:00.000Z",
+      activeDayCount: 3,
+      notableObservations: 18,
+    },
+    trafficCounters: {
+      observations: 96,
+      trackedEntities: 8,
+      firstObservedAt: "2026-07-01T07:00:00.000Z",
+      lastObservedAt: "2026-07-02T09:40:00.000Z",
+      activeDayCount: 2,
+      notableObservations: 5,
+    },
+  },
+  telemetryPatterns: [
+    {
+      id: "telemetry-pattern:datex_travel_time:e6-sluppen",
+      source: "datex_travel_time",
+      title: "E6 Sluppen",
+      description: "Maks 8 min forsinkelse i historikken.",
+      observationCount: 18,
+      notableObservationCount: 7,
+      activeDayCount: 3,
+      firstObservedAt: "2026-06-30T09:00:00.000Z",
+      lastObservedAt: "2026-07-02T09:45:00.000Z",
+      maxDelaySeconds: 480,
+      sourceConfidence: {
+        level: "uncertain",
+        label: "Usikker",
+        score: 0.46,
+        rationale: "Telemetri er et kontekstsignal.",
+      },
+    },
+    {
+      id: "telemetry-pattern:trafikkdata:06970V72811",
+      source: "trafikkdata",
+      title: "Kroppanbrua",
+      description: "Maks 2.8x normal trafikk i historikken.",
+      observationCount: 12,
+      notableObservationCount: 5,
+      activeDayCount: 2,
+      firstObservedAt: "2026-07-01T07:00:00.000Z",
+      lastObservedAt: "2026-07-02T09:40:00.000Z",
+      maxAnomalyRatio: 2.75,
+      geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+      sourceConfidence: {
+        level: "uncertain",
+        label: "Usikker",
+        score: 0.46,
+        rationale: "Trafikkdata er et kontekstsignal.",
+      },
+    },
+  ],
   investigationQueue: [
     {
       id: "investigation:delay:e6-south:100141",
@@ -206,6 +265,20 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Tidsrom");
     expect(html).toContain("Siste døgn");
     expect(html).toContain("Analysevindu: Hele tilgjengelige datasett");
+    expect(html).toContain("Tidsseriegrunnlag");
+    expect(html).toContain("Historikk bak trafikkbildet");
+    expect(html).toContain("DATEX reisetid");
+    expect(html).toContain("Trafikkdata");
+    expect(html).toContain("Køsignaler");
+    expect(html).toContain("Avvik");
+    expect(html).toContain("Gjentakende signaler");
+    expect(html).toContain("Mulige svarte punkter");
+    expect(html).toContain("2 mønstre");
+    expect(html).toContain("E6 Sluppen");
+    expect(html).toContain("Maks 8 min forsinkelse i historikken");
+    expect(html).toContain("7 tydelige signaler");
+    expect(html).toContain("Kroppanbrua");
+    expect(html).toContain("2.8x normal trafikk");
     expect(html).toContain("Operatørkø");
     expect(html).toContain("Signaler å undersøke");
     expect(html).toContain("3 signaler");
@@ -272,6 +345,7 @@ describe("SpatialAnalyticsDashboard", () => {
                 speculative: 0,
               },
             },
+            telemetryPatterns: [],
             investigationQueue: [],
             heatmapCells: [],
             unexplainedDelays: [],
@@ -283,6 +357,30 @@ describe("SpatialAnalyticsDashboard", () => {
 
     expect(html).toContain("Ingen store DATEX-forsinkelser uten koblet trafikkhendelse");
     expect(html).toContain("Ingen prioriterte romlige signaler");
+    expect(html).toContain("Ingen gjentakende DATEX- eller Trafikkdata-signaler");
     expect(html).toContain("Ingen stedfestede observasjoner");
+  });
+
+  it("renders recurrent telemetry patterns as map markers when geometry exists", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <SpatialAnalyticsDashboard
+          filters={{ minDelaySeconds: 180, limit: 80 }}
+          onFiltersChange={vi.fn()}
+          payload={{
+            ...payload,
+            heatmapCells: [],
+            unexplainedDelays: [],
+            investigationQueue: [],
+            telemetryPatterns: [payload.telemetryPatterns[1]!],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain('data-map-marker="circle"');
+    expect(html).toContain("Kroppanbrua");
+    expect(html).toContain("Sist sett 2. juli 2026");
+    expect(html).toContain("5 tydelige signaler · 2 aktive dager");
   });
 });

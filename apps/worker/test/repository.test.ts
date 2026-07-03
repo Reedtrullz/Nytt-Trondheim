@@ -599,15 +599,35 @@ describe("WorkerRepository", () => {
 
     await repository.upsertDatexTravelTimes([corridor]);
 
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
     const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("INSERT INTO datex_travel_times");
     expect(sql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(sql).toContain("updated_at=now()");
     expect(sql).not.toContain("source_items");
     expect(sql).not.toContain("situation_source_items");
+    const [historySql, historyParameters] = query.mock.calls[1] as [string, unknown[]];
+    expect(historySql).toContain("INSERT INTO datex_travel_time_history");
+    expect(historySql).toContain("ON CONFLICT (corridor_id, observed_at) DO UPDATE");
+    expect(historySql).not.toContain("source_items");
+    expect(historySql).not.toContain("situation_source_items");
     expect(parameters).toEqual([
       corridor.id,
+      corridor.name,
+      corridor.state,
+      corridor.travelTimeSeconds,
+      corridor.freeFlowSeconds,
+      corridor.delaySeconds,
+      corridor.delayRatio,
+      corridor.trend,
+      corridor.measurementFrom,
+      corridor.measurementTo,
+      corridor.sourceUrl,
+      corridor,
+    ]);
+    expect(historyParameters).toEqual([
+      corridor.id,
+      corridor.measurementTo,
       corridor.name,
       corridor.state,
       corridor.travelTimeSeconds,
@@ -897,13 +917,18 @@ describe("WorkerRepository", () => {
 
     await repository.upsertTrafficCounterSnapshots([first, latest]);
 
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(4);
     const [sql, firstParams] = query.mock.calls[0] as [string, unknown[]];
-    const [, latestParams] = query.mock.calls[1] as [string, unknown[]];
+    const [historySql, firstHistoryParams] = query.mock.calls[1] as [string, unknown[]];
+    const [, latestParams] = query.mock.calls[2] as [string, unknown[]];
+    const [, latestHistoryParams] = query.mock.calls[3] as [string, unknown[]];
     expect(sql).toContain("INSERT INTO traffic_counter_snapshots");
     expect(sql).toContain("ON CONFLICT (point_id) DO UPDATE");
     expect(sql).toContain("updated_at=EXCLUDED.updated_at");
     expect(sql).toContain("ST_SetSRID(ST_GeomFromGeoJSON($4),4326)");
+    expect(historySql).toContain("INSERT INTO traffic_counter_snapshot_history");
+    expect(historySql).toContain("ON CONFLICT (point_id, observed_at) DO UPDATE");
+    expect(historySql).toContain("ST_SetSRID(ST_GeomFromGeoJSON($8),4326)");
     expect(firstParams).toEqual([
       "06970V72811",
       first,
@@ -914,6 +939,26 @@ describe("WorkerRepository", () => {
       "06970V72811",
       latest,
       latest.updatedAt,
+      JSON.stringify(latest.geometry),
+    ]);
+    expect(firstHistoryParams).toEqual([
+      "06970V72811",
+      first.updatedAt,
+      first,
+      first.volumeLastHour,
+      first.baselineVolumeLastHour ?? null,
+      first.anomalyRatio ?? null,
+      first.coveragePercent ?? null,
+      JSON.stringify(first.geometry),
+    ]);
+    expect(latestHistoryParams).toEqual([
+      "06970V72811",
+      latest.updatedAt,
+      latest,
+      latest.volumeLastHour,
+      latest.baselineVolumeLastHour ?? null,
+      latest.anomalyRatio ?? null,
+      latest.coveragePercent ?? null,
       JSON.stringify(latest.geometry),
     ]);
     const sqlCalls = query.mock.calls.map(([statement]) => String(statement));

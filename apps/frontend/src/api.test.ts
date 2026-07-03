@@ -245,6 +245,21 @@ describe("frontend source item API helpers", () => {
             speculative: 0,
           },
         },
+        telemetryHistory: {
+          datexTravelTime: {
+            observations: 0,
+            trackedEntities: 0,
+            activeDayCount: 0,
+            notableObservations: 0,
+          },
+          trafficCounters: {
+            observations: 0,
+            trackedEntities: 0,
+            activeDayCount: 0,
+            notableObservations: 0,
+          },
+        },
+        telemetryPatterns: [],
         investigationQueue: [],
         heatmapCells: [],
         unexplainedDelays: [],

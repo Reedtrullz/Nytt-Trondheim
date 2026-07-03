@@ -278,6 +278,36 @@ export interface SpatialInvestigationQueueItem {
   targetUrl?: string;
 }
 
+export interface TelemetryHistorySourceSummary {
+  observations: number;
+  trackedEntities: number;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  activeDayCount: number;
+  notableObservations: number;
+}
+
+export interface CommandCenterTelemetryHistorySummary {
+  datexTravelTime: TelemetryHistorySourceSummary;
+  trafficCounters: TelemetryHistorySourceSummary;
+}
+
+export interface TelemetryHistoryPattern {
+  id: string;
+  source: "datex_travel_time" | "trafikkdata";
+  title: string;
+  description: string;
+  observationCount: number;
+  notableObservationCount: number;
+  activeDayCount: number;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  maxDelaySeconds?: number;
+  maxAnomalyRatio?: number;
+  geometry?: Point;
+  sourceConfidence?: SourceConfidenceSummary;
+}
+
 export interface CommandCenterSpatialAnalyticsPayload {
   generatedAt: string;
   window: {
@@ -291,6 +321,8 @@ export interface CommandCenterSpatialAnalyticsPayload {
     criticalDelays: number;
     bySourceConfidence: Record<SourceConfidenceLevel, number>;
   };
+  telemetryHistory: CommandCenterTelemetryHistorySummary;
+  telemetryPatterns: TelemetryHistoryPattern[];
   investigationQueue: SpatialInvestigationQueueItem[];
   heatmapCells: SpatialHeatmapCell[];
   unexplainedDelays: UnexplainedDelayCandidate[];

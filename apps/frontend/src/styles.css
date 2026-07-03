@@ -4790,6 +4790,96 @@ button {
   line-height: 1.35;
 }
 
+.spatial-telemetry-history {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+  margin: -8px 0 18px;
+}
+
+.spatial-telemetry-history > div,
+.spatial-telemetry-history article {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 14px;
+}
+
+.spatial-telemetry-history h2,
+.spatial-telemetry-history h3 {
+  margin: 2px 0 0;
+  font: 24px/1.08 var(--serif);
+}
+
+.spatial-telemetry-history h3 {
+  font-size: 20px;
+}
+
+.spatial-telemetry-history p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.spatial-telemetry-history dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.spatial-telemetry-history dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.spatial-telemetry-history dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.spatial-telemetry-patterns {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  margin: 0 0 18px;
+  padding: 18px;
+}
+
+.spatial-telemetry-pattern-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.spatial-telemetry-pattern {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.5fr);
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-left: 5px solid rgba(20, 104, 75, 0.55);
+  background: var(--page);
+  padding: 13px;
+}
+
+.spatial-telemetry-pattern h3 {
+  margin: 3px 0 5px;
+  font: 21px/1.1 var(--serif);
+}
+
+.spatial-telemetry-pattern p,
+.spatial-telemetry-pattern small {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .spatial-analytics-map {
   height: min(60vh, 560px);
   min-height: 420px;
@@ -8556,6 +8646,8 @@ button {
   .notification-triggers-grid,
   .notification-push-status,
   .notification-delivery-list,
+  .spatial-telemetry-history,
+  .spatial-telemetry-pattern-list,
   .spatial-analytics-grid,
   .raw-inspector-grid,
   .worker-metrics-grid,
@@ -8929,7 +9021,12 @@ button {
     height: 440px;
   }
 
+  .spatial-telemetry-history dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .spatial-investigation-row,
+  .spatial-telemetry-pattern,
   .spatial-delay-row,
   .spatial-delay-row dl {
     grid-template-columns: 1fr;

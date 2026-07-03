@@ -6,9 +6,11 @@ import {
   sourceMixConfidenceSummary,
   type CommandCenterSpatialAnalyticsPayload,
   type CommandCenterSpatialAnalyticsQueryInput,
+  type CommandCenterTelemetryHistorySummary,
   type SourceConfidenceSummary,
   type SpatialHeatmapCell,
   type SpatialInvestigationQueueItem,
+  type TelemetryHistoryPattern,
   type UnexplainedDelayCandidate,
 } from "@nytt/shared";
 import { api } from "../api.js";
@@ -209,6 +211,32 @@ function trustedSignalCount(payload: CommandCenterSpatialAnalyticsPayload) {
   return payload.summary.bySourceConfidence.confirmed + payload.summary.bySourceConfidence.likely;
 }
 
+function telemetryHistoryWindow(summary: CommandCenterTelemetryHistorySummary["datexTravelTime"]) {
+  if (!summary.firstObservedAt || !summary.lastObservedAt) return "Ingen historikk i vinduet";
+  if (summary.firstObservedAt === summary.lastObservedAt)
+    return `Observert ${time(summary.lastObservedAt)}`;
+  return `${time(summary.firstObservedAt)} - ${time(summary.lastObservedAt)}`;
+}
+
+function telemetryPatternSourceLabel(source: TelemetryHistoryPattern["source"]) {
+  return source === "datex_travel_time" ? "DATEX reisetid" : "Trafikkdata";
+}
+
+function telemetryPatternEvidence(pattern: TelemetryHistoryPattern) {
+  const evidence = [
+    `${pattern.notableObservationCount} tydelige signaler`,
+    activeDaysLabel(pattern.activeDayCount),
+    `${pattern.observationCount} observasjoner`,
+  ];
+  if (pattern.maxDelaySeconds !== undefined) {
+    evidence.push(delayText(pattern.maxDelaySeconds));
+  }
+  if (pattern.maxAnomalyRatio !== undefined) {
+    evidence.push(`${pattern.maxAnomalyRatio.toFixed(1)}x normal trafikk`);
+  }
+  return evidence;
+}
+
 function compareHeatmapCells(left: SpatialHeatmapCell, right: SpatialHeatmapCell) {
   const priorityDifference =
     hotspotPriorityRank[hotspotPriority(right)] - hotspotPriorityRank[hotspotPriority(left)];
@@ -286,6 +314,31 @@ function heatmapColor(cell: SpatialHeatmapCell) {
   if (cell.maxSeverity === "high") return "#d05d2b";
   if (cell.trafficEventCount > 0) return "#175f9f";
   return "#0f6f4f";
+}
+
+function telemetryPatternPosition(pattern: TelemetryHistoryPattern): [number, number] | undefined {
+  const coordinates = pattern.geometry?.coordinates;
+  const lng = coordinates?.[0];
+  const lat = coordinates?.[1];
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
+    return undefined;
+  }
+  return [lat, lng];
+}
+
+function telemetryPatternRadius(pattern: TelemetryHistoryPattern) {
+  return Math.min(28, Math.max(9, Math.sqrt(pattern.notableObservationCount + 1) * 4.8));
+}
+
+function telemetryPatternColor(pattern: TelemetryHistoryPattern) {
+  if (pattern.notableObservationCount >= 8 || pattern.activeDayCount >= 4) return "#8d2f20";
+  if (pattern.source === "trafikkdata") return "#1f6f7a";
+  return "#7a5a18";
 }
 
 function rawSourceItemHref(sourceItemId: string) {
@@ -381,6 +434,40 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
             </Polyline>
           );
         })}
+        {payload.telemetryPatterns.flatMap((pattern) => {
+          const position = telemetryPatternPosition(pattern);
+          if (!position) return [];
+          return [
+            <CircleMarker
+              center={position}
+              key={pattern.id}
+              pathOptions={{
+                color: telemetryPatternColor(pattern),
+                fillColor: telemetryPatternColor(pattern),
+                fillOpacity: 0.22,
+                opacity: 0.88,
+                weight: 3,
+              }}
+              radius={telemetryPatternRadius(pattern)}
+            >
+              <Popup>
+                <article className="spatial-map-popup">
+                  <strong>{pattern.title}</strong>
+                  <p>{telemetryPatternSourceLabel(pattern.source)}</p>
+                  {pattern.sourceConfidence ? (
+                    <p>
+                      {pattern.sourceConfidence.label} tillit ·{" "}
+                      {confidenceScoreLabel(pattern.sourceConfidence)}
+                    </p>
+                  ) : null}
+                  <p>{pattern.description}</p>
+                  <p>{telemetryPatternEvidence(pattern).join(" · ")}</p>
+                  <small>Sist sett {time(pattern.lastObservedAt)}</small>
+                </article>
+              </Popup>
+            </CircleMarker>,
+          ];
+        })}
       </MapContainer>
     </div>
   );
@@ -453,6 +540,71 @@ function InvestigationQueueItemRow({ item }: { item: SpatialInvestigationQueueIt
             Åpne kilde
           </a>
         ) : null}
+      </div>
+    </article>
+  );
+}
+
+function TelemetryHistoryCard({
+  label,
+  summary,
+  notableLabel,
+}: {
+  label: string;
+  summary: CommandCenterTelemetryHistorySummary["datexTravelTime"];
+  notableLabel: string;
+}) {
+  return (
+    <article>
+      <div>
+        <h3>{label}</h3>
+        <p>{telemetryHistoryWindow(summary)}</p>
+      </div>
+      <dl>
+        <div>
+          <dt>Observasjoner</dt>
+          <dd>{summary.observations}</dd>
+        </div>
+        <div>
+          <dt>Spor</dt>
+          <dd>{summary.trackedEntities}</dd>
+        </div>
+        <div>
+          <dt>Aktive dager</dt>
+          <dd>{summary.activeDayCount}</dd>
+        </div>
+        <div>
+          <dt>{notableLabel}</dt>
+          <dd>{summary.notableObservations}</dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
+function TelemetryPatternRow({ pattern }: { pattern: TelemetryHistoryPattern }) {
+  return (
+    <article className="spatial-telemetry-pattern">
+      <div>
+        <p className="label">{telemetryPatternSourceLabel(pattern.source)}</p>
+        <h3>{pattern.title}</h3>
+        {pattern.sourceConfidence ? (
+          <p className={`spatial-hotspot-confidence confidence-${pattern.sourceConfidence.level}`}>
+            {pattern.sourceConfidence.label} tillit ·{" "}
+            {confidenceScoreLabel(pattern.sourceConfidence)}
+          </p>
+        ) : null}
+        <p>{pattern.description}</p>
+        <small>
+          {pattern.firstObservedAt && pattern.lastObservedAt
+            ? `${time(pattern.firstObservedAt)} - ${time(pattern.lastObservedAt)}`
+            : "Historikk uten komplett tidsvindu"}
+        </small>
+      </div>
+      <div className="spatial-investigation-evidence">
+        {telemetryPatternEvidence(pattern).map((item) => (
+          <span key={item}>{item}</span>
+        ))}
       </div>
     </article>
   );
@@ -532,6 +684,42 @@ export function SpatialAnalyticsDashboard({
           <strong>{trustedSignalCount(payload)}</strong>
           <span>Bekreftet/sannsynlig</span>
         </article>
+      </section>
+      <section className="spatial-telemetry-history" aria-labelledby="spatial-history-heading">
+        <div>
+          <p className="label">Tidsseriegrunnlag</p>
+          <h2 id="spatial-history-heading">Historikk bak trafikkbildet</h2>
+        </div>
+        <TelemetryHistoryCard
+          label="DATEX reisetid"
+          notableLabel="Køsignaler"
+          summary={payload.telemetryHistory.datexTravelTime}
+        />
+        <TelemetryHistoryCard
+          label="Trafikkdata"
+          notableLabel="Avvik"
+          summary={payload.telemetryHistory.trafficCounters}
+        />
+      </section>
+      <section className="spatial-telemetry-patterns" aria-labelledby="spatial-pattern-heading">
+        <div className="spatial-section-heading">
+          <div>
+            <p className="label">Gjentakende signaler</p>
+            <h2 id="spatial-pattern-heading">Mulige svarte punkter</h2>
+          </div>
+          <span>{payload.telemetryPatterns.length} mønstre</span>
+        </div>
+        {payload.telemetryPatterns.length === 0 ? (
+          <p className="spatial-empty-state">
+            Ingen gjentakende DATEX- eller Trafikkdata-signaler i analysevinduet ennå.
+          </p>
+        ) : (
+          <div className="spatial-telemetry-pattern-list">
+            {payload.telemetryPatterns.map((pattern) => (
+              <TelemetryPatternRow key={pattern.id} pattern={pattern} />
+            ))}
+          </div>
+        )}
       </section>
       <section className="spatial-analytics-grid">
         <aside className="coverage-bundles-sidebar spatial-analytics-sidebar" aria-label="Filtre">
