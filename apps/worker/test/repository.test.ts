@@ -323,6 +323,20 @@ describe("WorkerRepository", () => {
         "critical",
       ]),
     );
+    const payload = JSON.parse(String((query.mock.calls[0]?.[1] as unknown[])[9])) as {
+      score?: number;
+      confidence?: { level?: string; score?: number };
+      sourceLabels?: string[];
+      matchedKeywords?: string[];
+      reasons?: string[];
+    };
+    expect(payload).toMatchObject({
+      score: 0.91,
+      confidence: { level: "confirmed", score: 0.91 },
+      sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+      matchedKeywords: ["stengt"],
+      reasons: ["Har offentlig kildegrunnlag."],
+    });
   });
 
   it("loads active Web Push subscriptions without revoked users", async () => {

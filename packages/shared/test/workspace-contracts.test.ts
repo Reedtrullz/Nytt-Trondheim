@@ -180,12 +180,14 @@ describe("workspace contract schemas", () => {
       notificationTriggerQuerySchema.parse({
         kinds: "public_safety,traffic_disruption",
         severities: "critical,warning",
+        deliveryStates: "failed,no_subscribers",
         q: "røyk",
         limit: "12",
       }),
     ).toMatchObject({
       kinds: ["public_safety", "traffic_disruption"],
       severities: ["critical", "warning"],
+      deliveryStates: ["failed", "no_subscribers"],
       q: "røyk",
       limit: 12,
     });
@@ -293,6 +295,16 @@ describe("workspace contract schemas", () => {
           title: "Steinsprang, vegen er stengt",
           body: "Gangåsvegen: Vegen er stengt.",
           targetUrl: "/situasjoner/one",
+          score: 0.91,
+          confidence: {
+            level: "confirmed",
+            score: 0.91,
+            sourceCount: 2,
+            updatedAt: "2026-07-02T09:45:00.000Z",
+          },
+          sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+          matchedKeywords: ["stengt"],
+          reasons: ["Har offentlig kildegrunnlag."],
           createdAt: "2026-07-02T09:45:00.000Z",
           sentAt: "2026-07-02T09:45:01.000Z",
         },
@@ -310,7 +322,14 @@ describe("workspace contract schemas", () => {
       "endpoint",
     );
     expect(pushDeliveryPageSchema.parse(deliveries)).toMatchObject({
-      items: [{ status: "sent", triggerId: "notification:situation:one" }],
+      items: [
+        {
+          status: "sent",
+          triggerId: "notification:situation:one",
+          score: 0.91,
+          sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+        },
+      ],
     });
   });
 

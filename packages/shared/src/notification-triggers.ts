@@ -219,6 +219,13 @@ export function notificationSubscriptionMatchesCandidate(
   return subscription.kinds.length === 0 || subscription.kinds.includes(candidate.kind);
 }
 
+export function notificationTriggerCandidateCanDispatch(
+  candidate: Pick<NotificationTriggerCandidate, "severity" | "confidence">,
+): boolean {
+  if (severityRank[candidate.severity] < severityRank.warning) return false;
+  return candidate.confidence.level === "confirmed" || candidate.confidence.level === "likely";
+}
+
 function confidenceFromScore(
   score: number,
   sourceCount: number,
@@ -510,6 +517,7 @@ function deliveryStateForCandidate(
   if (deliveries.some((item) => item.status === "sent")) return "sent";
   if (deliveries.some((item) => item.status === "failed")) return "failed";
   if (deliveries.some((item) => item.status === "skipped")) return "suppressed";
+  if (!notificationTriggerCandidateCanDispatch(candidate)) return "suppressed";
   if (!context.configured) return "not_configured";
   if (
     context.subscriptions &&
@@ -535,7 +543,7 @@ function deliveryDetail(state: NotificationTriggerDeliveryState): string {
     case "failed":
       return "Siste push-levering for denne utløseren feilet.";
     case "suppressed":
-      return "Utløseren er dempet eller allerede håndtert for aktuelle abonnementer.";
+      return "Utløseren er under terskelen, dempet eller allerede håndtert for automatiske push-varsler.";
     case "candidate_only":
       return "Kandidat for systemvarsel. Ingen push er sendt i denne visningen.";
   }
@@ -635,6 +643,24 @@ export function applyNotificationDeliveryStates(
   return {
     ...nextPage,
     pushStatus: notificationPushStatus(nextPage, context),
+  };
+}
+
+export function filterNotificationTriggerPageByDeliveryStates(
+  page: NotificationTriggerPage,
+  deliveryStates: NotificationTriggerDeliveryState[] | undefined,
+): NotificationTriggerPage {
+  if (!deliveryStates?.length) return page;
+  const allowed = new Set(deliveryStates);
+  const items = page.items.filter((candidate) => allowed.has(candidate.deliveryState));
+  return {
+    ...page,
+    filters: {
+      ...page.filters,
+      deliveryStates,
+    },
+    items,
+    summary: summaryForCandidates(items),
   };
 }
 

@@ -73,6 +73,7 @@ import type {
   SourceCollectorRun,
   SourceContractCheckStatus,
   SourceContractComplianceCheck,
+  SourceConfidenceSummary,
   SourceFreshness,
   IncidentSourceTraceabilitySummary,
   SourceNonSecretDiagnostic,
@@ -582,6 +583,7 @@ type PushDeliveryRow = {
   body: string;
   targetUrl?: string | null;
   errorMessage?: string | null;
+  payload?: unknown;
   createdAt: Date | string;
   sentAt?: Date | string | null;
 };
@@ -868,6 +870,7 @@ function pushSubscriptionFromRow(row: PushSubscriptionRow): PushSubscriptionSumm
 }
 
 function pushDeliveryFromRow(row: PushDeliveryRow): PushDeliveryListItem {
+  const payload = pushDeliveryPayloadSummary(row.payload);
   return {
     id: row.id,
     triggerId: row.triggerId,
@@ -880,8 +883,70 @@ function pushDeliveryFromRow(row: PushDeliveryRow): PushDeliveryListItem {
     body: row.body,
     ...(row.targetUrl ? { targetUrl: row.targetUrl } : {}),
     ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+    ...payload,
     createdAt: isoString(row.createdAt),
     ...(row.sentAt ? { sentAt: isoString(row.sentAt) } : {}),
+  };
+}
+
+function payloadStringArray(
+  payload: Record<string, unknown>,
+  key: string,
+  maxItems = 20,
+): string[] {
+  const value = payload[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .slice(0, maxItems);
+}
+
+const pushDeliveryConfidenceLevels = new Set<SourceConfidenceSummary["level"]>([
+  "confirmed",
+  "likely",
+  "uncertain",
+  "speculative",
+]);
+
+function pushDeliveryConfidenceSummary(value: unknown): SourceConfidenceSummary | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.level !== "string" ||
+    !pushDeliveryConfidenceLevels.has(record.level as SourceConfidenceSummary["level"])
+  ) {
+    return undefined;
+  }
+  const score =
+    typeof record.score === "number" ? Math.max(0, Math.min(1, record.score)) : undefined;
+  const sourceCount =
+    typeof record.sourceCount === "number" && Number.isFinite(record.sourceCount)
+      ? Math.max(0, Math.round(record.sourceCount))
+      : undefined;
+  return {
+    level: record.level as SourceConfidenceSummary["level"],
+    ...(score !== undefined ? { score } : {}),
+    ...(sourceCount !== undefined ? { sourceCount } : {}),
+    ...(typeof record.updatedAt === "string" ? { updatedAt: record.updatedAt } : {}),
+    ...(typeof record.rationale === "string" ? { rationale: record.rationale.slice(0, 500) } : {}),
+  };
+}
+
+function pushDeliveryPayloadSummary(payload: unknown): Partial<PushDeliveryListItem> {
+  if (!payload || typeof payload !== "object") return {};
+  const record = payload as Record<string, unknown>;
+  const score =
+    typeof record.score === "number" ? Math.max(0, Math.min(1, record.score)) : undefined;
+  const confidence = pushDeliveryConfidenceSummary(record.confidence);
+  const sourceLabels = payloadStringArray(record, "sourceLabels");
+  const matchedKeywords = payloadStringArray(record, "matchedKeywords");
+  const reasons = payloadStringArray(record, "reasons");
+  return {
+    ...(score !== undefined ? { score } : {}),
+    ...(confidence ? { confidence } : {}),
+    ...(sourceLabels.length ? { sourceLabels } : {}),
+    ...(matchedKeywords.length ? { matchedKeywords } : {}),
+    ...(reasons.length ? { reasons } : {}),
   };
 }
 
@@ -5336,6 +5401,7 @@ export class PgStore implements Store {
          body,
          target_url AS "targetUrl",
          error_message AS "errorMessage",
+         payload,
          created_at AS "createdAt",
          sent_at AS "sentAt"
        FROM push_notification_deliveries

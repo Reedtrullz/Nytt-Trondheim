@@ -2950,6 +2950,45 @@ describe("private situation API", () => {
     });
   });
 
+  it("filters notification trigger candidates by delivery state after readiness is applied", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const blockedResponse = await agent
+      .get(
+        "/api/operations/notification-triggers?severities=critical,warning&q=brann&deliveryStates=no_subscribers&limit=10",
+      )
+      .expect(200);
+
+    expect(blockedResponse.body.filters).toMatchObject({
+      deliveryStates: ["no_subscribers"],
+    });
+    expect(blockedResponse.body.items.length).toBeGreaterThan(0);
+    expect(
+      blockedResponse.body.items.every(
+        (item: { deliveryState: string }) => item.deliveryState === "no_subscribers",
+      ),
+    ).toBe(true);
+    expect(blockedResponse.body.summary.total).toBe(blockedResponse.body.items.length);
+    expect(blockedResponse.body.pushStatus).toMatchObject({
+      configured: true,
+      label: "Mangler match",
+    });
+
+    const readyResponse = await agent
+      .get(
+        "/api/operations/notification-triggers?severities=critical,warning&q=brann&deliveryStates=ready&limit=10",
+      )
+      .expect(200);
+
+    expect(readyResponse.body.filters).toMatchObject({
+      deliveryStates: ["ready"],
+    });
+    expect(readyResponse.body.items).toEqual([]);
+    expect(readyResponse.body.summary.total).toBe(0);
+  });
+
   it("marks notification trigger candidates as ready when an active subscription matches", async () => {
     const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
     const agent = request.agent(app);

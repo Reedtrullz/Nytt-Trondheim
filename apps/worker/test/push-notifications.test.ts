@@ -158,6 +158,46 @@ describe("push notifications", () => {
     expect(webPushMock.sendNotification).not.toHaveBeenCalled();
   });
 
+  it("does not claim or send watch candidates below the high-impact dispatch floor", async () => {
+    const repo = repository({
+      activePushSubscriptions: vi.fn().mockResolvedValue([
+        {
+          id: "subscription-one",
+          userId: "viewer-one",
+          endpoint: "https://push.example.test/send/secret",
+          keys: {
+            p256dh: "p256dh-key-material-that-is-long-enough",
+            auth: "auth-key-long-enough",
+          },
+          minSeverity: "watch",
+          kinds: [],
+        },
+      ]),
+    });
+    const watchCandidate: NotificationTriggerCandidate = {
+      ...candidate,
+      id: "notification:situation:watch-one",
+      severity: "watch",
+      score: 0.6,
+      confidence: {
+        level: "uncertain",
+        score: 0.6,
+        sourceCount: 1,
+        updatedAt: "2026-07-02T09:45:00.000Z",
+      },
+    };
+
+    const metrics = await deliverPushNotifications([watchCandidate], repo, {
+      publicKey: "public-key",
+      privateKey: "private-key",
+      subject: "mailto:test@example.test",
+    });
+
+    expect(metrics).toMatchObject({ claimed: 0, sent: 0, skipped: 1 });
+    expect(repo.claimPushDelivery).not.toHaveBeenCalled();
+    expect(webPushMock.sendNotification).not.toHaveBeenCalled();
+  });
+
   it("loads VAPID config only when public and private keys exist", () => {
     expect(loadWebPushConfig({ WEB_PUSH_VAPID_PUBLIC_KEY: "public" })).toBeUndefined();
     expect(

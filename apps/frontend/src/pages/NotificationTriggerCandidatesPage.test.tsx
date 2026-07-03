@@ -84,6 +84,16 @@ const deliveries = {
       severity: "critical" as const,
       title: "Steinsprang, vegen er stengt",
       body: "Gangåsvegen: Vegen er stengt.",
+      score: 0.91,
+      confidence: {
+        level: "confirmed" as const,
+        score: 0.91,
+        sourceCount: 2,
+        updatedAt: "2026-07-02T09:45:00.000Z",
+      },
+      sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+      matchedKeywords: ["stengt", "omkjøring"],
+      reasons: ["Har offentlig kildegrunnlag."],
       createdAt: "2026-07-02T09:46:00.000Z",
       sentAt: "2026-07-02T09:46:01.000Z",
     },
@@ -112,6 +122,8 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Kildehelse kontrollert");
     expect(html).toContain("Siste leveranser");
     expect(html).toContain("1 sendt");
+    expect(html).toContain("91 % score");
+    expect(html).toContain("Vegvesen DATEX, Adresseavisen");
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kritisk");
     expect(html).toContain("Sendt");
@@ -201,5 +213,41 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Må følges opp");
     expect(html).toContain("Ingen aktive nettleserabonnement er registrert.");
     expect(html).toContain("1 kandidat mangler match eller har feilet levering.");
+  });
+
+  it("can render a delivery-state-filtered operator list", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <NotificationTriggerCandidatesDashboard
+          filters={{ limit: 30, deliveryStates: ["no_subscribers"] }}
+          onFiltersChange={vi.fn()}
+          page={{
+            ...page,
+            summary: {
+              ...page.summary,
+              total: 2,
+            },
+            items: [
+              page.items[0]!,
+              {
+                ...page.items[0]!,
+                id: "notification:article:violence-one",
+                title: "Ung mann kritisk skadd",
+                body: "Ingen aktive abonnenter matcher denne typen akkurat nå.",
+                deliveryState: "no_subscribers",
+                detail: "Ingen aktive push-abonnement matcher alvorlighet og type.",
+              },
+            ],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Levering");
+    expect(html).toContain("1 vist av 2");
+    expect(html).toContain("Ung mann kritisk skadd");
+    expect(html).toContain("Ingen abonnent");
+    expect(html).toContain("Ingen aktive push-abonnement matcher alvorlighet og type.");
+    expect(html).not.toContain("Steinsprang, vegen er stengt</strong>");
   });
 });

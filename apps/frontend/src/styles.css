@@ -4839,6 +4839,8 @@ button {
 
 .notification-delivery-row span,
 .notification-delivery-row strong,
+.notification-delivery-row p,
+.notification-delivery-row em,
 .notification-delivery-row small {
   display: block;
 }
@@ -4859,6 +4861,19 @@ button {
   margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.notification-delivery-row p,
+.notification-delivery-row em {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.notification-delivery-row em {
+  color: var(--text);
+  font-style: normal;
 }
 
 .notification-settings-page {

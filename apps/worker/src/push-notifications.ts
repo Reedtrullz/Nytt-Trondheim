@@ -1,5 +1,6 @@
 import webPush, { type PushSubscription } from "web-push";
 import {
+  notificationTriggerCandidateCanDispatch,
   notificationSubscriptionMatchesCandidate,
   type NotificationTriggerCandidate,
 } from "@nytt/shared";
@@ -96,6 +97,10 @@ export async function deliverPushNotifications(
   }
 
   for (const candidate of candidates) {
+    if (!notificationTriggerCandidateCanDispatch(candidate)) {
+      metrics.skipped += subscriptions.length;
+      continue;
+    }
     for (const subscription of subscriptions) {
       if (!notificationSubscriptionMatchesCandidate(subscription, candidate)) {
         metrics.skipped += 1;

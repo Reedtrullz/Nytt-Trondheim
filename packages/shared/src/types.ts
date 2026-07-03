@@ -901,6 +901,7 @@ export interface NotificationPushStatus {
 export interface NotificationTriggerQuery {
   kinds?: NotificationTriggerKind[];
   severities?: NotificationTriggerSeverity[];
+  deliveryStates?: NotificationTriggerDeliveryState[];
   q?: string;
   limit?: number;
 }
@@ -960,6 +961,11 @@ export interface PushDeliveryListItem {
   body: string;
   targetUrl?: string;
   errorMessage?: string;
+  score?: number;
+  confidence?: SourceConfidenceSummary;
+  sourceLabels?: string[];
+  matchedKeywords?: string[];
+  reasons?: string[];
   createdAt: string;
   sentAt?: string;
 }

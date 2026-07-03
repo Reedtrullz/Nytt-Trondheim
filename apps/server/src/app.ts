@@ -16,6 +16,7 @@ import {
   commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
   emailLoginRequestSchema,
+  filterNotificationTriggerPageByDeliveryStates,
   isPublicSituation,
   lifecycleInputSchema,
   noteInputSchema,
@@ -2005,19 +2006,21 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/operations/notification-triggers", async (req, res, next) => {
     try {
       const filters = notificationTriggerQuerySchema.parse(req.query);
+      const { deliveryStates, ...candidateFilters } = filters;
       const [page, deliveries, subscriptions, sourceHealth] = await Promise.all([
-        store.listNotificationTriggers(filters, currentLogin(req)),
+        store.listNotificationTriggers(candidateFilters, currentLogin(req)),
         store.listPushDeliveries(100, currentLogin(req)),
         store.listPushSubscriptionPreferences(currentLogin(req)),
         store.listSourceHealth(),
       ]);
+      const pageWithDeliveryState = applyNotificationDeliveryStates(page, {
+        configured: Boolean(config.webPushConfigured),
+        deliveries: deliveries.items,
+        subscriptions,
+        sourceHealth,
+      });
       res.json(
-        applyNotificationDeliveryStates(page, {
-          configured: Boolean(config.webPushConfigured),
-          deliveries: deliveries.items,
-          subscriptions,
-          sourceHealth,
-        }),
+        filterNotificationTriggerPageByDeliveryStates(pageWithDeliveryState, deliveryStates),
       );
     } catch (error) {
       next(error);

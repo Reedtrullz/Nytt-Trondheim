@@ -1001,6 +1001,7 @@ export const notificationTriggerDeliveryStateSchema = z.enum([
 export const notificationTriggerQuerySchema = z.object({
   kinds: csvListSchema(notificationTriggerKindSchema),
   severities: csvListSchema(notificationTriggerSeveritySchema),
+  deliveryStates: csvListSchema(notificationTriggerDeliveryStateSchema),
   q: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
@@ -1131,6 +1132,11 @@ export const pushDeliveryListItemSchema = z
     body: z.string().trim().min(1).max(1000),
     targetUrl: z.string().trim().max(2048).optional(),
     errorMessage: z.string().trim().max(1000).optional(),
+    score: z.number().min(0).max(1).optional(),
+    confidence: sourceConfidenceSummarySchema.optional(),
+    sourceLabels: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
+    matchedKeywords: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+    reasons: z.array(z.string().trim().min(1).max(260)).max(20).optional(),
     createdAt: z.string().datetime(),
     sentAt: z.string().datetime().optional(),
   })

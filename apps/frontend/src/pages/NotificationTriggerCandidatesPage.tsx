@@ -14,6 +14,7 @@ import { api } from "../api.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 
 interface NotificationTriggerFilters extends NotificationTriggerQueryInput {
+  deliveryStates?: NotificationTriggerDeliveryState[];
   selected?: string;
 }
 
@@ -53,6 +54,16 @@ const kindOptions: Array<{ value: NotificationTriggerKind; label: string }> = [
   { value: "service_disruption", label: "Driftsbrudd" },
 ];
 
+const deliveryStateOptions: Array<{ value: NotificationTriggerDeliveryState; label: string }> = [
+  { value: "ready", label: "Klar" },
+  { value: "sent", label: "Sendt" },
+  { value: "failed", label: "Feilet" },
+  { value: "no_subscribers", label: "Ingen abonnent" },
+  { value: "not_configured", label: "Ikke konfigurert" },
+  { value: "suppressed", label: "Dempet" },
+  { value: "candidate_only", label: "Kun kandidat" },
+];
+
 function time(value?: string) {
   return value
     ? new Intl.DateTimeFormat("nb-NO", {
@@ -87,6 +98,10 @@ function parseFilters(search: string): NotificationTriggerFilters {
     parameters.get("kinds"),
     kindOptions.map((option) => option.value),
   );
+  const deliveryStates = parseList(
+    parameters.get("deliveryStates"),
+    deliveryStateOptions.map((option) => option.value),
+  );
   const q = parameters.get("q")?.trim() || undefined;
   const selected = parameters.get("trigger")?.trim() || undefined;
   const parsedLimit = Number(parameters.get("limit"));
@@ -94,6 +109,7 @@ function parseFilters(search: string): NotificationTriggerFilters {
     limit: Number.isFinite(parsedLimit) && parsedLimit >= 1 ? parsedLimit : 30,
     ...(severities ? { severities } : {}),
     ...(kinds ? { kinds } : {}),
+    ...(deliveryStates ? { deliveryStates } : {}),
     ...(q ? { q } : {}),
     ...(selected ? { selected } : {}),
   };
@@ -103,6 +119,8 @@ function buildSearch(filters: NotificationTriggerFilters) {
   const parameters = new URLSearchParams();
   if (filters.severities?.length) parameters.set("severities", filters.severities.join(","));
   if (filters.kinds?.length) parameters.set("kinds", filters.kinds.join(","));
+  if (filters.deliveryStates?.length)
+    parameters.set("deliveryStates", filters.deliveryStates.join(","));
   if (filters.q) parameters.set("q", filters.q);
   if (filters.limit) parameters.set("limit", String(filters.limit));
   if (filters.selected) parameters.set("trigger", filters.selected);
@@ -114,6 +132,7 @@ function queryFromFilters(filters: NotificationTriggerFilters): NotificationTrig
     limit: filters.limit ?? 30,
     ...(filters.severities?.length ? { severities: filters.severities } : {}),
     ...(filters.kinds?.length ? { kinds: filters.kinds } : {}),
+    ...(filters.deliveryStates?.length ? { deliveryStates: filters.deliveryStates } : {}),
     ...(filters.q ? { q: filters.q } : {}),
   };
 }
@@ -237,6 +256,18 @@ function DeliveryHistory({ deliveries }: { deliveries?: PushDeliveryPage }) {
             <article key={item.id} className={`notification-delivery-row ${item.status}`}>
               <span>{item.status}</span>
               <strong>{item.title}</strong>
+              {item.score !== undefined || item.confidence || item.sourceLabels?.length ? (
+                <p>
+                  {item.score !== undefined ? `${percent(item.score)} score` : null}
+                  {item.score !== undefined && item.confidence ? " · " : null}
+                  {item.confidence ? (item.confidence.label ?? item.confidence.level) : null}
+                  {(item.score !== undefined || item.confidence) && item.sourceLabels?.length
+                    ? " · "
+                    : null}
+                  {item.sourceLabels?.length ? item.sourceLabels.join(", ") : null}
+                </p>
+              ) : null}
+              {item.reasons?.[0] ? <em>{item.reasons[0]}</em> : null}
               <small>
                 {severityLabels[item.severity]} · {time(item.sentAt ?? item.createdAt)}
               </small>
@@ -332,8 +363,11 @@ export function NotificationTriggerCandidatesDashboard({
   filters: NotificationTriggerFilters;
   onFiltersChange: (filters: NotificationTriggerFilters) => void;
 }) {
+  const visibleItems = filters.deliveryStates?.length
+    ? page.items.filter((candidate) => filters.deliveryStates?.includes(candidate.deliveryState))
+    : page.items;
   const selectedCandidate =
-    page.items.find((item) => item.id === filters.selected) ?? page.items[0];
+    visibleItems.find((item) => item.id === filters.selected) ?? visibleItems[0];
 
   function update(next: Partial<NotificationTriggerFilters>) {
     onFiltersChange({ ...filters, selected: undefined, ...next });
@@ -415,6 +449,23 @@ export function NotificationTriggerCandidatesDashboard({
               </label>
             ))}
           </fieldset>
+          <fieldset className="notification-trigger-filter">
+            <legend>Levering</legend>
+            {deliveryStateOptions.map((option) => (
+              <label key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={filters.deliveryStates?.includes(option.value) ?? false}
+                  onChange={() =>
+                    update({
+                      deliveryStates: toggle(filters.deliveryStates, option.value),
+                    })
+                  }
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </fieldset>
         </aside>
         <section className="notification-trigger-list" aria-label="Varselkandidater">
           <div className="coverage-bundle-list-heading">
@@ -422,12 +473,15 @@ export function NotificationTriggerCandidatesDashboard({
               <p className="label">Siste beregning {time(page.generatedAt)}</p>
               <h2>Kandidater</h2>
             </div>
-            <span>{page.items.length} vist</span>
+            <span>
+              {visibleItems.length} vist
+              {visibleItems.length === page.items.length ? "" : ` av ${page.items.length}`}
+            </span>
           </div>
-          {page.items.length === 0 ? (
+          {visibleItems.length === 0 ? (
             <p className="coverage-bundle-empty">Ingen varselkandidater matcher filtrene.</p>
           ) : (
-            page.items.map((candidate) => (
+            visibleItems.map((candidate) => (
               <button
                 className={
                   candidate.id === selectedCandidate?.id

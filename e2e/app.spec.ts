@@ -2176,6 +2176,17 @@ test("command notification bridge shows Web Push readiness responsively", async 
             severity: "critical",
             title: "Steinsprang, vegen er stengt",
             body: "Gangåsvegen: Vegen er stengt.",
+            score: 0.91,
+            confidence: {
+              level: "confirmed",
+              label: "Bekreftet",
+              score: 0.91,
+              sourceCount: 2,
+              updatedAt: "2026-07-02T09:45:00.000Z",
+            },
+            sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+            matchedKeywords: ["stengt", "omkjøring"],
+            reasons: ["Har offentlig kildegrunnlag."],
             createdAt: "2026-07-02T09:46:00.000Z",
             sentAt: "2026-07-02T09:46:01.000Z",
           },
@@ -2208,8 +2219,17 @@ test("command notification bridge shows Web Push readiness responsively", async 
     await expect(page.getByText("1/2")).toBeVisible();
     await expect(page.getByText("Kildehelse kontrollert")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Siste leveranser" })).toBeVisible();
+    const deliveryHistory = page.locator(".notification-delivery-history");
+    await expect(deliveryHistory.getByText("91 % score")).toBeVisible();
+    await expect(deliveryHistory.getByText("Vegvesen DATEX, Adresseavisen")).toBeVisible();
     await expect(page.getByText("Steinsprang, vegen er stengt").first()).toBeVisible();
     await expect(page.getByText("Ingen abonnent").first()).toBeVisible();
+    await expect(page.getByRole("group", { name: "Levering" })).toBeVisible();
+    await page.getByLabel("Filtre").getByLabel("Ingen abonnent").click();
+    const candidateList = page.getByLabel("Varselkandidater");
+    await expect(candidateList.getByText("1 vist av 2")).toBeVisible();
+    await expect(candidateList.getByText("Voldshendelse på Lade")).toBeVisible();
+    await expect(candidateList.getByText("Steinsprang, vegen er stengt")).not.toBeVisible();
     await expectNoHorizontalPageOverflow(page);
   }
 });

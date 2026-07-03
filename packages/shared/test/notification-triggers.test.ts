@@ -3,6 +3,7 @@ import type { Article, Situation } from "../src/index.js";
 import {
   applyNotificationDeliveryStates,
   buildNotificationTriggerPage,
+  filterNotificationTriggerPageByDeliveryStates,
   notificationSubscriptionMatchesCandidate,
   publicNotificationTriggerGuidance,
 } from "../src/index.js";
@@ -211,6 +212,112 @@ describe("notification trigger candidates", () => {
       detail: expect.stringContaining("Push-varsel er sendt"),
     });
     expect(sentPage.pushStatus?.deliveryCounts).toMatchObject({ total: 1, sent: 1 });
+  });
+
+  it("filters operation pages by delivery state after readiness is known", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [situation()],
+      articles: [
+        article({
+          id: "article-road",
+          title: "Ti meter stort ras kan bli stengt i flere uker",
+          excerpt: "Veien er stengt ved Gangåsvegen.",
+          category: "Transport",
+          situationId: "situation-one",
+        }),
+        article({
+          id: "article-violence",
+          title: "Én person kritisk skadet etter voldshendelse i Trondheim",
+          excerpt: "Politiet opplyser at en ung mann er kritisk skadet etter hendelsen.",
+          category: "Krim",
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+    const pageWithDeliveryState = applyNotificationDeliveryStates(page, {
+      configured: true,
+      subscriptions: [
+        {
+          enabled: true,
+          minSeverity: "critical",
+          kinds: ["traffic_disruption"],
+        },
+      ],
+    });
+
+    expect(pageWithDeliveryState.items.map((candidate) => candidate.deliveryState)).toEqual([
+      "ready",
+      "no_subscribers",
+    ]);
+
+    const blockedPage = filterNotificationTriggerPageByDeliveryStates(pageWithDeliveryState, [
+      "no_subscribers",
+    ]);
+
+    expect(blockedPage.filters.deliveryStates).toEqual(["no_subscribers"]);
+    expect(blockedPage.summary.total).toBe(1);
+    expect(blockedPage.items).toHaveLength(1);
+    expect(blockedPage.items[0]).toMatchObject({
+      id: "notification:article:article-violence",
+      deliveryState: "no_subscribers",
+    });
+    expect(blockedPage.pushStatus).toEqual(pageWithDeliveryState.pushStatus);
+  });
+
+  it("suppresses low-confidence watch candidates from automatic Web Push delivery", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [
+        situation({
+          id: "watch-one",
+          title: "Midlertidig observasjon",
+          summary: "Situasjonen følges uten tydelig høy effekt.",
+          status: "preliminary",
+          verificationStatus: "Foreløpig fra rapportering",
+          updatedAt: "2026-07-01T23:00:00.000Z",
+          relatedArticleIds: [],
+          activationBasis: {
+            rule: "two_independent_sources",
+            sourceIds: ["nrk", "adressa"],
+            articleIds: [],
+            activatedAt: "2026-07-02T08:55:00.000Z",
+          },
+          evidence: [],
+          importance: "high",
+          officialSource: undefined,
+          sourceConfidence: {
+            level: "uncertain",
+            score: 0.58,
+            sourceCount: 1,
+            updatedAt: "2026-07-02T08:55:00.000Z",
+          },
+        }),
+      ],
+      articles: [],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items[0]).toMatchObject({
+      id: "notification:situation:watch-one",
+      severity: "watch",
+      confidence: expect.objectContaining({ level: "uncertain" }),
+    });
+
+    const pageWithDeliveryState = applyNotificationDeliveryStates(page, {
+      configured: true,
+      subscriptions: [{ enabled: true, minSeverity: "watch", kinds: [] }],
+    });
+
+    expect(pageWithDeliveryState.items[0]).toMatchObject({
+      deliveryState: "suppressed",
+      detail: expect.stringContaining("under terskelen"),
+    });
+    expect(pageWithDeliveryState.pushStatus).toMatchObject({
+      label: "Klar",
+      activeSubscriptions: 1,
+      matchingCandidates: 1,
+      readyCandidates: 0,
+      blockedCandidates: 0,
+    });
   });
 
   it("uses the same subscription matching rule as worker dispatch", () => {
