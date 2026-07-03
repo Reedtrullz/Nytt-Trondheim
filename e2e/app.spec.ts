@@ -187,6 +187,7 @@ test("situation overview changes map selection without refetching workspace data
     title: "Skogbrann ved Bymarka",
     summary: "Samlet oversikt fra åpne, publiserte kilder.",
     status: "active",
+    publicVisibility: "public",
     importance: "high",
     updatedAt: "2026-05-26T12:18:00.000Z",
     locationLabel: "Bymarka / Granåsen",
