@@ -132,6 +132,11 @@ describe("CommandBriefingDashboard", () => {
     );
 
     expect(html).toContain("Brief-revisjon");
+    expect(html).toContain("Modulært kommandosenter");
+    expect(html).toContain("Brief-arbeidsflate");
+    expect(html).toContain("Dashboard-oppsett");
+    expect(html).toContain("Publisert bypuls layout");
+    expect(html).toContain("Endre størrelse på AI-spor");
     expect(html).toContain("AI-assistert");
     expect(html).toContain("deepseek-v4-flash");
     expect(html).toContain("Kun morgenbrief");

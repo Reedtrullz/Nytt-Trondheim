@@ -117,6 +117,11 @@ describe("RawDataInspectorDashboard", () => {
     );
 
     expect(html).toContain("Rådata-inspektør");
+    expect(html).toContain("Modulært kommandosenter");
+    expect(html).toContain("Rådata-arbeidsflate");
+    expect(html).toContain("Dashboard-oppsett");
+    expect(html).toContain("Rådatafiltre layout");
+    expect(html).toContain("Endre størrelse på Payload-detaljer");
     expect(html).toContain("Testkilde");
     expect(html).toContain("Normalisert payload");
     expect(html).toContain("Rå payload");

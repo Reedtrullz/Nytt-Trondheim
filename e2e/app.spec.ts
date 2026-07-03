@@ -1026,9 +1026,12 @@ test("command briefing page shows AI brief traceability", async ({ page }) => {
   await page.goto("/command/brief");
 
   await expect(page.getByRole("heading", { name: "Brief-revisjon" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Morgenbrief" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Siste analyse" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Historier bak briefen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Brief-arbeidsflate" })).toBeVisible();
+  await expect(page.getByLabel("Brief-revisjon-moduler")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Morgenbrief" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Siste analyse" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Historier bak briefen" }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Rådata" })).toHaveAttribute(
     "href",
     "/command/radata",
@@ -1333,7 +1336,10 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
   await page.goto("/command/romlig");
 
   await expect(page.getByRole("heading", { name: "Romlig analyse" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Signaler å undersøke" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Romlig arbeidsflate" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Analysefilter" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Signaler å undersøke" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Varmepunkt Sluppen" })).toBeVisible();
   await expect(page.getByText("Toppdag 2. juli: 3 observasjoner")).toBeVisible();
   await expect(page.getByLabel("Tidsprofil for varmepunkt").first()).toBeVisible();
@@ -1342,6 +1348,8 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
 
   await expect(page).toHaveURL(/\/command\/radata\?sourceItem=source%3Aone/);
   await expect(page.getByRole("heading", { name: "Rådata-inspektør" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rådata-arbeidsflate" })).toBeVisible();
+  await expect(page.getByLabel("Rådata-inspektør-moduler")).toBeVisible();
   await expect(page.getByRole("heading", { name: "DATEX Sluppen payload" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Normalisert payload" })).toBeVisible();
   await expect(page.getByText('"location": "Sluppen"')).toBeVisible();

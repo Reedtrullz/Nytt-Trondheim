@@ -14,6 +14,7 @@ import type {
   SourceItemPage,
 } from "@nytt/shared";
 import { api } from "../api.js";
+import { DashboardGrid } from "../components/DashboardGrid.js";
 
 interface RawInspectorViewFilters extends RawInspectorAiRunFilters {
   sourceItem?: string;
@@ -253,398 +254,446 @@ export function RawDataInspectorDashboard({
           <Link to="/command/dekning">Dekningsgrupper</Link>
         </div>
       </header>
-      <section className="raw-inspector-grid">
-        <aside className="raw-inspector-sidebar" aria-label="Rådatafiltre">
-          <form onSubmit={submitSourceItem}>
-            <label>
-              Kildeelement-ID
-              <input
-                value={sourceInput}
-                onChange={(event) => setSourceInput(event.target.value)}
-                placeholder="source:..."
-              />
-            </label>
-            <button type="submit">Hent kildeelement</button>
-          </form>
-          <form onSubmit={submitTelemetry}>
-            <label>
-              Telemetrikilde
-              <select
-                value={telemetrySourceInput}
-                onChange={(event) =>
-                  setTelemetrySourceInput(event.target.value as RawInspectorTelemetrySource)
-                }
-              >
-                {Object.entries(telemetrySourceLabels).map(([value, label]) => (
-                  <option value={value} key={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Telemetri-ID
-              <input
-                value={telemetryIdInput}
-                onChange={(event) => setTelemetryIdInput(event.target.value)}
-                placeholder="100141 / 06970V72811"
-              />
-            </label>
-            <button type="submit">Hent telemetri</button>
-          </form>
-          <label>
-            Telemetrisøk
-            <input
-              value={filters.telemetryQ ?? ""}
-              onChange={(event) =>
-                update({
-                  telemetryQ: event.target.value || undefined,
-                  telemetryCursor: undefined,
-                })
-              }
-              placeholder="Søk i korridor, teller eller ID"
-            />
-          </label>
-          <label>
-            Telemetriliste
-            <select
-              value={filters.telemetryListSource ?? ""}
-              onChange={(event) =>
-                update({
-                  telemetryListSource: (event.target.value ||
-                    undefined) as RawInspectorViewFilters["telemetryListSource"],
-                  telemetryCursor: undefined,
-                })
-              }
-            >
-              <option value="">Alle</option>
-              {Object.entries(telemetrySourceLabels).map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {telemetryPage.nextCursor ? (
-            <button
-              type="button"
-              onClick={() => update({ telemetryCursor: telemetryPage.nextCursor })}
-            >
-              Neste telemetriside
-            </button>
-          ) : null}
-          <label>
-            Kildesøk
-            <input
-              value={filters.sourceQ ?? ""}
-              onChange={(event) =>
-                update({ sourceQ: event.target.value || undefined, sourceCursor: undefined })
-              }
-              placeholder="Søk i tittel, sammendrag, hash"
-            />
-          </label>
-          <label>
-            Kildetype
-            <select
-              value={filters.sourceKind ?? ""}
-              onChange={(event) =>
-                update({
-                  sourceKind: (event.target.value ||
-                    undefined) as RawInspectorViewFilters["sourceKind"],
-                  sourceCursor: undefined,
-                })
-              }
-            >
-              <option value="">Alle</option>
-              {Object.entries(sourceKindLabels).map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {sourceItems.nextCursor ? (
-            <button type="button" onClick={() => update({ sourceCursor: sourceItems.nextCursor })}>
-              Neste kildeside
-            </button>
-          ) : null}
-          <label>
-            AI-søk
-            <input
-              value={filters.q ?? ""}
-              onChange={(event) => update({ q: event.target.value || undefined })}
-              placeholder="Søk i kjøring, modell, feil"
-            />
-          </label>
-          <label>
-            Provider
-            <select
-              value={filters.provider ?? ""}
-              onChange={(event) =>
-                update({
-                  provider: (event.target.value ||
-                    undefined) as RawInspectorAiRunFilters["provider"],
-                })
-              }
-            >
-              <option value="">Alle</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="deterministic">Deterministisk</option>
-            </select>
-          </label>
-          <label>
-            Status
-            <select
-              value={filters.status ?? ""}
-              onChange={(event) =>
-                update({
-                  status: (event.target.value || undefined) as RawInspectorAiRunFilters["status"],
-                })
-              }
-            >
-              <option value="">Alle</option>
-              <option value="ok">OK</option>
-              <option value="degraded">Degradert</option>
-              <option value="disabled">Avslått</option>
-            </select>
-          </label>
-          {aiRuns.nextCursor ? (
-            <button type="button" onClick={() => update({ cursor: aiRuns.nextCursor })}>
-              Neste side
-            </button>
-          ) : null}
-        </aside>
-        <section
-          className="raw-inspector-list"
-          aria-label="Telemetri, kildeelementer og AI-kjøringer"
-        >
-          <div className="raw-inspector-section-heading">
-            <h2>Telemetri</h2>
-            <span>{telemetryPage.items.length} vist</span>
-          </div>
-          {telemetryItemsError ? (
-            <p className="raw-inspector-error">{telemetryItemsError}</p>
-          ) : null}
-          {telemetryPage.items.length === 0 ? (
-            <p className="raw-inspector-empty">Ingen telemetri matcher filtrene.</p>
-          ) : (
-            telemetryPage.items.map((item) => (
-              <button
-                className={
-                  item.id === filters.telemetryId && item.source === filters.telemetrySource
-                    ? "raw-inspector-run selected"
-                    : "raw-inspector-run"
-                }
-                key={`${item.source}:${item.id}`}
-                type="button"
-                onClick={() =>
-                  update({
-                    telemetrySource: item.source,
-                    telemetryId: item.id,
-                  })
-                }
-              >
-                <span>{telemetrySourceLabels[item.source]}</span>
-                <strong>{item.title}</strong>
-                <small>
-                  {item.summary || item.id} · oppdatert {time(item.updatedAt)}
-                </small>
-              </button>
-            ))
-          )}
-          <div className="raw-inspector-section-heading">
-            <h2>Kildeelementer</h2>
-            <span>{sourceItems.items.length} vist</span>
-          </div>
-          {sourceItemsError ? <p className="raw-inspector-error">{sourceItemsError}</p> : null}
-          {sourceItems.items.length === 0 ? (
-            <p className="raw-inspector-empty">Ingen kildeelementer matcher filtrene.</p>
-          ) : (
-            sourceItems.items.map((item) => (
-              <button
-                className={
-                  item.id === filters.sourceItem
-                    ? "raw-inspector-run selected"
-                    : "raw-inspector-run"
-                }
-                key={item.id}
-                type="button"
-                onClick={() => update({ sourceItem: item.id })}
-              >
-                <span>
-                  {item.provider} · {sourceKindLabels[item.kind]}
-                </span>
-                <strong>{item.title ?? item.id}</strong>
-                <small>
-                  {item.summary ?? item.id} · hentet {time(item.fetchedAt)}
-                </small>
-              </button>
-            ))
-          )}
-          <div className="raw-inspector-section-heading">
-            <h2>AI-kjøringer</h2>
-            <span>{aiRuns.items.length} vist</span>
-          </div>
-          {aiError ? <p className="raw-inspector-error">{aiError}</p> : null}
-          {aiRuns.items.length === 0 ? (
-            <p className="raw-inspector-empty">Ingen AI-kjøringer matcher filtrene.</p>
-          ) : (
-            aiRuns.items.map((run) => (
-              <button
-                className={
-                  run.id === filters.run ? "raw-inspector-run selected" : "raw-inspector-run"
-                }
-                key={run.id}
-                type="button"
-                onClick={() => update({ run: run.id })}
-              >
-                <span>{providerLabels[run.provider] ?? run.provider}</span>
-                <strong>{run.model}</strong>
-                <small>
-                  {statusLabels[run.status] ?? run.status} · {run.articleCount} saker ·{" "}
-                  {aiProfileLabel(run.diagnostics)} · {time(run.completedAt)}
-                </small>
-                {run.error ? <em>{run.error}</em> : null}
-              </button>
-            ))
-          )}
-        </section>
-        <aside className="raw-inspector-detail" aria-label="Rådatadetalj">
-          <section>
-            <p className="label">Telemetri</p>
-            {telemetryError ? <p className="raw-inspector-error">{telemetryError}</p> : null}
-            {telemetryDetail ? (
-              <>
-                <h2>{telemetryDetail.record.title}</h2>
-                <dl>
-                  <div>
-                    <dt>Kilde</dt>
-                    <dd>{telemetrySourceLabels[telemetryDetail.record.source]}</dd>
-                  </div>
-                  <div>
-                    <dt>ID</dt>
-                    <dd>{telemetryDetail.record.id}</dd>
-                  </div>
-                  <div>
-                    <dt>Observert</dt>
-                    <dd>
-                      {time(telemetryDetail.record.observedAt ?? telemetryDetail.record.updatedAt)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Payload</dt>
-                    <dd>{Math.round(telemetryDetail.payloadBytes / 1024)} kB etter sanitering</dd>
-                  </div>
-                </dl>
-                {telemetryDetail.record.summary ? <p>{telemetryDetail.record.summary}</p> : null}
-                {telemetryDetail.record.sourceUrl ? (
-                  <a href={telemetryDetail.record.sourceUrl} rel="noreferrer" target="_blank">
-                    Åpne kilde
-                  </a>
+      <DashboardGrid
+        ariaLabel="Rådata-inspektør-moduler"
+        description="Dra og størrelsesjuster filter, lister og payload-detaljer for kildegransking."
+        label="Modulært kommandosenter"
+        storageKey="nytt-raw-inspector-dashboard-v1"
+        title="Rådata-arbeidsflate"
+        widgets={[
+          {
+            id: "filters",
+            title: "Rådatafiltre",
+            description: "Direkteoppslag og filtrering for kildeelementer, telemetri og AI.",
+            defaultSize: "standard",
+            children: (
+              <aside className="raw-inspector-sidebar" aria-label="Rådatafiltre">
+                <form onSubmit={submitSourceItem}>
+                  <label>
+                    Kildeelement-ID
+                    <input
+                      value={sourceInput}
+                      onChange={(event) => setSourceInput(event.target.value)}
+                      placeholder="source:..."
+                    />
+                  </label>
+                  <button type="submit">Hent kildeelement</button>
+                </form>
+                <form onSubmit={submitTelemetry}>
+                  <label>
+                    Telemetrikilde
+                    <select
+                      value={telemetrySourceInput}
+                      onChange={(event) =>
+                        setTelemetrySourceInput(event.target.value as RawInspectorTelemetrySource)
+                      }
+                    >
+                      {Object.entries(telemetrySourceLabels).map(([value, label]) => (
+                        <option value={value} key={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Telemetri-ID
+                    <input
+                      value={telemetryIdInput}
+                      onChange={(event) => setTelemetryIdInput(event.target.value)}
+                      placeholder="100141 / 06970V72811"
+                    />
+                  </label>
+                  <button type="submit">Hent telemetri</button>
+                </form>
+                <label>
+                  Telemetrisøk
+                  <input
+                    value={filters.telemetryQ ?? ""}
+                    onChange={(event) =>
+                      update({
+                        telemetryQ: event.target.value || undefined,
+                        telemetryCursor: undefined,
+                      })
+                    }
+                    placeholder="Søk i korridor, teller eller ID"
+                  />
+                </label>
+                <label>
+                  Telemetriliste
+                  <select
+                    value={filters.telemetryListSource ?? ""}
+                    onChange={(event) =>
+                      update({
+                        telemetryListSource: (event.target.value ||
+                          undefined) as RawInspectorViewFilters["telemetryListSource"],
+                        telemetryCursor: undefined,
+                      })
+                    }
+                  >
+                    <option value="">Alle</option>
+                    {Object.entries(telemetrySourceLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {telemetryPage.nextCursor ? (
+                  <button
+                    type="button"
+                    onClick={() => update({ telemetryCursor: telemetryPage.nextCursor })}
+                  >
+                    Neste telemetriside
+                  </button>
                 ) : null}
-                {telemetryDetail.redacted || telemetryDetail.truncated ? (
-                  <p className="raw-inspector-warning">
-                    Payload er {telemetryDetail.redacted ? "redigert" : "ikke redigert"}
-                    {telemetryDetail.truncated ? " og forkortet" : ""}.
-                  </p>
+                <label>
+                  Kildesøk
+                  <input
+                    value={filters.sourceQ ?? ""}
+                    onChange={(event) =>
+                      update({ sourceQ: event.target.value || undefined, sourceCursor: undefined })
+                    }
+                    placeholder="Søk i tittel, sammendrag, hash"
+                  />
+                </label>
+                <label>
+                  Kildetype
+                  <select
+                    value={filters.sourceKind ?? ""}
+                    onChange={(event) =>
+                      update({
+                        sourceKind: (event.target.value ||
+                          undefined) as RawInspectorViewFilters["sourceKind"],
+                        sourceCursor: undefined,
+                      })
+                    }
+                  >
+                    <option value="">Alle</option>
+                    {Object.entries(sourceKindLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {sourceItems.nextCursor ? (
+                  <button
+                    type="button"
+                    onClick={() => update({ sourceCursor: sourceItems.nextCursor })}
+                  >
+                    Neste kildeside
+                  </button>
                 ) : null}
-                <PayloadPanel title="Telemetripayload" value={telemetryDetail.payload} />
-              </>
-            ) : (
-              <p className="raw-inspector-empty">
-                Velg telemetri fra romlig analyse eller oppgi kilde og ID.
-              </p>
-            )}
-          </section>
-          <section>
-            <p className="label">Kildeelement</p>
-            {sourceError ? <p className="raw-inspector-error">{sourceError}</p> : null}
-            {sourceItem ? (
-              <>
-                <h2>{sourceItem.item.title ?? sourceItem.item.id}</h2>
-                <dl>
-                  <div>
-                    <dt>Provider</dt>
-                    <dd>{sourceItem.item.provider}</dd>
-                  </div>
-                  <div>
-                    <dt>Type</dt>
-                    <dd>{sourceItem.item.kind}</dd>
-                  </div>
-                  <div>
-                    <dt>Payload</dt>
-                    <dd>
-                      {Math.round(sourceItem.payloadBytes.raw / 1024)} kB rå ·{" "}
-                      {Math.round(sourceItem.payloadBytes.normalized / 1024)} kB normalisert
-                    </dd>
-                  </div>
-                </dl>
-                {sourceItem.redacted || sourceItem.truncated ? (
-                  <p className="raw-inspector-warning">
-                    Payload er {sourceItem.redacted ? "redigert" : "ikke redigert"}
-                    {sourceItem.truncated ? " og forkortet" : ""}.
-                  </p>
+                <label>
+                  AI-søk
+                  <input
+                    value={filters.q ?? ""}
+                    onChange={(event) => update({ q: event.target.value || undefined })}
+                    placeholder="Søk i kjøring, modell, feil"
+                  />
+                </label>
+                <label>
+                  Provider
+                  <select
+                    value={filters.provider ?? ""}
+                    onChange={(event) =>
+                      update({
+                        provider: (event.target.value ||
+                          undefined) as RawInspectorAiRunFilters["provider"],
+                      })
+                    }
+                  >
+                    <option value="">Alle</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="deterministic">Deterministisk</option>
+                  </select>
+                </label>
+                <label>
+                  Status
+                  <select
+                    value={filters.status ?? ""}
+                    onChange={(event) =>
+                      update({
+                        status: (event.target.value ||
+                          undefined) as RawInspectorAiRunFilters["status"],
+                      })
+                    }
+                  >
+                    <option value="">Alle</option>
+                    <option value="ok">OK</option>
+                    <option value="degraded">Degradert</option>
+                    <option value="disabled">Avslått</option>
+                  </select>
+                </label>
+                {aiRuns.nextCursor ? (
+                  <button type="button" onClick={() => update({ cursor: aiRuns.nextCursor })}>
+                    Neste side
+                  </button>
                 ) : null}
-                <PayloadPanel title="Normalisert payload" value={sourceItem.normalizedPayload} />
-                <PayloadPanel title="Rå payload" value={sourceItem.rawPayload} />
-              </>
-            ) : (
-              <p className="raw-inspector-empty">Velg et kildeelement for råpayload.</p>
-            )}
-          </section>
-          <section>
-            <p className="label">AI-detalj</p>
-            {selectedAiRun ? (
-              <>
-                <h2>{selectedAiRun.model}</h2>
-                <dl>
-                  <div>
-                    <dt>Status</dt>
-                    <dd>{statusLabels[selectedAiRun.status] ?? selectedAiRun.status}</dd>
-                  </div>
-                  <div>
-                    <dt>Provider</dt>
-                    <dd>{providerLabels[selectedAiRun.provider] ?? selectedAiRun.provider}</dd>
-                  </div>
-                  <div>
-                    <dt>Artikler</dt>
-                    <dd>{selectedAiRun.articleIds.join(", ") || "Ingen"}</dd>
-                  </div>
-                  <div>
-                    <dt>Profil</dt>
-                    <dd>{aiProfileLabel(selectedAiRun.diagnostics)}</dd>
-                  </div>
-                  {selectedAiRun.diagnostics ? (
-                    <div>
-                      <dt>Forsøk</dt>
-                      <dd>
-                        {selectedAiRun.diagnostics.attempts
-                          .map(
-                            (attempt) =>
-                              `${aiProfileLabels[attempt.profile]} ${
-                                attempt.status === "ok" ? "OK" : "feilet"
-                              } (${attempt.articleCount}/${attempt.situationCount})`,
-                          )
-                          .join(", ")}
-                      </dd>
-                    </div>
-                  ) : null}
-                </dl>
-                {selectedAiRun.error ? (
-                  <p className="raw-inspector-error">{selectedAiRun.error}</p>
+              </aside>
+            ),
+          },
+          {
+            id: "object-lists",
+            title: "Objektlister",
+            description: "Nylige telemetriobjekter, kildeelementer og AI-kjøringer.",
+            defaultSize: "large",
+            children: (
+              <section
+                className="raw-inspector-list"
+                aria-label="Telemetri, kildeelementer og AI-kjøringer"
+              >
+                <div className="raw-inspector-section-heading">
+                  <h2>Telemetri</h2>
+                  <span>{telemetryPage.items.length} vist</span>
+                </div>
+                {telemetryItemsError ? (
+                  <p className="raw-inspector-error">{telemetryItemsError}</p>
                 ) : null}
-                <PayloadPanel
-                  title="AI-resultat"
-                  value={selectedAiRun.result}
-                  note={`${Math.round(selectedAiRun.resultBytes / 1024)} kB etter sanitering`}
-                />
-              </>
-            ) : (
-              <p className="raw-inspector-empty">Velg en AI-kjøring for resultatpayload.</p>
-            )}
-          </section>
-        </aside>
-      </section>
+                {telemetryPage.items.length === 0 ? (
+                  <p className="raw-inspector-empty">Ingen telemetri matcher filtrene.</p>
+                ) : (
+                  telemetryPage.items.map((item) => (
+                    <button
+                      className={
+                        item.id === filters.telemetryId && item.source === filters.telemetrySource
+                          ? "raw-inspector-run selected"
+                          : "raw-inspector-run"
+                      }
+                      key={`${item.source}:${item.id}`}
+                      type="button"
+                      onClick={() =>
+                        update({
+                          telemetrySource: item.source,
+                          telemetryId: item.id,
+                        })
+                      }
+                    >
+                      <span>{telemetrySourceLabels[item.source]}</span>
+                      <strong>{item.title}</strong>
+                      <small>
+                        {item.summary || item.id} · oppdatert {time(item.updatedAt)}
+                      </small>
+                    </button>
+                  ))
+                )}
+                <div className="raw-inspector-section-heading">
+                  <h2>Kildeelementer</h2>
+                  <span>{sourceItems.items.length} vist</span>
+                </div>
+                {sourceItemsError ? (
+                  <p className="raw-inspector-error">{sourceItemsError}</p>
+                ) : null}
+                {sourceItems.items.length === 0 ? (
+                  <p className="raw-inspector-empty">Ingen kildeelementer matcher filtrene.</p>
+                ) : (
+                  sourceItems.items.map((item) => (
+                    <button
+                      className={
+                        item.id === filters.sourceItem
+                          ? "raw-inspector-run selected"
+                          : "raw-inspector-run"
+                      }
+                      key={item.id}
+                      type="button"
+                      onClick={() => update({ sourceItem: item.id })}
+                    >
+                      <span>
+                        {item.provider} · {sourceKindLabels[item.kind]}
+                      </span>
+                      <strong>{item.title ?? item.id}</strong>
+                      <small>
+                        {item.summary ?? item.id} · hentet {time(item.fetchedAt)}
+                      </small>
+                    </button>
+                  ))
+                )}
+                <div className="raw-inspector-section-heading">
+                  <h2>AI-kjøringer</h2>
+                  <span>{aiRuns.items.length} vist</span>
+                </div>
+                {aiError ? <p className="raw-inspector-error">{aiError}</p> : null}
+                {aiRuns.items.length === 0 ? (
+                  <p className="raw-inspector-empty">Ingen AI-kjøringer matcher filtrene.</p>
+                ) : (
+                  aiRuns.items.map((run) => (
+                    <button
+                      className={
+                        run.id === filters.run ? "raw-inspector-run selected" : "raw-inspector-run"
+                      }
+                      key={run.id}
+                      type="button"
+                      onClick={() => update({ run: run.id })}
+                    >
+                      <span>{providerLabels[run.provider] ?? run.provider}</span>
+                      <strong>{run.model}</strong>
+                      <small>
+                        {statusLabels[run.status] ?? run.status} · {run.articleCount} saker ·{" "}
+                        {aiProfileLabel(run.diagnostics)} · {time(run.completedAt)}
+                      </small>
+                      {run.error ? <em>{run.error}</em> : null}
+                    </button>
+                  ))
+                )}
+              </section>
+            ),
+          },
+          {
+            id: "payload-detail",
+            title: "Payload-detaljer",
+            description: "Sanitert råpayload og normalisert resultat for valgt objekt.",
+            defaultSize: "large",
+            children: (
+              <aside className="raw-inspector-detail" aria-label="Rådatadetalj">
+                <section>
+                  <p className="label">Telemetri</p>
+                  {telemetryError ? <p className="raw-inspector-error">{telemetryError}</p> : null}
+                  {telemetryDetail ? (
+                    <>
+                      <h2>{telemetryDetail.record.title}</h2>
+                      <dl>
+                        <div>
+                          <dt>Kilde</dt>
+                          <dd>{telemetrySourceLabels[telemetryDetail.record.source]}</dd>
+                        </div>
+                        <div>
+                          <dt>ID</dt>
+                          <dd>{telemetryDetail.record.id}</dd>
+                        </div>
+                        <div>
+                          <dt>Observert</dt>
+                          <dd>
+                            {time(
+                              telemetryDetail.record.observedAt ?? telemetryDetail.record.updatedAt,
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Payload</dt>
+                          <dd>
+                            {Math.round(telemetryDetail.payloadBytes / 1024)} kB etter sanitering
+                          </dd>
+                        </div>
+                      </dl>
+                      {telemetryDetail.record.summary ? (
+                        <p>{telemetryDetail.record.summary}</p>
+                      ) : null}
+                      {telemetryDetail.record.sourceUrl ? (
+                        <a href={telemetryDetail.record.sourceUrl} rel="noreferrer" target="_blank">
+                          Åpne kilde
+                        </a>
+                      ) : null}
+                      {telemetryDetail.redacted || telemetryDetail.truncated ? (
+                        <p className="raw-inspector-warning">
+                          Payload er {telemetryDetail.redacted ? "redigert" : "ikke redigert"}
+                          {telemetryDetail.truncated ? " og forkortet" : ""}.
+                        </p>
+                      ) : null}
+                      <PayloadPanel title="Telemetripayload" value={telemetryDetail.payload} />
+                    </>
+                  ) : (
+                    <p className="raw-inspector-empty">
+                      Velg telemetri fra romlig analyse eller oppgi kilde og ID.
+                    </p>
+                  )}
+                </section>
+                <section>
+                  <p className="label">Kildeelement</p>
+                  {sourceError ? <p className="raw-inspector-error">{sourceError}</p> : null}
+                  {sourceItem ? (
+                    <>
+                      <h2>{sourceItem.item.title ?? sourceItem.item.id}</h2>
+                      <dl>
+                        <div>
+                          <dt>Provider</dt>
+                          <dd>{sourceItem.item.provider}</dd>
+                        </div>
+                        <div>
+                          <dt>Type</dt>
+                          <dd>{sourceItem.item.kind}</dd>
+                        </div>
+                        <div>
+                          <dt>Payload</dt>
+                          <dd>
+                            {Math.round(sourceItem.payloadBytes.raw / 1024)} kB rå ·{" "}
+                            {Math.round(sourceItem.payloadBytes.normalized / 1024)} kB normalisert
+                          </dd>
+                        </div>
+                      </dl>
+                      {sourceItem.redacted || sourceItem.truncated ? (
+                        <p className="raw-inspector-warning">
+                          Payload er {sourceItem.redacted ? "redigert" : "ikke redigert"}
+                          {sourceItem.truncated ? " og forkortet" : ""}.
+                        </p>
+                      ) : null}
+                      <PayloadPanel
+                        title="Normalisert payload"
+                        value={sourceItem.normalizedPayload}
+                      />
+                      <PayloadPanel title="Rå payload" value={sourceItem.rawPayload} />
+                    </>
+                  ) : (
+                    <p className="raw-inspector-empty">Velg et kildeelement for råpayload.</p>
+                  )}
+                </section>
+                <section>
+                  <p className="label">AI-detalj</p>
+                  {selectedAiRun ? (
+                    <>
+                      <h2>{selectedAiRun.model}</h2>
+                      <dl>
+                        <div>
+                          <dt>Status</dt>
+                          <dd>{statusLabels[selectedAiRun.status] ?? selectedAiRun.status}</dd>
+                        </div>
+                        <div>
+                          <dt>Provider</dt>
+                          <dd>
+                            {providerLabels[selectedAiRun.provider] ?? selectedAiRun.provider}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Artikler</dt>
+                          <dd>{selectedAiRun.articleIds.join(", ") || "Ingen"}</dd>
+                        </div>
+                        <div>
+                          <dt>Profil</dt>
+                          <dd>{aiProfileLabel(selectedAiRun.diagnostics)}</dd>
+                        </div>
+                        {selectedAiRun.diagnostics ? (
+                          <div>
+                            <dt>Forsøk</dt>
+                            <dd>
+                              {selectedAiRun.diagnostics.attempts
+                                .map(
+                                  (attempt) =>
+                                    `${aiProfileLabels[attempt.profile]} ${
+                                      attempt.status === "ok" ? "OK" : "feilet"
+                                    } (${attempt.articleCount}/${attempt.situationCount})`,
+                                )
+                                .join(", ")}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                      {selectedAiRun.error ? (
+                        <p className="raw-inspector-error">{selectedAiRun.error}</p>
+                      ) : null}
+                      <PayloadPanel
+                        title="AI-resultat"
+                        value={selectedAiRun.result}
+                        note={`${Math.round(selectedAiRun.resultBytes / 1024)} kB etter sanitering`}
+                      />
+                    </>
+                  ) : (
+                    <p className="raw-inspector-empty">Velg en AI-kjøring for resultatpayload.</p>
+                  )}
+                </section>
+              </aside>
+            ),
+          },
+        ]}
+      />
     </main>
   );
 }

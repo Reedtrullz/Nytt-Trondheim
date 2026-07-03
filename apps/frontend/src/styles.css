@@ -5719,6 +5719,23 @@ button {
   height: 100%;
 }
 
+.dashboard-widget-body > .spatial-analytics-sidebar,
+.dashboard-widget-body > .spatial-analytics-cells,
+.dashboard-widget-body > .spatial-investigation-panel,
+.dashboard-widget-body > .spatial-delay-panel,
+.dashboard-widget-body > .spatial-telemetry-patterns {
+  position: static;
+  top: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.dashboard-widget-body > .spatial-telemetry-history {
+  margin: 0;
+}
+
 .spatial-map-popup {
   max-width: 260px;
 }
@@ -6145,6 +6162,16 @@ button {
   padding: 18px;
 }
 
+.dashboard-widget-body > .raw-inspector-sidebar,
+.dashboard-widget-body > .raw-inspector-list,
+.dashboard-widget-body > .raw-inspector-detail {
+  position: static;
+  top: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
 .raw-inspector-section-heading {
   display: flex;
   align-items: end;
@@ -6345,6 +6372,12 @@ button {
 
 .command-briefing-card {
   padding: 18px;
+}
+
+.dashboard-widget-body > .command-briefing-card {
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .command-briefing-card-large {

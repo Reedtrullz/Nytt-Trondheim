@@ -15,6 +15,7 @@ import {
   type UnexplainedDelayCandidate,
 } from "@nytt/shared";
 import { api } from "../api.js";
+import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 
 type SpatialAnalyticsFilters = CommandCenterSpatialAnalyticsQueryInput;
@@ -681,6 +682,216 @@ function TelemetryPatternRow({ pattern }: { pattern: TelemetryHistoryPattern }) 
   );
 }
 
+function SpatialFiltersPanel({
+  activeTimeWindow,
+  filters,
+  onFiltersChange,
+  payloadWindowLabel,
+}: {
+  activeTimeWindow: SpatialAnalyticsTimeWindow;
+  filters: SpatialAnalyticsFilters;
+  onFiltersChange: (filters: SpatialAnalyticsFilters) => void;
+  payloadWindowLabel: string;
+}) {
+  function update(next: Partial<SpatialAnalyticsFilters>) {
+    onFiltersChange({ ...filters, ...next });
+  }
+
+  function updateTimeWindow(window: SpatialAnalyticsTimeWindow) {
+    onFiltersChange({
+      ...filters,
+      from: undefined,
+      to: undefined,
+      ...spatialAnalyticsFiltersForTimeWindow(window),
+    });
+  }
+
+  return (
+    <aside className="coverage-bundles-sidebar spatial-analytics-sidebar" aria-label="Filtre">
+      <label>
+        Tidsrom
+        <select
+          aria-label="Tidsrom for romlig analyse"
+          value={activeTimeWindow}
+          onChange={(event) => updateTimeWindow(event.target.value as SpatialAnalyticsTimeWindow)}
+        >
+          {Object.entries(spatialTimeWindowLabels).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="spatial-filter-note">Analysevindu: {payloadWindowLabel}</p>
+      <label>
+        Min. forsinkelse
+        <select
+          value={filters.minDelaySeconds}
+          onChange={(event) => update({ minDelaySeconds: Number(event.target.value) })}
+        >
+          <option value={60}>1 minutt</option>
+          <option value={180}>3 minutter</option>
+          <option value={300}>5 minutter</option>
+          <option value={600}>10 minutter</option>
+        </select>
+      </label>
+      <label>
+        Maks celler
+        <input
+          min={10}
+          max={200}
+          type="number"
+          value={filters.limit}
+          onChange={(event) => update({ limit: Number(event.target.value) || 80 })}
+        />
+      </label>
+    </aside>
+  );
+}
+
+function TelemetryHistorySection({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
+  return (
+    <section className="spatial-telemetry-history" aria-labelledby="spatial-history-heading">
+      <div>
+        <p className="label">Tidsseriegrunnlag</p>
+        <h2 id="spatial-history-heading">Historikk bak trafikkbildet</h2>
+      </div>
+      <TelemetryHistoryCard
+        label="DATEX reisetid"
+        notableLabel="Køsignaler"
+        summary={payload.telemetryHistory.datexTravelTime}
+      />
+      <TelemetryHistoryCard
+        label="Trafikkdata"
+        notableLabel="Avvik"
+        summary={payload.telemetryHistory.trafficCounters}
+      />
+    </section>
+  );
+}
+
+function TelemetryPatternsSection({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
+  return (
+    <section className="spatial-telemetry-patterns" aria-labelledby="spatial-pattern-heading">
+      <div className="spatial-section-heading">
+        <div>
+          <p className="label">Gjentakende signaler</p>
+          <h2 id="spatial-pattern-heading">Mulige svarte punkter</h2>
+        </div>
+        <span>{payload.telemetryPatterns.length} mønstre</span>
+      </div>
+      {payload.telemetryPatterns.length === 0 ? (
+        <p className="spatial-empty-state">
+          Ingen gjentakende DATEX- eller Trafikkdata-signaler i analysevinduet ennå.
+        </p>
+      ) : (
+        <div className="spatial-telemetry-pattern-list">
+          {payload.telemetryPatterns.map((pattern) => (
+            <TelemetryPatternRow key={pattern.id} pattern={pattern} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function InvestigationQueueSection({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
+  return (
+    <section
+      className="spatial-investigation-panel"
+      aria-labelledby="spatial-investigation-heading"
+    >
+      <div className="spatial-section-heading">
+        <div>
+          <p className="label">Operatørkø</p>
+          <h2 id="spatial-investigation-heading">Signaler å undersøke</h2>
+        </div>
+        <span>{payload.investigationQueue.length} signaler</span>
+      </div>
+      {payload.investigationQueue.length === 0 ? (
+        <p className="spatial-empty-state">Ingen prioriterte romlige signaler i analysevinduet.</p>
+      ) : (
+        <div className="spatial-investigation-list">
+          {payload.investigationQueue.map((item) => (
+            <InvestigationQueueItemRow item={item} key={item.id} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DelayCandidatesSection({ candidates }: { candidates: UnexplainedDelayCandidate[] }) {
+  return (
+    <section className="spatial-delay-panel" aria-labelledby="spatial-delay-heading">
+      <div className="spatial-section-heading">
+        <div>
+          <p className="label">Trafikkpuls</p>
+          <h2 id="spatial-delay-heading">Forsinkelser uten kjent årsak</h2>
+        </div>
+        <span>{candidates.length} kandidater</span>
+      </div>
+      {candidates.length === 0 ? (
+        <p className="spatial-empty-state">
+          Ingen store DATEX-forsinkelser uten koblet trafikkhendelse akkurat nå.
+        </p>
+      ) : (
+        <div className="spatial-delay-list">
+          {candidates.map((candidate) => (
+            <DelayCandidateRow candidate={candidate} key={candidate.id} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HeatmapCellsSection({ cells }: { cells: SpatialHeatmapCell[] }) {
+  return (
+    <section className="spatial-analytics-cells" aria-label="Romlige observasjoner">
+      <div className="spatial-section-heading">
+        <div>
+          <p className="label">Observasjoner</p>
+          <h2>Varmepunkter</h2>
+        </div>
+      </div>
+      {cells.length === 0 ? (
+        <p className="spatial-empty-state">Ingen stedfestede observasjoner i vinduet.</p>
+      ) : (
+        <div className="spatial-cell-list">
+          {cells.map((cell) => {
+            const priority = hotspotPriority(cell);
+            const confidence = hotspotConfidence(cell);
+            return (
+              <article className={`spatial-cell-row priority-${priority}`} key={cell.id}>
+                <p className={`spatial-hotspot-priority priority-${priority}`}>
+                  {hotspotPriorityLabels[priority]}
+                </p>
+                <p className={`spatial-hotspot-confidence confidence-${confidence.level}`}>
+                  {confidence.label} tillit · {confidenceScoreLabel(confidence)}
+                </p>
+                <strong>{cell.count} observasjoner</strong>
+                <span>
+                  {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser · sist sett{" "}
+                  {time(cell.lastSeenAt)}
+                </span>
+                <span>
+                  Først sett {time(cell.firstSeenAt)} · {activeDaysLabel(cell.activeDayCount)}
+                </span>
+                <small>{hotspotReason(cell)}</small>
+                <small>{confidence.rationale}</small>
+                <small>{cell.sourceIds.map(sourceLabel).join(", ")}</small>
+                <HeatmapTimeProfile cell={cell} />
+                <SourceItemLinks sourceItemIds={cell.sourceItemIds} />
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function SpatialAnalyticsDashboard({
   payload,
   filters,
@@ -701,24 +912,86 @@ export function SpatialAnalyticsDashboard({
     [payload.unexplainedDelays],
   );
 
-  function update(next: Partial<SpatialAnalyticsFilters>) {
-    onFiltersChange({ ...filters, ...next });
-  }
-
-  function updateTimeWindow(window: SpatialAnalyticsTimeWindow) {
-    onFiltersChange({
-      ...filters,
-      from: undefined,
-      to: undefined,
-      ...spatialAnalyticsFiltersForTimeWindow(window),
-    });
-  }
-
   const activeTimeWindow = spatialTimeWindowForFilters(filters);
   const payloadWindowLabel =
     payload.window.from || payload.window.to
       ? `${time(payload.window.from)} - ${time(payload.window.to)}`
       : "Hele tilgjengelige datasett";
+  const widgets = useMemo(() => {
+    const nextWidgets: DashboardWidgetDefinition[] = [
+      {
+        id: "filters",
+        title: "Analysefilter",
+        description: "Tidsvindu, forsinkelsesterskel og cellemengde.",
+        defaultSize: "standard",
+        resizable: false,
+        children: (
+          <SpatialFiltersPanel
+            activeTimeWindow={activeTimeWindow}
+            filters={filters}
+            onFiltersChange={onFiltersChange}
+            payloadWindowLabel={payloadWindowLabel}
+          />
+        ),
+      },
+      {
+        id: "investigation-queue",
+        title: "Signaler å undersøke",
+        description: "Prioritert kø for operatøroppfølging.",
+        defaultSize: "large",
+        children: <InvestigationQueueSection payload={payload} />,
+      },
+    ];
+    if (showMap) {
+      nextWidgets.push({
+        id: "map",
+        title: "Romlig varmekart",
+        description: "Varmepunkter, DATEX-forsinkelser og telemetrimønstre.",
+        defaultSize: "full",
+        children: <SpatialAnalyticsMap payload={payload} />,
+      });
+    }
+    nextWidgets.push(
+      {
+        id: "delays",
+        title: "Uforklarte forsinkelser",
+        description: "DATEX-korridorer uten kjent koblet årsak.",
+        defaultSize: "large",
+        children: <DelayCandidatesSection candidates={rankedDelayCandidates} />,
+      },
+      {
+        id: "heatmap-cells",
+        title: "Varmepunkter",
+        description: "Stedfestede observasjoner rangert etter prioritet.",
+        defaultSize: "large",
+        children: <HeatmapCellsSection cells={rankedHeatmapCells} />,
+      },
+      {
+        id: "telemetry-history",
+        title: "Tidsseriegrunnlag",
+        description: "Historikken bak trafikkbildet.",
+        defaultSize: "wide",
+        children: <TelemetryHistorySection payload={payload} />,
+      },
+      {
+        id: "telemetry-patterns",
+        title: "Mulige svarte punkter",
+        description: "Gjentakende signaler fra DATEX og Trafikkdata.",
+        defaultSize: "wide",
+        children: <TelemetryPatternsSection payload={payload} />,
+      },
+    );
+    return nextWidgets;
+  }, [
+    activeTimeWindow,
+    filters,
+    onFiltersChange,
+    payload,
+    payloadWindowLabel,
+    rankedDelayCandidates,
+    rankedHeatmapCells,
+    showMap,
+  ]);
 
   return (
     <main className="spatial-analytics-page">
@@ -756,172 +1029,14 @@ export function SpatialAnalyticsDashboard({
           <span>Bekreftet/sannsynlig</span>
         </article>
       </section>
-      <section className="spatial-telemetry-history" aria-labelledby="spatial-history-heading">
-        <div>
-          <p className="label">Tidsseriegrunnlag</p>
-          <h2 id="spatial-history-heading">Historikk bak trafikkbildet</h2>
-        </div>
-        <TelemetryHistoryCard
-          label="DATEX reisetid"
-          notableLabel="Køsignaler"
-          summary={payload.telemetryHistory.datexTravelTime}
-        />
-        <TelemetryHistoryCard
-          label="Trafikkdata"
-          notableLabel="Avvik"
-          summary={payload.telemetryHistory.trafficCounters}
-        />
-      </section>
-      <section className="spatial-telemetry-patterns" aria-labelledby="spatial-pattern-heading">
-        <div className="spatial-section-heading">
-          <div>
-            <p className="label">Gjentakende signaler</p>
-            <h2 id="spatial-pattern-heading">Mulige svarte punkter</h2>
-          </div>
-          <span>{payload.telemetryPatterns.length} mønstre</span>
-        </div>
-        {payload.telemetryPatterns.length === 0 ? (
-          <p className="spatial-empty-state">
-            Ingen gjentakende DATEX- eller Trafikkdata-signaler i analysevinduet ennå.
-          </p>
-        ) : (
-          <div className="spatial-telemetry-pattern-list">
-            {payload.telemetryPatterns.map((pattern) => (
-              <TelemetryPatternRow key={pattern.id} pattern={pattern} />
-            ))}
-          </div>
-        )}
-      </section>
-      <section className="spatial-analytics-grid">
-        <aside className="coverage-bundles-sidebar spatial-analytics-sidebar" aria-label="Filtre">
-          <label>
-            Tidsrom
-            <select
-              aria-label="Tidsrom for romlig analyse"
-              value={activeTimeWindow}
-              onChange={(event) =>
-                updateTimeWindow(event.target.value as SpatialAnalyticsTimeWindow)
-              }
-            >
-              {Object.entries(spatialTimeWindowLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="spatial-filter-note">Analysevindu: {payloadWindowLabel}</p>
-          <label>
-            Min. forsinkelse
-            <select
-              value={filters.minDelaySeconds}
-              onChange={(event) => update({ minDelaySeconds: Number(event.target.value) })}
-            >
-              <option value={60}>1 minutt</option>
-              <option value={180}>3 minutter</option>
-              <option value={300}>5 minutter</option>
-              <option value={600}>10 minutter</option>
-            </select>
-          </label>
-          <label>
-            Maks celler
-            <input
-              min={10}
-              max={200}
-              type="number"
-              value={filters.limit}
-              onChange={(event) => update({ limit: Number(event.target.value) || 80 })}
-            />
-          </label>
-        </aside>
-        <div className="spatial-analytics-main">
-          <section
-            className="spatial-investigation-panel"
-            aria-labelledby="spatial-investigation-heading"
-          >
-            <div className="spatial-section-heading">
-              <div>
-                <p className="label">Operatørkø</p>
-                <h2 id="spatial-investigation-heading">Signaler å undersøke</h2>
-              </div>
-              <span>{payload.investigationQueue.length} signaler</span>
-            </div>
-            {payload.investigationQueue.length === 0 ? (
-              <p className="spatial-empty-state">
-                Ingen prioriterte romlige signaler i analysevinduet.
-              </p>
-            ) : (
-              <div className="spatial-investigation-list">
-                {payload.investigationQueue.map((item) => (
-                  <InvestigationQueueItemRow item={item} key={item.id} />
-                ))}
-              </div>
-            )}
-          </section>
-          {showMap ? <SpatialAnalyticsMap payload={payload} /> : null}
-          <section className="spatial-delay-panel" aria-labelledby="spatial-delay-heading">
-            <div className="spatial-section-heading">
-              <div>
-                <p className="label">Trafikkpuls</p>
-                <h2 id="spatial-delay-heading">Forsinkelser uten kjent årsak</h2>
-              </div>
-              <span>{payload.unexplainedDelays.length} kandidater</span>
-            </div>
-            {payload.unexplainedDelays.length === 0 ? (
-              <p className="spatial-empty-state">
-                Ingen store DATEX-forsinkelser uten koblet trafikkhendelse akkurat nå.
-              </p>
-            ) : (
-              <div className="spatial-delay-list">
-                {rankedDelayCandidates.map((candidate) => (
-                  <DelayCandidateRow candidate={candidate} key={candidate.id} />
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-        <aside className="spatial-analytics-cells" aria-label="Romlige observasjoner">
-          <div className="spatial-section-heading">
-            <div>
-              <p className="label">Observasjoner</p>
-              <h2>Varmepunkter</h2>
-            </div>
-          </div>
-          {payload.heatmapCells.length === 0 ? (
-            <p className="spatial-empty-state">Ingen stedfestede observasjoner i vinduet.</p>
-          ) : (
-            <div className="spatial-cell-list">
-              {rankedHeatmapCells.map((cell) => {
-                const priority = hotspotPriority(cell);
-                const confidence = hotspotConfidence(cell);
-                return (
-                  <article className={`spatial-cell-row priority-${priority}`} key={cell.id}>
-                    <p className={`spatial-hotspot-priority priority-${priority}`}>
-                      {hotspotPriorityLabels[priority]}
-                    </p>
-                    <p className={`spatial-hotspot-confidence confidence-${confidence.level}`}>
-                      {confidence.label} tillit · {confidenceScoreLabel(confidence)}
-                    </p>
-                    <strong>{cell.count} observasjoner</strong>
-                    <span>
-                      {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser · sist
-                      sett {time(cell.lastSeenAt)}
-                    </span>
-                    <span>
-                      Først sett {time(cell.firstSeenAt)} · {activeDaysLabel(cell.activeDayCount)}
-                    </span>
-                    <small>{hotspotReason(cell)}</small>
-                    <small>{confidence.rationale}</small>
-                    <small>{cell.sourceIds.map(sourceLabel).join(", ")}</small>
-                    <HeatmapTimeProfile cell={cell} />
-                    <SourceItemLinks sourceItemIds={cell.sourceItemIds} />
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </aside>
-      </section>
+      <DashboardGrid
+        ariaLabel="Romlig analysemoduler"
+        description="Dra og størrelsesjuster romlige analysemoduler for dagens operatørarbeid."
+        label="Modulært kommandosenter"
+        storageKey="nytt-spatial-analytics-dashboard-v1"
+        title="Romlig arbeidsflate"
+        widgets={widgets}
+      />
     </main>
   );
 }

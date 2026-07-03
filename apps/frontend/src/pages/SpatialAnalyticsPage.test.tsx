@@ -328,6 +328,12 @@ describe("SpatialAnalyticsDashboard", () => {
     );
 
     expect(html).toContain("Romlig analyse");
+    expect(html).toContain("Modulært kommandosenter");
+    expect(html).toContain("Romlig arbeidsflate");
+    expect(html).toContain("Dashboard-oppsett");
+    expect(html).toContain("Analysefilter");
+    expect(html).toContain("Signaler å undersøke layout");
+    expect(html).toContain("Endre størrelse på Signaler å undersøke");
     expect(html).toContain("Tidsrom");
     expect(html).toContain("Siste døgn");
     expect(html).toContain("Analysevindu: Hele tilgjengelige datasett");
@@ -454,6 +460,8 @@ describe("SpatialAnalyticsDashboard", () => {
     );
 
     expect(html).toContain('data-map-marker="circle"');
+    expect(html).toContain("Romlig varmekart");
+    expect(html).toContain("Varmepunkter, DATEX-forsinkelser og telemetrimønstre");
     expect(html).toContain("Kroppanbrua");
     expect(html).toContain("Sist sett 2. juli 2026");
     expect(html).toContain("5 tydelige signaler · 2 aktive dager");
