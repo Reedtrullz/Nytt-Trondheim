@@ -1200,7 +1200,8 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
   await expect(page).toHaveURL(
     /\/command\/radata\?telemetrySource=datex_travel_time&telemetryId=e6-sluppen/,
   );
-  await expect(page.getByRole("heading", { name: "E6 Okstadbakken - Sluppen" })).toBeVisible();
+  const rawDetail = page.getByLabel("Rådatadetalj");
+  await expect(rawDetail.getByRole("heading", { name: "E6 Okstadbakken - Sluppen" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Telemetripayload" })).toBeVisible();
   await expect(page.getByText('"corridorId": "e6-sluppen"')).toBeVisible();
   await expect(page.getByText('"secret": "[redacted]"')).toBeVisible();
@@ -2315,12 +2316,7 @@ test("article save missing target rolls back optimistic state", async ({ page })
 });
 
 test("article save is disabled while a request is pending", async ({ page }) => {
-  let releaseArticleRefresh!: () => void;
-  const articleRefreshMayFinish = new Promise<void>((resolve) => {
-    releaseArticleRefresh = resolve;
-  });
   await page.route("**/api/articles?**", async (route) => {
-    await articleRefreshMayFinish;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -2360,18 +2356,18 @@ test("article save is disabled while a request is pending", async ({ page }) => 
     name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
   });
   const initialLabel = (await saveButton.getAttribute("aria-label")) ?? "";
-  await saveButton.click();
-  const articleRefreshResponse = page.waitForResponse(
-    (response) => response.url().includes("/api/articles?") && response.status() === 200,
+  const saveResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/saved/articles/a-bridge"),
   );
-  releaseArticleRefresh();
-  await articleRefreshResponse;
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
   const pendingSaveButton = page.getByRole("button", {
     name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
   });
   await expect(pendingSaveButton).toBeDisabled();
   expect(calls).toBe(1);
   releaseSave();
+  await saveResponse;
 
   const expectedLabel = initialLabel.startsWith("Fjern fra lagret")
     ? /Lagre sak: Ny bru over Nidelva/
@@ -2383,12 +2379,9 @@ test("article save is disabled while a request is pending", async ({ page }) => 
 test("stale article refresh after save completion does not undo optimistic saved state", async ({
   page,
 }) => {
-  let releaseArticleRefresh!: () => void;
-  const staleArticleRefreshMayFinish = new Promise<void>((resolve) => {
-    releaseArticleRefresh = resolve;
-  });
+  let articleRequestCount = 0;
   await page.route("**/api/articles?**", async (route) => {
-    await staleArticleRefreshMayFinish;
+    articleRequestCount += 1;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -2415,7 +2408,7 @@ test("stale article refresh after save completion does not undo optimistic saved
     await route.fulfill({ status: 204, body: "" });
   });
 
-  await page.goto("/?q=bru");
+  await page.goto("/");
   const saveButton = page.getByRole("button", {
     name: /(Lagre sak|Fjern fra lagret): Ny bru over Nidelva/,
   });
@@ -2429,8 +2422,9 @@ test("stale article refresh after save completion does not undo optimistic saved
   const staleRefreshResponse = page.waitForResponse(
     (response) => response.url().includes("/api/articles?") && response.status() === 200,
   );
-  releaseArticleRefresh();
+  await page.getByPlaceholder("Søk i saker").fill("bru");
   await staleRefreshResponse;
+  expect(articleRequestCount).toBe(1);
 
   const expectedLabel = initialLabel.startsWith("Fjern fra lagret")
     ? /Lagre sak: Ny bru over Nidelva/
