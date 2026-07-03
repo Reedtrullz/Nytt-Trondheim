@@ -102,6 +102,28 @@ function signalText(signal: CoverageBundleListItem["signals"][number]) {
     : signalLabels[signal.kind];
 }
 
+function nearMissText(nearMiss: CoverageBundleListItem["nearMisses"][number]) {
+  const metrics = [
+    nearMiss.overlap !== undefined ? `${nearMiss.overlap} treff` : undefined,
+    nearMiss.score !== undefined ? `${Math.round(nearMiss.score * 100)} %` : undefined,
+    nearMiss.detail,
+  ].filter(Boolean);
+  return metrics.length
+    ? `${nearMissLabels[nearMiss.reason]} · ${metrics.join(" · ")}`
+    : nearMissLabels[nearMiss.reason];
+}
+
+function nearMissArticleText(
+  nearMiss: CoverageBundleListItem["nearMisses"][number],
+  articlesById: Map<string, CoverageBundleListItem["memberArticles"][number]>,
+) {
+  const articleLabels = nearMiss.articleIds.flatMap((articleId) => {
+    const article = articlesById.get(articleId);
+    return article ? [`${article.sourceLabel}: ${article.title}`] : [];
+  });
+  return articleLabels.length ? articleLabels.join(" / ") : nearMiss.articleIds.join(" / ");
+}
+
 function BundleDrawer({ bundle }: { bundle: CoverageBundleListItem | undefined }) {
   if (!bundle) {
     return (
@@ -111,6 +133,9 @@ function BundleDrawer({ bundle }: { bundle: CoverageBundleListItem | undefined }
       </aside>
     );
   }
+  const nearMissArticlesById = new Map(
+    [...bundle.memberArticles, ...bundle.nearMissArticles].map((article) => [article.id, article]),
+  );
 
   return (
     <aside className="coverage-bundle-drawer" aria-label={`Detaljer for ${bundle.reason}`}>
@@ -179,7 +204,8 @@ function BundleDrawer({ bundle }: { bundle: CoverageBundleListItem | undefined }
           <ul className="coverage-bundle-signal-list">
             {bundle.nearMisses.map((nearMiss) => (
               <li key={`${nearMiss.reason}:${nearMiss.articleIds.join(":")}`}>
-                {nearMissLabels[nearMiss.reason]} · {nearMiss.articleIds.join(" / ")}
+                <span>{nearMissText(nearMiss)}</span>
+                <small>{nearMissArticleText(nearMiss, nearMissArticlesById)}</small>
               </li>
             ))}
           </ul>

@@ -44,6 +44,26 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests City Pulse story pages with the same public feed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ items: [], nextCursor: undefined }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.cityPulseStories({
+      scope: "trondheim",
+      category: "Krim",
+      topic: "rosenborg",
+      q: "Lade",
+      from: "2026-07-02T08:00:00.000Z",
+      cursor: "story-cursor",
+      limit: 12,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/city-pulse/stories?scope=trondheim&category=Krim&topic=rosenborg&q=Lade&from=2026-07-02T08%3A00%3A00.000Z&cursor=story-cursor&limit=12",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("requests the map-first situation workspace with typed filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       okResponse({
@@ -236,6 +256,13 @@ describe("frontend source item API helpers", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       okResponse({
         generatedAt: "2026-07-02T09:45:00.000Z",
+        live: {
+          status: "empty",
+          refreshIntervalSeconds: 60,
+          nextRefreshAt: "2026-07-02T09:46:00.000Z",
+          staleAfterSeconds: 900,
+          detail: "Ingen tidsstemplet romlig analyse er tilgjengelig i dette vinduet.",
+        },
         window: {},
         summary: {
           heatmapCells: 0,

@@ -318,7 +318,7 @@ describe("private situation API", () => {
       generatedAt: "2026-07-02T07:30:00.000Z",
       title: "Morgenbrief",
       mode: "ai_assisted",
-      sourceLine: "AI-assistert · 5/6 kilder OK",
+      sourceLine: "Automatisk analyse · 5/6 kilder OK",
       paragraphs: [
         "Lagret brief fra worker.",
         "Denne teksten skal ikke beregnes på nytt i serveren.",
@@ -338,7 +338,8 @@ describe("private situation API", () => {
         const normalizedSql = sql.replace(/\s+/g, " ").trim();
         captured.push(normalizedSql);
         if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
-          expect(params).toEqual(["Reedtrullz", "trondheim", 41]);
+          expect(params?.slice(0, 2)).toEqual(["Reedtrullz", "trondheim"]);
+          expect([41, 201]).toContain(params?.[2]);
           return { rows: [{ payload: article, saved: false }] };
         }
         if (normalizedSql.includes("FROM situations WHERE status IN")) {
@@ -2766,6 +2767,95 @@ describe("private situation API", () => {
     await agent.get("/api/articles?cursor=not-a-valid-cursor").expect(400);
   });
 
+  it("serves grouped City Pulse stories through a story-native API", async () => {
+    const { app, store } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const bundle = {
+      id: "coverage:incident:city-pulse-api",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-03T09:00:00.000Z",
+    };
+    const articles: Article[] = [
+      {
+        id: "city-pulse-api-adressa",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Bypulsstory: Ung mann kritisk skadd på Lade",
+        excerpt: "Politiet leter etter flere personer etter en voldshendelse på Lade.",
+        url: "https://example.test/city-pulse-api-adressa",
+        publishedAt: "2026-07-03T09:10:00.000Z",
+        scope: "trondheim",
+        category: "Krim",
+        places: ["Lade", "Trondheim"],
+        coverageBundle: bundle,
+      },
+      {
+        id: "city-pulse-api-politiloggen",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Bypulsstory: Voldshendelse: Trondheim, Lade",
+        excerpt: "En person er kritisk skadet etter en voldshendelse på Lade.",
+        url: "https://example.test/city-pulse-api-politiloggen",
+        publishedAt: "2026-07-03T09:06:00.000Z",
+        scope: "trondheim",
+        category: "Krim",
+        places: ["Lade", "Trondheim"],
+        situationId: "politiloggen-lade-vold",
+        coverageBundle: bundle,
+      },
+      {
+        id: "city-pulse-api-single",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Bypulsstory: Konsert på Byscenen",
+        excerpt: "Kulturarrangement i Trondheim sentrum.",
+        url: "https://example.test/city-pulse-api-single",
+        publishedAt: "2026-07-03T08:00:00.000Z",
+        scope: "trondheim",
+        category: "Kultur",
+        places: ["Trondheim sentrum"],
+      },
+    ];
+    (store as unknown as { articles: Article[] }).articles.unshift(...articles);
+
+    const first = await agent.get("/api/city-pulse/stories?q=Bypulsstory&limit=1").expect(200);
+    expect(first.body.items).toHaveLength(1);
+    expect(first.body.items[0]).toMatchObject({
+      id: "coverage:incident:city-pulse-api",
+      primaryArticleId: "city-pulse-api-adressa",
+      articleIds: ["city-pulse-api-adressa", "city-pulse-api-politiloggen"],
+      sourceLabels: ["Adresseavisen", "Politiloggen"],
+      sourceCount: 2,
+      updateCount: 2,
+      latestAt: "2026-07-03T09:10:00.000Z",
+      coverageBundle: { reason: "Samme hendelse på tvers av kilder" },
+      publicVerification: {
+        label: "Verifisert",
+        officialSources: ["politiloggen"],
+        reportingSources: ["adressa"],
+      },
+    });
+    expect(first.body.nextCursor).toBeTruthy();
+
+    const second = await agent
+      .get(
+        `/api/city-pulse/stories?q=Bypulsstory&limit=1&cursor=${encodeURIComponent(
+          first.body.nextCursor as string,
+        )}`,
+      )
+      .expect(200);
+    expect(second.body.items).toHaveLength(1);
+    expect(second.body.items[0]).toMatchObject({
+      id: "article:city-pulse-api-single",
+      primaryArticleId: "city-pulse-api-single",
+      sourceCount: 1,
+      updateCount: 1,
+    });
+  });
+
   it("rejects unknown article category query values", async () => {
     const { agent } = await ownerAgent();
     await agent.get("/api/articles?category=Mat").expect(400);
@@ -3007,6 +3097,80 @@ describe("private situation API", () => {
     expect(JSON.stringify(response.body)).not.toContain("rawPayload");
     expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
     expect(JSON.stringify(response.body)).not.toContain("raw_payload");
+  });
+
+  it("includes spatial unexplained-delay candidates in private notification triggers", async () => {
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listSituations").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listArticles").mockResolvedValue({
+      items: [
+        {
+          id: "article-e6-delay",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Kø på E6 ved Sluppen",
+          excerpt: "Trafikken går sakte ved E6 sør for Trondheim.",
+          url: "https://example.test/e6-delay",
+          publishedAt: "2026-07-02T09:30:00.000Z",
+          scope: "trondheim",
+          category: "Transport",
+          places: ["Sluppen", "Trondheim"],
+        },
+      ] satisfies Article[],
+    });
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listTrafficPulseCorridors").mockResolvedValue([
+      {
+        id: "100141",
+        name: "E6 Okstadbakken - E6 Sluppenrampene",
+        state: "slow",
+        travelTimeSeconds: 900,
+        freeFlowSeconds: 540,
+        delaySeconds: 360,
+        delayRatio: 1.67,
+        measurementFrom: "2026-07-02T09:25:00.000Z",
+        measurementTo: "2026-07-02T09:30:00.000Z",
+        updatedAt: "2026-07-02T09:30:20.000Z",
+        sourceUrl: "https://example.test/datex-travel-time",
+      },
+    ] satisfies TrafficPulseCorridor[]);
+    vi.spyOn(store, "listTrafficCounterSnapshots").mockResolvedValue([]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent
+      .get(
+        "/api/operations/notification-triggers?kinds=traffic_disruption&traceStates=raw_evidence&q=E6&limit=10",
+      )
+      .expect(200);
+
+    expect(response.body.summary.total).toBe(1);
+    expect(response.body.items[0]).toMatchObject({
+      id: "notification:spatial:investigation:delay:e6-south:100141",
+      kind: "traffic_disruption",
+      severity: "warning",
+      title: "E6 sør inn mot Trondheim",
+      sourceIds: ["datex_travel_time"],
+      matchedKeywords: ["uforklart forsinkelse"],
+      publicSurface: {
+        state: "hidden",
+        label: "Kun Command Center",
+      },
+      links: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "source_audit",
+          href: "/command/kilder?sources=datex_travel_time&detail=datex_travel_time",
+        }),
+        expect.objectContaining({
+          kind: "source_item",
+          href: "/command/radata?telemetrySource=datex_travel_time&telemetryId=100141",
+          sourceItemId: "telemetry:datex_travel_time:100141",
+        }),
+      ]),
+    });
+    expect(JSON.stringify(response.body)).not.toContain("rawPayload");
+    expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
   });
 
   it("marks notification trigger candidates as waiting when no active subscription matches", async () => {
@@ -3338,6 +3502,15 @@ describe("private situation API", () => {
       .expect(200);
 
     expect(response.body).toMatchObject({
+      live: {
+        status: expect.stringMatching(/^(live|stale)$/u),
+        refreshIntervalSeconds: 60,
+        nextRefreshAt: expect.any(String),
+        staleAfterSeconds: 900,
+        dataUpdatedAt: "2026-07-02T09:45:00.000Z",
+        dataAgeSeconds: expect.any(Number),
+        detail: expect.any(String),
+      },
       summary: {
         heatmapCells: 1,
         observations: 3,

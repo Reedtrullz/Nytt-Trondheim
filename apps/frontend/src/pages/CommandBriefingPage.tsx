@@ -18,7 +18,7 @@ const noteKindLabels: Record<CommandCenterOperationsNote["kind"], string> = {
   other: "Annet",
 };
 
-const aiProfileLabels: Record<AiAnalysisProfile, string> = {
+const analysisProfileLabels: Record<AiAnalysisProfile, string> = {
   standard: "Full analyse",
   compact_recovery: "Kompakt gjenoppretting",
   brief_only_recovery: "Kun morgenbrief",
@@ -41,12 +41,12 @@ function sourceStateLabel(source: SourceHealth) {
   return "Feilet";
 }
 
-function aiRunPath(id: string) {
+function analysisRunPath(id: string) {
   return `/command/radata?run=${encodeURIComponent(id)}`;
 }
 
-function aiProfileLabel(diagnostics?: AiProcessingRunDiagnostics) {
-  return diagnostics ? aiProfileLabels[diagnostics.profile] : "Ukjent profil";
+function analysisProfileLabel(diagnostics?: AiProcessingRunDiagnostics) {
+  return diagnostics ? analysisProfileLabels[diagnostics.profile] : "Ukjent profil";
 }
 
 export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenterBriefingPayload }) {
@@ -90,7 +90,7 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
             ) : (
               <p className="command-briefing-empty">
                 Ingen lagret brief ennå. Forsiden bruker deterministisk reserve når worker ikke har
-                lagret en AI- eller reservebrief.
+                lagret en analysert brief.
               </p>
             )}
           </section>
@@ -98,18 +98,18 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
       },
       {
         id: "ai-trace",
-        title: "AI-spor",
-        description: "DeepSeek-modell, gjenopprettingsprofil og siste råresultat.",
+        title: "Analysespor",
+        description: "Analysemodell, gjenopprettingsprofil og siste råresultat.",
         defaultSize: "standard",
         children: (
           <section className="command-briefing-card">
             <div className="command-briefing-section-heading">
               <div>
-                <p className="label">AI-spor</p>
+                <p className="label">Analysespor</p>
                 <h2>Siste analyse</h2>
               </div>
               {briefing.latestAiRun ? (
-                <Link to={aiRunPath(briefing.latestAiRun.id)}>Åpne råresultat</Link>
+                <Link to={analysisRunPath(briefing.latestAiRun.id)}>Åpne råresultat</Link>
               ) : null}
             </div>
             {briefing.latestAiRun ? (
@@ -128,7 +128,7 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
                 </div>
                 <div>
                   <dt>Profil</dt>
-                  <dd>{aiProfileLabel(briefing.latestAiRun.diagnostics)}</dd>
+                  <dd>{analysisProfileLabel(briefing.latestAiRun.diagnostics)}</dd>
                 </div>
                 {briefing.latestAiRun.diagnostics ? (
                   <div>
@@ -138,7 +138,7 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
                       {briefing.latestAiRun.diagnostics.attempts
                         .map(
                           (attempt) =>
-                            `${aiProfileLabels[attempt.profile]} ${
+                            `${analysisProfileLabels[attempt.profile]} ${
                               attempt.status === "ok" ? "OK" : "feilet"
                             }`,
                         )
@@ -158,7 +158,7 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
                 ) : null}
               </dl>
             ) : (
-              <p className="command-briefing-empty">Ingen AI-kjøringer er lagret ennå.</p>
+              <p className="command-briefing-empty">Ingen analysekjøringer er lagret ennå.</p>
             )}
           </section>
         ),
@@ -166,7 +166,7 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
       {
         id: "supporting-stories",
         title: "Historier bak briefen",
-        description: "Artikler worker/AI peker på som grunnlag.",
+        description: "Artikler analysen peker på som grunnlag.",
         defaultSize: "large",
         children: (
           <section className="command-briefing-card command-briefing-card-large">
@@ -204,15 +204,15 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
       },
       {
         id: "operator-notes",
-        title: "AI-operatørnotater",
-        description: "Signalene DeepSeek flagget for eiergjennomgang.",
+        title: "Operatørnotater",
+        description: "Signalene analysen flagget for eiergjennomgang.",
         defaultSize: "standard",
         children: (
           <section className="command-briefing-card">
             <div className="command-briefing-section-heading">
               <div>
-                <p className="label">AI-operatørnotater</p>
-                <h2>Signalene DeepSeek flagget</h2>
+                <p className="label">Operatørnotater</p>
+                <h2>Signalene analysen flagget</h2>
               </div>
               <span>{briefing.operationsNotes.length} notater</span>
             </div>
@@ -237,8 +237,8 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
               </ul>
             ) : (
               <p className="command-briefing-empty">
-                Ingen operatørnotater i siste AI-resultat. Det kan være normalt ved deterministisk
-                reserve eller tomt nyhetsbilde.
+                Ingen operatørnotater i siste analyseresultat. Det kan være normalt ved
+                deterministisk reserve eller tomt nyhetsbilde.
               </p>
             )}
           </section>
@@ -323,7 +323,7 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
           <p className="label">Privat kommandosenter</p>
           <h1>Brief-revisjon</h1>
           <p>
-            Eierflate for å kontrollere morgenbriefen, AI-status og hvilke saker som ligger bak.
+            Eierflate for å kontrollere morgenbriefen, analysestatus og hvilke saker som ligger bak.
           </p>
         </div>
         <div className="coverage-bundles-actions">
@@ -340,14 +340,14 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
           <small>{time(morningBrief?.generatedAt ?? briefing.generatedAt)}</small>
         </article>
         <article>
-          <span>AI-kjøring</span>
+          <span>Analysekjøring</span>
           <strong>{briefing.latestAiRun?.status ?? "Ikke registrert"}</strong>
           <small>
             {briefing.latestAiRun
-              ? `${briefing.latestAiRun.model} · ${aiProfileLabel(
+              ? `${briefing.latestAiRun.model} · ${analysisProfileLabel(
                   briefing.latestAiRun.diagnostics,
                 )} · ${time(briefing.latestAiRun.completedAt)}`
-              : "Ingen AI-run funnet"}
+              : "Ingen analysekjøring funnet"}
           </small>
         </article>
         <article>
@@ -362,14 +362,15 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
           <strong>{briefing.supportingArticles.length}</strong>
           <small>
             {briefing.supportingSituations.length} situasjoner · {briefing.operationsNotes.length}{" "}
-            AI-notater
+            analysenotater
           </small>
         </article>
       </section>
 
       <DashboardGrid
         ariaLabel="Brief-revisjon-moduler"
-        description="Dra og størrelsesjuster briefmoduler mens du kontrollerer AI-grunnlaget."
+        configMode="toggle"
+        description="Dra og størrelsesjuster briefmoduler mens du kontrollerer analysegrunnlaget."
         label="Modulært kommandosenter"
         storageKey="nytt-command-briefing-dashboard-v1"
         title="Brief-arbeidsflate"

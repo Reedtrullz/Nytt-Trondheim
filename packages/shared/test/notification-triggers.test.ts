@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { Article, HomeSituationSummary, Situation } from "../src/index.js";
+import type {
+  Article,
+  HomeSituationSummary,
+  Situation,
+  SpatialInvestigationQueueItem,
+} from "../src/index.js";
 import {
   applyNotificationDeliveryStates,
   buildPublicNotificationSignalHighlights,
@@ -96,6 +101,43 @@ function homeSituation(overrides: Partial<HomeSituationSummary> = {}): HomeSitua
   };
 }
 
+function spatialInvestigationItem(
+  overrides: Partial<SpatialInvestigationQueueItem> = {},
+): SpatialInvestigationQueueItem {
+  return {
+    id: "investigation:delay:e6-south:100141",
+    kind: "unexplained_delay",
+    priority: "high",
+    title: "E6 Okstadbakken - E6 Sluppenrampene",
+    summary: "6 min forsinkelse uten kjent årsak",
+    reason:
+      "DATEX viser ca. 6 min forsinkelse uten koblet trafikkhendelse eller tydelig nyhetsforklaring.",
+    updatedAt: "2026-07-02T08:58:00.000Z",
+    evidence: ["6 min forsinkelse", "Ingen romlig koblet trafikkhendelse"],
+    articleIds: ["article-e6"],
+    sourceItemIds: [],
+    rawRefs: [
+      {
+        type: "telemetry",
+        source: "datex_travel_time",
+        id: "100141",
+        label: "DATEX reisetid",
+        observedAt: "2026-07-02T08:58:00.000Z",
+      },
+    ],
+    sourceConfidence: {
+      level: "likely",
+      label: "Sannsynlig",
+      score: 0.67,
+      sourceCount: 2,
+      updatedAt: "2026-07-02T08:58:00.000Z",
+      rationale: "Redaksjonell dekning støttes av kontekstsignaler.",
+    },
+    targetUrl: "https://example.test/datex-travel-time",
+    ...overrides,
+  };
+}
+
 describe("notification trigger candidates", () => {
   it("exposes public guidance for the high-impact trigger categories", () => {
     expect(publicNotificationTriggerGuidance).toEqual(
@@ -175,6 +217,97 @@ describe("notification trigger candidates", () => {
         }),
       ]),
     );
+  });
+
+  it("turns spatial traffic anomalies into traceable command-center notification candidates", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [
+        article({
+          id: "article-e6",
+          title: "Veien er stengt ved E6 Sluppen",
+          excerpt: "Trafikken står sakte sør for Trondheim.",
+          category: "Transport",
+          coverageBundle: {
+            id: "coverage:e6-sluppen",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme trafikkhendelse",
+            generatedAt: "2026-07-02T08:59:00.000Z",
+          },
+        }),
+      ],
+      spatialInvestigationItems: [spatialInvestigationItem()],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.summary.total).toBe(1);
+    expect(page.summary.officialBacked).toBe(0);
+    expect(page.items[0]).toMatchObject({
+      id: "notification:spatial:investigation:delay:e6-south:100141",
+      kind: "traffic_disruption",
+      severity: "warning",
+      title: "E6 Okstadbakken - E6 Sluppenrampene",
+      articleIds: ["article-e6"],
+      sourceIds: ["datex_travel_time"],
+      matchedKeywords: ["uforklart forsinkelse"],
+      confidence: expect.objectContaining({ level: "likely" }),
+      publicSurface: {
+        state: "hidden",
+        label: "Kun Command Center",
+        detail: "Dette er et romlig operatørsignal og vises ikke direkte på City Pulse.",
+      },
+      reasons: expect.arrayContaining([
+        "Romlig analyse kobler telemetri, trafikkbilde og nyhetsdekning.",
+        "6 min forsinkelse",
+      ]),
+    });
+    expect(page.items[0]?.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "source_audit",
+          href: "/command/kilder?sources=datex_travel_time&detail=datex_travel_time",
+          sourceId: "datex_travel_time",
+        }),
+        expect.objectContaining({
+          kind: "source_item",
+          href: "/command/radata?telemetrySource=datex_travel_time&telemetryId=100141",
+          sourceItemId: "telemetry:datex_travel_time:100141",
+        }),
+        expect.objectContaining({
+          kind: "external",
+          href: "https://example.test/datex-travel-time",
+        }),
+      ]),
+    );
+    expect(notificationTriggerTraceState(page.items[0]!)).toBe("raw_evidence");
+  });
+
+  it("does not create duplicate article notification rows for articles absorbed by spatial anomalies", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [
+        article({
+          id: "article-e6",
+          title: "Veien er stengt ved E6 Sluppen",
+          excerpt: "Trafikken står sakte sør for Trondheim.",
+          category: "Transport",
+          coverageBundle: {
+            id: "coverage:e6-sluppen",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme trafikkhendelse",
+            generatedAt: "2026-07-02T08:59:00.000Z",
+          },
+        }),
+      ],
+      spatialInvestigationItems: [spatialInvestigationItem()],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items.map((item) => item.id)).toEqual([
+      "notification:spatial:investigation:delay:e6-south:100141",
+    ]);
   });
 
   it("links situation notification candidates to operator source evidence", () => {

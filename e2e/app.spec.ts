@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import {
+  buildCityPulseStories,
   fallbackWorldCupDashboard,
   sampleBootstrap,
   sampleWorkspace,
@@ -31,6 +32,13 @@ async function expectNoHorizontalPageOverflow(page: Page): Promise<void> {
 
   expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
+}
+
+function cityPulseStoryPageBody(articles: Article[], nextCursor?: string): string {
+  return JSON.stringify({
+    items: buildCityPulseStories(articles),
+    ...(nextCursor ? { nextCursor } : {}),
+  });
 }
 
 async function useViewerSession(page: Page): Promise<void> {
@@ -110,6 +118,127 @@ test("frontpage uses bootstrap feed without immediate duplicate refreshes", asyn
   expect(duplicateRefreshes).toEqual([]);
 });
 
+test("frontpage can refresh City Pulse on demand without duplicate article fetches", async ({
+  page,
+}) => {
+  const articleRequests: string[] = [];
+  let bootstrapCalls = 0;
+  let refreshRequested = false;
+  const initialArticle: Article = {
+    ...sampleBootstrap.articles[0]!,
+    id: "city-pulse-initial",
+    title: "Første bypuls fra bootstrap",
+    excerpt: "Dette er den første forsiden.",
+    publishedAt: "2026-07-03T10:00:00.000Z",
+  };
+  const refreshedArticle: Article = {
+    ...sampleBootstrap.articles[0]!,
+    id: "city-pulse-refreshed",
+    title: "Oppdatert bypuls fra live-refresh",
+    excerpt: "Dette kom inn etter manuell oppdatering.",
+    publishedAt: "2026-07-03T10:05:00.000Z",
+  };
+  await page.route("**/api/bootstrap", async (route) => {
+    bootstrapCalls += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleBootstrap,
+        articles: refreshRequested ? [refreshedArticle] : [initialArticle],
+        stories: buildCityPulseStories(refreshRequested ? [refreshedArticle] : [initialArticle]),
+        situations: [],
+        morningBrief: undefined,
+      }),
+    });
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    articleRequests.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [refreshedArticle] }),
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Første bypuls fra bootstrap" }),
+  ).toBeVisible();
+  expect(bootstrapCalls).toBeGreaterThanOrEqual(1);
+  expect(articleRequests).toEqual([]);
+  refreshRequested = true;
+  await page.getByRole("button", { name: "Oppdater bypuls" }).click();
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Oppdatert bypuls fra live-refresh" }),
+  ).toBeVisible();
+  expect(bootstrapCalls).toBeGreaterThanOrEqual(2);
+  expect(articleRequests).toEqual([]);
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("default City Pulse load more uses story pagination instead of raw article pages", async ({
+  page,
+}) => {
+  const rawArticleRequests: string[] = [];
+  const initialArticle: Article = {
+    ...sampleBootstrap.articles[0]!,
+    id: "city-pulse-default-initial",
+    title: "Første samlede bypulsrad",
+    excerpt: "Bootstrap leverer første rad uten ekstra artikkelforespørsel.",
+    publishedAt: "2026-07-03T10:00:00.000Z",
+  };
+  const nextArticle: Article = {
+    ...sampleBootstrap.articles[0]!,
+    id: "city-pulse-default-next",
+    title: "Neste samlede bypulsrad",
+    excerpt: "Denne kommer fra story-endepunktet.",
+    publishedAt: "2026-07-03T09:30:00.000Z",
+  };
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleBootstrap,
+        articles: [initialArticle],
+        stories: buildCityPulseStories([initialArticle]),
+        storyNextCursor: "story-next",
+        situations: [],
+        morningBrief: undefined,
+      }),
+    });
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    rawArticleRequests.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get("cursor")).toBe("story-next");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: cityPulseStoryPageBody([nextArticle]),
+    });
+  });
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Første samlede bypulsrad" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Vis flere saker" }).click();
+  await expect(
+    page.locator(".source-cluster").getByRole("link", { name: /Neste samlede bypulsrad/ }),
+  ).toBeVisible();
+  expect(rawArticleRequests).toEqual([]);
+});
+
 test("filtered City Pulse modules use refreshed feed instead of stale bootstrap context", async ({
   page,
 }) => {
@@ -165,6 +294,7 @@ test("filtered City Pulse modules use refreshed feed instead of stale bootstrap 
       contentType: "application/json",
       body: JSON.stringify({
         articles: [staleArticle],
+        stories: buildCityPulseStories([staleArticle]),
         situations: [
           {
             id: "stale-ras",
@@ -183,11 +313,11 @@ test("filtered City Pulse modules use refreshed feed instead of stale bootstrap 
       }),
     });
   });
-  await page.route("**/api/articles?**", async (route) => {
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: [freshArticle] }),
+      body: cityPulseStoryPageBody([freshArticle]),
     });
   });
 
@@ -206,14 +336,14 @@ test("filtered City Pulse modules use refreshed feed instead of stale bootstrap 
   await expect(nearby.getByRole("button", { name: /Fersk trafikk ved Sluppen/ })).toBeVisible();
 });
 
-test("City Pulse pins the AI-assisted morning brief on the public frontpage", async ({ page }) => {
+test("City Pulse pins the analyzed morning brief on the public frontpage", async ({ page }) => {
   const article = sampleBootstrap.articles.find((item) => item.id === "a-road")!;
   const situation = sampleBootstrap.situations[0]!;
   const morningBrief: MorningBrief = {
     generatedAt: "2026-07-02T07:30:00.000Z",
     title: "Morgenbrief",
     mode: "ai_assisted",
-    sourceLine: "AI-assistert · 6/7 kilder OK",
+    sourceLine: "Automatisk analyse · 6/7 kilder OK",
     paragraphs: [
       "Bypulsen starter med tre tydelige signaler i Trondheim.",
       "Trafikk og framkommelighet peker seg ut rundt østbyen og E6.",
@@ -266,12 +396,15 @@ test("City Pulse pins the AI-assisted morning brief on the public frontpage", as
 
   const brief = page.locator(".morning-brief");
   await expect(brief.getByRole("heading", { name: "Morgenbrief" })).toBeVisible();
-  await expect(brief.getByText("AI-assistert").first()).toBeVisible();
+  await expect(brief.getByText("Analysert brief").first()).toBeVisible();
+  await expect(brief.getByText("Automatisk analyse · 6/7 kilder OK")).toBeVisible();
   await expect(brief.getByText("Bypulsen starter med tre tydelige signaler")).toBeVisible();
   await expect(brief.getByText("Trafikk og framkommelighet peker seg ut")).toBeVisible();
   await expect(brief.getByText("offentlige kilder styrer prioriteringen")).toBeVisible();
-  await expect(brief.getByText("AI-spor")).toBeVisible();
-  await expect(brief.getByText("DeepSeek · deepseek-v4-flash · OK")).toBeVisible();
+  await expect(brief.getByText("Analysespor")).toBeVisible();
+  await expect(brief.getByText("Automatisk analyse · OK")).toBeVisible();
+  await expect(brief).not.toContainText("DeepSeek");
+  await expect(brief).not.toContainText("deepseek-v4-flash");
   await expect(brief.getByLabel("Morgenbrief-nøkkeltall")).toContainText("Transport leder bildet");
   await expect(
     brief.getByLabel("Morgenbrief-grunnlag").getByRole("link", { name: article.title }),
@@ -279,7 +412,7 @@ test("City Pulse pins the AI-assisted morning brief on the public frontpage", as
   await expect(
     brief.getByLabel("Morgenbrief-grunnlag").getByRole("link", { name: situation.title }),
   ).toHaveAttribute("href", `/situasjoner/${situation.id}`);
-  await expect(page.getByLabel("Bypulsmoduler")).toContainText("Varsel og AI-spor");
+  await expect(page.getByLabel("Bypulsmoduler")).toContainText("Varsel og analysespor");
   await expect(page.getByLabel("Bypulsmoduler")).toContainText("Brief-ferskhet");
   const publicSources = page.locator(".source-status");
   await expect(publicSources).toContainText("Delvis kildegrunnlag");
@@ -433,7 +566,7 @@ test("home nearby module links ranked local stories with the map", async ({ page
 
   const situationRow = nearby.getByRole("button", { name: /Skogbrann ved Bymarka/ });
   await expect(situationRow).toHaveAttribute("aria-current", "true");
-  await expect(nearby.getByText("Tilknyttet situasjon")).toBeVisible();
+  await expect(nearby.locator(".nearby-kind-situation")).toHaveText("Tilknyttet situasjon");
   await expect(nearby.getByRole("link", { name: "Åpne situasjon", exact: true })).toHaveAttribute(
     "href",
     "/situasjoner/skogbrann-bymarka",
@@ -501,6 +634,7 @@ test("home nearby map cluster popup exposes member stories", async ({ page }) =>
       body: JSON.stringify({
         ...sampleBootstrap,
         articles: clusterArticles,
+        stories: buildCityPulseStories(clusterArticles),
         situations: [],
         morningBrief: undefined,
       }),
@@ -538,6 +672,7 @@ test("home nearby module shows located active situations without matching articl
       body: JSON.stringify({
         ...sampleBootstrap,
         articles: [],
+        stories: [],
         morningBrief: undefined,
         situations: [
           {
@@ -620,8 +755,8 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
       situationId: undefined,
     },
   ];
-  let timeWindowRequest: URL | undefined;
-  let categoryRequest: URL | undefined;
+  let timeWindowStoryRequest: URL | undefined;
+  let categoryStoryRequest: URL | undefined;
 
   await page.route("**/api/bootstrap", async (route) => {
     await route.fulfill({
@@ -629,19 +764,20 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
       contentType: "application/json",
       body: JSON.stringify({
         articles,
+        stories: buildCityPulseStories(articles),
         situations: [],
         sourceHealth: sampleBootstrap.sourceHealth,
       }),
     });
   });
-  await page.route("**/api/articles?**", async (route) => {
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("from")) timeWindowRequest = url;
-    if (url.searchParams.get("category")) categoryRequest = url;
+    if (url.searchParams.get("from")) timeWindowStoryRequest = url;
+    if (url.searchParams.get("category")) categoryStoryRequest = url;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: articles }),
+      body: cityPulseStoryPageBody(articles),
     });
   });
   await page.route("**/api/situations?**", async (route) => {
@@ -668,7 +804,9 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await expect(channelContext).toContainText("Hendelser");
   await expect(channelContext).toContainText("Pågående og stedsfestede hendelser");
   await expect(channelContext.getByRole("button", { name: "Vis alle kanaler" })).toBeVisible();
-  await expect.poll(() => categoryRequest?.searchParams.get("category") ?? "").toBe("Hendelser");
+  await expect
+    .poll(() => categoryStoryRequest?.searchParams.get("category") ?? "")
+    .toBe("Hendelser");
   await channelContext.getByRole("button", { name: "Vis alle kanaler" }).click();
   await expect(page).not.toHaveURL(/category=Hendelser/);
   await expect(channelContext).toContainText("Alle");
@@ -691,7 +829,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   );
   await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
   await cityPulseModules
-    .getByRole("button", { name: "Bytt modulstørrelse for Varsel og AI-spor" })
+    .getByRole("button", { name: "Bytt modulstørrelse for Varsel og analysespor" })
     .click();
   const signalWidget = cityPulseModules.locator(".dashboard-widget", {
     hasText: "Slik vurderes høyeffekt-signaler",
@@ -725,7 +863,13 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   const lead = page.locator(".lead-story");
   const sources = lead.locator(".source-cluster");
   await expect(lead.getByRole("heading", { name: "Tente på antibac i Trondheim" })).toBeVisible();
+  await expect(lead.locator(".story-event-summary")).toContainText("Samlet hendelse");
+  await expect(lead.locator(".story-event-summary")).toContainText(
+    "2 kilder · samme hendelse på tvers av kilder",
+  );
   await expect(lead.getByText(/Kildetillit: Bekreftet/)).toBeVisible();
+  await expect(lead.locator(".story-badge-verified")).toContainText("Verifisert");
+  await expect(lead.locator(".story-verification-proof")).toContainText("Politiloggen + NRK");
   await expect(sources.getByText("2 kilder · samme hendelse på tvers av kilder")).toBeVisible();
   await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toBeVisible();
   await expect(sources.getByRole("link", { name: /Politiloggen/ })).toBeVisible();
@@ -734,9 +878,9 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await page.getByRole("button", { name: "24 timer" }).click();
   await expect(page).toHaveURL(/window=24h/);
   await expect
-    .poll(() => timeWindowRequest?.searchParams.get("from") ?? "")
+    .poll(() => timeWindowStoryRequest?.searchParams.get("from") ?? "")
     .toMatch(/^\d{4}-\d{2}-\d{2}T/);
-  expect(timeWindowRequest?.searchParams.get("scope")).toBe("trondheim");
+  expect(timeWindowStoryRequest?.searchParams.get("scope")).toBe("trondheim");
   await page.getByRole("button", { name: "Nær meg" }).click();
   await expect(page.getByRole("button", { name: "Lokalt fokus aktivt" })).toHaveAttribute(
     "aria-pressed",
@@ -814,6 +958,7 @@ test("verified public story proof opens the linked situation room for viewers", 
       contentType: "application/json",
       body: JSON.stringify({
         articles: [article],
+        stories: buildCityPulseStories([article]),
         situations: [situation],
         sourceHealth: sampleBootstrap.sourceHealth,
         morningBrief: undefined,
@@ -998,6 +1143,21 @@ test("coverage bundle operations page renders persisted decisions and drawer det
               {
                 articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
                 reason: "conflicting_specific_places",
+                overlap: 3,
+                score: 0.24,
+              },
+            ],
+            nearMissArticles: [
+              {
+                id: "adressa-other-smoke",
+                source: "adressa",
+                sourceLabel: "Adresseavisen",
+                title: "Røykmelding ved Heimdal",
+                excerpt: "Nødetatene undersøker røyk ved Heimdal.",
+                url: "https://example.test/adressa-other-smoke",
+                publishedAt: "2026-06-18T10:49:00.000Z",
+                category: "Hendelser",
+                places: ["Heimdal", "Trondheim"],
               },
             ],
           },
@@ -1012,6 +1172,7 @@ test("coverage bundle operations page renders persisted decisions and drawer det
   await expect(page.getByText("Samme hendelse på tvers av kilder").first()).toBeVisible();
   await expect(page.getByText("Generisk steds-hendelse")).toBeVisible();
   await expect(page.getByText("Konflikt i spesifikt sted")).toBeVisible();
+  await expect(page.getByText("Adresseavisen: Røykmelding ved Heimdal")).toBeVisible();
   await expect(page.getByRole("link", { name: "Tidslinje" })).toHaveAttribute(
     "href",
     "/command/tidslinje",
@@ -1027,8 +1188,11 @@ test("command briefing page shows AI brief traceability", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Brief-revisjon" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Brief-arbeidsflate" })).toBeVisible();
-  await expect(page.getByLabel("Brief-revisjon-moduler")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
+  const briefModules = page.getByLabel("Brief-revisjon-moduler");
+  await expect(briefModules).toBeVisible();
+  await expect(briefModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();
+  await expect(briefModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
+  await expect(briefModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Morgenbrief" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Siste analyse" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Historier bak briefen" }).first()).toBeVisible();
@@ -1070,6 +1234,15 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
       contentType: "application/json",
       body: JSON.stringify({
         generatedAt: "2026-07-02T09:45:00.000Z",
+        live: {
+          status: "live",
+          refreshIntervalSeconds: 60,
+          nextRefreshAt: "2026-07-02T09:46:00.000Z",
+          staleAfterSeconds: 900,
+          dataUpdatedAt: "2026-07-02T09:45:00.000Z",
+          dataAgeSeconds: 0,
+          detail: "Siste romlige signal 1 min siden.",
+        },
         window: {},
         summary: {
           heatmapCells: 1,
@@ -1210,6 +1383,7 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
             delayRatio: 1.7,
             updatedAt: "2026-07-02T09:40:00.000Z",
             sourceUrl: "https://example.test/datex",
+            explanationStatus: "unlinked_news_match",
             matchedArticleIds: ["article:one"],
             affectedEventIds: [],
             confidence: "warning",
@@ -1337,11 +1511,26 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
 
   await expect(page.getByRole("heading", { name: "Romlig analyse" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Romlig arbeidsflate" })).toBeVisible();
+  const spatialModules = page.getByLabel("Romlig analysemoduler");
+  await expect(spatialModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();
+  await expect(spatialModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
+  await expect(spatialModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Analysefilter" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Signaler å undersøke" }).first()).toBeVisible();
+  const correlationBrief = page.locator(".spatial-correlation-brief");
+  await expect(
+    correlationBrief.getByRole("heading", { name: "Hva krever oppfølging nå?" }),
+  ).toBeVisible();
+  await expect(correlationBrief.getByText("2 høyprioriterte")).toBeVisible();
+  await expect(correlationBrief.getByText("1 usikre signaler")).toBeVisible();
+  await expect(correlationBrief.getByText("nyhet + rådata/offisiell kontekst")).toBeVisible();
+  await expect(correlationBrief.getByRole("link", { name: "DATEX reisetid" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Varmepunkt Sluppen" })).toBeVisible();
-  await expect(page.getByText("Toppdag 2. juli: 3 observasjoner")).toBeVisible();
+  await expect(
+    page
+      .getByLabel("Signaler å undersøke", { exact: true })
+      .getByText("Toppdag 2. juli: 3 observasjoner"),
+  ).toBeVisible();
   await expect(page.getByLabel("Tidsprofil for varmepunkt").first()).toBeVisible();
   await expect(page.getByText("3 obs").first()).toBeVisible();
   await page.getByRole("link", { name: "Rådata 1" }).first().click();
@@ -1367,6 +1556,149 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
   await expect(page.getByRole("heading", { name: "Telemetripayload" })).toBeVisible();
   await expect(page.getByText('"corridorId": "e6-sluppen"')).toBeVisible();
   await expect(page.getByText('"secret": "[redacted]"')).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("raw inspector explains degraded AI recovery attempts", async ({ page }) => {
+  await page.route("**/api/operations/raw/source-items?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+  await page.route("**/api/operations/raw/telemetry?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+  await page.route("**/api/operations/raw/ai-runs?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "ai:one",
+            provider: "deepseek",
+            model: "deepseek-v4-flash",
+            status: "degraded",
+            startedAt: "2026-07-02T09:01:00.000Z",
+            completedAt: "2026-07-02T09:02:00.000Z",
+            articleCount: 12,
+            diagnostics: {
+              profile: "compact_recovery",
+              attempts: [
+                {
+                  profile: "standard",
+                  status: "failed",
+                  maxTokens: 4096,
+                  articleCount: 12,
+                  situationCount: 4,
+                  error: "JSON response was truncated",
+                },
+                {
+                  profile: "compact_recovery",
+                  status: "ok",
+                  maxTokens: 2048,
+                  articleCount: 8,
+                  situationCount: 4,
+                },
+              ],
+            },
+            error: "JSON response was truncated",
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/operations/raw/ai-runs/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "ai:one",
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+        status: "degraded",
+        startedAt: "2026-07-02T09:01:00.000Z",
+        completedAt: "2026-07-02T09:02:00.000Z",
+        articleCount: 12,
+        articleIds: ["article:one", "article:two"],
+        diagnostics: {
+          profile: "compact_recovery",
+          attempts: [
+            {
+              profile: "standard",
+              status: "failed",
+              maxTokens: 4096,
+              articleCount: 12,
+              situationCount: 4,
+              error: "JSON response was truncated",
+            },
+            {
+              profile: "compact_recovery",
+              status: "ok",
+              maxTokens: 2048,
+              articleCount: 8,
+              situationCount: 4,
+            },
+          ],
+        },
+        result: {
+          morningBrief: {
+            paragraphs: ["Kort bypuls.", "Trafikk følges.", "Ingen store væravvik."],
+          },
+          clusters: [
+            {
+              title: "Kø ved Sluppen",
+              citedClaims: [{ claim: "Sakte trafikk", articleId: "article:one" }],
+            },
+          ],
+          situationUpdates: [],
+          bundleHints: [
+            {
+              title: "Sluppen-trafikk",
+              citedClaims: [{ claim: "Samme korridor", articleId: "article:two" }],
+            },
+          ],
+          categoryHints: [{ articleId: "article:one", category: "Transport" }],
+          relevanceHints: [{ articleId: "article:two", scope: "trondheim" }],
+          operationsNotes: [
+            {
+              kind: "bundle_candidate",
+              summary: "Mulig kobling til trafikkpuls.",
+              citedClaims: [{ claim: "Mulig trafikkårsak", articleId: "article:one" }],
+            },
+          ],
+          diagnostics: { profile: "compact_recovery" },
+        },
+        resultBytes: 32,
+        redacted: false,
+        truncated: false,
+        error: "JSON response was truncated",
+      }),
+    });
+  });
+
+  await page.goto("/command/radata?run=ai%3Aone");
+
+  await expect(page.getByRole("heading", { name: "Rådata-inspektør" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI-spor og reserveflyt" })).toBeVisible();
+  await expect(page.getByText("Reserveanalyse brukt")).toBeVisible();
+  await expect(page.getByText("Full analyse feilet", { exact: true })).toBeVisible();
+  await expect(page.getByText("12 saker / 4 situasjoner")).toBeVisible();
+  await expect(page.getByText("4096 maks tokens")).toBeVisible();
+  await expect(page.getByText("Kompakt gjenoppretting OK")).toBeVisible();
+  await expect(page.getByText("2048 maks tokens")).toBeVisible();
+  await expect(page.getByText("Sanitert resultat: 32 B")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Analysebeslutninger" })).toBeVisible();
+  await expect(page.getByText("3 avsnitt")).toBeVisible();
+  await expect(page.getByText("1 klynge")).toBeVisible();
+  await expect(page.getByText("3 spor")).toBeVisible();
+  await expect(page.getByText("JSON response was truncated").first()).toBeVisible();
   await expectNoHorizontalPageOverflow(page);
 });
 
@@ -2570,27 +2902,25 @@ test("article save missing target rolls back optimistic state", async ({ page })
 });
 
 test("article save is disabled while a request is pending", async ({ page }) => {
-  await page.route("**/api/articles?**", async (route) => {
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        items: [
-          {
-            id: "a-bridge",
-            source: "adressa",
-            sourceLabel: "Adresseavisen",
-            title: "Ny bru over Nidelva åpnet for gående og syklende",
-            excerpt: "Stale refresh while save is pending.",
-            url: "https://www.adressa.no/nyheter/trondheim",
-            publishedAt: "2026-05-26T10:18:00.000Z",
-            scope: "trondheim",
-            category: "Transport",
-            places: ["Midtbyen", "Skansen"],
-            saved: false,
-          },
-        ],
-      }),
+      body: cityPulseStoryPageBody([
+        {
+          id: "a-bridge",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ny bru over Nidelva åpnet for gående og syklende",
+          excerpt: "Stale refresh while save is pending.",
+          url: "https://www.adressa.no/nyheter/trondheim",
+          publishedAt: "2026-05-26T10:18:00.000Z",
+          scope: "trondheim",
+          category: "Transport",
+          places: ["Midtbyen", "Skansen"],
+          saved: false,
+        },
+      ]),
     });
   });
 
@@ -2633,29 +2963,27 @@ test("article save is disabled while a request is pending", async ({ page }) => 
 test("stale article refresh after save completion does not undo optimistic saved state", async ({
   page,
 }) => {
-  let articleRequestCount = 0;
-  await page.route("**/api/articles?**", async (route) => {
-    articleRequestCount += 1;
+  let storyRequestCount = 0;
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
+    storyRequestCount += 1;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        items: [
-          {
-            id: "a-bridge",
-            source: "adressa",
-            sourceLabel: "Adresseavisen",
-            title: "Ny bru over Nidelva åpnet for gående og syklende",
-            excerpt: "Stale refresh after save completion.",
-            url: "https://www.adressa.no/nyheter/trondheim",
-            publishedAt: "2026-05-26T10:18:00.000Z",
-            scope: "trondheim",
-            category: "Transport",
-            places: ["Midtbyen", "Skansen"],
-            saved: false,
-          },
-        ],
-      }),
+      body: cityPulseStoryPageBody([
+        {
+          id: "a-bridge",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ny bru over Nidelva åpnet for gående og syklende",
+          excerpt: "Stale refresh after save completion.",
+          url: "https://www.adressa.no/nyheter/trondheim",
+          publishedAt: "2026-05-26T10:18:00.000Z",
+          scope: "trondheim",
+          category: "Transport",
+          places: ["Midtbyen", "Skansen"],
+          saved: false,
+        },
+      ]),
     });
   });
   await page.route("**/api/saved/articles/a-bridge", async (route) => {
@@ -2674,11 +3002,11 @@ test("stale article refresh after save completion does not undo optimistic saved
   await saveResponse;
 
   const staleRefreshResponse = page.waitForResponse(
-    (response) => response.url().includes("/api/articles?") && response.status() === 200,
+    (response) => response.url().includes("/api/city-pulse/stories?") && response.status() === 200,
   );
   await page.getByPlaceholder("Søk i saker").fill("bru");
   await staleRefreshResponse;
-  expect(articleRequestCount).toBe(1);
+  expect(storyRequestCount).toBe(1);
 
   const expectedLabel = initialLabel.startsWith("Fjern fra lagret")
     ? /Lagre sak: Ny bru over Nidelva/
@@ -2693,30 +3021,28 @@ test("load more response from an old filter is ignored after URL filter changes"
   const oldPageMayFinish = new Promise<void>((resolve) => {
     releaseOldPage = resolve;
   });
-  await page.route("**/api/articles?**", async (route) => {
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("cursor") === "old-bru-page") {
       await oldPageMayFinish;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          items: [
-            {
-              id: "a-old-bru",
-              source: "adressa",
-              sourceLabel: "Adresseavisen",
-              title: "Gammel bru-sak fra forrige filter",
-              excerpt: "Denne skal ikke blandes inn etter filterbytte.",
-              url: "https://www.adressa.no/nyheter/trondheim/gammel-bru",
-              publishedAt: "2026-05-25T10:18:00.000Z",
-              scope: "trondheim",
-              category: "Transport",
-              places: ["Midtbyen"],
-              saved: false,
-            },
-          ],
-        }),
+        body: cityPulseStoryPageBody([
+          {
+            id: "a-old-bru",
+            source: "adressa",
+            sourceLabel: "Adresseavisen",
+            title: "Gammel bru-sak fra forrige filter",
+            excerpt: "Denne skal ikke blandes inn etter filterbytte.",
+            url: "https://www.adressa.no/nyheter/trondheim/gammel-bru",
+            publishedAt: "2026-05-25T10:18:00.000Z",
+            scope: "trondheim",
+            category: "Transport",
+            places: ["Midtbyen"],
+            saved: false,
+          },
+        ]),
       });
       return;
     }
@@ -2724,15 +3050,15 @@ test("load more response from an old filter is ignored after URL filter changes"
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ items: [] }),
+        body: cityPulseStoryPageBody([]),
       });
       return;
     }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        items: [
+      body: cityPulseStoryPageBody(
+        [
           {
             id: "a-bridge",
             source: "adressa",
@@ -2747,8 +3073,8 @@ test("load more response from an old filter is ignored after URL filter changes"
             saved: false,
           },
         ],
-        nextCursor: "old-bru-page",
-      }),
+        "old-bru-page",
+      ),
     });
   });
 
@@ -2757,7 +3083,9 @@ test("load more response from an old filter is ignored after URL filter changes"
   await page.getByRole("button", { name: "Vis flere saker" }).click();
   const politicsRefreshResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
-    return url.pathname === "/api/articles" && url.searchParams.get("category") === "Politikk";
+    return (
+      url.pathname === "/api/city-pulse/stories" && url.searchParams.get("category") === "Politikk"
+    );
   });
   await page.getByRole("button", { name: "Politikk" }).click();
   await expect(page).toHaveURL(/category=Politikk/);
@@ -3107,6 +3435,9 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Command Center-matrise" })).toBeVisible();
   const commandModules = page.getByLabel("Kommandosenter-moduler");
+  await expect(commandModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();
+  await expect(commandModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
+  await commandModules.getByRole("button", { name: "Tilpass oppsett" }).click();
   await expect(commandModules.getByLabel("Dashboard-oppsett")).toBeVisible();
   await expect(commandModules.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
   const sourceWidget = commandModules.locator(".dashboard-widget", {
@@ -3121,6 +3452,7 @@ test("owner can open the real situation index and operations status", async ({ p
   await page.reload();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(sourceWidget).toHaveClass(/dashboard-widget-full/);
+  await commandModules.getByRole("button", { name: "Tilpass oppsett" }).click();
   await commandModules.getByRole("button", { name: "Tilbakestill" }).click();
   await expect(sourceWidget).toHaveClass(/dashboard-widget-large/);
   await expect

@@ -3,6 +3,7 @@ import type {
   ArticleCoverageBundle,
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleKind,
+  CityPulseStory,
 } from "./types.js";
 import { isFootballClubBrannContext } from "./incident-text.js";
 
@@ -80,6 +81,7 @@ export interface CoverageBundleListItem extends ArticleCoverageBundleDecision {
   lastSeenAt: string;
   updatedAt: string;
   memberArticles: CoverageBundleArticleSummary[];
+  nearMissArticles: CoverageBundleArticleSummary[];
 }
 
 export interface CoverageBundleSummary {
@@ -646,17 +648,55 @@ function articleFitsGroup(article: Article, group: HomeArticleGroup): boolean {
   return group.articles.some((existing) => articlesSimilar(article, existing));
 }
 
+function groupsConflict(left: HomeArticleGroup, right: HomeArticleGroup): boolean {
+  return left.articles.some((leftArticle) =>
+    right.articles.some((rightArticle) => articlesConflict(leftArticle, rightArticle)),
+  );
+}
+
+function groupFromArticles(id: string, articles: Article[]): HomeArticleGroup {
+  const sortedArticles = [...articles].sort(sortArticles);
+  return {
+    id,
+    primary: sortedArticles[0]!,
+    articles: sortedArticles,
+    sourceLabels: sourceLabelsFor(sortedArticles),
+    bundle: bundleFor(sortedArticles),
+  };
+}
+
+function mergeCandidateGroups(
+  article: Article,
+  candidateGroups: HomeArticleGroup[],
+): HomeArticleGroup[] {
+  const mergeableGroups: HomeArticleGroup[] = [];
+  for (const candidate of candidateGroups) {
+    if (mergeableGroups.some((existing) => groupsConflict(existing, candidate))) continue;
+    mergeableGroups.push(candidate);
+  }
+  return mergeableGroups;
+}
+
 export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
   const groups: HomeArticleGroup[] = [];
   const sorted = [...articles].sort(sortArticles);
 
   sorted.forEach((article) => {
-    const group = groups.find((candidate) => articleFitsGroup(article, candidate));
-    if (group) {
-      group.articles = [...group.articles, article].sort(sortArticles);
-      group.primary = group.articles[0]!;
-      group.sourceLabels = sourceLabelsFor(group.articles);
-      group.bundle = bundleFor(group.articles);
+    const candidateGroups = groups.filter((candidate) => articleFitsGroup(article, candidate));
+    if (candidateGroups.length > 0) {
+      const mergeableGroups = mergeCandidateGroups(article, candidateGroups);
+      const mergeableGroupIds = new Set(mergeableGroups.map((candidate) => candidate.id));
+      const mergedGroupId = mergeableGroups[0]?.id ?? groupId(article);
+      const mergedGroup = groupFromArticles(mergedGroupId, [
+        article,
+        ...mergeableGroups.flatMap((candidate) => candidate.articles),
+      ]);
+      groups.splice(
+        0,
+        groups.length,
+        ...groups.filter((candidate) => !mergeableGroupIds.has(candidate.id)),
+        mergedGroup,
+      );
       return;
     }
     groups.push({
@@ -669,6 +709,26 @@ export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
   });
 
   return groups.sort((left, right) => sortArticles(left.primary, right.primary));
+}
+
+export function cityPulseStoryFromGroup(group: HomeArticleGroup): CityPulseStory {
+  return {
+    id: group.id,
+    primaryArticleId: group.primary.id,
+    articleIds: group.articles.map((article) => article.id),
+    primary: group.primary,
+    articles: group.articles,
+    sourceLabels: group.sourceLabels,
+    sourceCount: group.sourceLabels.length,
+    updateCount: group.articles.length,
+    latestAt: group.primary.publishedAt,
+    category: group.primary.category,
+    ...(group.bundle ? { coverageBundle: group.bundle } : {}),
+  };
+}
+
+export function buildCityPulseStories(articles: Article[]): CityPulseStory[] {
+  return groupHomeArticles(articles).map(cityPulseStoryFromGroup);
 }
 
 function coverageBundlesCompatible(left: Article, right: Article): boolean {
@@ -684,6 +744,43 @@ function stableBundleArticleId(articles: Article[]): string {
     (left, right) =>
       left.publishedAt.localeCompare(right.publishedAt) || left.id.localeCompare(right.id),
   )[0]!.id;
+}
+
+function reusableCoverageBundleId(articles: Article[]): string | undefined {
+  const candidates = new Map<
+    string,
+    { id: string; generatedAt: string; memberCount: number; articles: Article[] }
+  >();
+
+  for (const article of articles) {
+    const bundle = article.coverageBundle;
+    if (!bundle?.id || bundle.id.startsWith("coverage:situation:")) continue;
+    const candidate = candidates.get(bundle.id) ?? {
+      id: bundle.id,
+      generatedAt: bundle.generatedAt,
+      memberCount: 0,
+      articles: [],
+    };
+    candidate.memberCount += 1;
+    candidate.articles.push(article);
+    if (bundle.generatedAt < candidate.generatedAt) candidate.generatedAt = bundle.generatedAt;
+    candidates.set(bundle.id, candidate);
+  }
+
+  return [...candidates.values()]
+    .filter((candidate) =>
+      candidate.articles.every((left, leftIndex) =>
+        candidate.articles
+          .slice(leftIndex + 1)
+          .every((right) => !coverageBundlesStale(left, right)),
+      ),
+    )
+    .sort(
+      (left, right) =>
+        right.memberCount - left.memberCount ||
+        left.generatedAt.localeCompare(right.generatedAt) ||
+        left.id.localeCompare(right.id),
+    )[0]?.id;
 }
 
 function hashBundleParts(parts: string[]): string {
@@ -725,6 +822,8 @@ function groupReason(kind: ArticleCoverageBundleKind, articles: Article[]): stri
 function coverageBundleId(articles: Article[]): string {
   const situationId = articles.find((article) => article.situationId)?.situationId;
   if (situationId) return `coverage:situation:${situationId}`;
+  const reusableId = reusableCoverageBundleId(articles);
+  if (reusableId) return reusableId;
   const anchor = stableBundleArticleId(articles);
   return `coverage:${hashBundleParts([anchor])}`;
 }

@@ -10,7 +10,7 @@ const briefing: CommandCenterBriefingPayload = {
     generatedAt: "2026-07-02T07:00:00.000Z",
     title: "Morgenbrief",
     mode: "ai_assisted",
-    sourceLine: "AI-assistert · 1/2 kilder OK",
+    sourceLine: "Automatisk analyse · 1/2 kilder OK",
     paragraphs: [
       "Trafikken er rolig, men beredskap følger lokale hendelser.",
       "En sak om Lade følges av flere redaksjoner.",
@@ -124,7 +124,7 @@ const briefing: CommandCenterBriefingPayload = {
 };
 
 describe("CommandBriefingDashboard", () => {
-  it("renders the owner briefing review with AI traceability and support context", () => {
+  it("renders the owner briefing review with analysis traceability and support context", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <CommandBriefingDashboard briefing={briefing} />
@@ -134,10 +134,12 @@ describe("CommandBriefingDashboard", () => {
     expect(html).toContain("Brief-revisjon");
     expect(html).toContain("Modulært kommandosenter");
     expect(html).toContain("Brief-arbeidsflate");
-    expect(html).toContain("Dashboard-oppsett");
-    expect(html).toContain("Publisert bypuls layout");
-    expect(html).toContain("Endre størrelse på AI-spor");
-    expect(html).toContain("AI-assistert");
+    expect(html).toContain("Tilpass oppsett");
+    expect(html).not.toContain("Dashboard-oppsett");
+    expect(html).toContain("Publisert bypuls");
+    expect(html).not.toContain("Endre størrelse på Analysespor");
+    expect(html).toContain("Analysekjøring");
+    expect(html).toContain("Automatisk analyse");
     expect(html).toContain("deepseek-v4-flash");
     expect(html).toContain("Kun morgenbrief");
     expect(html).toContain("Kompakt gjenoppretting feilet");
@@ -145,6 +147,9 @@ describe("CommandBriefingDashboard", () => {
     expect(html).toContain("Hendelse på Lade");
     expect(html).toContain("Flere kilder omtaler samme hendelse");
     expect(html).toContain("AI-analyse");
+    expect(html).toContain("Signalene analysen flagget");
+    expect(html).not.toContain("Signalene DeepSeek flagget");
+    expect(html).not.toContain("AI-operatørnotater");
     expect(html).not.toContain("Slå sammen");
     expect(html).not.toContain("Godkjenn brief");
   });

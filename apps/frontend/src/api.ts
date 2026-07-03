@@ -9,6 +9,7 @@ import type {
   ArticlePage,
   ArticleTopic,
   BootstrapPayload,
+  CityPulseStoryPage,
   CommandCenterBriefingPayload,
   CommandCenterSpatialAnalyticsPayload,
   CommandCenterSpatialAnalyticsQueryInput,
@@ -202,6 +203,24 @@ export const api = {
       if (value && value !== "Alle") parameters.set(key, String(value));
     }
     return request<ArticlePage>(`/api/articles?${parameters.toString()}`);
+  },
+  cityPulseStories: (
+    query: {
+      scope?: string;
+      category?: string;
+      topic?: ArticleTopic;
+      q?: string;
+      from?: string;
+      to?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+  ) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value && value !== "Alle") parameters.set(key, String(value));
+    }
+    return request<CityPulseStoryPage>(`/api/city-pulse/stories?${parameters.toString()}`);
   },
   worldCupDashboard: () => request<WorldCupDashboardPayload>("/api/sport/world-cup"),
   sourceItems: (query: SourceItemFilters = {}) => {

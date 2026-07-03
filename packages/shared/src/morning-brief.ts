@@ -108,7 +108,7 @@ function situationSentence(situations: HomeSituationSummary[]): string {
 function sourceLine(sourceHealth: SourceHealth[], mode: MorningBrief["mode"]): string {
   const okCount = sourceHealth.filter((source) => source.state === "ok").length;
   const total = sourceHealth.length;
-  const modeText = mode === "ai_assisted" ? "AI-assistert" : "Deterministisk reserve";
+  const modeText = mode === "ai_assisted" ? "Automatisk analyse" : "Deterministisk reserve";
   return `${modeText} · ${okCount}/${total} kilder OK`;
 }
 

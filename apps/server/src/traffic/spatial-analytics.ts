@@ -203,6 +203,11 @@ function delayEvidence(
   articleTitles: Map<string, string>,
 ): string[] {
   const evidence = [`DATEX reisetid: ${delayMinutes(candidate.delaySeconds) ?? "ukjent"} min`];
+  evidence.push(
+    candidate.explanationStatus === "unlinked_news_match"
+      ? "Nyhetsstatus: trafikk omtales, men er ikke koblet til korridoren"
+      : "Nyhetsstatus: ingen relevant nyhet funnet",
+  );
   if (candidate.matchedArticleIds.length > 0) {
     const titles = candidate.matchedArticleIds
       .flatMap((id) => {
@@ -290,6 +295,8 @@ export function buildUnexplainedDelayCandidates(
         .filter((article) => likelyMatchesCorridor(article, impact.name))
         .slice(0, 8)
         .map((article) => article.id);
+      const explanationStatus: UnexplainedDelayCandidate["explanationStatus"] =
+        matchedArticleIds.length > 0 ? "unlinked_news_match" : "no_news_match";
       const minutes = delayMinutes(travelTime.delaySeconds);
       const confidence = confidenceForDelay(travelTime.delaySeconds, travelTime.state);
       const reason = matchedArticleIds.length
@@ -309,6 +316,7 @@ export function buildUnexplainedDelayCandidates(
           ...(travelTime.delayRatio !== undefined ? { delayRatio: travelTime.delayRatio } : {}),
           updatedAt: travelTime.measurementTo ?? travelTime.updatedAt,
           sourceUrl: travelTime.sourceUrl,
+          explanationStatus,
           matchedArticleIds,
           affectedEventIds: impact.affectedEventIds,
           confidence,

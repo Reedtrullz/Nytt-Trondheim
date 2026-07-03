@@ -18,6 +18,7 @@ import type {
   SourceHealth,
   SourceId,
 } from "./types.js";
+import type { SpatialInvestigationQueueItem, SpatialRawDataRef } from "./traffic-map.js";
 import { sourceConfidenceLabels } from "./types.js";
 import { sourceMixConfidenceSummary } from "./source-confidence.js";
 import { sourceIdLabel } from "./source-labels.js";
@@ -39,6 +40,7 @@ export interface PublicNotificationTriggerGuidance {
 export interface BuildNotificationTriggersInput {
   situations: Situation[];
   articles: Article[];
+  spatialInvestigationItems?: SpatialInvestigationQueueItem[];
   generatedAt: string;
   filters?: NotificationTriggerQuery;
 }
@@ -834,6 +836,115 @@ function articleCandidate(
   };
 }
 
+function spatialSeverity(
+  priority: SpatialInvestigationQueueItem["priority"],
+): NotificationTriggerSeverity {
+  if (priority === "critical") return "critical";
+  if (priority === "high") return "warning";
+  return "watch";
+}
+
+function spatialScore(
+  item: SpatialInvestigationQueueItem,
+  severity: NotificationTriggerSeverity,
+  generatedAt: string,
+): number {
+  const priorityScore = item.priority === "critical" ? 0.72 : item.priority === "high" ? 0.62 : 0.5;
+  const confidenceScore =
+    item.sourceConfidence?.score ??
+    confidenceLevelScore[item.sourceConfidence?.level ?? "uncertain"];
+  return clampScore(
+    priorityScore +
+      confidenceScore * 0.18 +
+      (severity === "critical" ? 0.05 : 0) +
+      recencyBoost(item.updatedAt, generatedAt),
+  );
+}
+
+function spatialRawRefSourceId(ref: SpatialRawDataRef): SourceId {
+  return ref.source;
+}
+
+function spatialSourceIds(item: SpatialInvestigationQueueItem): SourceId[] {
+  return unique((item.rawRefs ?? []).map(spatialRawRefSourceId));
+}
+
+function spatialSourceLabels(item: SpatialInvestigationQueueItem): string[] {
+  return unique(
+    item.rawRefs?.length
+      ? item.rawRefs.map((ref) => ref.label || sourceIdLabel(spatialRawRefSourceId(ref)))
+      : item.sourceConfidence?.sourceCount
+        ? ["Romlig analyse"]
+        : [],
+  );
+}
+
+function rawTelemetryTraceLinks(rawRefs: SpatialRawDataRef[] = []): OperationsTimelineEventLink[] {
+  return rawRefs.slice(0, 8).map((ref) => {
+    const sourceId = spatialRawRefSourceId(ref);
+    return {
+      kind: "source_item",
+      label: `Rådata: ${ref.label || sourceIdLabel(sourceId)}`,
+      href: `/command/radata?telemetrySource=${encodeURIComponent(ref.source)}&telemetryId=${encodeURIComponent(ref.id)}`,
+      sourceId,
+      sourceItemId: `telemetry:${ref.source}:${ref.id}`,
+    };
+  });
+}
+
+function spatialCandidate(
+  item: SpatialInvestigationQueueItem,
+  generatedAt: string,
+): NotificationTriggerCandidate | undefined {
+  if (item.kind === "hotspot") return undefined;
+  const severity = spatialSeverity(item.priority);
+  const score = spatialScore(item, severity, generatedAt);
+  if (score < 0.58) return undefined;
+
+  const sourceIds = spatialSourceIds(item);
+  const matchedKeywords =
+    item.kind === "unexplained_delay" ? ["uforklart forsinkelse"] : ["trafikkdata-avvik"];
+  const confidence =
+    item.sourceConfidence ?? confidenceFromScore(score, sourceIds.length, generatedAt);
+
+  return {
+    id: `notification:spatial:${item.id}`,
+    kind: "traffic_disruption",
+    severity,
+    deliveryState: "candidate_only",
+    title: item.title,
+    body: item.summary,
+    detail: "Romlig analyse har flagget et trafikkavvik for operatørvurdering.",
+    score,
+    confidence,
+    generatedAt,
+    eventUpdatedAt: item.updatedAt,
+    articleIds: item.articleIds,
+    sourceIds,
+    sourceLabels: spatialSourceLabels(item),
+    matchedKeywords,
+    reasons: [
+      "Romlig analyse kobler telemetri, trafikkbilde og nyhetsdekning.",
+      item.reason,
+      ...item.evidence.slice(0, 4),
+    ],
+    links: [
+      ...sourceAuditLinksForSources(sourceIds),
+      ...rawTelemetryTraceLinks(item.rawRefs),
+      ...(item.targetUrl
+        ? [{ kind: "external" as const, label: "Åpne ekstern kilde", href: item.targetUrl }]
+        : []),
+    ],
+    publicSurface: {
+      state: "hidden",
+      label: "Kun Command Center",
+      detail: "Dette er et romlig operatørsignal og vises ikke direkte på City Pulse.",
+      reason:
+        "Telemetriavvik krever manuell kontroll mot trafikkart, nyheter og offisielle hendelser før offentlig varsel.",
+    },
+  };
+}
+
 function candidateMatchesQuery(
   candidate: NotificationTriggerCandidate,
   filters: NotificationTriggerQuery,
@@ -1041,6 +1152,14 @@ export function buildNotificationTriggerPage(
   for (const situation of input.situations) {
     const relatedArticles = articlesForSituation.get(situation.id) ?? [];
     const candidate = situationCandidate(situation, relatedArticles, input.generatedAt);
+    if (!candidate) continue;
+    for (const articleId of candidate.articleIds) coveredArticleIds.add(articleId);
+    candidates.push(candidate);
+  }
+
+  for (const item of input.spatialInvestigationItems ?? []) {
+    if (item.articleIds.some((articleId) => coveredArticleIds.has(articleId))) continue;
+    const candidate = spatialCandidate(item, input.generatedAt);
     if (!candidate) continue;
     for (const articleId of candidate.articleIds) coveredArticleIds.add(articleId);
     candidates.push(candidate);

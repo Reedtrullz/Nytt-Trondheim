@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
+  AiAnalysisAttemptDiagnostics,
   AiAnalysisProfile,
   AiProcessingRunDiagnostics,
   RawInspectorAiRunDetail,
@@ -167,6 +168,217 @@ function aiProfileLabel(diagnostics?: AiProcessingRunDiagnostics) {
   return diagnostics ? aiProfileLabels[diagnostics.profile] : "Ukjent profil";
 }
 
+function bytesLabel(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${kilobytes.toFixed(kilobytes >= 10 ? 0 : 1)} kB`;
+  const megabytes = kilobytes / 1024;
+  return `${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB`;
+}
+
+function aiAttemptLabel(attempt: AiAnalysisAttemptDiagnostics) {
+  return `${aiProfileLabels[attempt.profile]} ${attempt.status === "ok" ? "OK" : "feilet"}`;
+}
+
+function aiAttemptScopeLabel(attempt: AiAnalysisAttemptDiagnostics) {
+  return `${attempt.articleCount} saker / ${attempt.situationCount} situasjoner`;
+}
+
+function aiRunDiagnosticsCopy(run: RawInspectorAiRunDetail) {
+  const attempts = run.diagnostics?.attempts ?? [];
+  const failedAttempts = attempts.filter((attempt) => attempt.status === "failed");
+  const firstFailedAttempt = failedAttempts[0];
+  const successfulAttempt = [...attempts].reverse().find((attempt) => attempt.status === "ok");
+
+  if (run.status === "disabled") {
+    return {
+      title: "AI er avslått",
+      detail: "Deterministisk analyse brukes uten AI-resultat for denne kjøringen.",
+    };
+  }
+
+  if (run.status === "degraded" && firstFailedAttempt && successfulAttempt) {
+    return {
+      title: "Reserveanalyse brukt",
+      detail: `${aiAttemptLabel(firstFailedAttempt)}, ${aiProfileLabels[
+        successfulAttempt.profile
+      ].toLowerCase()} fullførte.`,
+    };
+  }
+
+  if (run.status === "degraded" || failedAttempts.length > 0) {
+    return {
+      title: "AI-resultat trenger tilsyn",
+      detail:
+        "AI feilet eller leverte et ufullstendig resultat. Deterministisk gruppering er fortsatt tilgjengelig.",
+    };
+  }
+
+  return {
+    title: "AI-kjøringen fullførte",
+    detail: successfulAttempt
+      ? `${aiProfileLabels[successfulAttempt.profile]} fullførte analysen.`
+      : "Ingen avvik registrert i diagnostikken.",
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function arrayField(value: Record<string, unknown>, key: string): unknown[] {
+  const field = value[key];
+  return Array.isArray(field) ? field : [];
+}
+
+function morningBriefParagraphCount(result: Record<string, unknown>) {
+  const morningBrief = result.morningBrief;
+  if (!isRecord(morningBrief)) return 0;
+  return arrayField(morningBrief, "paragraphs").length;
+}
+
+function citedClaimCount(items: unknown[]) {
+  return items.reduce<number>((count, item) => {
+    if (!isRecord(item)) return count;
+    return count + arrayField(item, "citedClaims").length;
+  }, 0);
+}
+
+function aiDecisionSummary(run: RawInspectorAiRunDetail) {
+  const result: Record<string, unknown> = isRecord(run.result) ? run.result : {};
+  const clusters = arrayField(result, "clusters");
+  const situationUpdates = arrayField(result, "situationUpdates");
+  const bundleHints = arrayField(result, "bundleHints");
+  const categoryHints = arrayField(result, "categoryHints");
+  const relevanceHints = arrayField(result, "relevanceHints");
+  const operationsNotes = arrayField(result, "operationsNotes");
+  const paragraphs = morningBriefParagraphCount(result);
+  const citedClaims =
+    citedClaimCount(clusters) +
+    citedClaimCount(situationUpdates) +
+    citedClaimCount(bundleHints) +
+    citedClaimCount(operationsNotes);
+
+  return {
+    total:
+      paragraphs +
+      clusters.length +
+      situationUpdates.length +
+      bundleHints.length +
+      categoryHints.length +
+      relevanceHints.length +
+      operationsNotes.length,
+    rows: [
+      {
+        label: "Morgenbrief",
+        value: paragraphs,
+        unit: paragraphs === 1 ? "avsnitt" : "avsnitt",
+      },
+      {
+        label: "Hendelsesklynger",
+        value: clusters.length,
+        unit: clusters.length === 1 ? "klynge" : "klynger",
+      },
+      {
+        label: "Situasjonskoblinger",
+        value: situationUpdates.length,
+        unit: situationUpdates.length === 1 ? "oppdatering" : "oppdateringer",
+      },
+      {
+        label: "Dekningshint",
+        value: bundleHints.length,
+        unit: bundleHints.length === 1 ? "hint" : "hint",
+      },
+      {
+        label: "Kategori/relevans",
+        value: categoryHints.length + relevanceHints.length,
+        unit: "hint",
+      },
+      {
+        label: "Operatørnotater",
+        value: operationsNotes.length,
+        unit: operationsNotes.length === 1 ? "notat" : "notater",
+      },
+      {
+        label: "Siterte påstander",
+        value: citedClaims,
+        unit: citedClaims === 1 ? "spor" : "spor",
+      },
+    ],
+  };
+}
+
+function AiDecisionSummaryPanel({ run }: { run: RawInspectorAiRunDetail }) {
+  const summary = aiDecisionSummary(run);
+  return (
+    <section className="raw-ai-decision-summary" aria-label="Analysebeslutninger">
+      <div>
+        <h3>Analysebeslutninger</h3>
+        <p>Strukturert oppsummering av hva den sanitiserte analyseresponsen faktisk foreslo.</p>
+      </div>
+      {summary.total === 0 ? (
+        <p className="raw-inspector-empty">
+          Ingen strukturerte analysebeslutninger er lagret i resultatpayloaden.
+        </p>
+      ) : (
+        <dl>
+          {summary.rows.map((row) => (
+            <div key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>
+                {row.value} {row.unit}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
+}
+
+function AiRunDiagnosticsPanel({ run }: { run: RawInspectorAiRunDetail }) {
+  const copy = aiRunDiagnosticsCopy(run);
+  const attempts = run.diagnostics?.attempts ?? [];
+
+  return (
+    <section className="raw-ai-diagnostics">
+      <div className="raw-ai-diagnostics-header">
+        <div>
+          <h3>AI-spor og reserveflyt</h3>
+          <p>{copy.detail}</p>
+        </div>
+        <strong>{copy.title}</strong>
+      </div>
+      {attempts.length > 0 ? (
+        <ol className="raw-ai-attempt-list">
+          {attempts.map((attempt, index) => (
+            <li
+              className={`raw-ai-attempt raw-ai-attempt-${attempt.status}`}
+              key={`${attempt.profile}-${index}`}
+            >
+              <div>
+                <strong>{aiAttemptLabel(attempt)}</strong>
+                <span>{aiAttemptScopeLabel(attempt)}</span>
+              </div>
+              <div>
+                <span>{attempt.maxTokens} maks tokens</span>
+                {attempt.error ? <span>{attempt.error}</span> : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="raw-inspector-empty">Ingen forsøk er lagret for denne kjøringen.</p>
+      )}
+      <p className="raw-ai-artifacts">
+        Sanitert resultat: {bytesLabel(run.resultBytes)}
+        {run.redacted ? " · redigert" : ""}
+        {run.truncated ? " · forkortet" : ""}
+      </p>
+    </section>
+  );
+}
+
 function PayloadPanel({ title, value, note }: { title: string; value: unknown; note?: string }) {
   return (
     <section className="raw-inspector-payload">
@@ -256,6 +468,7 @@ export function RawDataInspectorDashboard({
       </header>
       <DashboardGrid
         ariaLabel="Rådata-inspektør-moduler"
+        configMode="toggle"
         description="Dra og størrelsesjuster filter, lister og payload-detaljer for kildegransking."
         label="Modulært kommandosenter"
         storageKey="nytt-raw-inspector-dashboard-v1"
@@ -660,29 +873,16 @@ export function RawDataInspectorDashboard({
                           <dt>Profil</dt>
                           <dd>{aiProfileLabel(selectedAiRun.diagnostics)}</dd>
                         </div>
-                        {selectedAiRun.diagnostics ? (
-                          <div>
-                            <dt>Forsøk</dt>
-                            <dd>
-                              {selectedAiRun.diagnostics.attempts
-                                .map(
-                                  (attempt) =>
-                                    `${aiProfileLabels[attempt.profile]} ${
-                                      attempt.status === "ok" ? "OK" : "feilet"
-                                    } (${attempt.articleCount}/${attempt.situationCount})`,
-                                )
-                                .join(", ")}
-                            </dd>
-                          </div>
-                        ) : null}
                       </dl>
                       {selectedAiRun.error ? (
                         <p className="raw-inspector-error">{selectedAiRun.error}</p>
                       ) : null}
+                      <AiRunDiagnosticsPanel run={selectedAiRun} />
+                      <AiDecisionSummaryPanel run={selectedAiRun} />
                       <PayloadPanel
                         title="AI-resultat"
                         value={selectedAiRun.result}
-                        note={`${Math.round(selectedAiRun.resultBytes / 1024)} kB etter sanitering`}
+                        note={`${bytesLabel(selectedAiRun.resultBytes)} etter sanitering`}
                       />
                     </>
                   ) : (

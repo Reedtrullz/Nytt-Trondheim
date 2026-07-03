@@ -43,6 +43,11 @@ const confidenceLabels: Record<UnexplainedDelayCandidate["confidence"], string> 
   critical: "Kritisk",
 };
 
+const delayExplanationLabels: Record<UnexplainedDelayCandidate["explanationStatus"], string> = {
+  no_news_match: "Ingen nyhetsforklaring",
+  unlinked_news_match: "Nyhet omtaler trafikk, men er ikke koblet",
+};
+
 type HotspotPriority = "watch" | "high" | "critical";
 type InvestigationPriority = SpatialInvestigationQueueItem["priority"];
 
@@ -64,6 +69,12 @@ const investigationKindLabels: Record<SpatialInvestigationQueueItem["kind"], str
   traffic_counter_anomaly: "Trafikkdata-avvik",
 };
 
+const liveStatusLabels: Record<CommandCenterSpatialAnalyticsPayload["live"]["status"], string> = {
+  live: "Live",
+  stale: "Treg",
+  empty: "Tomt vindu",
+};
+
 const severityLabels: Record<NonNullable<SpatialHeatmapCell["maxSeverity"]>, string> = {
   low: "lav",
   medium: "middels",
@@ -80,6 +91,12 @@ const hotspotPriorityRank: Record<HotspotPriority, number> = {
 const delayPriorityRank: Record<UnexplainedDelayCandidate["confidence"], number> = {
   watch: 0,
   warning: 1,
+  critical: 2,
+};
+
+const investigationPriorityRank: Record<InvestigationPriority, number> = {
+  watch: 0,
+  high: 1,
   critical: 2,
 };
 
@@ -112,6 +129,18 @@ export function spatialAnalyticsFiltersForTimeWindow(
   return {
     from: from.toISOString(),
     to: to.toISOString(),
+  };
+}
+
+export function spatialAnalyticsLiveFilters(
+  filters: SpatialAnalyticsFilters,
+  base: Date = new Date(),
+): SpatialAnalyticsFilters {
+  const window = spatialTimeWindowForFilters(filters);
+  if (window === "all") return filters;
+  return {
+    ...filters,
+    ...spatialAnalyticsFiltersForTimeWindow(window, base),
   };
 }
 
@@ -283,6 +312,24 @@ function compareDelayCandidates(left: UnexplainedDelayCandidate, right: Unexplai
   return left.id.localeCompare(right.id);
 }
 
+function compareInvestigationItems(
+  left: SpatialInvestigationQueueItem,
+  right: SpatialInvestigationQueueItem,
+) {
+  const priorityDifference =
+    investigationPriorityRank[right.priority] - investigationPriorityRank[left.priority];
+  if (priorityDifference !== 0) return priorityDifference;
+
+  const confidenceDifference =
+    (right.sourceConfidence?.score ?? 0) - (left.sourceConfidence?.score ?? 0);
+  if (confidenceDifference !== 0) return confidenceDifference;
+
+  const recencyDifference = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  if (recencyDifference !== 0 && Number.isFinite(recencyDifference)) return recencyDifference;
+
+  return left.id.localeCompare(right.id);
+}
+
 function parseFilters(search: string): SpatialAnalyticsFilters {
   const parameters = new URLSearchParams(search);
   const from = parameters.get("from") || undefined;
@@ -429,6 +476,110 @@ function RawTelemetryLinks({ rawRefs }: { rawRefs?: SpatialRawDataRef[] }) {
   );
 }
 
+function itemHasRawEvidence(item: SpatialInvestigationQueueItem) {
+  return item.sourceItemIds.length > 0 || (item.rawRefs?.length ?? 0) > 0;
+}
+
+function rawEvidenceCount(items: SpatialInvestigationQueueItem[]) {
+  return items.reduce((total, item) => {
+    return total + item.sourceItemIds.length + (item.rawRefs?.length ?? 0);
+  }, 0);
+}
+
+function crossSourceInvestigationCount(items: SpatialInvestigationQueueItem[]) {
+  return items.filter((item) => item.articleIds.length > 0 && itemHasRawEvidence(item)).length;
+}
+
+function prioritySummary(items: SpatialInvestigationQueueItem[]) {
+  const critical = items.filter((item) => item.priority === "critical").length;
+  const high = items.filter((item) => item.priority === "high").length;
+  if (critical > 0) return `${critical} kritisk${critical === 1 ? "" : "e"}`;
+  if (high > 0) return `${high} høyprioritert${high === 1 ? "" : "e"}`;
+  return items.length > 0 ? `${items.length} følger med` : "Ingen prioritet";
+}
+
+function SpatialCorrelationBrief({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
+  const rankedItems = [...payload.investigationQueue].sort(compareInvestigationItems);
+  const topItems = rankedItems.slice(0, 3);
+  const trustedCount = trustedSignalCount(payload);
+  const uncertainCount =
+    payload.summary.bySourceConfidence.uncertain + payload.summary.bySourceConfidence.speculative;
+
+  return (
+    <section className="spatial-correlation-brief" aria-labelledby="spatial-brief-heading">
+      <div className="spatial-section-heading">
+        <div>
+          <p className="label">Korrelasjonsbrief</p>
+          <h2 id="spatial-brief-heading">Hva krever oppfølging nå?</h2>
+        </div>
+        <span>{payload.investigationQueue.length} signaler</span>
+      </div>
+      <div className="spatial-correlation-metrics">
+        <article>
+          <span>Operatørprioritet</span>
+          <strong>{prioritySummary(payload.investigationQueue)}</strong>
+          <small>{payload.investigationQueue.length} signaler i køen</small>
+        </article>
+        <article>
+          <span>Tverrkilde</span>
+          <strong>{crossSourceInvestigationCount(payload.investigationQueue)}</strong>
+          <small>nyhet + rådata/offisiell kontekst</small>
+        </article>
+        <article>
+          <span>Råspor</span>
+          <strong>{rawEvidenceCount(payload.investigationQueue)}</strong>
+          <small>kilde- og telemetrispor</small>
+        </article>
+        <article>
+          <span>Tillit</span>
+          <strong>{trustedCount}</strong>
+          <small>{uncertainCount} usikre signaler</small>
+        </article>
+      </div>
+      {topItems.length === 0 ? (
+        <p className="spatial-empty-state">
+          Ingen romlige signaler krever operatøroppfølging i dette analysevinduet.
+        </p>
+      ) : (
+        <ol className="spatial-correlation-list">
+          {topItems.map((item) => (
+            <li className={`priority-${item.priority}`} key={item.id}>
+              <div>
+                <p className={`spatial-hotspot-priority priority-${item.priority}`}>
+                  {investigationPriorityLabels[item.priority]} ·{" "}
+                  {investigationKindLabels[item.kind]}
+                </p>
+                <strong>{item.title}</strong>
+                {item.sourceConfidence ? (
+                  <span
+                    className={`spatial-hotspot-confidence confidence-${item.sourceConfidence.level}`}
+                  >
+                    {item.sourceConfidence.label} tillit ·{" "}
+                    {confidenceScoreLabel(item.sourceConfidence)}
+                  </span>
+                ) : null}
+                <small>{item.reason}</small>
+              </div>
+              <div className="spatial-correlation-evidence">
+                {item.evidence.slice(0, 3).map((evidence) => (
+                  <span key={evidence}>{evidence}</span>
+                ))}
+              </div>
+              <div className="spatial-investigation-actions">
+                {item.articleIds.length > 0 ? (
+                  <span>{item.articleIds.length} mulige saker</span>
+                ) : null}
+                <SourceItemLinks sourceItemIds={item.sourceItemIds} />
+                <RawTelemetryLinks rawRefs={item.rawRefs} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
   return (
     <div className="spatial-analytics-map">
@@ -496,6 +647,7 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
                     {confidence.label} tillit · {confidenceScoreLabel(confidence)}
                   </p>
                   <p>{delayText(candidate.delaySeconds)}</p>
+                  <p>{delayExplanationLabels[candidate.explanationStatus]}</p>
                   <p>{candidate.reason}</p>
                   <p>{confidence.rationale}</p>
                   <RawTelemetryLinks rawRefs={candidate.rawRefs} />
@@ -565,6 +717,10 @@ function DelayCandidateRow({ candidate }: { candidate: UnexplainedDelayCandidate
         <div>
           <dt>Målt</dt>
           <dd>{time(candidate.updatedAt)}</dd>
+        </div>
+        <div>
+          <dt>Forklaring</dt>
+          <dd>{delayExplanationLabels[candidate.explanationStatus]}</dd>
         </div>
         <div>
           <dt>Mulige saker</dt>
@@ -892,15 +1048,36 @@ function HeatmapCellsSection({ cells }: { cells: SpatialHeatmapCell[] }) {
   );
 }
 
+function SpatialLiveStatus({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
+  const live = payload.live;
+  const refreshMinutes = Math.max(1, Math.round(live.refreshIntervalSeconds / 60));
+  return (
+    <aside className={`spatial-live-status live-${live.status}`} aria-label="Live status">
+      <span>{liveStatusLabels[live.status]}</span>
+      <strong>{live.detail}</strong>
+      <small>
+        {live.dataUpdatedAt ? `Datagrunnlag ${time(live.dataUpdatedAt)}` : "Ingen siste signal"}
+      </small>
+      <small>
+        Neste automatiske oppdatering {time(live.nextRefreshAt)} · hvert {refreshMinutes} min
+      </small>
+    </aside>
+  );
+}
+
 export function SpatialAnalyticsDashboard({
   payload,
   filters,
   onFiltersChange,
+  isRefreshing = false,
+  onRefresh,
   showMap = true,
 }: {
   payload: CommandCenterSpatialAnalyticsPayload;
   filters: SpatialAnalyticsFilters;
   onFiltersChange: (filters: SpatialAnalyticsFilters) => void;
+  isRefreshing?: boolean;
+  onRefresh?: () => void;
   showMap?: boolean;
 }) {
   const rankedHeatmapCells = useMemo(
@@ -940,6 +1117,13 @@ export function SpatialAnalyticsDashboard({
         description: "Prioritert kø for operatøroppfølging.",
         defaultSize: "large",
         children: <InvestigationQueueSection payload={payload} />,
+      },
+      {
+        id: "correlation-brief",
+        title: "Korrelasjonsbrief",
+        description: "Operatørprioritet, råspor og tverrkilde-signaler.",
+        defaultSize: "large",
+        children: <SpatialCorrelationBrief payload={payload} />,
       },
     ];
     if (showMap) {
@@ -1001,7 +1185,13 @@ export function SpatialAnalyticsDashboard({
           <h1>Romlig analyse</h1>
           <p>Siste beregning {time(payload.generatedAt)}</p>
         </div>
+        <SpatialLiveStatus payload={payload} />
         <div className="coverage-bundles-actions">
+          {onRefresh ? (
+            <button disabled={isRefreshing} onClick={onRefresh} type="button">
+              {isRefreshing ? "Oppdaterer..." : "Oppdater nå"}
+            </button>
+          ) : null}
           <Link to="/command">Kommandosenter</Link>
           <Link to="/command/tidslinje">Tidslinje</Link>
           <Link to="/command/radata">Rådata</Link>
@@ -1031,6 +1221,7 @@ export function SpatialAnalyticsDashboard({
       </section>
       <DashboardGrid
         ariaLabel="Romlig analysemoduler"
+        configMode="toggle"
         description="Dra og størrelsesjuster romlige analysemoduler for dagens operatørarbeid."
         label="Modulært kommandosenter"
         storageKey="nytt-spatial-analytics-dashboard-v1"
@@ -1048,22 +1239,38 @@ export function SpatialAnalyticsPage() {
   const [payload, setPayload] = useState<CommandCenterSpatialAnalyticsPayload>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     let ignore = false;
     setError(undefined);
+    setRefreshing(true);
     api
-      .spatialAnalytics(filters)
+      .spatialAnalytics(spatialAnalyticsLiveFilters(filters))
       .then((nextPayload) => {
         if (!ignore) setPayload(nextPayload);
       })
       .catch((reason: Error) => {
         if (!ignore) setError(reason.message);
+      })
+      .finally(() => {
+        if (!ignore) setRefreshing(false);
       });
     return () => {
       ignore = true;
     };
   }, [attempt, filters]);
+
+  useEffect(() => {
+    if (!payload) return;
+    const intervalSeconds = Math.max(15, payload.live.refreshIntervalSeconds);
+    const timer = window.setTimeout(() => {
+      setAttempt((value) => value + 1);
+    }, intervalSeconds * 1000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [payload?.generatedAt, payload?.live.refreshIntervalSeconds]);
 
   function updateFilters(nextFilters: SpatialAnalyticsFilters) {
     setSearchParams(buildSearch(nextFilters), { replace: true });
@@ -1092,6 +1299,8 @@ export function SpatialAnalyticsPage() {
   return (
     <SpatialAnalyticsDashboard
       filters={filters}
+      isRefreshing={refreshing}
+      onRefresh={() => setAttempt((value) => value + 1)}
       onFiltersChange={updateFilters}
       payload={payload}
     />

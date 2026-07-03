@@ -1274,7 +1274,8 @@ export interface SituationWorkspace {
 
 export interface BootstrapPayload {
   articles: Article[];
-  articleNextCursor?: string;
+  stories?: CityPulseStory[];
+  storyNextCursor?: string;
   situations: HomeSituationSummary[];
   sourceHealth: SourceHealth[];
   morningBrief?: MorningBrief;
@@ -1282,6 +1283,26 @@ export interface BootstrapPayload {
 
 export interface ArticlePage {
   items: Article[];
+  nextCursor?: string;
+}
+
+export interface CityPulseStory {
+  id: string;
+  primaryArticleId: string;
+  articleIds: string[];
+  primary: Article;
+  articles: Article[];
+  sourceLabels: string[];
+  sourceCount: number;
+  updateCount: number;
+  latestAt: string;
+  category: ArticleCategory;
+  coverageBundle?: ArticleCoverageBundle;
+  publicVerification?: ArticlePublicVerification;
+}
+
+export interface CityPulseStoryPage {
+  items: CityPulseStory[];
   nextCursor?: string;
 }
 

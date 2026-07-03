@@ -8,6 +8,7 @@ import type {
   WorkspaceNote,
   WorkspaceTask,
 } from "./types.js";
+import { buildCityPulseStories } from "./article-bundles.js";
 import { buildMorningBrief } from "./morning-brief.js";
 
 const now = "2026-05-26T12:26:00.000Z";
@@ -241,6 +242,7 @@ export const sampleSourceHealth: SourceHealth[] = [
 
 export const sampleBootstrap: BootstrapPayload = {
   articles: sampleArticles,
+  stories: buildCityPulseStories(sampleArticles),
   situations: [
     {
       id: sampleSituation.id,

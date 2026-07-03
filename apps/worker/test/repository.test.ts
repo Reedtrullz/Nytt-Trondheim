@@ -224,7 +224,7 @@ describe("WorkerRepository", () => {
       generatedAt: "2026-07-02T07:30:00.000Z",
       title: "Morgenbrief",
       mode: "ai_assisted",
-      sourceLine: "AI-assistert · 5/6 kilder OK",
+      sourceLine: "Automatisk analyse · 5/6 kilder OK",
       paragraphs: [
         "Trondheim starter dagen med trafikk og noen få hendelser.",
         "E6 ved Sluppen peker seg ut som den mest praktiske saken å følge.",

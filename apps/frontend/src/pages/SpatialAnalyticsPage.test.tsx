@@ -17,10 +17,20 @@ vi.mock("react-leaflet", () => ({
 import {
   SpatialAnalyticsDashboard,
   spatialAnalyticsFiltersForTimeWindow,
+  spatialAnalyticsLiveFilters,
 } from "./SpatialAnalyticsPage.js";
 
 const payload: CommandCenterSpatialAnalyticsPayload = {
   generatedAt: "2026-07-02T09:45:00.000Z",
+  live: {
+    status: "live",
+    refreshIntervalSeconds: 60,
+    nextRefreshAt: "2026-07-02T09:46:00.000Z",
+    staleAfterSeconds: 900,
+    dataUpdatedAt: "2026-07-02T09:45:00.000Z",
+    dataAgeSeconds: 0,
+    detail: "Siste romlige signal 1 min siden.",
+  },
   window: {},
   summary: {
     heatmapCells: 2,
@@ -102,6 +112,7 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       updatedAt: "2026-07-02T09:40:00.000Z",
       evidence: [
         "DATEX reisetid: 6 min",
+        "Nyhetsstatus: trafikk omtales, men er ikke koblet til korridoren",
         "Mulige saker: Kø på E6 ved Sluppen",
         "Ingen romlig koblet trafikkhendelse",
       ],
@@ -243,6 +254,7 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       delayRatio: 1.1,
       updatedAt: "2026-07-02T09:44:00.000Z",
       sourceUrl: "https://example.test/datex-weak",
+      explanationStatus: "no_news_match",
       matchedArticleIds: [],
       affectedEventIds: [],
       confidence: "watch",
@@ -279,6 +291,7 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       delayRatio: 1.67,
       updatedAt: "2026-07-02T09:40:00.000Z",
       sourceUrl: "https://example.test/datex",
+      explanationStatus: "unlinked_news_match",
       matchedArticleIds: ["article-one"],
       affectedEventIds: [],
       confidence: "warning",
@@ -330,10 +343,15 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Romlig analyse");
     expect(html).toContain("Modulært kommandosenter");
     expect(html).toContain("Romlig arbeidsflate");
-    expect(html).toContain("Dashboard-oppsett");
+    expect(html).toContain("Live");
+    expect(html).toContain("Siste romlige signal 1 min siden.");
+    expect(html).toContain("Datagrunnlag 2. juli 2026, 11:45");
+    expect(html).toContain("Neste automatiske oppdatering 2. juli 2026, 11:46");
+    expect(html).toContain("Tilpass oppsett");
+    expect(html).not.toContain("Dashboard-oppsett");
     expect(html).toContain("Analysefilter");
-    expect(html).toContain("Signaler å undersøke layout");
-    expect(html).toContain("Endre størrelse på Signaler å undersøke");
+    expect(html).not.toContain("Signaler å undersøke layout");
+    expect(html).not.toContain("Endre størrelse på Signaler å undersøke");
     expect(html).toContain("Tidsrom");
     expect(html).toContain("Siste døgn");
     expect(html).toContain("Analysevindu: Hele tilgjengelige datasett");
@@ -354,12 +372,24 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Operatørkø");
     expect(html).toContain("Signaler å undersøke");
     expect(html).toContain("3 signaler");
+    expect(html).toContain("Korrelasjonsbrief");
+    expect(html).toContain("Hva krever oppfølging nå?");
+    expect(html).toContain("Operatørprioritet");
+    expect(html).toContain("3 høyprioriterte");
+    expect(html).toContain("3 signaler i køen");
+    expect(html).toContain("Tverrkilde");
+    expect(html).toContain("nyhet + rådata/offisiell kontekst");
+    expect(html).toContain("<span>Råspor</span><strong>3</strong>");
+    expect(html).toContain("<small>kilde- og telemetrispor</small>");
+    expect(html).toContain("<span>Tillit</span><strong>3</strong>");
+    expect(html).toContain("<small>1 usikre signaler</small>");
     expect(html).toContain("Høy prioritet · Uforklart forsinkelse");
     expect(html).toContain("Toppdag 2. juli: 4 observasjoner");
     expect(html).toContain("Høy prioritet · Trafikkdata-avvik");
     expect(html).toContain("E6 Sluppen");
     expect(html).toContain("2.8x normal trafikk");
     expect(html).toContain("DATEX reisetid: 6 min");
+    expect(html).toContain("Nyhetsstatus: trafikk omtales, men er ikke koblet til korridoren");
     expect(html).toContain("Mulige saker: Kø på E6 ved Sluppen");
     expect(html).toContain("1 mulige saker");
     expect(html).toContain(
@@ -372,6 +402,8 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Bekreftet/sannsynlig");
     expect(html).toContain("E6 Okstadbakken");
     expect(html).toContain("6 min forsinkelse");
+    expect(html).toContain("Nyhet omtaler trafikk, men er ikke koblet");
+    expect(html).toContain("Ingen nyhetsforklaring");
     expect(html).toContain("Sannsynlig tillit");
     expect(html).toContain("Redaksjonell dekning støttes av kontekstsignaler");
     expect(html).toContain("API-levert kildevurdering");
@@ -442,6 +474,33 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Ingen stedfestede observasjoner");
   });
 
+  it("renders stale live status when the spatial sources lag", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <SpatialAnalyticsDashboard
+          filters={{ minDelaySeconds: 180, limit: 80 }}
+          onFiltersChange={vi.fn()}
+          payload={{
+            ...payload,
+            live: {
+              status: "stale",
+              refreshIntervalSeconds: 60,
+              nextRefreshAt: "2026-07-02T10:01:00.000Z",
+              staleAfterSeconds: 900,
+              dataUpdatedAt: "2026-07-02T09:30:00.000Z",
+              dataAgeSeconds: 1800,
+              detail: "Siste romlige signal 30 min siden; undersøk worker og kildehelse.",
+            },
+          }}
+          showMap={false}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Treg");
+    expect(html).toContain("Siste romlige signal 30 min siden; undersøk worker og kildehelse.");
+  });
+
   it("renders recurrent telemetry patterns as map markers when geometry exists", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
@@ -465,5 +524,33 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Kroppanbrua");
     expect(html).toContain("Sist sett 2. juli 2026");
     expect(html).toContain("5 tydelige signaler · 2 aktive dager");
+  });
+});
+
+describe("spatialAnalyticsLiveFilters", () => {
+  it("keeps all-time filters stable", () => {
+    expect(spatialAnalyticsLiveFilters({ minDelaySeconds: 180, limit: 80 })).toEqual({
+      minDelaySeconds: 180,
+      limit: 80,
+    });
+  });
+
+  it("refreshes rolling time windows against the current clock", () => {
+    const base = new Date("2026-07-02T12:00:00.000Z");
+    expect(
+      spatialAnalyticsLiveFilters(
+        {
+          ...spatialAnalyticsFiltersForTimeWindow("24h", new Date("2026-07-02T09:00:00.000Z")),
+          minDelaySeconds: 180,
+          limit: 80,
+        },
+        base,
+      ),
+    ).toEqual({
+      from: "2026-07-01T12:00:00.000Z",
+      to: "2026-07-02T12:00:00.000Z",
+      minDelaySeconds: 180,
+      limit: 80,
+    });
   });
 });

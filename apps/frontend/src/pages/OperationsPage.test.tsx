@@ -95,10 +95,10 @@ const briefing: CommandCenterBriefingPayload = {
     generatedAt: "2026-06-02T06:04:00.000Z",
     title: "Morgenbrief",
     mode: "ai_assisted",
-    sourceLine: "AI-assistert · 1/2 kilder OK",
+    sourceLine: "Automatisk analyse · 1/2 kilder OK",
     paragraphs: [
       "Morgenbildet følger trafikk og åpne situasjoner.",
-      "DeepSeek samlet støttende saker uten private påstander.",
+      "Analysen samlet støttende saker uten private påstander.",
       "Kildehelse viser ett tilsynspunkt.",
     ],
     highlights: [
@@ -233,10 +233,15 @@ describe("OperationsDashboard", () => {
         status={status}
         briefing={briefing}
         notificationTriggers={notificationTriggers}
+        lastFetchedAt="2026-06-02T06:06:30.000Z"
+        onRefresh={() => undefined}
       />,
     );
 
     expect(html).toContain("Worker-syklus");
+    expect(html).toContain("Operatørfeed");
+    expect(html).toContain("Oppdater nå");
+    expect(html).toContain("Oppdateres hvert minutt mens fanen er synlig.");
     expect(html).toContain("Operasjonell telemetri");
     expect(html).toContain("Dette er ikke hendelsesbevis");
     expect(html).toContain("3.3 sek");
@@ -253,7 +258,7 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Kommandosenter");
     expect(html).toContain("2 kun Command Center");
     expect(html).toContain("Intelligence Bridge");
-    expect(html).toContain("Morgenbrief, AI-spor");
+    expect(html).toContain("Morgenbrief, analysespor");
     expect(html).toContain("ai_assisted");
     expect(html).toContain("deepseek-v4-flash");
     expect(html).toContain("Kildehelse viser ett tilsynspunkt.");
@@ -261,7 +266,9 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Åpne brief-revisjon");
     expect(html).toContain("Command Center-matrise");
     expect(html).toContain("Hva hver privat flate beviser");
-    expect(html).toContain("AI Summary Generator");
+    expect(html).toContain("Brief Analysis");
+    expect(html).not.toContain("AI Summary Generator");
+    expect(html).not.toContain("DeepSeek ·");
     expect(html).toContain("Brief klar");
     expect(html).toContain("/command/dekning");
     expect(html).toContain("Event Clustering");
@@ -305,5 +312,25 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Ingen fullført worker-syklus");
     expect(html).toContain("Ingen måling");
     expect(html).toContain("Varselutløsere beregnes separat");
+  });
+
+  it("renders refresh progress and stale-refresh errors without hiding the dashboard", () => {
+    const html = renderToStaticMarkup(
+      <OperationsDashboard
+        status={status}
+        refreshing={true}
+        refreshError="Driftstatus kunne ikke oppdateres."
+        lastFetchedAt="2026-06-02T06:06:30.000Z"
+        onRefresh={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain("Oppdaterer");
+    expect(html).toContain("Driftstatus kunne ikke oppdateres.");
+    expect(html).toContain("Kommandosenter-moduler");
+    expect(html).toContain("Tilpass oppsett");
+    expect(html).not.toContain("Dashboard-oppsett");
+    expect(html).not.toContain("Tilbakestill");
   });
 });

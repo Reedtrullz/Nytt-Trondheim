@@ -74,6 +74,15 @@ const traceStateOptions: Array<{ value: NotificationTriggerTraceState; label: st
   { value: "missing", label: notificationTriggerTraceStateLabels.missing },
 ];
 
+type OperatorDecisionState = "sent" | "ready" | "blocked" | "investigate";
+
+const operatorDecisionLabels: Record<OperatorDecisionState, string> = {
+  sent: "Sendt",
+  ready: "Klar",
+  blocked: "Blokkert",
+  investigate: "Undersøk",
+};
+
 function time(value?: string) {
   return value
     ? new Intl.DateTimeFormat("nb-NO", {
@@ -118,6 +127,68 @@ function evidenceTraceSummary(candidate: NotificationTriggerCandidate) {
   return traceState === "external_only"
     ? "Kun ekstern kilde"
     : notificationTriggerTraceStateLabels[traceState];
+}
+
+function operatorDecision(candidate: NotificationTriggerCandidate): {
+  state: OperatorDecisionState;
+  label: string;
+  detail: string;
+} {
+  const traceState = notificationTriggerTraceState(candidate);
+  const strongEvidence = traceState === "raw_evidence" || traceState === "source_audit";
+  const strongConfidence =
+    candidate.confidence.level === "confirmed" || candidate.confidence.level === "likely";
+
+  if (candidate.deliveryState === "sent") {
+    return {
+      state: "sent",
+      label: "Sendt",
+      detail: "Push-varsel er allerede sendt for denne utløseren.",
+    };
+  }
+
+  if (
+    candidate.deliveryState === "not_configured" ||
+    candidate.deliveryState === "no_subscribers" ||
+    candidate.deliveryState === "failed" ||
+    candidate.deliveryState === "suppressed"
+  ) {
+    return {
+      state: "blocked",
+      label: "Blokkert",
+      detail: candidate.detail,
+    };
+  }
+
+  if (candidate.deliveryState === "ready" && strongConfidence && strongEvidence) {
+    return {
+      state: "ready",
+      label: "Klar",
+      detail: "Matcher abonnenter og har sporbar kilde eller rådata.",
+    };
+  }
+
+  if (!strongEvidence) {
+    return {
+      state: "investigate",
+      label: "Undersøk",
+      detail: "Mangler rådata/kildeaudit og bør kontrolleres før eventuell varsling.",
+    };
+  }
+
+  if (!strongConfidence) {
+    return {
+      state: "investigate",
+      label: "Undersøk",
+      detail: "Kildegrunnlaget er ikke sterkt nok til automatisk varsling.",
+    };
+  }
+
+  return {
+    state: "investigate",
+    label: "Undersøk",
+    detail: "Beholdes som operatørkandidat inntil leveringsstatus er avklart.",
+  };
 }
 
 function parseList<T extends string>(value: string | null, allowed: readonly T[]): T[] | undefined {
@@ -215,6 +286,7 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
         <span>{severityLabels[candidate.severity]}</span>
         <span>{percent(candidate.score)} score</span>
         <span>{deliveryStateLabels[candidate.deliveryState]}</span>
+        <span>{operatorDecision(candidate).label}</span>
       </div>
       <dl className="coverage-bundle-facts">
         <div>
@@ -250,6 +322,10 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
         <div>
           <dt>Sporbarhet</dt>
           <dd>{evidenceTraceSummary(candidate)}</dd>
+        </div>
+        <div>
+          <dt>Operatørvalg</dt>
+          <dd>{operatorDecision(candidate).detail}</dd>
         </div>
       </dl>
       <section>
@@ -311,6 +387,51 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
         </div>
       </section>
     </aside>
+  );
+}
+
+function OperatorDecisionSummary({ candidates }: { candidates: NotificationTriggerCandidate[] }) {
+  const buckets = candidates.reduce(
+    (counts, candidate) => {
+      counts[operatorDecision(candidate).state] += 1;
+      return counts;
+    },
+    { blocked: 0, investigate: 0, ready: 0, sent: 0 } satisfies Record<
+      OperatorDecisionState,
+      number
+    >,
+  );
+  const priorityCandidate =
+    candidates.find((candidate) => operatorDecision(candidate).state === "ready") ??
+    candidates.find((candidate) => operatorDecision(candidate).state === "blocked") ??
+    candidates.find((candidate) => operatorDecision(candidate).state === "investigate") ??
+    candidates[0];
+  const priorityDecision = priorityCandidate ? operatorDecision(priorityCandidate) : undefined;
+
+  return (
+    <section className="notification-operator-summary" aria-labelledby="operator-decision-title">
+      <div>
+        <p className="label">Operatørprioritet</p>
+        <h2 id="operator-decision-title">
+          {priorityCandidate
+            ? `${priorityDecision?.label}: ${priorityCandidate.title}`
+            : "Ingen aktive kandidater"}
+        </h2>
+        <p>
+          {priorityCandidate && priorityDecision
+            ? priorityDecision.detail
+            : "Ingen varselutløsere trenger oppfølging i gjeldende filter."}
+        </p>
+      </div>
+      <dl>
+        {(["ready", "blocked", "investigate", "sent"] as const).map((state) => (
+          <div className={state} key={state}>
+            <dt>{operatorDecisionLabels[state]}</dt>
+            <dd>{buckets[state]}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
@@ -498,6 +619,7 @@ export function NotificationTriggerCandidatesDashboard({
         </article>
       </section>
       <PushStatusPanel status={page.pushStatus} />
+      <OperatorDecisionSummary candidates={visibleItems} />
       <DeliveryHistory deliveries={deliveries} />
       <section className="notification-triggers-grid">
         <aside

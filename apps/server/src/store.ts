@@ -19,6 +19,7 @@ import type {
   ArticleTopic,
   Attachment,
   BootstrapPayload,
+  CityPulseStoryPage,
   CommandCenterBriefingArticleSummary,
   CommandCenterBriefingPayload,
   CommandCenterOperationsNote,
@@ -94,8 +95,10 @@ import type {
   TrafficEventSeverity,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  UnexplainedDelayCandidate,
   TelemetryHistoryPattern,
   SpatialHeatmapCell,
+  SpatialInvestigationQueueItem,
   WorkerCycleMetrics,
   WorkspaceNote,
   WorkspaceTask,
@@ -105,6 +108,11 @@ import {
   activationPolicyForSource,
   bootstrapWithMorningBrief,
   buildNotificationTriggerPage,
+  cityPulseStoryFromGroup,
+  derivePublicVerificationForArticleGroup,
+  groupHomeArticles,
+  isLocalSportsCoverageText,
+  isNewsroomPublicVerificationSource,
   isPublicSituation,
   sampleArticles,
   sampleBootstrap,
@@ -121,6 +129,12 @@ import type { Point as GeoJsonPoint } from "geojson";
 import type { AuthUser } from "./auth.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { findRelatedTrafficArticles } from "./traffic/related-articles.js";
+import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
+import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
+import {
+  buildSpatialInvestigationQueue,
+  buildUnexplainedDelayCandidates,
+} from "./traffic/spatial-analytics.js";
 
 export interface ArticleFilters {
   scope?: string;
@@ -210,6 +224,72 @@ function articleMatchesTopic(article: Article, topic: ArticleTopic): boolean {
   return false;
 }
 
+function articleMatchesCategory(article: Article, category: string): boolean {
+  if (category === "Alle") return true;
+  if (article.category === category) return true;
+  return category === "Sport" && isLocalSportsCoverageText(`${article.title} ${article.excerpt}`);
+}
+
+function sportCategorySqlPredicate(categoryParam: string): string {
+  return `(a.category = ${categoryParam}
+    OR (
+      a.category = 'Nyheter'
+      AND (
+        a.payload->>'title' ILIKE '%ranheim%'
+        OR a.payload->>'excerpt' ILIKE '%ranheim%'
+        OR a.payload->>'title' ILIKE '%rosenborg%'
+        OR a.payload->>'excerpt' ILIKE '%rosenborg%'
+        OR a.payload->>'title' ILIKE '%rbk%'
+        OR a.payload->>'excerpt' ILIKE '%rbk%'
+        OR a.payload->>'title' ILIKE '%kolstad%'
+        OR a.payload->>'excerpt' ILIKE '%kolstad%'
+        OR a.payload->>'title' ILIKE '%byåsen%'
+        OR a.payload->>'excerpt' ILIKE '%byåsen%'
+        OR a.payload->>'title' ILIKE '%nardo%'
+        OR a.payload->>'excerpt' ILIKE '%nardo%'
+        OR a.payload->>'title' ILIKE '%strindheim%'
+        OR a.payload->>'excerpt' ILIKE '%strindheim%'
+      )
+      AND (
+        a.payload->>'title' ILIKE '%bortesmell%'
+        OR a.payload->>'excerpt' ILIKE '%bortesmell%'
+        OR a.payload->>'title' ILIKE '%bortekompleks%'
+        OR a.payload->>'excerpt' ILIKE '%bortekompleks%'
+        OR a.payload->>'title' ILIKE '%bortetap%'
+        OR a.payload->>'excerpt' ILIKE '%bortetap%'
+        OR a.payload->>'title' ILIKE '%divisjon%'
+        OR a.payload->>'excerpt' ILIKE '%divisjon%'
+        OR a.payload->>'title' ILIKE '%fotball%'
+        OR a.payload->>'excerpt' ILIKE '%fotball%'
+        OR a.payload->>'title' ILIKE '%håndball%'
+        OR a.payload->>'excerpt' ILIKE '%håndball%'
+        OR a.payload->>'title' ILIKE '%kamp%'
+        OR a.payload->>'excerpt' ILIKE '%kamp%'
+        OR a.payload->>'title' ILIKE '%tapte%'
+        OR a.payload->>'excerpt' ILIKE '%tapte%'
+        OR a.payload->>'title' ~* '\\d+\\s*[–-]\\s*\\d+'
+        OR a.payload->>'excerpt' ~* '\\d+\\s*[–-]\\s*\\d+'
+      )
+    ))`;
+}
+
+function rosenborgTopicSqlPredicate(topicParam: string): string {
+  return `(COALESCE(a.payload->'topics', '[]'::jsonb) ? ${topicParam}
+    OR (
+      NOT (a.payload ? 'topics')
+      AND (
+        a.category = 'Sport'
+        OR ${sportCategorySqlPredicate("'Sport'")}
+      )
+      AND (
+        a.payload->>'title' ILIKE '%rosenborg%'
+        OR a.payload->>'excerpt' ILIKE '%rosenborg%'
+        OR a.payload->>'title' ILIKE '%rbk%'
+        OR a.payload->>'excerpt' ILIKE '%rbk%'
+      )
+    ))`;
+}
+
 export interface AttachmentRecord extends Attachment {
   storagePath: string;
 }
@@ -240,6 +320,7 @@ export interface Store {
   ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false>;
   getBootstrap(login: string): Promise<BootstrapPayload>;
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
+  listCityPulseStories(filters: ArticleFilters, login: string): Promise<CityPulseStoryPage>;
   listCoverageBundles(
     filters: CoverageBundleQueryInput,
     login: string,
@@ -1073,29 +1154,6 @@ function sourceItemRoleForProvider(provider: SourceId): SourceItem["role"] {
   return "ignored";
 }
 
-const newsroomArticleSources = new Set<SourceId>([
-  "nrk",
-  "adressa",
-  "avisa_st",
-  "snasningen",
-  "merakerposten",
-  "frostingen",
-  "ytringen",
-  "steinkjer_avisa",
-  "innherred",
-  "namdalsavisa",
-  "malviknytt",
-  "selbyggen",
-  "fjell_ljom",
-  "retten",
-  "hitra_froya",
-  "tronderbladet",
-  "nidaros",
-  "t_a",
-  "vg",
-  "dagbladet",
-]);
-
 function sourceLabelsForIds(sources: SourceId[]): string {
   return sources.map((source) => sourceIdLabel(source)).join(", ");
 }
@@ -1116,7 +1174,8 @@ function publicVerificationForSituation(
       situation.evidence
         .filter(
           (item) =>
-            item.provenance === "reporting_estimate" && newsroomArticleSources.has(item.source),
+            item.provenance === "reporting_estimate" &&
+            isNewsroomPublicVerificationSource(item.source),
         )
         .map((item) => item.source),
     ),
@@ -1137,7 +1196,7 @@ function publicVerificationForTrafficOfficialEvent(
   reportingSources: SourceId[],
 ): Article["publicVerification"] | undefined {
   const newsroomSources = [
-    ...new Set(reportingSources.filter((source) => newsroomArticleSources.has(source))),
+    ...new Set(reportingSources.filter((source) => isNewsroomPublicVerificationSource(source))),
   ];
   if (event.source !== "datex" || newsroomSources.length === 0) return undefined;
   return {
@@ -1147,6 +1206,74 @@ function publicVerificationForTrafficOfficialEvent(
     officialSources: ["datex"],
     reportingSources: newsroomSources,
   };
+}
+
+function enrichArticlesWithCoverageGroupVerification(articles: Article[]): Article[] {
+  if (articles.length < 2) return articles;
+  const verificationByArticleId = new Map<string, Article["publicVerification"]>();
+  for (const group of groupHomeArticles(articles)) {
+    const verification = derivePublicVerificationForArticleGroup(group);
+    if (!verification) continue;
+    for (const article of group.articles) {
+      if (!article.publicVerification) verificationByArticleId.set(article.id, verification);
+    }
+  }
+  if (verificationByArticleId.size === 0) return articles;
+  return articles.map((article) => {
+    if (article.publicVerification) return article;
+    const publicVerification = verificationByArticleId.get(article.id);
+    return publicVerification ? { ...article, publicVerification } : article;
+  });
+}
+
+function cityPulseStoryPageFromArticles(
+  articles: Article[],
+  filters: ArticleFilters,
+): CityPulseStoryPage {
+  const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+  const limit = filters.limit ?? 40;
+  const stories = groupHomeArticles(articles)
+    .map((group) => {
+      const publicVerification =
+        group.primary.publicVerification ??
+        group.articles.find((article) => article.publicVerification)?.publicVerification ??
+        derivePublicVerificationForArticleGroup(group);
+      const story = cityPulseStoryFromGroup(group);
+      return publicVerification ? { ...story, publicVerification } : story;
+    })
+    .filter((story) => beforeCursor(story.latestAt, story.id, cursor));
+  const page = stories.slice(0, limit);
+  const last = page.at(-1);
+  return {
+    items: page,
+    nextCursor: stories.length > limit && last ? encodeCursor(last.latestAt, last.id) : undefined,
+  };
+}
+
+function articlesFromCityPulseStoryPage(page: CityPulseStoryPage): Article[] {
+  const seenArticleIds = new Set<string>();
+  return page.items
+    .flatMap((story) => {
+      const articles = story.articles.length > 0 ? story.articles : [story.primary];
+      return articles.map((article) => ({
+        ...article,
+        ...(story.coverageBundle && !article.coverageBundle
+          ? { coverageBundle: story.coverageBundle }
+          : {}),
+        ...(story.publicVerification && !article.publicVerification
+          ? { publicVerification: story.publicVerification }
+          : {}),
+      }));
+    })
+    .filter((article) => {
+      if (seenArticleIds.has(article.id)) return false;
+      seenArticleIds.add(article.id);
+      return true;
+    });
+}
+
+function cityPulseStorySourceLimit(filters: ArticleFilters): number {
+  return Math.min(500, Math.max(100, (filters.limit ?? 40) * 5));
 }
 
 function articleOverlapsTrafficEvent(article: Article, event: TrafficMapEvent): boolean {
@@ -1173,7 +1300,7 @@ function enrichArticlesWithTrafficOfficialVerification(
       !article.publicVerification &&
       article.category === "Transport" &&
       Boolean(article.location) &&
-      newsroomArticleSources.has(article.source),
+      isNewsroomPublicVerificationSource(article.source),
   );
   if (candidateArticles.length === 0) return articles;
 
@@ -1226,6 +1353,67 @@ function enrichArticlesWithSituations(articles: Article[], situations: Situation
       ...(publicVerification ? { publicVerification } : {}),
     };
   });
+}
+
+function trafficMapEventSourceKey(event: TrafficMapEvent): string {
+  return `${event.source}:${event.sourceEventId}`;
+}
+
+function sourceConfidenceForSpatialDelayCandidate(
+  candidate: UnexplainedDelayCandidate,
+): SourceConfidenceSummary {
+  const sources = new Set<string>(["datex_travel_time"]);
+  if (candidate.matchedArticleIds.length > 0) sources.add("news_article");
+  if (candidate.affectedEventIds.length > 0) sources.add("vegvesen_traffic_info");
+  return sourceMixConfidenceSummary([...sources], { updatedAt: candidate.updatedAt });
+}
+
+function buildSpatialNotificationItems(input: {
+  articles: Article[];
+  trafficInfoEvents: TrafficMapEvent[];
+  officialEvents: OfficialEvent[];
+  trafficPulse: TrafficPulseCorridor[];
+  trafficCounters?: TrafficCounterSnapshot[];
+}): SpatialInvestigationQueueItem[] {
+  if (input.trafficPulse.length === 0 && !input.trafficCounters?.length) return [];
+
+  const eventsBySourceKey = new Map<string, TrafficMapEvent>();
+  for (const event of input.trafficInfoEvents) {
+    eventsBySourceKey.set(trafficMapEventSourceKey(event), event);
+  }
+  for (const event of input.officialEvents) {
+    const trafficEvent = officialEventToTrafficMapEvent(event);
+    if (!trafficEvent || (trafficEvent.state !== "active" && trafficEvent.state !== "planned")) {
+      continue;
+    }
+    eventsBySourceKey.set(trafficMapEventSourceKey(trafficEvent), trafficEvent);
+  }
+
+  const estimatedEvents = roadClosingArticleTrafficEvents(input.articles, {
+    officialEvents: [...eventsBySourceKey.values()],
+  });
+  for (const event of estimatedEvents) {
+    eventsBySourceKey.set(trafficMapEventSourceKey(event), event);
+  }
+
+  const corridorImpacts = buildCorridorImpacts([...eventsBySourceKey.values()], input.trafficPulse);
+  const delayCandidates = buildUnexplainedDelayCandidates(corridorImpacts, input.articles, {
+    minDelaySeconds: 180,
+  })
+    .slice(0, 20)
+    .map((candidate) => ({
+      ...candidate,
+      sourceConfidence:
+        candidate.sourceConfidence ?? sourceConfidenceForSpatialDelayCandidate(candidate),
+    }));
+
+  return buildSpatialInvestigationQueue(
+    delayCandidates,
+    [],
+    input.articles,
+    input.trafficCounters ?? [],
+    { limit: 8 },
+  );
 }
 
 interface SourceItemRow {
@@ -1743,6 +1931,17 @@ function coverageBundleArticleSummary(article: Article): CoverageBundleArticleSu
   };
 }
 
+function coverageBundleNearMissArticleSummaries(
+  nearMisses: CoverageBundleListItem["nearMisses"],
+  articlesById: Map<string, Article>,
+): CoverageBundleArticleSummary[] {
+  const articleIds = [...new Set(nearMisses.flatMap((nearMiss) => nearMiss.articleIds))];
+  return articleIds.flatMap((articleId) => {
+    const article = articlesById.get(articleId);
+    return article ? [coverageBundleArticleSummary(article)] : [];
+  });
+}
+
 function emptyCoverageBundleSummary(): CoverageBundleSummary {
   return {
     recentBundleCount: 0,
@@ -1772,6 +1971,12 @@ function coverageBundleMatchesQuery(item: CoverageBundleListItem, query: string)
     item.reason,
     item.sourceLabels.join(" "),
     ...item.memberArticles.flatMap((article) => [
+      article.title,
+      article.excerpt,
+      article.sourceLabel,
+      article.places.join(" "),
+    ]),
+    ...item.nearMissArticles.flatMap((article) => [
       article.title,
       article.excerpt,
       article.sourceLabel,
@@ -1810,6 +2015,7 @@ function coverageBundleItemFromDecision(
       const article = articlesById.get(articleId);
       return article ? [coverageBundleArticleSummary(article)] : [];
     }),
+    nearMissArticles: coverageBundleNearMissArticleSummaries(decision.nearMisses, articlesById),
   };
 }
 
@@ -1836,6 +2042,7 @@ function coverageBundleItemFromRow(
       const article = articlesById.get(articleId);
       return article ? [coverageBundleArticleSummary(article)] : [];
     }),
+    nearMissArticles: coverageBundleNearMissArticleSummaries(row.near_misses, articlesById),
   };
 }
 
@@ -3529,7 +3736,7 @@ export class MemoryStore implements Store {
   }
 
   async getBootstrap(): Promise<BootstrapPayload> {
-    const articles = await this.listArticles({ scope: "trondheim", limit: 40 });
+    const storyPage = await this.listCityPulseStories({ scope: "trondheim", limit: 40 });
     const situations = [...this.situations.values()]
       .filter(
         (situation) =>
@@ -3543,8 +3750,9 @@ export class MemoryStore implements Store {
       .slice(0, 3)
       .map(homeSituationSummary);
     return bootstrapWithMorningBrief({
-      articles: articles.items,
-      ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
+      articles: articlesFromCityPulseStoryPage(storyPage),
+      stories: storyPage.items,
+      ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
       situations,
       sourceHealth: clone(sampleBootstrap.sourceHealth),
     });
@@ -3560,7 +3768,7 @@ export class MemoryStore implements Store {
           (!filters.scope || article.scope === filters.scope) &&
           (!filters.category ||
             filters.category === "Alle" ||
-            article.category === filters.category) &&
+            articleMatchesCategory(article, filters.category)) &&
           (!filters.topic || articleMatchesTopic(article, filters.topic)) &&
           (!filters.from || article.publishedAt >= filters.from) &&
           (!filters.to || article.publishedAt <= filters.to) &&
@@ -3578,18 +3786,29 @@ export class MemoryStore implements Store {
     const last = page.at(-1);
     return {
       items: clone(
-        enrichArticlesWithSituations(
-          page,
-          [...this.situations.values()].filter(
-            (situation) =>
-              isPublicSituation(situation) &&
-              (situation.status === "preliminary" || situation.status === "active"),
+        enrichArticlesWithCoverageGroupVerification(
+          enrichArticlesWithSituations(
+            page,
+            [...this.situations.values()].filter(
+              (situation) =>
+                isPublicSituation(situation) &&
+                (situation.status === "preliminary" || situation.status === "active"),
+            ),
           ),
         ),
       ),
       nextCursor:
         items.length > limit && last ? encodeCursor(last.publishedAt, last.id) : undefined,
     };
+  }
+
+  async listCityPulseStories(filters: ArticleFilters): Promise<CityPulseStoryPage> {
+    const articles = await this.listArticles({
+      ...filters,
+      cursor: undefined,
+      limit: cityPulseStorySourceLimit(filters),
+    });
+    return cityPulseStoryPageFromArticles(articles.items, filters);
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
@@ -3628,14 +3847,32 @@ export class MemoryStore implements Store {
   async listNotificationTriggers(
     filters: NotificationTriggerQueryInput,
   ): Promise<NotificationTriggerPage> {
-    const [situations, articles] = await Promise.all([
-      this.listSituations({ includeDismissed: false, limit: 100, publicOnly: true }),
-      this.listArticles({ limit: 500 }),
-    ]);
+    const generatedAt = new Date().toISOString();
+    const [situations, articles, trafficInfoEvents, officialEvents, trafficPulse, trafficCounters] =
+      await Promise.all([
+        this.listSituations({ includeDismissed: false, limit: 100, publicOnly: true }),
+        this.listArticles({ limit: 500 }),
+        this.listTrafficMapEvents({
+          sources: ["vegvesen_traffic_info"],
+          states: ["active", "planned"],
+          limit: null,
+        }),
+        this.listOfficialEvents({ source: "datex", states: ["active", "updated"], limit: 200 }),
+        this.listTrafficPulseCorridors(50),
+        this.listTrafficCounterSnapshots(),
+      ]);
+    const spatialInvestigationItems = buildSpatialNotificationItems({
+      articles: articles.items,
+      trafficInfoEvents,
+      officialEvents,
+      trafficPulse,
+      trafficCounters,
+    });
     return buildNotificationTriggerPage({
       situations: situations.items,
       articles: articles.items,
-      generatedAt: new Date().toISOString(),
+      spatialInvestigationItems,
+      generatedAt,
       filters,
     });
   }
@@ -3908,11 +4145,13 @@ export class MemoryStore implements Store {
       .slice(0, filters.limit);
   }
 
-  async listOfficialEvents(): Promise<OfficialEvent[]> {
+  async listOfficialEvents(_filters: OfficialEventFilters = {}): Promise<OfficialEvent[]> {
+    void _filters;
     return [];
   }
 
-  async listTrafficMapEvents(): Promise<TrafficMapEvent[]> {
+  async listTrafficMapEvents(_filters: TrafficMapEventFilters = {}): Promise<TrafficMapEvent[]> {
+    void _filters;
     return [];
   }
 
@@ -3932,11 +4171,13 @@ export class MemoryStore implements Store {
     return [];
   }
 
-  async listTrafficCounterSnapshots(): Promise<TrafficCounterSnapshot[]> {
+  async listTrafficCounterSnapshots(_bounds?: Bounds): Promise<TrafficCounterSnapshot[]> {
+    void _bounds;
     return [];
   }
 
-  async listTrafficPulseCorridors(): Promise<TrafficPulseCorridor[]> {
+  async listTrafficPulseCorridors(_limit = 30): Promise<TrafficPulseCorridor[]> {
+    void _limit;
     return [];
   }
 
@@ -4938,9 +5179,9 @@ export class PgStore implements Store {
   }
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
-    const [articles, situations, sourceHealth, latestMorningBrief, latestAiRun] = await Promise.all(
-      [
-        this.listArticles({ scope: "trondheim", limit: 40 }, login),
+    const [storyPage, situations, sourceHealth, latestMorningBrief, latestAiRun] =
+      await Promise.all([
+        this.listCityPulseStories({ scope: "trondheim", limit: 40 }, login),
         this.listHomeSituationSummaries(),
         this.listSourceHealth(),
         this.latestMorningBrief(),
@@ -4956,11 +5197,11 @@ export class PgStore implements Store {
          ORDER BY completed_at DESC
          LIMIT 1`,
         ),
-      ],
-    );
+      ]);
     const bootstrapPayload = {
-      articles: articles.items,
-      ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
+      articles: articlesFromCityPulseStoryPage(storyPage),
+      stories: storyPage.items,
+      ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
       situations,
       sourceHealth,
     };
@@ -5043,25 +5284,17 @@ export class PgStore implements Store {
     }
     if (filters.category && filters.category !== "Alle") {
       params.push(filters.category);
-      where.push(`a.category = $${params.length}`);
+      const categoryParam = `$${params.length}`;
+      where.push(
+        filters.category === "Sport"
+          ? sportCategorySqlPredicate(categoryParam)
+          : `a.category = ${categoryParam}`,
+      );
     }
     if (filters.topic === "rosenborg") {
       params.push(filters.topic);
       const topicIndex = params.length;
-      where.push(
-        `(COALESCE(a.payload->'topics', '[]'::jsonb) ? $${topicIndex}
-          OR (
-            NOT (a.payload ? 'topics')
-            AND
-            a.category = 'Sport'
-            AND (
-              a.payload->>'title' ILIKE '%rosenborg%'
-              OR a.payload->>'excerpt' ILIKE '%rosenborg%'
-              OR a.payload->>'title' ILIKE '%rbk%'
-              OR a.payload->>'excerpt' ILIKE '%rbk%'
-            )
-          ))`,
-      );
+      where.push(rosenborgTopicSqlPredicate(`$${topicIndex}`));
     }
     if (filters.q) {
       params.push(`%${filters.q}%`);
@@ -5117,13 +5350,15 @@ export class PgStore implements Store {
       (article) =>
         article.category === "Transport" &&
         article.location &&
-        newsroomArticleSources.has(article.source),
+        isNewsroomPublicVerificationSource(article.source),
     )
       ? await this.listOfficialEvents({ source: "datex", limit: 500 })
       : [];
-    const items = enrichArticlesWithTrafficOfficialVerification(
-      enrichArticlesWithSituations(rawItems, relatedSituations),
-      officialEvents,
+    const items = enrichArticlesWithCoverageGroupVerification(
+      enrichArticlesWithTrafficOfficialVerification(
+        enrichArticlesWithSituations(rawItems, relatedSituations),
+        officialEvents,
+      ),
     );
     return {
       items,
@@ -5132,6 +5367,18 @@ export class PgStore implements Store {
           ? encodeCursor(items.at(-1)!.publishedAt, items.at(-1)!.id)
           : undefined,
     };
+  }
+
+  async listCityPulseStories(filters: ArticleFilters, login: string): Promise<CityPulseStoryPage> {
+    const articles = await this.listArticles(
+      {
+        ...filters,
+        cursor: undefined,
+        limit: cityPulseStorySourceLimit(filters),
+      },
+      login,
+    );
+    return cityPulseStoryPageFromArticles(articles.items, filters);
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
@@ -5159,6 +5406,17 @@ export class PgStore implements Store {
                 OR a.payload->>'excerpt' ILIKE $${params.length}
                 OR a.payload::text ILIKE $${params.length}
               )
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(cb.near_misses) AS near_miss(item)
+            JOIN LATERAL jsonb_array_elements_text(
+              COALESCE(near_miss.item->'articleIds', '[]'::jsonb)
+            ) AS near_miss_article(id) ON true
+            JOIN articles a ON a.id = near_miss_article.id
+            WHERE a.payload->>'title' ILIKE $${params.length}
+              OR a.payload->>'excerpt' ILIKE $${params.length}
+              OR a.payload::text ILIKE $${params.length}
           ))`,
       );
     }
@@ -5191,7 +5449,14 @@ export class PgStore implements Store {
        LIMIT $${params.length}`,
       params,
     );
-    const articleIds = [...new Set(result.rows.flatMap((row) => row.member_article_ids))];
+    const articleIds = [
+      ...new Set(
+        result.rows.flatMap((row) => [
+          ...row.member_article_ids,
+          ...row.near_misses.flatMap((nearMiss) => nearMiss.articleIds),
+        ]),
+      ),
+    ];
     const articleResult = articleIds.length
       ? await this.pool.query<{ payload: Article }>(
           "SELECT payload FROM articles WHERE id = ANY($1::text[])",
@@ -5257,14 +5522,32 @@ export class PgStore implements Store {
     filters: NotificationTriggerQueryInput,
     login: string,
   ): Promise<NotificationTriggerPage> {
-    const [situations, articles] = await Promise.all([
-      this.listSituations({ includeDismissed: false, limit: 100, publicOnly: true }, login),
-      this.listArticles({ limit: 500 }, login),
-    ]);
+    const generatedAt = new Date().toISOString();
+    const [situations, articles, trafficInfoEvents, officialEvents, trafficPulse, trafficCounters] =
+      await Promise.all([
+        this.listSituations({ includeDismissed: false, limit: 100, publicOnly: true }, login),
+        this.listArticles({ limit: 500 }, login),
+        this.listTrafficMapEvents({
+          sources: ["vegvesen_traffic_info"],
+          states: ["active", "planned"],
+          limit: null,
+        }),
+        this.listOfficialEvents({ source: "datex", states: ["active", "updated"], limit: 200 }),
+        this.listTrafficPulseCorridors(50),
+        this.listTrafficCounterSnapshots(),
+      ]);
+    const spatialInvestigationItems = buildSpatialNotificationItems({
+      articles: articles.items,
+      trafficInfoEvents,
+      officialEvents,
+      trafficPulse,
+      trafficCounters,
+    });
     return buildNotificationTriggerPage({
       situations: situations.items,
       articles: articles.items,
-      generatedAt: new Date().toISOString(),
+      spatialInvestigationItems,
+      generatedAt,
       filters,
     });
   }

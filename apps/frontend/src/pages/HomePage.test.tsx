@@ -1,10 +1,20 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import type { Article, BootstrapPayload, MorningBrief, SourceHealth } from "@nytt/shared";
+import type {
+  Article,
+  BootstrapPayload,
+  CityPulseStory,
+  CityPulseStoryPage,
+  MorningBrief,
+  SourceHealth,
+} from "@nytt/shared";
 import {
+  articlesFromCityPulseStoryPage,
+  articlesFromCityPulseStories,
   CityPulseDashboard,
   ChannelContextPanel,
+  CityPulseRefreshStatus,
   CityPulseSignalPanel,
   LocalFocusRadiusControl,
   LocalFocusSummaryPanel,
@@ -13,9 +23,12 @@ import {
   MorningBriefPanel,
   PublicSourceStatusPanel,
   StoryConfidenceBadge,
+  StoryEventBundleSummary,
   StoryVerificationProof,
   channelStoryCountsForCards,
   cityPulseDataForCurrentFeed,
+  cityPulseLatestTimestamp,
+  mergeCityPulseStoryLists,
   morningBriefFreshness,
   storyFeedSummary,
 } from "./HomePage.js";
@@ -79,9 +92,23 @@ const situation = {
   },
 } satisfies BootstrapPayload["situations"][number];
 
+const bootstrapStory = {
+  id: "story-one",
+  primaryArticleId: article.id,
+  articleIds: [article.id],
+  primary: article,
+  articles: [article],
+  sourceLabels: ["Adresseavisen"],
+  sourceCount: 1,
+  updateCount: 1,
+  latestAt: article.publishedAt,
+  category: article.category,
+} satisfies CityPulseStory;
+
 const bootstrap = {
   articles: [article],
-  articleNextCursor: "next-page",
+  stories: [bootstrapStory],
+  storyNextCursor: "next-stories",
   situations: [situation],
   sourceHealth: [],
   morningBrief: brief,
@@ -128,16 +155,18 @@ describe("MorningBriefPanel", () => {
       />,
     );
 
-    expect(html).toContain("AI-assistert");
+    expect(html).toContain("Analysert brief");
     expect(html).toContain("Morgenbrief");
     expect(html).toContain("Morgenbrief-ferskhet");
     expect(html).toContain("Oppdatert i dag");
     expect(html).toContain("Trafikktrøbbel sør i byen");
-    expect(html).toContain("AI-assistert · 5/6 kilder OK");
-    expect(html).toContain("AI-spor");
-    expect(html).toContain("DeepSeek");
-    expect(html).toContain("deepseek-v4-flash");
+    expect(html).toContain("Automatisk analyse · 5/6 kilder OK");
+    expect(html).not.toContain("AI-assistert · 5/6 kilder OK");
+    expect(html).toContain("Analysespor");
+    expect(html).toContain("Automatisk analyse");
     expect(html).toContain("OK");
+    expect(html).not.toContain("DeepSeek");
+    expect(html).not.toContain("deepseek-v4-flash");
     expect(html).toContain("Morgenbrief-nøkkeltall");
     expect(html).toContain("Transport leder bildet");
     expect(html).toContain("Morgenbrief-grunnlag");
@@ -191,7 +220,7 @@ describe("CityPulseDashboard", () => {
     expect(html).toContain("dashboard-layout-city-pulse");
     expect(html).toContain("dashboard-widget-full");
     expect(html).toContain("Morgenbrief");
-    expect(html).toContain("Varsel og AI-spor");
+    expect(html).toContain("Varsel og analysespor");
     expect(html).toContain("Slik vurderes høyeffekt-signaler");
     expect(html).toContain("Liv og helse");
     expect(html).toContain("Stengte hovedårer");
@@ -220,6 +249,181 @@ describe("CityPulseDashboard", () => {
   });
 });
 
+describe("CityPulseRefreshStatus", () => {
+  it("uses story freshness before older flattened article timestamps", () => {
+    expect(
+      cityPulseLatestTimestamp({
+        ...bootstrap,
+        stories: [
+          {
+            ...bootstrapStory,
+            latestAt: "2026-07-02T09:15:00.000Z",
+            primary: { ...article, publishedAt: "2026-07-02T08:00:00.000Z" },
+            articles: [{ ...article, publishedAt: "2026-07-02T08:00:00.000Z" }],
+          },
+        ],
+        articles: [{ ...article, publishedAt: "2026-07-02T08:00:00.000Z" }],
+        situations: [],
+        sourceHealth: [],
+      }),
+    ).toBe("2026-07-02T09:15:00.000Z");
+  });
+
+  it("uses the newest public feed timestamp for live City Pulse status", () => {
+    expect(
+      cityPulseLatestTimestamp({
+        ...bootstrap,
+        morningBrief: { ...brief, generatedAt: "2026-07-02T07:30:00.000Z" },
+        articles: [{ ...article, publishedAt: "2026-07-02T08:30:00.000Z" }],
+        situations: [
+          {
+            ...situation,
+            updatedAt: "2026-07-02T09:05:00.000Z",
+          },
+        ],
+        sourceHealth: [
+          {
+            source: "nrk",
+            label: "NRK",
+            state: "ok",
+            detail: "RSS",
+            lastCheckedAt: "2026-07-02T08:55:00.000Z",
+          },
+        ],
+      }),
+    ).toBe("2026-07-02T09:05:00.000Z");
+  });
+
+  it("renders a compact manual refresh control with status and errors", () => {
+    const html = renderToStaticMarkup(
+      <CityPulseRefreshStatus
+        error="Kunne ikke oppdatere bypulsen"
+        lastUpdatedAt="2026-07-02T09:05:00.000Z"
+        refreshing
+      />,
+    );
+
+    expect(html).toContain("city-pulse-refresh has-error");
+    expect(html).toContain("Bypuls");
+    expect(html).toContain("11:05");
+    expect(html).toContain("Oppdaterer");
+    expect(html).toContain("Kunne ikke oppdatere bypulsen");
+  });
+});
+
+describe("articlesFromCityPulseStoryPage", () => {
+  it("flattens story members once in story order and keeps story metadata", () => {
+    const secondArticle = {
+      ...article,
+      id: "article-two",
+      title: "Oppdatering om kø ved Sluppen",
+      publishedAt: "2026-07-02T07:10:00.000Z",
+    } satisfies Article;
+    const coverageBundle = {
+      id: "coverage:incident:sluppen-traffic",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-02T07:12:00.000Z",
+    };
+    const publicVerification = {
+      status: "verified" as const,
+      label: "Verifisert",
+      detail: "Bekreftet av Vegvesen DATEX og Adresseavisen.",
+      officialSources: ["datex" as const],
+      reportingSources: ["adressa" as const],
+    };
+    const page = {
+      items: [
+        {
+          id: "story-one",
+          primaryArticleId: article.id,
+          articleIds: [article.id, secondArticle.id],
+          primary: article,
+          articles: [article, secondArticle],
+          sourceLabels: ["Adresseavisen", "NRK Trøndelag"],
+          sourceCount: 2,
+          updateCount: 2,
+          latestAt: article.publishedAt,
+          category: article.category,
+          coverageBundle,
+          publicVerification,
+        },
+        {
+          id: "story-two",
+          primaryArticleId: secondArticle.id,
+          articleIds: [secondArticle.id],
+          primary: secondArticle,
+          articles: [secondArticle],
+          sourceLabels: ["NRK Trøndelag"],
+          sourceCount: 1,
+          updateCount: 1,
+          latestAt: secondArticle.publishedAt,
+          category: secondArticle.category,
+        },
+      ],
+      nextCursor: "next-stories",
+    } satisfies CityPulseStoryPage;
+
+    expect(articlesFromCityPulseStoryPage(page).map((item) => item.id)).toEqual([
+      "article-one",
+      "article-two",
+    ]);
+    expect(articlesFromCityPulseStoryPage(page)[0]).toMatchObject({
+      coverageBundle,
+      publicVerification,
+    });
+    expect(articlesFromCityPulseStories(page.items).map((item) => item.id)).toEqual([
+      "article-one",
+      "article-two",
+    ]);
+  });
+
+  it("merges later members into an already-rendered story", () => {
+    const laterArticle = {
+      ...article,
+      id: "article-two",
+      title: "Oppdatering om samme hendelse",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      publishedAt: "2026-07-02T09:15:00.000Z",
+    } satisfies Article;
+    const current = {
+      id: "story-one",
+      primaryArticleId: article.id,
+      articleIds: [article.id],
+      primary: article,
+      articles: [article],
+      sourceLabels: ["Adresseavisen"],
+      sourceCount: 1,
+      updateCount: 1,
+      latestAt: article.publishedAt,
+      category: article.category,
+    } satisfies CityPulseStory;
+    const incoming = {
+      ...current,
+      articleIds: [laterArticle.id],
+      primaryArticleId: laterArticle.id,
+      primary: laterArticle,
+      articles: [laterArticle],
+      sourceLabels: ["NRK Trøndelag"],
+      latestAt: laterArticle.publishedAt,
+    } satisfies CityPulseStory;
+
+    expect(mergeCityPulseStoryLists([current], [incoming])).toEqual([
+      {
+        ...current,
+        articleIds: [article.id, laterArticle.id],
+        articles: [laterArticle, article],
+        sourceLabels: ["Adresseavisen", "NRK Trøndelag"],
+        sourceCount: 2,
+        updateCount: 2,
+        latestAt: laterArticle.publishedAt,
+      },
+    ]);
+  });
+});
+
 describe("cityPulseDataForCurrentFeed", () => {
   it("keeps the stored morning brief and standalone situations on the default view", () => {
     const filters = {
@@ -236,7 +440,8 @@ describe("cityPulseDataForCurrentFeed", () => {
     });
 
     expect(data.morningBrief).toBe(brief);
-    expect(data.articleNextCursor).toBe(bootstrap.articleNextCursor);
+    expect(data.stories).toBe(bootstrap.stories);
+    expect(data.storyNextCursor).toBe(bootstrap.storyNextCursor);
     expect(data.situations).toEqual([situation]);
   });
 
@@ -261,8 +466,9 @@ describe("cityPulseDataForCurrentFeed", () => {
     });
 
     expect(data.articles).toEqual([filteredArticle]);
+    expect(data.stories).toBeUndefined();
     expect(data.morningBrief).toBeUndefined();
-    expect(data.articleNextCursor).toBeUndefined();
+    expect(data.storyNextCursor).toBeUndefined();
     expect(data.situations).toEqual([]);
   });
 
@@ -291,15 +497,15 @@ describe("cityPulseDataForCurrentFeed", () => {
 });
 
 describe("CityPulseSignalPanel", () => {
-  it("renders public alert guidance and AI trace status without private delivery details", () => {
+  it("renders public alert guidance and analysis trace status without private delivery details", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <CityPulseSignalPanel brief={brief} now={new Date("2026-07-02T12:00:00.000Z")} />
       </MemoryRouter>,
     );
 
-    expect(html).toContain("Varsel og AI-spor");
-    expect(html).toContain("AI-assistert");
+    expect(html).toContain("Varsel og analysespor");
+    expect(html).toContain("Analysert brief");
     expect(html).toContain("09:25");
     expect(html).toContain("Brief-ferskhet");
     expect(html).toContain("Oppdatert i dag");
@@ -315,6 +521,7 @@ describe("CityPulseSignalPanel", () => {
     expect(html).not.toContain("triggerId");
     expect(html).not.toContain("endpoint");
     expect(html).not.toContain("Abonnementer");
+    expect(html).not.toContain("DeepSeek");
   });
 
   it("renders public-safe active signal highlights from current City Pulse data", () => {
@@ -353,7 +560,7 @@ describe("CityPulseSignalPanel", () => {
     expect(html).not.toContain("subscription");
   });
 
-  it("carries stale morning brief status into the public AI signal module", () => {
+  it("carries stale morning brief status into the public analysis signal module", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <CityPulseSignalPanel
@@ -520,6 +727,43 @@ describe("StoryConfidenceBadge", () => {
     expect(html).toContain("98 %");
     expect(html).toContain("story-confidence-confirmed");
     expect(html).toContain("Offisielle kilder og redaksjonelle kilder peker mot samme område.");
+  });
+});
+
+describe("StoryEventBundleSummary", () => {
+  it("makes clustered story cards read as event bundles before source articles", () => {
+    const coverageBundle = {
+      id: "coverage:incident:sluppen",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-02T07:30:00.000Z",
+    } as const;
+    const [card] = homeStoryCardsForGroups(
+      groupHomeArticles([
+        { ...article, id: "nrk-sluppen", source: "nrk", sourceLabel: "NRK", coverageBundle },
+        {
+          ...article,
+          id: "adressa-sluppen",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          coverageBundle,
+        },
+      ]),
+    );
+
+    const html = renderToStaticMarkup(<StoryEventBundleSummary card={card!} />);
+
+    expect(html).toContain("story-event-summary-hendelse");
+    expect(html).toContain("Samlet hendelse");
+    expect(html).toContain("2 kilder · samme hendelse på tvers av kilder");
+    expect(html).toContain("Samlet bypulskort");
+  });
+
+  it("keeps single-source story cards visually quiet", () => {
+    const [card] = homeStoryCardsForGroups(groupHomeArticles([article]));
+
+    expect(renderToStaticMarkup(<StoryEventBundleSummary card={card!} />)).toBe("");
   });
 });
 

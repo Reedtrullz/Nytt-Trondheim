@@ -38,7 +38,7 @@ const sourceHealth: SourceHealth[] = [
 ];
 
 describe("buildMorningBrief", () => {
-  it("uses public DeepSeek clusters as the AI-assisted second paragraph", () => {
+  it("uses public DeepSeek clusters as the automatic-analysis second paragraph", () => {
     const brief = buildMorningBrief({
       articles: [article()],
       situations,
@@ -64,7 +64,7 @@ describe("buildMorningBrief", () => {
     expect(brief.mode).toBe("ai_assisted");
     expect(brief.paragraphs).toHaveLength(3);
     expect(brief.paragraphs[1]).toContain("Trafikktrøbbel sør i byen");
-    expect(brief.sourceLine).toContain("AI-assistert");
+    expect(brief.sourceLine).toContain("Automatisk analyse");
     expect(brief.aiRun).toMatchObject({ provider: "deepseek", status: "ok" });
   });
 

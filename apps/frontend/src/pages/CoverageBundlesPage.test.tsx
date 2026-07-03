@@ -61,6 +61,21 @@ const page: CoverageBundlePage = {
         {
           articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
           reason: "conflicting_specific_places",
+          overlap: 3,
+          score: 0.24,
+        },
+      ],
+      nearMissArticles: [
+        {
+          id: "adressa-other-smoke",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Røykmelding ved Heimdal",
+          excerpt: "Nødetatene undersøker røyk ved Heimdal.",
+          url: "https://example.test/adressa-other-smoke",
+          publishedAt: "2026-06-18T10:49:00.000Z",
+          category: "Hendelser",
+          places: ["Heimdal", "Trondheim"],
         },
       ],
     },
@@ -81,6 +96,10 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Politiloggen");
     expect(html).toContain("Generisk steds-hendelse");
     expect(html).toContain("Konflikt i spesifikt sted");
+    expect(html).toContain("3 treff");
+    expect(html).toContain("24 %");
+    expect(html).toContain("NRK Trøndelag: Rykka til Flatåsen etter røykutvikling");
+    expect(html).toContain("Adresseavisen: Røykmelding ved Heimdal");
     expect(html).toContain("Rykka til Flatåsen etter røykutvikling");
     expect(html).toContain("/command/tidslinje");
     expect(html).toContain("/command/kilder");

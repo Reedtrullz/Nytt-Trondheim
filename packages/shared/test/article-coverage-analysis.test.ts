@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeArticleCoverage, type Article } from "../src/index.js";
+import { analyzeArticleCoverage, buildCityPulseStories, type Article } from "../src/index.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -19,6 +19,58 @@ function article(overrides: Partial<Article> = {}): Article {
 }
 
 describe("article coverage analysis", () => {
+  it("builds first-class City Pulse stories from grouped article coverage", () => {
+    const bundle = {
+      id: "coverage:incident:saupstad",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-18T11:00:00.000Z",
+    } as const;
+
+    const stories = buildCityPulseStories([
+      article({ id: "nrk-slagsmal", sourceLabel: "NRK Trøndelag", coverageBundle: bundle }),
+      article({
+        id: "politiloggen-saupstad",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Ro og orden: Trondheim, Saupstad",
+        publishedAt: "2026-06-18T10:37:00.000Z",
+        coverageBundle: bundle,
+      }),
+      article({
+        id: "single-story",
+        title: "Konsert på Byscenen",
+        excerpt: "Byscenen setter opp sommerkonsert i Trondheim sentrum.",
+        category: "Kultur",
+        publishedAt: "2026-06-18T09:00:00.000Z",
+        url: "https://example.test/kultur",
+        places: ["Trondheim sentrum"],
+        location: { lat: 63.431, lng: 10.394, label: "Trondheim sentrum" },
+      }),
+    ]);
+
+    expect(stories).toHaveLength(2);
+    expect(stories[0]).toMatchObject({
+      id: "coverage:incident:saupstad",
+      primaryArticleId: "nrk-slagsmal",
+      articleIds: ["nrk-slagsmal", "politiloggen-saupstad"],
+      sourceLabels: ["NRK Trøndelag", "Politiloggen"],
+      sourceCount: 2,
+      updateCount: 2,
+      latestAt: "2026-06-18T10:39:00.000Z",
+      category: "Hendelser",
+      coverageBundle: bundle,
+    });
+    expect(stories[1]).toMatchObject({
+      id: "article:single-story",
+      primaryArticleId: "single-story",
+      sourceCount: 1,
+      updateCount: 1,
+      category: "Kultur",
+    });
+  });
+
   it("annotates grouped fighting coverage with observable bundle signals", () => {
     const analysis = analyzeArticleCoverage(
       [
@@ -268,6 +320,135 @@ describe("article coverage analysis", () => {
         expect.objectContaining({
           kind: "generic_place_incident",
           detail: "vold",
+        }),
+      ]),
+    });
+  });
+
+  it("keeps a persisted bundle id stable when an older provider joins the same incident", () => {
+    const generatedAt = "2026-06-28T17:10:00.000Z";
+    const existingBundle = {
+      id: "coverage:incident:lade-vold-existing",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-28T17:00:00.000Z",
+    };
+
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-lade-update",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ung mann kritisk skadd - politiet leter etter flere navngitte personer",
+          excerpt:
+            "En ung mann er kritisk skadet etter en voldshendelse på Lade i Trondheim. Politiet leter etter flere navngitte personer.",
+          publishedAt: "2026-06-28T16:59:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+          coverageBundle: existingBundle,
+        }),
+        article({
+          id: "nrk-lade-update",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Én person kritisk skadet etter voldshendelse på Lade i Trondheim",
+          excerpt: "Politiet opplyser at en ung mann er kritisk skadet etter en voldshendelse.",
+          publishedAt: "2026-06-28T16:45:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+          coverageBundle: existingBundle,
+        }),
+        article({
+          id: "vg-older-lade",
+          source: "vg",
+          sourceLabel: "VG",
+          title: "Ung mann fraktet til sykehus etter voldsepisode i Trondheim",
+          excerpt:
+            "En ung mann ble kritisk skadet etter en voldshendelse på Lade. Politiet leter etter flere personer.",
+          publishedAt: "2026-06-28T16:40:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+        }),
+      ],
+      generatedAt,
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      id: "coverage:incident:lade-vold-existing",
+      kind: "incident",
+      confidence: "high",
+      memberArticleIds: ["adressa-lade-update", "nrk-lade-update", "vg-older-lade"],
+    });
+    expect(analysis.articles.map((item) => item.coverageBundle?.id)).toEqual([
+      "coverage:incident:lade-vold-existing",
+      "coverage:incident:lade-vold-existing",
+      "coverage:incident:lade-vold-existing",
+    ]);
+  });
+
+  it("merges existing rows when an older bridge article matches both sides of one incident", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-lade-critical",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ung mann kritisk skadd på Lade",
+          excerpt: "En ung mann er kritisk skadet etter en voldshendelse på Lade i Trondheim.",
+          publishedAt: "2026-06-28T16:59:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+        }),
+        article({
+          id: "nrk-minors-charged",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Flere mindreårige siktet",
+          excerpt:
+            "Fire personer er siktet for grov kroppsskade. Politiet leter etter flere navngitte personer.",
+          publishedAt: "2026-06-28T16:54:00.000Z",
+          category: "Krim",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+        article({
+          id: "vg-bridge-lade",
+          source: "vg",
+          sourceLabel: "VG",
+          title: "Ung mann kritisk skadd - politiet leter etter flere navngitte personer",
+          excerpt:
+            "En ung mann er kritisk skadet etter en voldshendelse på Lade i Trondheim. Flere personer er siktet for grov kroppsskade, og politiet leter etter navngitte personer.",
+          publishedAt: "2026-06-28T16:45:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+        }),
+      ],
+      "2026-06-28T17:10:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "incident",
+      confidence: "high",
+      memberArticleIds: ["adressa-lade-critical", "nrk-minors-charged", "vg-bridge-lade"],
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "vold",
+          articleIds: ["adressa-lade-critical", "vg-bridge-lade"],
+        }),
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "vold",
+          articleIds: ["nrk-minors-charged", "vg-bridge-lade"],
         }),
       ]),
     });

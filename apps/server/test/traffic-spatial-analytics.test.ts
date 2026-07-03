@@ -65,6 +65,7 @@ describe("spatial analytics unexplained delay candidates", () => {
       corridorId: "e6-south",
       confidence: "warning",
       delaySeconds: 360,
+      explanationStatus: "unlinked_news_match",
       matchedArticleIds: ["article-e6-delay"],
       affectedEventIds: [],
       rawRefs: [
@@ -76,6 +77,29 @@ describe("spatial analytics unexplained delay candidates", () => {
           observedAt: "2026-07-02T09:30:00.000Z",
         },
       ],
+    });
+  });
+
+  it("distinguishes missing news coverage from unlinked traffic news", () => {
+    const [candidate] = buildUnexplainedDelayCandidates([corridorImpact()], [], {
+      minDelaySeconds: 180,
+    });
+
+    expect(candidate).toMatchObject({
+      explanationStatus: "no_news_match",
+      matchedArticleIds: [],
+      reason:
+        "DATEX viser ca. 6 min forsinkelse uten koblet trafikkhendelse eller tydelig nyhetsforklaring.",
+    });
+
+    const [queueItem] = buildSpatialInvestigationQueue([candidate!], [], []);
+
+    expect(queueItem).toMatchObject({
+      kind: "unexplained_delay",
+      evidence: expect.arrayContaining([
+        "Nyhetsstatus: ingen relevant nyhet funnet",
+        "Ingen tydelig nyhetsforklaring",
+      ]),
     });
   });
 
@@ -181,6 +205,7 @@ describe("spatial analytics unexplained delay candidates", () => {
         ],
         evidence: expect.arrayContaining([
           "DATEX reisetid: 6 min",
+          "Nyhetsstatus: trafikk omtales, men er ikke koblet til korridoren",
           "Mulige saker: Kø på E6 ved Sluppen",
           "Ingen romlig koblet trafikkhendelse",
         ]),

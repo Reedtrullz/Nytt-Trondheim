@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CommandCenterBriefingPayload,
   NotificationTriggerCandidate,
@@ -145,11 +145,11 @@ function commandTools({
   return [
     {
       title: "Brief-revisjon",
-      capability: "AI Summary Generator",
+      capability: "Brief Analysis",
       href: "/command/brief",
       cta: "Åpne brief-revisjon",
       status: briefing?.morningBrief ? "Brief klar" : "Venter på brief",
-      detail: briefing?.latestAiRun?.model ?? "Viser AI-spor når worker har kjørt.",
+      detail: briefing?.latestAiRun?.model ?? "Viser analysespor når worker har kjørt.",
       tone: briefing?.morningBrief ? "ok" : "idle",
     },
     {
@@ -194,7 +194,7 @@ function commandTools({
       href: "/command/radata",
       cta: "Åpne rådata",
       status: sourceItems > 0 ? `${sourceItems} objekter` : "Venter på objekter",
-      detail: "Sanitert råpayload for kilder, telemetri og AI-kjøringer.",
+      detail: "Sanitert råpayload for kilder, telemetri og analysekjøringer.",
       tone: sourceItems > 0 ? "ok" : "idle",
     },
     {
@@ -356,7 +356,7 @@ function OperationsSummaryTiles({ status }: { status: OperationsStatus }) {
       </article>
       <article>
         <strong>{status.latestAiRun?.status ?? "Ukjent"}</strong>
-        <span>DeepSeek · {time(status.latestAiRun?.completedAt)}</span>
+        <span>Analyse · {time(status.latestAiRun?.completedAt)}</span>
       </article>
     </div>
   );
@@ -515,7 +515,7 @@ function IntelligenceBridgeWidget({ briefing }: { briefing?: CommandCenterBriefi
           <small>{time(briefing.morningBrief?.generatedAt ?? briefing.generatedAt)}</small>
         </article>
         <article>
-          <span>AI</span>
+          <span>Analyse</span>
           <strong>{briefing.latestAiRun?.status ?? "Ikke registrert"}</strong>
           <small>{briefing.latestAiRun?.model ?? "Ingen kjøring"}</small>
         </article>
@@ -547,10 +547,18 @@ export function OperationsDashboard({
   status,
   briefing,
   notificationTriggers,
+  refreshing,
+  refreshError,
+  lastFetchedAt,
+  onRefresh,
 }: {
   status: OperationsStatus;
   briefing?: CommandCenterBriefingPayload;
   notificationTriggers?: NotificationTriggerPage;
+  refreshing?: boolean;
+  refreshError?: string;
+  lastFetchedAt?: string;
+  onRefresh?: () => void;
 }) {
   const trafficPulse = status.trafficPulse ?? [];
   const workerMetrics = status.workerCycleMetrics;
@@ -564,7 +572,7 @@ export function OperationsDashboard({
       {
         id: "overview",
         title: "Situasjonsbilde",
-        description: "Nøkkeltall for innhentede saker, åpne situasjoner og AI-status.",
+        description: "Nøkkeltall for innhentede saker, åpne situasjoner og analysestatus.",
         defaultSize: "wide",
         children: <OperationsSummaryTiles status={status} />,
       },
@@ -587,7 +595,7 @@ export function OperationsDashboard({
       {
         id: "briefing",
         title: "Intelligence Bridge",
-        description: "Morgenbrief, AI-spor og støttegrunnlag for offentlig bypuls.",
+        description: "Morgenbrief, analysespor og støttegrunnlag for offentlig bypuls.",
         defaultSize: "wide",
         children: <IntelligenceBridgeWidget briefing={briefing} />,
       },
@@ -654,9 +662,31 @@ export function OperationsDashboard({
         <p className="label">Privat kommandosenter</p>
         <h1>Kommandosenter</h1>
         <p>Sist innhenting {time(status.latestCollectionAt)}</p>
+        {onRefresh ? (
+          <div
+            className={`operations-live-status${refreshError ? " has-error" : ""}`}
+            aria-live="polite"
+          >
+            <div>
+              <span>Operatørfeed</span>
+              <strong>
+                {refreshing
+                  ? "Oppdaterer ..."
+                  : lastFetchedAt
+                    ? `Oppdatert ${time(lastFetchedAt)}`
+                    : "Klar"}
+              </strong>
+              <small>{refreshError ?? "Oppdateres hvert minutt mens fanen er synlig."}</small>
+            </div>
+            <button type="button" onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? "Oppdaterer" : "Oppdater nå"}
+            </button>
+          </div>
+        ) : null}
       </header>
       <DashboardGrid
         ariaLabel="Kommandosenter-moduler"
+        configMode="toggle"
         storageKey="nytt-command-dashboard-v1"
         widgets={widgets}
       />
@@ -669,49 +699,107 @@ export function OperationsPage() {
   const [briefing, setBriefing] = useState<CommandCenterBriefingPayload>();
   const [notificationTriggers, setNotificationTriggers] = useState<NotificationTriggerPage>();
   const [error, setError] = useState<string>();
-  const [attempt, setAttempt] = useState(0);
+  const [refreshError, setRefreshError] = useState<string>();
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastFetchedAt, setLastFetchedAt] = useState<string>();
+  const mountedRef = useRef(true);
+  const statusRef = useRef<OperationsStatus | undefined>(undefined);
+  const refreshInFlightRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
-    setError(undefined);
-    setStatus(undefined);
-    setBriefing(undefined);
-    setNotificationTriggers(undefined);
-    void api
-      .operations()
-      .then((nextStatus) => {
-        if (cancelled) return;
-        setStatus(nextStatus);
-        void api
-          .commandBriefing()
-          .then((nextBriefing) => {
-            if (!cancelled) setBriefing(nextBriefing);
-          })
-          .catch(() => {
-            // Keep the Command Center usable if the derived briefing review is temporarily unavailable.
-          });
-        void api
-          .notificationTriggers({ limit: 4 })
-          .then((nextTriggers) => {
-            if (!cancelled) setNotificationTriggers(nextTriggers);
-          })
-          .catch(() => {
-            // Keep the Command Center usable if notification analysis is temporarily unavailable.
-          });
-      })
-      .catch((reason: Error) => {
-        if (!cancelled) setError(reason.message);
-      });
+    statusRef.current = status;
+  }, [status]);
+
+  const loadOperations = useCallback(
+    async ({ initial = false, silent = false }: { initial?: boolean; silent?: boolean } = {}) => {
+      if (refreshInFlightRef.current) return;
+      refreshInFlightRef.current = true;
+
+      if (initial) {
+        setError(undefined);
+        setRefreshError(undefined);
+        setStatus(undefined);
+        setBriefing(undefined);
+        setNotificationTriggers(undefined);
+      }
+      if (!silent) setRefreshing(true);
+
+      try {
+        const nextStatus = await api.operations();
+        const fetchedAt = new Date().toISOString();
+
+        if (mountedRef.current) {
+          setStatus(nextStatus);
+          statusRef.current = nextStatus;
+          setError(undefined);
+          setLastFetchedAt(fetchedAt);
+        }
+
+        const [nextBriefing, nextTriggers] = await Promise.allSettled([
+          api.commandBriefing(),
+          api.notificationTriggers({ limit: 4 }),
+        ]);
+
+        if (!mountedRef.current) return;
+
+        if (nextBriefing.status === "fulfilled") {
+          setBriefing(nextBriefing.value);
+        } else if (initial) {
+          setBriefing(undefined);
+        }
+
+        if (nextTriggers.status === "fulfilled") {
+          setNotificationTriggers(nextTriggers.value);
+        } else if (initial) {
+          setNotificationTriggers(undefined);
+        }
+
+        if (nextBriefing.status === "rejected" || nextTriggers.status === "rejected") {
+          setRefreshError("Driftstatus er oppdatert, men en støtteanalyse mangler.");
+        } else {
+          setRefreshError(undefined);
+        }
+      } catch (reason) {
+        if (!mountedRef.current) return;
+        const message = reason instanceof Error ? reason.message : "Kunne ikke hente driftstatus.";
+        if (initial || !statusRef.current) {
+          setError(message);
+        } else {
+          setRefreshError(message);
+        }
+      } finally {
+        refreshInFlightRef.current = false;
+        if (mountedRef.current) setRefreshing(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void loadOperations({ initial: true });
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
-  }, [attempt]);
+  }, [loadOperations]);
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") void loadOperations({ silent: true });
+    };
+    const interval = window.setInterval(refreshIfVisible, 60_000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [loadOperations]);
 
   if (error) {
     return (
       <main className="operations-page" role="alert">
         <p>Kunne ikke hente driftstatus: {error}</p>
-        <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+        <button type="button" onClick={() => void loadOperations({ initial: true })}>
           Prøv igjen
         </button>
       </main>
@@ -724,6 +812,10 @@ export function OperationsPage() {
       status={status}
       briefing={briefing}
       notificationTriggers={notificationTriggers}
+      refreshing={refreshing}
+      refreshError={refreshError}
+      lastFetchedAt={lastFetchedAt}
+      onRefresh={() => void loadOperations()}
     />
   );
 }

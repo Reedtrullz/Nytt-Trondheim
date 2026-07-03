@@ -14,4 +14,5 @@ runtime-status/
 *.tsbuildinfo
 .DS_Store
 .hermes/
+.hcodex-swarm/
 NPRA_DATEXII_3_1_Specification.pdf

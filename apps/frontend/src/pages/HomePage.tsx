@@ -15,7 +15,10 @@ import {
   publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
+  type CityPulseStory,
+  type CityPulseStoryPage,
   type HomeSituationSummary,
+  type MorningBrief,
   type PublicNotificationSignalHighlight,
   type NotificationTriggerSeverity,
   type SourceConfidenceSummary,
@@ -64,6 +67,7 @@ import {
 } from "../homeLocalFocus.js";
 import {
   homeStoryCardsForGroups,
+  homeStoryCardsForStories,
   sourceClusterLabelForGroup,
   type HomeStoryCard,
   type HomeStoryVerification,
@@ -184,6 +188,23 @@ function notificationKindLabel(kind: PublicNotificationSignalHighlight["kind"]) 
   }
 }
 
+function morningBriefModeLabel(mode: MorningBrief["mode"]): string {
+  return mode === "ai_assisted" ? "Analysert brief" : "Reservebrief";
+}
+
+function publicAnalysisRunLabel(brief: MorningBrief): string | undefined {
+  if (!brief.aiRun) return undefined;
+  const providerLabel =
+    brief.aiRun.provider === "deterministic" ? "Deterministisk analyse" : "Automatisk analyse";
+  return `${providerLabel} · ${brief.aiRun.status.toUpperCase()} · ${formatTime(
+    brief.aiRun.completedAt,
+  )}`;
+}
+
+function publicBriefSourceLine(line: string): string {
+  return line.replaceAll("AI-assistert", "Automatisk analyse").replaceAll("DeepSeek", "Analyse");
+}
+
 function SaveButton({
   article,
   saving,
@@ -273,8 +294,9 @@ export function MorningBriefPanel({
   now?: Date;
 }) {
   if (!brief) return null;
-  const modeLabel = brief.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief";
+  const modeLabel = morningBriefModeLabel(brief.mode);
   const freshness = morningBriefFreshness(brief.generatedAt, now);
+  const analysisRunLabel = publicAnalysisRunLabel(brief);
   const articlesById = new Map(articles.map((article) => [article.id, article]));
   const situationsById = new Map(situations.map((situation) => [situation.id, situation]));
   const linkedArticles = brief.articleIds
@@ -314,15 +336,11 @@ export function MorningBriefPanel({
             <p key={paragraph}>{paragraph}</p>
           ))}
         </div>
-        <small>{brief.sourceLine}</small>
-        {brief.aiRun ? (
+        <small>{publicBriefSourceLine(brief.sourceLine)}</small>
+        {analysisRunLabel ? (
           <p className="morning-brief-ai-trace">
-            <span>AI-spor</span>
-            <span>
-              {brief.aiRun.provider === "deepseek" ? "DeepSeek" : "Deterministisk"} ·{" "}
-              {brief.aiRun.model} · {brief.aiRun.status.toUpperCase()} ·{" "}
-              {formatTime(brief.aiRun.completedAt)}
-            </span>
+            <span>Analysespor</span>
+            <span>{analysisRunLabel}</span>
           </p>
         ) : null}
         {hasSourceLinks ? (
@@ -384,7 +402,7 @@ export function CityPulseSignalPanel({
     <section className="city-pulse-signal-panel" aria-labelledby="city-pulse-signal-heading">
       <div className="section-heading-row">
         <div>
-          <p className="label">Varsel og AI-spor</p>
+          <p className="label">Varsel og analysespor</p>
           <h2 id="city-pulse-signal-heading">Slik vurderes høyeffekt-signaler</h2>
         </div>
         <Link to="/varsler">
@@ -394,7 +412,7 @@ export function CityPulseSignalPanel({
       <div className="city-pulse-signal-status">
         <div>
           <span>Morgenbrief</span>
-          <strong>{brief?.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief"}</strong>
+          <strong>{brief ? morningBriefModeLabel(brief.mode) : "Ikke lagret"}</strong>
         </div>
         <div>
           <span>Siste analyse</span>
@@ -514,7 +532,7 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
     });
     nextWidgets.push({
       id: "signal-trace",
-      title: "Varsel og AI-spor",
+      title: "Varsel og analysespor",
       description: "Offentlig forklaring på høyeffekt-signaler.",
       defaultSize: "full",
       children: (
@@ -619,6 +637,7 @@ function LeadStory({
           {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
         </div>
         {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
+        <StoryEventBundleSummary card={card} />
         <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
         <div className="story-card-tags lead-story-tags">
@@ -699,6 +718,35 @@ export function StoryConfidenceBadge({ confidence }: { confidence: SourceConfide
       Kildetillit: {confidence.label}
       {scoreLabel}
     </span>
+  );
+}
+
+function storyBundleLabel(kind: HomeStoryCard["cardKind"]): string {
+  switch (kind) {
+    case "situasjon":
+      return "Samlet situasjon";
+    case "hendelse":
+      return "Samlet hendelse";
+    case "tema":
+      return "Samlet tema";
+    case "oppdatering":
+      return "Samlet oppdatering";
+    case "sak":
+      return "Samlet sak";
+  }
+}
+
+export function StoryEventBundleSummary({ card }: { card: HomeStoryCard }) {
+  if (!card.isClustered) return null;
+  const summary = card.clusterLabel ?? card.sourceSummary;
+  return (
+    <div
+      className={`story-event-summary story-event-summary-${card.cardKind}`}
+      aria-label={`Samlet bypulskort: ${summary}`}
+    >
+      <span>{storyBundleLabel(card.cardKind)}</span>
+      <strong>{summary}</strong>
+    </div>
   );
 }
 
@@ -802,6 +850,7 @@ function StoryCard({
           </p>
           {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
         </div>
+        <StoryEventBundleSummary card={card} />
         {articleUrl ? (
           <a
             className="headline story-title"
@@ -1238,6 +1287,159 @@ function situationMatchesWindow(
   return latest !== undefined && latest >= lowerBound;
 }
 
+export function cityPulseLatestTimestamp(data: BootstrapPayload): string | undefined {
+  const candidates = [
+    data.morningBrief?.generatedAt,
+    ...(data.stories ?? []).map((story) => story.latestAt),
+    ...data.articles.map((article) => article.publishedAt),
+    ...data.situations.flatMap((situation) => [situation.updatedAt, situation.createdAt]),
+    ...data.sourceHealth.map((source) => source.lastCheckedAt),
+  ].flatMap((value) => {
+    if (!value) return [];
+    const timestamp = timestampMs(value);
+    return timestamp === undefined ? [] : [{ value, timestamp }];
+  });
+  return candidates.sort((left, right) => right.timestamp - left.timestamp)[0]?.value;
+}
+
+export function articlesFromCityPulseStoryPage(page: CityPulseStoryPage): Article[] {
+  return articlesFromCityPulseStories(page.items);
+}
+
+export function articlesFromCityPulseStories(stories: CityPulseStory[]): Article[] {
+  const seenArticleIds = new Set<string>();
+  return stories
+    .flatMap((story) => {
+      const articles = story.articles.length > 0 ? story.articles : [story.primary];
+      return articles.map((article) => ({
+        ...article,
+        ...(story.coverageBundle && !article.coverageBundle
+          ? { coverageBundle: story.coverageBundle }
+          : {}),
+        ...(story.publicVerification && !article.publicVerification
+          ? { publicVerification: story.publicVerification }
+          : {}),
+      }));
+    })
+    .filter((article) => {
+      if (seenArticleIds.has(article.id)) return false;
+      seenArticleIds.add(article.id);
+      return true;
+    });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+function newerTimestamp(left: string, right: string): string {
+  const leftMs = timestampMs(left) ?? 0;
+  const rightMs = timestampMs(right) ?? 0;
+  return rightMs > leftMs ? right : left;
+}
+
+function mergeCityPulseStory(existing: CityPulseStory, incoming: CityPulseStory): CityPulseStory {
+  const articlesById = new Map<string, Article>();
+  const sourceLabels = uniqueStrings([...existing.sourceLabels, ...incoming.sourceLabels]);
+  for (const article of [
+    ...(existing.articles.length > 0 ? existing.articles : [existing.primary]),
+    ...(incoming.articles.length > 0 ? incoming.articles : [incoming.primary]),
+  ]) {
+    articlesById.set(article.id, article);
+  }
+  const articles = [...articlesById.values()].sort(
+    (left, right) => (timestampMs(right.publishedAt) ?? 0) - (timestampMs(left.publishedAt) ?? 0),
+  );
+  const articleIds = uniqueStrings([
+    ...existing.articleIds,
+    ...incoming.articleIds,
+    ...articles.map((article) => article.id),
+  ]);
+  return {
+    ...existing,
+    articleIds,
+    articles,
+    sourceLabels,
+    sourceCount: sourceLabels.length,
+    updateCount: Math.max(existing.updateCount, incoming.updateCount, articles.length),
+    latestAt: newerTimestamp(existing.latestAt, incoming.latestAt),
+    coverageBundle: existing.coverageBundle ?? incoming.coverageBundle,
+    publicVerification: existing.publicVerification ?? incoming.publicVerification,
+  };
+}
+
+export function mergeCityPulseStoryLists(
+  current: CityPulseStory[],
+  incoming: CityPulseStory[],
+): CityPulseStory[] {
+  const storiesById = new Map(current.map((story) => [story.id, story]));
+  for (const story of incoming) {
+    const existing = storiesById.get(story.id);
+    storiesById.set(story.id, existing ? mergeCityPulseStory(existing, story) : story);
+  }
+  return [...storiesById.values()].sort(
+    (left, right) => (timestampMs(right.latestAt) ?? 0) - (timestampMs(left.latestAt) ?? 0),
+  );
+}
+
+function cityPulseStoryWithArticle(
+  story: CityPulseStory,
+  articleId: string,
+  update: (article: Article) => Article,
+): CityPulseStory {
+  const primary = story.primary.id === articleId ? update(story.primary) : story.primary;
+  const articles = story.articles.map((article) =>
+    article.id === articleId ? update(article) : article,
+  );
+  if (
+    primary === story.primary &&
+    articles.every((article, index) => article === story.articles[index])
+  ) {
+    return story;
+  }
+  return { ...story, primary, articles };
+}
+
+function cityPulseStoriesWithSavedState(
+  stories: CityPulseStory[],
+  articleId: string,
+  saved: boolean,
+): CityPulseStory[] {
+  return stories.map((story) =>
+    cityPulseStoryWithArticle(story, articleId, (article) => ({ ...article, saved })),
+  );
+}
+
+export function CityPulseRefreshStatus({
+  error,
+  lastUpdatedAt,
+  onRefresh,
+  refreshing,
+}: {
+  error?: string;
+  lastUpdatedAt?: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+}) {
+  return (
+    <section className={`city-pulse-refresh${error ? " has-error" : ""}`} aria-live="polite">
+      <div>
+        <span>Bypuls</span>
+        <strong>{lastUpdatedAt ? formatTime(lastUpdatedAt) : "Ikke oppdatert"}</strong>
+      </div>
+      <button type="button" disabled={refreshing} onClick={onRefresh}>
+        {refreshing ? "Oppdaterer" : "Oppdater bypuls"}
+      </button>
+      {error ? <small role="status">{error}</small> : null}
+    </section>
+  );
+}
+
 function isDefaultHomeFeed(filters: HomeFilters): boolean {
   return (
     filters.scope === "trondheim" &&
@@ -1273,10 +1475,15 @@ export function cityPulseDataForCurrentFeed({
   return {
     ...initialData,
     articles,
-    articleNextCursor: defaultFeed ? initialData.articleNextCursor : undefined,
+    stories: defaultFeed ? initialData.stories : undefined,
+    storyNextCursor: defaultFeed ? initialData.storyNextCursor : undefined,
     situations,
     morningBrief: defaultFeed ? initialData.morningBrief : undefined,
   };
+}
+
+function defaultStoryNextCursor(data: BootstrapPayload): string | undefined {
+  return data.storyNextCursor;
 }
 
 interface SavedOverride {
@@ -1297,18 +1504,28 @@ export function HomePage({
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
   const { scope, category, topic, timeWindow, q: query } = filters;
   const initialFeedIsDefault = isDefaultHomeFeed(filters);
+  const [liveData, setLiveData] = useState(initialData);
   const [articles, setArticles] = useState(() =>
     initialFeedIsDefault ? initialData.articles : [],
   );
+  const [stories, setStories] = useState<CityPulseStory[]>(() =>
+    initialFeedIsDefault ? (initialData.stories ?? []) : [],
+  );
   const [nextCursor, setNextCursor] = useState<string | undefined>(() =>
-    initialFeedIsDefault ? initialData.articleNextCursor : undefined,
+    initialFeedIsDefault ? defaultStoryNextCursor(initialData) : undefined,
   );
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
+  const [refreshingCityPulse, setRefreshingCityPulse] = useState(false);
+  const [cityPulseRefreshError, setCityPulseRefreshError] = useState<string>();
+  const [cityPulseRefreshedAt, setCityPulseRefreshedAt] = useState(() =>
+    cityPulseLatestTimestamp(initialData),
+  );
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
   const articleSavedOverridesRef = useRef<Map<string, SavedOverride>>(new Map());
+  const cityPulseRefreshRunningRef = useRef(false);
   const feedKey = `${scope}\u0000${category}\u0000${topic ?? ""}\u0000${query}\u0000${timeWindow}`;
   const feedKeyRef = useRef(feedKey);
   const loadMoreRequestIdRef = useRef(0);
@@ -1322,6 +1539,95 @@ export function HomePage({
   const focusRadiusCustomizedRef = useRef(false);
   const activeLocalFocus = localFocus.status === "active" ? localFocus.point : undefined;
   const activeLocalFocusRadiusKm = activeLocalFocus?.radiusKm ?? focusRadiusKm;
+
+  useEffect(() => {
+    setLiveData(initialData);
+    setCityPulseRefreshedAt(cityPulseLatestTimestamp(initialData));
+  }, [initialData]);
+
+  const applySavedOverrides = useCallback((items: Article[]) => {
+    const savedOverrides = articleSavedOverridesRef.current;
+    if (savedOverrides.size === 0) return items;
+    const now = Date.now();
+    const nextOverrides = new Map(savedOverrides);
+    const nextItems = items.map((item) => {
+      const override = nextOverrides.get(item.id);
+      if (!override) return item;
+      if (override.expiresAt <= now || item.saved === override.saved) {
+        nextOverrides.delete(item.id);
+        return item;
+      }
+      return { ...item, saved: override.saved };
+    });
+    articleSavedOverridesRef.current = nextOverrides;
+    return nextItems;
+  }, []);
+
+  const applySavedOverridesToStories = useCallback(
+    (items: CityPulseStory[]) => {
+      const updatedArticles = new Map(
+        applySavedOverrides(articlesFromCityPulseStories(items)).map((article) => [
+          article.id,
+          article,
+        ]),
+      );
+      return items.map((story) => {
+        const primary = updatedArticles.get(story.primary.id) ?? story.primary;
+        const articles =
+          story.articles.length > 0
+            ? story.articles.map((article) => updatedArticles.get(article.id) ?? article)
+            : story.articles;
+        return primary === story.primary && articles === story.articles
+          ? story
+          : { ...story, primary, articles };
+      });
+    },
+    [applySavedOverrides],
+  );
+
+  const refreshCityPulse = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      if (cityPulseRefreshRunningRef.current) return;
+      cityPulseRefreshRunningRef.current = true;
+      if (!options.silent) setRefreshingCityPulse(true);
+      try {
+        const nextData = await api.bootstrap();
+        setLiveData(nextData);
+        setCityPulseRefreshedAt(cityPulseLatestTimestamp(nextData) ?? new Date().toISOString());
+        setCityPulseRefreshError(undefined);
+        if (feedKeyRef.current === defaultHomeFeedKey) {
+          const nextStories = applySavedOverridesToStories(nextData.stories ?? []);
+          setStories(nextStories);
+          setArticles(
+            nextStories.length > 0
+              ? articlesFromCityPulseStories(nextStories)
+              : applySavedOverrides(nextData.articles),
+          );
+          setNextCursor(defaultStoryNextCursor(nextData));
+        }
+      } catch (reason) {
+        if (!options.silent) {
+          setCityPulseRefreshError(
+            reason instanceof Error ? reason.message : "Kunne ikke oppdatere bypulsen",
+          );
+        }
+      } finally {
+        cityPulseRefreshRunningRef.current = false;
+        if (!options.silent) setRefreshingCityPulse(false);
+      }
+    },
+    [applySavedOverrides, applySavedOverridesToStories],
+  );
+
+  useEffect(() => {
+    if (feedKey !== defaultHomeFeedKey) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      if (savingArticleIdsRef.current.size > 0) return;
+      void refreshCityPulse({ silent: true });
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [feedKey, refreshCityPulse]);
 
   useEffect(() => {
     try {
@@ -1493,8 +1799,14 @@ export function HomePage({
       setLoading(false);
       setLoadingMore(false);
       setFeedError(undefined);
-      setArticles(initialData.articles);
-      setNextCursor(initialData.articleNextCursor);
+      const nextStories = applySavedOverridesToStories(liveData.stories ?? []);
+      setStories(nextStories);
+      setArticles(
+        nextStories.length > 0
+          ? articlesFromCityPulseStories(nextStories)
+          : applySavedOverrides(liveData.articles),
+      );
+      setNextCursor(defaultStoryNextCursor(liveData));
       return;
     }
     let cancelled = false;
@@ -1502,31 +1814,18 @@ export function HomePage({
     setLoadingMore(false);
     loadMoreRequestIdRef.current += 1;
     setNextCursor(undefined);
+    setStories([]);
     setArticles([]);
     setFeedError(undefined);
     const timeout = window.setTimeout(
       () => {
         void api
-          .articles({ scope, category, topic, q: query, from: timeWindowFrom })
+          .cityPulseStories({ scope, category, topic, q: query, from: timeWindowFrom })
           .then((page) => {
             if (!cancelled) {
-              setArticles(() => {
-                const savedOverrides = articleSavedOverridesRef.current;
-                if (savedOverrides.size === 0) return page.items;
-                const now = Date.now();
-                const nextOverrides = new Map(savedOverrides);
-                const nextItems = page.items.map((item) => {
-                  const override = nextOverrides.get(item.id);
-                  if (!override) return item;
-                  if (override.expiresAt <= now || item.saved === override.saved) {
-                    nextOverrides.delete(item.id);
-                    return item;
-                  }
-                  return { ...item, saved: override.saved };
-                });
-                articleSavedOverridesRef.current = nextOverrides;
-                return nextItems;
-              });
+              const nextStories = applySavedOverridesToStories(page.items);
+              setStories(nextStories);
+              setArticles(articlesFromCityPulseStories(nextStories));
               setNextCursor(page.nextCursor);
             }
           })
@@ -1545,9 +1844,12 @@ export function HomePage({
     };
   }, [
     category,
+    applySavedOverrides,
+    applySavedOverridesToStories,
     feedKey,
-    initialData.articleNextCursor,
-    initialData.articles,
+    liveData.articles,
+    liveData.stories,
+    liveData.storyNextCursor,
     query,
     scope,
     timeWindowFrom,
@@ -1561,14 +1863,20 @@ export function HomePage({
       cityPulseDataForCurrentFeed({
         articles: filtered,
         filters,
-        initialData,
+        initialData: liveData,
         timeWindowFrom,
       }),
-    [filtered, filters, initialData, timeWindowFrom],
+    [filtered, filters, liveData, timeWindowFrom],
   );
 
   const groupedArticles = useMemo(() => groupHomeArticles(filtered), [filtered]);
-  const storyCards = useMemo(() => homeStoryCardsForGroups(groupedArticles), [groupedArticles]);
+  const storyCards = useMemo(
+    () =>
+      stories.length > 0
+        ? homeStoryCardsForStories(stories)
+        : homeStoryCardsForGroups(groupedArticles),
+    [groupedArticles, stories],
+  );
   const channelStoryCounts = useMemo(() => channelStoryCountsForCards(storyCards), [storyCards]);
   const displayedStoryCards = useMemo(
     () => rankHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus),
@@ -1600,6 +1908,7 @@ export function HomePage({
     });
     setSavingArticleIds(pending);
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
+    setStories((items) => cityPulseStoriesWithSavedState(items, id, saved));
     try {
       await api.saveArticle(id, saved);
       articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(id, {
@@ -1614,6 +1923,7 @@ export function HomePage({
       setArticles((items) =>
         items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
       );
+      setStories((items) => cityPulseStoriesWithSavedState(items, id, previous));
       setSaveError(reason instanceof Error ? reason.message : "Kunne ikke lagre saken");
     } finally {
       const next = new Set(savingArticleIdsRef.current);
@@ -1632,22 +1942,27 @@ export function HomePage({
     setLoadingMore(true);
     setFeedError(undefined);
     try {
-      const page = await api.articles({
+      const requestQuery = {
         scope,
         category,
         topic,
         q: query,
         from: timeWindowFrom,
         cursor: requestCursor,
-      });
+      };
+      const page = await api.cityPulseStories(requestQuery);
+      const pageStories = applySavedOverridesToStories(page.items);
+      const pageNextCursor = page.nextCursor;
       if (loadMoreRequestIdRef.current !== requestId || feedKeyRef.current !== requestFeedKey) {
         return;
       }
+      const nextArticles = articlesFromCityPulseStories(pageStories);
+      setStories((current) => mergeCityPulseStoryLists(current, pageStories));
       setArticles((current) => [
         ...current,
-        ...page.items.filter((item) => !current.some((existing) => existing.id === item.id)),
+        ...nextArticles.filter((item) => !current.some((existing) => existing.id === item.id)),
       ]);
-      setNextCursor(page.nextCursor);
+      setNextCursor(pageNextCursor);
     } catch (reason) {
       if (loadMoreRequestIdRef.current === requestId) {
         setFeedError(reason instanceof Error ? reason.message : "Kunne ikke hente flere saker");
@@ -1732,6 +2047,14 @@ export function HomePage({
             </button>
           ))}
         </div>
+        {feedKey === defaultHomeFeedKey ? (
+          <CityPulseRefreshStatus
+            error={cityPulseRefreshError}
+            lastUpdatedAt={cityPulseRefreshedAt}
+            onRefresh={() => void refreshCityPulse()}
+            refreshing={refreshingCityPulse}
+          />
+        ) : null}
         <div className={`local-focus local-focus-${localFocus.status}`} aria-live="polite">
           <button
             type="button"

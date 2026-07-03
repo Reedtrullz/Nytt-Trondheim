@@ -56,6 +56,31 @@ const aiRun: RawInspectorAiRunDetail = {
     ],
   },
   result: {
+    morningBrief: {
+      paragraphs: ["Kort bypuls.", "Trafikk følges.", "Ingen store væravvik."],
+    },
+    clusters: [
+      {
+        title: "Kø ved Sluppen",
+        citedClaims: [{ claim: "Sakte trafikk", articleId: "article:one" }],
+      },
+    ],
+    situationUpdates: [],
+    bundleHints: [
+      {
+        title: "Sluppen-trafikk",
+        citedClaims: [{ claim: "Samme korridor", articleId: "article:two" }],
+      },
+    ],
+    categoryHints: [{ articleId: "article:one", category: "Transport" }],
+    relevanceHints: [{ articleId: "article:two", scope: "trondheim" }],
+    operationsNotes: [
+      {
+        kind: "bundle_candidate",
+        summary: "Mulig kobling til trafikkpuls.",
+        citedClaims: [{ claim: "Mulig trafikkårsak", articleId: "article:one" }],
+      },
+    ],
     diagnostics: {
       profile: "compact_recovery",
       attempts: [
@@ -119,9 +144,10 @@ describe("RawDataInspectorDashboard", () => {
     expect(html).toContain("Rådata-inspektør");
     expect(html).toContain("Modulært kommandosenter");
     expect(html).toContain("Rådata-arbeidsflate");
-    expect(html).toContain("Dashboard-oppsett");
-    expect(html).toContain("Rådatafiltre layout");
-    expect(html).toContain("Endre størrelse på Payload-detaljer");
+    expect(html).toContain("Tilpass oppsett");
+    expect(html).not.toContain("Dashboard-oppsett");
+    expect(html).not.toContain("Rådatafiltre layout");
+    expect(html).not.toContain("Endre størrelse på Payload-detaljer");
     expect(html).toContain("Testkilde");
     expect(html).toContain("Normalisert payload");
     expect(html).toContain("Rå payload");
@@ -132,9 +158,24 @@ describe("RawDataInspectorDashboard", () => {
     expect(html).toContain("DATEX reisetid");
     expect(html).toContain("Sakte trafikk · 6 min forsinkelse");
     expect(html).toContain("Telemetripayload");
+    expect(html).toContain("AI-spor og reserveflyt");
+    expect(html).toContain("Reserveanalyse brukt");
+    expect(html).toContain("kompakt gjenoppretting fullførte");
     expect(html).toContain("Kompakt gjenoppretting");
     expect(html).toContain("Full analyse feilet");
+    expect(html).toContain("12 saker / 4 situasjoner");
+    expect(html).toContain("4096 maks tokens");
+    expect(html).toContain("8 saker / 4 situasjoner");
+    expect(html).toContain("2048 maks tokens");
+    expect(html).toContain("Sanitert resultat: 32 B");
     expect(html).toContain("JSON response was truncated");
+    expect(html).toContain("Analysebeslutninger");
+    expect(html).toContain("3 avsnitt");
+    expect(html).toContain("1 klynge");
+    expect(html).toContain("1 hint");
+    expect(html).toContain("2 hint");
+    expect(html).toContain("1 notat");
+    expect(html).toContain("3 spor");
     expect(html).not.toContain("Slå sammen");
     expect(html).not.toContain("Kjør på nytt");
   });
@@ -151,6 +192,21 @@ describe("RawDataInspectorDashboard", () => {
     expect(html).toContain("Velg telemetri fra romlig analyse eller oppgi kilde og ID.");
     expect(html).toContain("Velg et kildeelement for råpayload.");
     expect(html).toContain("Velg en AI-kjøring for resultatpayload.");
+  });
+
+  it("shows an honest AI decision empty state when a run has no structured output", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <RawDataInspectorDashboard
+          aiRuns={{ items: [{ ...aiRun, status: "disabled" }] }}
+          filters={{ run: "ai:one" }}
+          selectedAiRun={{ ...aiRun, status: "disabled", result: {} }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("AI er avslått");
+    expect(html).toContain("Ingen strukturerte analysebeslutninger");
   });
 
   it("renders searchable source-item metadata without exposing payloads in the list", () => {

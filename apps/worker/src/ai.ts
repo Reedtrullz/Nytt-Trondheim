@@ -367,10 +367,15 @@ function run(
 }
 
 export class NoopAnalyzer implements SituationAnalyzer {
+  constructor(private readonly reason = "DeepSeek-analyse er ikke aktivert.") {}
+
   async cluster(articles: Article[]) {
     const startedAt = new Date().toISOString();
     const result = emptyAnalysisResult();
-    return { result, run: run("deterministic", "none", "disabled", startedAt, articles, result) };
+    return {
+      result,
+      run: run("deterministic", "none", "disabled", startedAt, articles, result, this.reason),
+    };
   }
 }
 
@@ -680,8 +685,21 @@ export function applySituationUpdateHints(
   });
 }
 
+function envFlagEnabled(value: string | undefined): boolean {
+  const normalized = value?.trim().toLocaleLowerCase("en") ?? "";
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+export function deepSeekAnalysisEnabled(): boolean {
+  return envFlagEnabled(process.env.DEEPSEEK_ANALYSIS_ENABLED);
+}
+
 export function createAnalyzer(): SituationAnalyzer {
-  return process.env.DEEPSEEK_API_KEY
-    ? new DeepSeekAnalyzer(process.env.DEEPSEEK_API_KEY)
-    : new NoopAnalyzer();
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (deepSeekAnalysisEnabled() && apiKey) return new DeepSeekAnalyzer(apiKey);
+  return new NoopAnalyzer(
+    deepSeekAnalysisEnabled()
+      ? "DEEPSEEK_ANALYSIS_ENABLED=true, men DEEPSEEK_API_KEY mangler."
+      : "DEEPSEEK_ANALYSIS_ENABLED er ikke satt til true; deterministisk analyse brukes.",
+  );
 }

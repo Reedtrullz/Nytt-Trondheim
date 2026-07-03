@@ -55,6 +55,7 @@ import {
   type SituationExplanation,
   type SituationMapWorkspace,
   type SituationWorkspace,
+  type CommandCenterSpatialAnalyticsPayload,
   type SourceConfidenceSummary,
   type SourceHealth,
   type SourceId,
@@ -117,6 +118,8 @@ const defaultWeatherBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.
 const workerStaleAfterSeconds = 2 * 60 * 60;
 const backupStaleAfterSeconds = 36 * 60 * 60;
 const restoreCheckStaleAfterSeconds = 8 * 24 * 60 * 60;
+const spatialAnalyticsRefreshIntervalSeconds = 60;
+const spatialAnalyticsStaleAfterSeconds = 15 * 60;
 const telemetrySourceIds = new Set<SourceId>([
   "datex_travel_time",
   "datex_weather",
@@ -539,6 +542,66 @@ function sourceConfidenceCounts(
     },
     { confirmed: 0, likely: 0, uncertain: 0, speculative: 0 },
   );
+}
+
+function latestSpatialDataUpdatedAt(input: {
+  heatmapCells: SpatialHeatmapCell[];
+  unexplainedDelays: UnexplainedDelayCandidate[];
+  telemetryHistory: CommandCenterSpatialAnalyticsPayload["telemetryHistory"];
+  telemetryPatterns: CommandCenterSpatialAnalyticsPayload["telemetryPatterns"];
+}): string | undefined {
+  const timestamps = [
+    ...input.heatmapCells.map((cell) => cell.lastSeenAt),
+    ...input.unexplainedDelays.map((candidate) => candidate.updatedAt),
+    input.telemetryHistory.datexTravelTime.lastObservedAt,
+    input.telemetryHistory.trafficCounters.lastObservedAt,
+    ...input.telemetryPatterns.map((pattern) => pattern.lastObservedAt),
+  ];
+  const latest = Math.max(
+    ...timestamps
+      .map((value) => (value ? Date.parse(value) : Number.NaN))
+      .filter((value) => Number.isFinite(value)),
+  );
+  return Number.isFinite(latest) ? new Date(latest).toISOString() : undefined;
+}
+
+function spatialLiveStatus(input: {
+  generatedAt: Date;
+  dataUpdatedAt?: string;
+}): CommandCenterSpatialAnalyticsPayload["live"] {
+  const nextRefreshAt = new Date(
+    input.generatedAt.getTime() + spatialAnalyticsRefreshIntervalSeconds * 1000,
+  ).toISOString();
+  const parsedDataUpdatedAt = input.dataUpdatedAt ? Date.parse(input.dataUpdatedAt) : Number.NaN;
+  if (!Number.isFinite(parsedDataUpdatedAt)) {
+    return {
+      status: "empty",
+      refreshIntervalSeconds: spatialAnalyticsRefreshIntervalSeconds,
+      nextRefreshAt,
+      staleAfterSeconds: spatialAnalyticsStaleAfterSeconds,
+      detail: "Ingen tidsstemplet romlig analyse er tilgjengelig i dette vinduet.",
+    };
+  }
+
+  const dataAgeSeconds = Math.max(
+    0,
+    Math.round((input.generatedAt.getTime() - parsedDataUpdatedAt) / 1000),
+  );
+  const status = dataAgeSeconds > spatialAnalyticsStaleAfterSeconds ? "stale" : "live";
+  return {
+    status,
+    refreshIntervalSeconds: spatialAnalyticsRefreshIntervalSeconds,
+    nextRefreshAt,
+    staleAfterSeconds: spatialAnalyticsStaleAfterSeconds,
+    dataUpdatedAt: new Date(parsedDataUpdatedAt).toISOString(),
+    dataAgeSeconds,
+    detail:
+      status === "live"
+        ? `Siste romlige signal ${formatRuntimeAge(dataAgeSeconds)}.`
+        : `Siste romlige signal ${formatRuntimeAge(
+            dataAgeSeconds,
+          )}; undersøk worker og kildehelse.`,
+  };
 }
 
 function addProvenanceBucket(
@@ -1117,6 +1180,15 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = articleQuerySchema.parse(req.query);
       res.json(await store.listArticles(query, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/city-pulse/stories", async (req, res, next) => {
+    try {
+      const query = articleQuerySchema.parse(req.query);
+      res.json(await store.listCityPulseStories(query, currentLogin(req)));
     } catch (error) {
       next(error);
     }
@@ -2153,9 +2225,17 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         },
       );
       const confidenceItems = [...enrichedHeatmapCells, ...unexplainedDelays];
+      const generatedAt = new Date();
+      const dataUpdatedAt = latestSpatialDataUpdatedAt({
+        heatmapCells: enrichedHeatmapCells,
+        unexplainedDelays,
+        telemetryHistory,
+        telemetryPatterns,
+      });
 
       res.json({
-        generatedAt: new Date().toISOString(),
+        generatedAt: generatedAt.toISOString(),
+        live: spatialLiveStatus({ generatedAt, dataUpdatedAt }),
         window: {
           ...(query.from ? { from: query.from } : {}),
           ...(query.to ? { to: query.to } : {}),

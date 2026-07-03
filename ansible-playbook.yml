@@ -24,7 +24,6 @@
         - NYTT_SMTP_HOST
         - NYTT_SMTP_FROM
         - NYTT_SMTP_API_KEY
-        - NYTT_DEEPSEEK_API_KEY
         - NYTT_DATEX_USERNAME
         - NYTT_DATEX_PASSWORD
         - NYTT_RESTIC_REPOSITORY
@@ -118,7 +117,8 @@
           SMTP_FROM={{ lookup('env', 'NYTT_SMTP_FROM') }}
           SMTP_USER={{ lookup('env', 'NYTT_SMTP_USER') | default('', true) }}
           SMTP_PASSWORD={{ lookup('env', 'NYTT_SMTP_API_KEY') }}
-          DEEPSEEK_API_KEY={{ lookup('env', 'NYTT_DEEPSEEK_API_KEY') }}
+          DEEPSEEK_ANALYSIS_ENABLED=false
+          DEEPSEEK_API_KEY=
           DEEPSEEK_MODEL=deepseek-v4-flash
           DEEPSEEK_TIMEOUT_MS=25000
           DEEPSEEK_MAX_RETRIES=0

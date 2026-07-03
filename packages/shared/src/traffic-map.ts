@@ -274,6 +274,7 @@ export interface UnexplainedDelayCandidate {
   delayRatio?: number;
   updatedAt: string;
   sourceUrl: string;
+  explanationStatus: "no_news_match" | "unlinked_news_match";
   matchedArticleIds: string[];
   affectedEventIds: string[];
   confidence: "watch" | "warning" | "critical";
@@ -330,6 +331,15 @@ export interface TelemetryHistoryPattern {
 
 export interface CommandCenterSpatialAnalyticsPayload {
   generatedAt: string;
+  live: {
+    status: "live" | "stale" | "empty";
+    refreshIntervalSeconds: number;
+    nextRefreshAt: string;
+    staleAfterSeconds: number;
+    dataUpdatedAt?: string;
+    dataAgeSeconds?: number;
+    detail: string;
+  };
   window: {
     from?: string;
     to?: string;

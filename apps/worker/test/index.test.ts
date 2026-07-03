@@ -4,6 +4,7 @@ import type {
   RoadCamera,
   RoadWeatherObservation,
   TrafficCounterSnapshot,
+  TrafficPulseCorridor,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
 } from "@nytt/shared";
@@ -18,6 +19,8 @@ import {
   collectTrafficInfoForMap,
   createCollectionGuard,
   buildWorkerCycleMetrics,
+  buildWorkerNotificationTriggerPage,
+  buildWorkerSpatialNotificationItems,
   collectorRunFromMetric,
   normalizeDatexSituationEndpoint,
   prepareArticleCoverageAnalysis,
@@ -120,11 +123,90 @@ function trafikkdataCounter(
   };
 }
 
+function trafficPulseCorridor(overrides: Partial<TrafficPulseCorridor> = {}): TrafficPulseCorridor {
+  return {
+    id: overrides.id ?? "e6-sluppen",
+    name: overrides.name ?? "E6 Okstadbakken - E6 Sluppenrampene",
+    state: overrides.state ?? "slow",
+    travelTimeSeconds: overrides.travelTimeSeconds ?? 720,
+    freeFlowSeconds: overrides.freeFlowSeconds ?? 360,
+    delaySeconds: overrides.delaySeconds ?? 360,
+    delayRatio: overrides.delayRatio ?? 2,
+    trend: overrides.trend ?? "increasing",
+    measurementFrom: overrides.measurementFrom ?? "2026-07-02T08:50:00.000Z",
+    measurementTo: overrides.measurementTo ?? "2026-07-02T09:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-07-02T09:00:00.000Z",
+    sourceUrl: overrides.sourceUrl ?? "https://www.vegvesen.no/trafikk",
+  };
+}
+
 function okXmlResponse(xml: string): Response {
   return new Response(xml, { status: 200 });
 }
 
 describe("worker lifecycle helpers", () => {
+  it("turns DATEX travel-time anomalies into worker Web Push candidates", () => {
+    const page = buildWorkerNotificationTriggerPage({
+      situations: [],
+      articles: [
+        newsArticle({
+          id: "article-e6-sluppen",
+          title: "Kø på E6 ved Sluppen",
+          excerpt: "Trafikken går sakte på E6 sør for Trondheim.",
+          category: "Transport",
+          places: ["E6", "Sluppen"],
+          publishedAt: "2026-07-02T08:58:00.000Z",
+        }),
+      ],
+      trafficPulse: [trafficPulseCorridor()],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.summary.total).toBe(1);
+    expect(page.items[0]).toMatchObject({
+      id: "notification:spatial:datex-delay:e6-sluppen",
+      kind: "traffic_disruption",
+      severity: "warning",
+      deliveryState: "candidate_only",
+      title: "E6 Okstadbakken - E6 Sluppenrampene",
+      articleIds: ["article-e6-sluppen"],
+      sourceIds: ["datex_travel_time"],
+      sourceLabels: ["DATEX reisetid"],
+      matchedKeywords: ["uforklart forsinkelse"],
+      confidence: expect.objectContaining({ level: "likely" }),
+      publicSurface: expect.objectContaining({
+        state: "hidden",
+        label: "Kun Command Center",
+      }),
+    });
+    expect(page.items[0]?.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "source_item",
+          href: expect.stringContaining(
+            "/command/radata?telemetrySource=datex_travel_time&telemetryId=e6-sluppen",
+          ),
+        }),
+      ]),
+    );
+  });
+
+  it("keeps small DATEX travel-time wiggles out of worker notification candidates", () => {
+    expect(
+      buildWorkerSpatialNotificationItems({
+        articles: [],
+        trafficPulse: [
+          trafficPulseCorridor({
+            id: "minor-delay",
+            state: "slow",
+            delaySeconds: 120,
+            delayRatio: 1.2,
+          }),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it("enforces SRTI on configured DATEX situation endpoints", () => {
     const withoutSrti = normalizeDatexSituationEndpoint(
       "https://datex-server-get-v3-1.atlas.vegvesen.no/datexapi/GetSituation/pullsnapshotdata?foo=bar",
@@ -284,6 +366,44 @@ describe("worker lifecycle helpers", () => {
     expect(health.detail).toContain("deterministisk gruppering og reservebrief brukes fortsatt");
     expect(health.detail).toContain("token-grensen");
     expect(health.detail).not.toContain("Error:");
+  });
+
+  it("reports intentionally disabled DeepSeek analysis as disabled, not degraded", () => {
+    const completedAt = "2026-07-03T09:39:35.717Z";
+    const health = sourceHealthFromDeepSeekAnalysis(
+      {
+        result: {
+          clusters: [],
+          situationUpdates: [],
+          bundleHints: [],
+          categoryHints: [],
+          relevanceHints: [],
+          operationsNotes: [],
+        },
+        run: {
+          id: "ai-run-disabled",
+          provider: "deterministic",
+          model: "none",
+          status: "disabled",
+          startedAt: "2026-07-03T09:39:10.000Z",
+          completedAt,
+          articleIds: [],
+          result: {},
+          error: "DEEPSEEK_ANALYSIS_ENABLED er ikke satt til true; deterministisk analyse brukes.",
+        },
+      },
+      "2026-07-03T09:50:00.000Z",
+    );
+
+    expect(health).toMatchObject({
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "disabled",
+      lastCheckedAt: completedAt,
+      nextPollAt: "2026-07-03T09:50:00.000Z",
+      detail: "DEEPSEEK_ANALYSIS_ENABLED er ikke satt til true; deterministisk analyse brukes.",
+    });
+    expect(health.lastFailureAt).toBeUndefined();
   });
 
   it("keeps hard DeepSeek provider failures degraded", () => {

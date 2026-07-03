@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Article, Situation } from "@nytt/shared";
-import { applySituationUpdateHints, DeepSeekAnalyzer, validateCitations } from "../src/ai.js";
+import {
+  applySituationUpdateHints,
+  createAnalyzer,
+  DeepSeekAnalyzer,
+  deepSeekAnalysisEnabled,
+  NoopAnalyzer,
+  validateCitations,
+} from "../src/ai.js";
 
 const articles: Article[] = [
   {
@@ -29,7 +36,27 @@ const articles: Article[] = [
   },
 ];
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("AI citation validation", () => {
+  it("keeps DeepSeek opt-in even when an API key is configured", () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("DEEPSEEK_ANALYSIS_ENABLED", "false");
+
+    expect(deepSeekAnalysisEnabled()).toBe(false);
+    expect(createAnalyzer()).toBeInstanceOf(NoopAnalyzer);
+  });
+
+  it("creates DeepSeek analyzer only when explicitly enabled and keyed", () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("DEEPSEEK_ANALYSIS_ENABLED", "true");
+
+    expect(deepSeekAnalysisEnabled()).toBe(true);
+    expect(createAnalyzer()).toBeInstanceOf(DeepSeekAnalyzer);
+  });
+
   it("retains only two-source clusters supported by literal public excerpts", () => {
     const result = validateCitations(
       {

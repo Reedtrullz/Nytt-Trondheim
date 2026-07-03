@@ -16,6 +16,74 @@ describe("article store", () => {
     expect(page.items.map((article) => article.id)).toEqual(["a-sluppen", "a-road"]);
   });
 
+  it("hydrates bootstrap from the first story page so story pagination cannot skip clustered rows", async () => {
+    const store = new MemoryStore();
+    const coverageBundle = {
+      id: "coverage:incident:story-native-bootstrap",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-09-03T09:15:00.000Z",
+    };
+    const clustered: Article[] = [
+      {
+        id: "story-native-cluster-adressa",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Story native bootstrap: Trafikkuhell ved Sluppen",
+        excerpt: "To kilder omtaler samme trafikkuhell ved Sluppen.",
+        url: "https://example.test/story-native-cluster-adressa",
+        publishedAt: "2026-09-03T09:10:00.000Z",
+        scope: "trondheim",
+        category: "Transport",
+        places: ["Sluppen"],
+        coverageBundle,
+      },
+      {
+        id: "story-native-cluster-politiloggen",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Story native bootstrap: Ulykke: Trondheim, Sluppen",
+        excerpt: "Politiet melder om samme trafikkuhell ved Sluppen.",
+        url: "https://example.test/story-native-cluster-politiloggen",
+        publishedAt: "2026-09-03T09:09:00.000Z",
+        scope: "trondheim",
+        category: "Transport",
+        places: ["Sluppen"],
+        coverageBundle,
+      },
+    ];
+    const standalone = Array.from({ length: 40 }, (_, index) => ({
+      id: `story-native-single-${String(index).padStart(2, "0")}`,
+      source: "nrk" as const,
+      sourceLabel: "NRK Trøndelag",
+      title: `Story native bootstrap enkeltsak ${index}`,
+      excerpt: `Unik bypulsnotis nummer ${index} med eget innhold for sortering.`,
+      url: `https://example.test/story-native-single-${index}`,
+      publishedAt: new Date(Date.UTC(2026, 8, 2, 8 - index * 25, 0)).toISOString(),
+      scope: "trondheim" as const,
+      category: "Nyheter" as const,
+      places: [`Teststed ${index}`],
+    })) satisfies Article[];
+    (store as unknown as { articles: Article[] }).articles.unshift(...clustered, ...standalone);
+
+    const bootstrap = await store.getBootstrap();
+    const articleIds = bootstrap.articles.map((article) => article.id);
+    const storyIds = bootstrap.stories?.map((story) => story.id) ?? [];
+
+    expect(bootstrap.storyNextCursor).toBeTruthy();
+    expect(bootstrap).not.toHaveProperty("articleNextCursor");
+    expect(storyIds).toContain("coverage:incident:story-native-bootstrap");
+    expect(storyIds).toContain("article:story-native-single-38");
+    expect(storyIds).not.toContain("article:story-native-single-39");
+    expect(storyIds).toHaveLength(40);
+    expect(articleIds).toContain("story-native-cluster-adressa");
+    expect(articleIds).toContain("story-native-cluster-politiloggen");
+    expect(articleIds).toContain("story-native-single-38");
+    expect(articleIds).not.toContain("story-native-single-39");
+    expect(articleIds).toHaveLength(41);
+  });
+
   it("searches production articles by place metadata, source label, and category", async () => {
     const article: Article = {
       id: "flatåsen-smoke",
@@ -85,6 +153,75 @@ describe("article store", () => {
     const store = new PgStore({ query } as unknown as pg.Pool);
 
     const page = await store.listArticles({ category: "Sport", topic: "rosenborg" }, "Reedtrullz");
+
+    expect(page.items).toEqual([{ ...article, saved: false }]);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps legacy local match reports discoverable in the Sport filter", async () => {
+    const store = new MemoryStore();
+    const legacyMatchReport: Article = {
+      id: "legacy-ranheim-match",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Ranheim tapte 0-3 borte mot Åsane",
+      excerpt: "Kampen var målløs til pause før Ranheim gikk på sitt femte bortetap.",
+      url: "https://example.test/ranheim-match",
+      publishedAt: "2026-06-28T15:59:00.000Z",
+      scope: "trondheim",
+      category: "Nyheter",
+      places: ["Ranheim", "Trondheim"],
+    };
+    const neighborhoodAward: Article = {
+      ...legacyMatchReport,
+      id: "ranheim-award",
+      title: "Ranheim vant pris for ny møteplass",
+      excerpt: "Prosjektet på Ranheim ble hedret av kommunen.",
+      url: "https://example.test/ranheim-award",
+      publishedAt: "2026-06-28T15:58:00.000Z",
+    };
+    (store as unknown as { articles: Article[] }).articles.unshift(
+      legacyMatchReport,
+      neighborhoodAward,
+    );
+
+    const page = await store.listArticles({ category: "Sport", limit: 20 });
+
+    expect(page.items.map((item) => item.id)).toContain("legacy-ranheim-match");
+    expect(page.items.map((item) => item.id)).not.toContain("ranheim-award");
+  });
+
+  it("filters production Sport articles with a conservative local-match fallback", async () => {
+    const article: Article = {
+      id: "legacy-ranheim-match",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Ranheim tapte 0-3 borte mot Åsane",
+      excerpt: "Kampen var målløs til pause før Ranheim gikk på sitt femte bortetap.",
+      url: "https://example.test/ranheim-match",
+      publishedAt: "2026-06-28T15:59:00.000Z",
+      scope: "trondheim",
+      category: "Nyheter",
+      places: ["Ranheim", "Trondheim"],
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["legacy-ranheim-match"]]);
+        return { rows: [] };
+      }
+      const normalized = sql.replace(/\s+/g, " ").trim();
+      expect(normalized).toContain("a.category = $2");
+      expect(normalized).toContain("a.category = 'Nyheter'");
+      expect(normalized).toContain("a.payload->>'title' ILIKE '%ranheim%'");
+      expect(normalized).toContain("a.payload->>'excerpt' ILIKE '%bortetap%'");
+      expect(normalized).toContain("a.payload->>'title' ~* '\\d+\\s*[–-]\\s*\\d+'");
+      expect(params).toEqual(["Reedtrullz", "Sport", 41]);
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ category: "Sport" }, "Reedtrullz");
 
     expect(page.items).toEqual([{ ...article, saved: false }]);
     expect(query).toHaveBeenCalledTimes(2);
@@ -321,6 +458,127 @@ describe("article store", () => {
         situationId: "politiloggen-lade-vold",
       },
     });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("derives public verification for bundled official-plus-news incident articles", async () => {
+    const coverageBundle = {
+      id: "coverage:incident:lade-vold",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-02T18:59:00.000Z",
+    } as const;
+    const newsroomArticle: Article = {
+      id: "adressa-lade-violence",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Ung mann kritisk skadd på Lade",
+      excerpt: "Politiet leter etter flere personer etter en voldshendelse på Lade.",
+      url: "https://example.test/lade-vold",
+      publishedAt: "2026-07-02T18:59:00.000Z",
+      scope: "trondheim",
+      category: "Krim",
+      places: ["Lade", "Trondheim"],
+      coverageBundle,
+    };
+    const officialArticle: Article = {
+      id: "politiloggen-lade-violence",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Voldshendelse: Trondheim, Lade",
+      excerpt: "En person er kritisk skadet etter en voldshendelse på Lade.",
+      url: "https://example.test/politiloggen/lade-vold",
+      publishedAt: "2026-07-02T18:45:00.000Z",
+      scope: "trondheim",
+      category: "Krim",
+      places: ["Lade", "Trondheim"],
+      situationId: "politiloggen-lade-vold",
+      coverageBundle,
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["adressa-lade-violence", "politiloggen-lade-violence"]]);
+        return { rows: [] };
+      }
+      return {
+        rows: [
+          { payload: newsroomArticle, saved: false },
+          { payload: officialArticle, saved: false },
+        ],
+      };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ limit: 10 }, "Reedtrullz");
+
+    expect(page.items).toHaveLength(2);
+    for (const article of page.items) {
+      expect(article.publicVerification).toMatchObject({
+        status: "verified",
+        label: "Verifisert",
+        detail: "Bekreftet av Politiloggen og Adresseavisen.",
+        officialSources: ["politiloggen"],
+        reportingSources: ["adressa"],
+        situationId: "politiloggen-lade-vold",
+      });
+    }
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not derive public verification from topical official-plus-news bundles", async () => {
+    const coverageBundle = {
+      id: "coverage:topic:politioppsummering",
+      kind: "topic",
+      confidence: "high",
+      reason: "Samme tema over tid",
+      generatedAt: "2026-07-02T18:59:00.000Z",
+    } as const;
+    const newsroomArticle: Article = {
+      id: "nrk-politioppsummering",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Politiet melder om rolig natt",
+      excerpt: "Flere medier omtaler politiets oppsummering av natta.",
+      url: "https://example.test/politioppsummering",
+      publishedAt: "2026-07-02T18:59:00.000Z",
+      scope: "trondheim",
+      category: "Nyheter",
+      places: ["Trondheim"],
+      coverageBundle,
+    };
+    const officialArticle: Article = {
+      id: "politiloggen-politioppsummering",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Oppsummering: Trondheim",
+      excerpt: "Politiet oppsummerer nattens hendelser i Trondheim.",
+      url: "https://example.test/politiloggen/oppsummering",
+      publishedAt: "2026-07-02T18:45:00.000Z",
+      scope: "trondheim",
+      category: "Nyheter",
+      places: ["Trondheim"],
+      coverageBundle,
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["nrk-politioppsummering", "politiloggen-politioppsummering"]]);
+        return { rows: [] };
+      }
+      return {
+        rows: [
+          { payload: newsroomArticle, saved: false },
+          { payload: officialArticle, saved: false },
+        ],
+      };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ limit: 10 }, "Reedtrullz");
+
+    expect(page.items.map((article) => article.publicVerification)).toEqual([undefined, undefined]);
     expect(query).toHaveBeenCalledTimes(2);
   });
 

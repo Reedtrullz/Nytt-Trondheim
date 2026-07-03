@@ -30,6 +30,18 @@ describe("coverage bundle store", () => {
         category: "Hendelser",
         places: ["Flatåsen", "Trondheim"],
       },
+      {
+        id: "adressa-other-smoke",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Røykmelding ved Heimdal",
+        excerpt: "Nødetatene undersøker røyk ved Heimdal i Trondheim.",
+        url: "https://example.test/adressa-other-smoke",
+        publishedAt: "2026-06-18T10:49:00.000Z",
+        scope: "trondheim",
+        category: "Hendelser",
+        places: ["Heimdal", "Trondheim"],
+      },
     ];
     const query = vi.fn(async (sql: string, params?: unknown[]) => {
       const normalized = sql.replace(/\s+/g, " ").trim();
@@ -62,14 +74,21 @@ describe("coverage bundle store", () => {
                   detail: "brann",
                 },
               ],
-              near_misses: [],
+              near_misses: [
+                {
+                  articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+                  reason: "conflicting_specific_places",
+                },
+              ],
               updated_at: "2026-06-18T10:55:30.000Z",
             },
           ],
         };
       }
       if (normalized === "SELECT payload FROM articles WHERE id = ANY($1::text[])") {
-        expect(params).toEqual([["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke"]]);
+        expect(params).toEqual([
+          ["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke", "adressa-other-smoke"],
+        ]);
         return { rows: memberArticles.map((payload) => ({ payload })) };
       }
       if (normalized.startsWith("SELECT count(*)::text AS total")) {
@@ -103,14 +122,26 @@ describe("coverage bundle store", () => {
         id: "coverage:flatåsen-smoke",
         kind: "incident",
         confidence: "high",
-        memberArticles: [
+        memberArticles: expect.arrayContaining([
           expect.objectContaining({ id: "nrk-flatåsen-smoke", sourceLabel: "NRK Trøndelag" }),
           expect.objectContaining({
             id: "politiloggen-flatåsen-smoke",
             sourceLabel: "Politiloggen",
           }),
-        ],
-        signals: [expect.objectContaining({ kind: "generic_place_incident" })],
+        ]),
+        nearMissArticles: expect.arrayContaining([
+          expect.objectContaining({
+            id: "adressa-other-smoke",
+            sourceLabel: "Adresseavisen",
+            title: "Røykmelding ved Heimdal",
+          }),
+        ]),
+        signals: expect.arrayContaining([
+          expect.objectContaining({ kind: "generic_place_incident" }),
+        ]),
+        nearMisses: expect.arrayContaining([
+          expect.objectContaining({ reason: "conflicting_specific_places" }),
+        ]),
       }),
     ]);
     expect(page.items[0]).not.toHaveProperty("payload");

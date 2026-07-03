@@ -1,8 +1,10 @@
-import type { Article } from "@nytt/shared";
+import type { Article, CityPulseStory } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
 import { groupHomeArticles } from "./homeArticleGroups.js";
 import {
+  homeArticleGroupForStory,
   homeStoryCardForGroup,
+  homeStoryCardForStory,
   homeStoryCardsForGroups,
   sourceClusterLabelForGroup,
 } from "./homeStoryCards.js";
@@ -65,7 +67,11 @@ describe("home story cards", () => {
       sourceCount: 2,
     });
     expect(card.sourceConfidence.rationale).toContain("Offisielle kilder");
-    expect(card.verification).toBeUndefined();
+    expect(card.verification).toEqual({
+      label: "Verifisert",
+      detail: "Bekreftet av Politiloggen og NRK.",
+      sourceSummary: "Politiloggen + NRK",
+    });
   });
 
   it("adds a public verification badge when DATEX and newsroom evidence back the story", () => {
@@ -138,6 +144,85 @@ describe("home story cards", () => {
     });
   });
 
+  it("derives a public verification badge for official-plus-news incident clusters", () => {
+    const coverageBundle = {
+      id: "coverage:incident:lade-vold",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-15T18:13:00.000Z",
+    } as const;
+    const group = groupHomeArticles([
+      article({
+        id: "adressa-lade-vold",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Ung mann kritisk skadd på Lade",
+        excerpt: "Politiet leter etter flere personer etter en voldshendelse på Lade.",
+        category: "Krim",
+        coverageBundle,
+      }),
+      article({
+        id: "politiloggen-lade-vold",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Voldshendelse: Trondheim, Lade",
+        excerpt: "En person er kritisk skadet etter en voldshendelse på Lade.",
+        category: "Krim",
+        publishedAt: "2026-06-15T20:08:00.000Z",
+        situationId: "politiloggen-lade-vold",
+        coverageBundle,
+      }),
+    ])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.verification).toEqual({
+      label: "Verifisert",
+      detail: "Bekreftet av Politiloggen og Adresseavisen.",
+      sourceSummary: "Politiloggen + Adresseavisen",
+      situationId: "politiloggen-lade-vold",
+    });
+    expect(card.sourceConfidence).toMatchObject({
+      level: "confirmed",
+      label: "Bekreftet",
+      sourceCount: 2,
+    });
+  });
+
+  it("does not derive public verification badges for topical official-plus-news bundles", () => {
+    const coverageBundle = {
+      id: "coverage:topic:politiet-statistikk",
+      kind: "topic",
+      confidence: "high",
+      reason: "Samme tema over tid",
+      generatedAt: "2026-06-15T18:13:00.000Z",
+    } as const;
+    const group = groupHomeArticles([
+      article({
+        id: "nrk-statistikk",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Politiet melder om rolig natt",
+        excerpt: "Flere medier omtaler politiets oppsummering av natta.",
+        category: "Nyheter",
+        coverageBundle,
+      }),
+      article({
+        id: "politiloggen-statistikk",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Oppsummering: Trondheim",
+        excerpt: "Politiet oppsummerer nattens hendelser i Trondheim.",
+        category: "Nyheter",
+        publishedAt: "2026-06-15T20:08:00.000Z",
+        coverageBundle,
+      }),
+    ])[0]!;
+
+    expect(homeStoryCardForGroup(group).verification).toBeUndefined();
+  });
+
   it("uses specific places before broad geography labels", () => {
     const [card] = homeStoryCardsForGroups(
       groupHomeArticles([
@@ -178,6 +263,77 @@ describe("home story cards", () => {
       level: "uncertain",
       label: "Usikker",
       sourceCount: 1,
+    });
+  });
+
+  it("builds public story cards directly from City Pulse story objects", () => {
+    const coverageBundle = {
+      id: "coverage:incident:city-pulse-story-card",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-06-15T18:13:00.000Z",
+    } as const;
+    const publicVerification: NonNullable<Article["publicVerification"]> = {
+      status: "verified",
+      label: "Verifisert",
+      detail: "Bekreftet av Politiloggen og Adresseavisen.",
+      officialSources: ["politiloggen"],
+      reportingSources: ["adressa"],
+      situationId: "politiloggen-torvet-antibac",
+    };
+    const story: CityPulseStory = {
+      id: "coverage:incident:city-pulse-story-card",
+      primaryArticleId: "adressa-antibac",
+      articleIds: ["adressa-antibac", "politiloggen-antibac"],
+      primary: article({
+        id: "adressa-antibac",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Mann tente på antibac på Torvet",
+      }),
+      articles: [
+        article({
+          id: "adressa-antibac",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Mann tente på antibac på Torvet",
+        }),
+        article({
+          id: "politiloggen-antibac",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Ro og orden: Trondheim, Torvet",
+          publishedAt: "2026-06-15T20:00:00.000Z",
+        }),
+      ],
+      sourceLabels: ["Adresseavisen", "Politiloggen"],
+      sourceCount: 2,
+      updateCount: 2,
+      latestAt: "2026-06-15T20:12:00.000Z",
+      category: "Hendelser",
+      coverageBundle,
+      publicVerification,
+    };
+
+    const group = homeArticleGroupForStory(story);
+    const card = homeStoryCardForStory(story);
+
+    expect(group.bundle).toBe(coverageBundle);
+    expect(group.articles.every((item) => item.coverageBundle === coverageBundle)).toBe(true);
+    expect(group.articles.every((item) => item.publicVerification === publicVerification)).toBe(
+      true,
+    );
+    expect(card.id).toBe(story.id);
+    expect(card.sourceCount).toBe(2);
+    expect(card.updateCount).toBe(2);
+    expect(card.clusterLabel).toBe("2 kilder · samme hendelse på tvers av kilder");
+    expect(card.cardKind).toBe("hendelse");
+    expect(card.verification).toEqual({
+      label: "Verifisert",
+      detail: "Bekreftet av Politiloggen og Adresseavisen.",
+      sourceSummary: "Politiloggen + Adresseavisen",
+      situationId: "politiloggen-torvet-antibac",
     });
   });
 });
