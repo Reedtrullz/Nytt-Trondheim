@@ -69,6 +69,30 @@ describe("header freshness label", () => {
     ).toBe("Delvis oppdatert 12:08 · 1 kilde trenger tilsyn");
   });
 
+  it("ignores private AI analysis sources in public freshness copy", () => {
+    expect(
+      headerFreshnessLabel(
+        [
+          {
+            source: "nrk",
+            label: "NRK",
+            state: "ok",
+            detail: "RSS",
+            lastCheckedAt: "2026-05-31T12:08:00+02:00",
+          },
+          {
+            source: "deepseek",
+            label: "AI-analyse",
+            state: "degraded",
+            detail: "DeepSeek bruker deterministisk reserveanalyse.",
+            lastCheckedAt: "2026-05-31T12:09:00+02:00",
+          },
+        ],
+        now,
+      ),
+    ).toBe("Oppdatert 12:08");
+  });
+
   it("shows source-state warning when no non-OK source has a valid timestamp", () => {
     expect(
       headerFreshnessLabel([{ source: "nrk", label: "NRK", state: "disabled", detail: "Av" }], now),

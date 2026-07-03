@@ -1659,6 +1659,26 @@ button {
   text-overflow: ellipsis;
 }
 
+.story-marker-popup-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+  font-style: normal;
+}
+
+.story-marker-popup-trust span {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
 .story-marker-popup-more {
   margin: 0;
 }

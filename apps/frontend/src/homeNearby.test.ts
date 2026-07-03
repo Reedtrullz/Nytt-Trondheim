@@ -208,6 +208,39 @@ describe("home nearby story model", () => {
     });
   });
 
+  it("carries public verification and source confidence into nearby map items", () => {
+    const items = nearbyStoryItems([
+      article({
+        id: "adressa-e6",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Kollisjon stenger E6",
+        category: "Transport",
+        publicVerification: {
+          status: "verified",
+          label: "Verifisert",
+          detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+          officialSources: ["datex"],
+          reportingSources: ["adressa"],
+          situationId: "datex-e6",
+        },
+      }),
+    ]);
+
+    expect(items[0]).toMatchObject({
+      verification: {
+        label: "Verifisert",
+        sourceSummary: "Statens vegvesen DATEX + Adresseavisen",
+        situationId: "datex-e6",
+      },
+      sourceConfidence: {
+        level: "confirmed",
+        label: "Bekreftet",
+        sourceCount: 2,
+      },
+    });
+  });
+
   it("adds official active situations to the nearby map even without matching articles", () => {
     const items = nearbyStoryItemsForGroupsAndSituations([], [situation()], { limit: 4 });
 
@@ -222,6 +255,14 @@ describe("home nearby story model", () => {
       category: "Hendelser",
       kind: "situation",
       relevanceLabel: "Tilknyttet situasjon",
+      verification: {
+        label: "Bekreftet",
+        sourceSummary: "Offentlig bekreftet situasjon",
+      },
+      sourceConfidence: {
+        level: "confirmed",
+        label: "Bekreftet",
+      },
     });
   });
 

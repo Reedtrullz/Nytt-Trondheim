@@ -23,6 +23,13 @@ const status: OperationsStatus = {
       lastCheckedAt: "2026-06-02T06:00:00.000Z",
       detail: "DATEX feilet",
     },
+    {
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "degraded",
+      lastCheckedAt: "2026-06-02T06:00:00.000Z",
+      detail: "AI-analyse bruker deterministisk reserveanalyse.",
+    },
   ],
   articleCount: 12,
   situationCounts: {
@@ -214,6 +221,7 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("2");
     expect(html).toContain("3 operasjonelle objekter");
     expect(html).toContain("Kilder som trenger tilsyn");
+    expect(html).toContain("<span>Kilder som trenger tilsyn</span><strong>1</strong>");
     expect(html).toContain("Worker");
     expect(html).toContain("Sist fullført 4 min siden.");
     expect(html).toContain("Utdatert");

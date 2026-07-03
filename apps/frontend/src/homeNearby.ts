@@ -1,4 +1,10 @@
-import type { Article, HomeSituationSummary } from "@nytt/shared";
+import {
+  sourceIdLabel,
+  sourceMixConfidenceSummary,
+  type Article,
+  type HomeSituationSummary,
+  type SourceConfidenceSummary,
+} from "@nytt/shared";
 import { distanceKmBetween, type HomeLocalFocusPoint } from "./homeLocalFocus.js";
 import { latLngFromLonLat } from "./mapCoordinates.js";
 
@@ -25,9 +31,18 @@ export interface NearbyStoryItem {
   kind: NearbyStoryKind;
   relevanceLabel: string;
   relevanceDetail: string;
+  sourceConfidence: SourceConfidenceSummary;
+  verification?: NearbyStoryVerification;
   score: number;
   distanceKm?: number;
   withinLocalRadius?: boolean;
+}
+
+export interface NearbyStoryVerification {
+  label: string;
+  detail: string;
+  sourceSummary: string;
+  situationId?: string;
 }
 
 interface NearbyArticleGroup {
@@ -132,6 +147,54 @@ function situationIdFor(group: NearbyArticleGroup): string | undefined {
   return group.articles.find((article) => article.situationId)?.situationId;
 }
 
+function verificationForGroup(group: NearbyArticleGroup): NearbyStoryVerification | undefined {
+  const verification =
+    group.primary.publicVerification ??
+    group.articles.find((article) => article.publicVerification)?.publicVerification;
+  if (!verification) return undefined;
+  return {
+    label: verification.label,
+    detail: verification.detail,
+    sourceSummary: [
+      ...verification.officialSources.map((source) => sourceIdLabel(source)),
+      ...verification.reportingSources.map((source) => sourceIdLabel(source)),
+    ].join(" + "),
+    ...(verification.situationId ? { situationId: verification.situationId } : {}),
+  };
+}
+
+function sourceConfidenceForGroup(group: NearbyArticleGroup): SourceConfidenceSummary {
+  const sources = new Set<string>();
+  for (const article of group.articles) {
+    sources.add(article.source);
+    const verification = article.publicVerification;
+    if (!verification) continue;
+    for (const source of verification.officialSources) sources.add(source);
+    for (const source of verification.reportingSources) sources.add(source);
+  }
+  return sourceMixConfidenceSummary([...sources], { updatedAt: group.primary.publishedAt });
+}
+
+function sourceConfidenceForSituation(situation: HomeSituationSummary): SourceConfidenceSummary {
+  if (situation.verificationStatus === "Offentlig bekreftet") {
+    return {
+      level: "confirmed",
+      label: "Bekreftet",
+      score: 0.86,
+      rationale:
+        "Situasjonsrommet er offentlig bekreftet, men kartpunktet er en offentlig visning.",
+      updatedAt: situation.updatedAt,
+    };
+  }
+  return {
+    level: "likely",
+    label: "Sannsynlig",
+    score: 0.68,
+    rationale: "Situasjonsrommet er foreløpig og vises med kilde- og kartkontekst.",
+    updatedAt: situation.updatedAt,
+  };
+}
+
 function situationItem(
   situation: HomeSituationSummary,
   localFocus?: HomeLocalFocusPoint,
@@ -161,6 +224,17 @@ function situationItem(
     publishedAt: situation.updatedAt,
     kind: "situation",
     score: 92,
+    sourceConfidence: sourceConfidenceForSituation(situation),
+    ...(situation.verificationStatus === "Offentlig bekreftet"
+      ? {
+          verification: {
+            label: "Bekreftet",
+            detail: "Situasjonsrommet er offentlig bekreftet.",
+            sourceSummary: "Offentlig bekreftet situasjon",
+            situationId: situation.id,
+          },
+        }
+      : {}),
     ...(distanceKm !== undefined
       ? {
           distanceKm,
@@ -210,6 +284,8 @@ export function nearbyStoryItemsForGroups(
     const representative = group.articles.find((article) => article.situationId) ?? group.primary;
     const kind = nearbyKind(representative);
     const copy = relevanceCopy(kind);
+    const sourceConfidence = sourceConfidenceForGroup(group);
+    const verification = verificationForGroup(group);
     const distanceKm = localFocus
       ? distanceKmBetween(localFocus, {
           lat: locationArticle.location.lat,
@@ -232,6 +308,8 @@ export function nearbyStoryItemsForGroups(
         score: Math.max(
           ...group.articles.map((article) => nearbyScore(article, nearbyKind(article))),
         ),
+        sourceConfidence,
+        ...(verification ? { verification } : {}),
         ...(distanceKm !== undefined
           ? {
               distanceKm,

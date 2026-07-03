@@ -1292,17 +1292,35 @@ function briefingArticleSummary(article: Article): CommandCenterBriefingArticleS
   };
 }
 
+const optionalDerivedAnalysisSources = new Set<SourceId>(["deepseek"]);
+
+function sourceRequiresOperationalAttention(source: SourceId): boolean {
+  return !optionalDerivedAnalysisSources.has(source);
+}
+
+function sourceHasOperationalAttention(source: SourceHealth): boolean {
+  return (
+    sourceRequiresOperationalAttention(source.source) &&
+    (source.state !== "ok" || Boolean(source.activeAlerts?.length))
+  );
+}
+
 function briefingSourceHealthSummary(
   sources: SourceHealth[],
 ): CommandCenterBriefingPayload["sourceHealthSummary"] {
+  const actionableSources = sources.filter((source) =>
+    sourceRequiresOperationalAttention(source.source),
+  );
   return {
-    total: sources.length,
-    ok: sources.filter((source) => source.state === "ok").length,
-    attention: sources.filter((source) => source.state !== "ok" || source.activeAlerts?.length)
-      .length,
-    degraded: sources.filter((source) => source.state === "degraded").length,
-    disabled: sources.filter((source) => source.state === "disabled").length,
-    staleAlerts: sources.reduce((sum, source) => sum + (source.activeAlerts?.length ?? 0), 0),
+    total: actionableSources.length,
+    ok: actionableSources.filter((source) => source.state === "ok").length,
+    attention: actionableSources.filter(sourceHasOperationalAttention).length,
+    degraded: actionableSources.filter((source) => source.state === "degraded").length,
+    disabled: actionableSources.filter((source) => source.state === "disabled").length,
+    staleAlerts: actionableSources.reduce(
+      (sum, source) => sum + (source.activeAlerts?.length ?? 0),
+      0,
+    ),
   };
 }
 
@@ -1987,6 +2005,7 @@ function staleAlertForSource(
   freshness: SourceFreshness,
   generatedAt: string,
 ): SourceStaleDataAlert | undefined {
+  if (!sourceRequiresOperationalAttention(source)) return undefined;
   const healthAlert = health && health.state !== "ok";
   const staleAlert = freshness.state === "stale" || freshness.state === "lagging";
   if (!healthAlert && !staleAlert) return undefined;
@@ -3961,9 +3980,7 @@ export class MemoryStore implements Store {
         situationIds.has(situation.id),
       ),
       sourceHealthSummary,
-      attentionSources: bootstrap.sourceHealth.filter(
-        (source) => source.state !== "ok" || source.activeAlerts?.length,
-      ),
+      attentionSources: bootstrap.sourceHealth.filter(sourceHasOperationalAttention),
     };
   }
 }
@@ -4682,9 +4699,7 @@ export class PgStore implements Store {
         .map((id) => situationsById.get(id))
         .filter((situation): situation is HomeSituationSummary => Boolean(situation)),
       sourceHealthSummary,
-      attentionSources: bootstrap.sourceHealth.filter(
-        (source) => source.state !== "ok" || source.activeAlerts?.length,
-      ),
+      attentionSources: bootstrap.sourceHealth.filter(sourceHasOperationalAttention),
     };
   }
 

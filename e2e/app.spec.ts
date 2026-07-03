@@ -5,6 +5,7 @@ import {
   sampleBootstrap,
   sampleWorkspace,
   type Article,
+  type MorningBrief,
 } from "@nytt/shared";
 
 async function openTrafficLayersIfHidden(page: Page): Promise<void> {
@@ -103,6 +104,66 @@ test("frontpage uses bootstrap feed without immediate duplicate refreshes", asyn
   await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
   await expect(page.getByText("Oppdaterer saker...")).toHaveCount(0);
   expect(duplicateRefreshes).toEqual([]);
+});
+
+test("City Pulse pins the AI-assisted morning brief on the public frontpage", async ({ page }) => {
+  const article = sampleBootstrap.articles.find((item) => item.id === "a-road")!;
+  const situation = sampleBootstrap.situations[0]!;
+  const morningBrief: MorningBrief = {
+    generatedAt: "2026-07-02T07:30:00.000Z",
+    title: "Morgenbrief",
+    mode: "ai_assisted",
+    sourceLine: "AI-assistert · 6/7 kilder OK",
+    paragraphs: [
+      "Bypulsen starter med tre tydelige signaler i Trondheim.",
+      "Trafikk og framkommelighet peker seg ut rundt østbyen og E6.",
+      "Ett åpent situasjonsrom følges videre, men offentlige kilder styrer prioriteringen.",
+    ],
+    highlights: [
+      { label: "Saker", value: "18", detail: "Transport leder bildet" },
+      { label: "Situasjoner", value: "1", detail: "Aktive eller til vurdering" },
+      { label: "Kilder", value: "6/7", detail: "Rapporterer OK" },
+    ],
+    articleIds: [article.id],
+    situationIds: [situation.id],
+    aiRun: {
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      status: "ok",
+      completedAt: "2026-07-02T07:25:00.000Z",
+    },
+  };
+
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleBootstrap,
+        morningBrief,
+      }),
+    });
+  });
+
+  await page.goto("/");
+
+  const brief = page.locator(".morning-brief");
+  await expect(brief.getByRole("heading", { name: "Morgenbrief" })).toBeVisible();
+  await expect(brief.getByText("AI-assistert").first()).toBeVisible();
+  await expect(brief.getByText("Bypulsen starter med tre tydelige signaler")).toBeVisible();
+  await expect(brief.getByText("Trafikk og framkommelighet peker seg ut")).toBeVisible();
+  await expect(brief.getByText("offentlige kilder styrer prioriteringen")).toBeVisible();
+  await expect(brief.getByText("AI-spor")).toBeVisible();
+  await expect(brief.getByText("DeepSeek · deepseek-v4-flash · OK")).toBeVisible();
+  await expect(brief.getByLabel("Morgenbrief-nøkkeltall")).toContainText("Transport leder bildet");
+  await expect(
+    brief.getByLabel("Morgenbrief-grunnlag").getByRole("link", { name: article.title }),
+  ).toHaveAttribute("href", article.url);
+  await expect(
+    brief.getByLabel("Morgenbrief-grunnlag").getByRole("link", { name: situation.title }),
+  ).toHaveAttribute("href", `/situasjoner/${situation.id}`);
+  await expect(page.getByLabel("Bypulsmoduler")).toContainText("Varsel og AI-spor");
+  await expectNoHorizontalPageOverflow(page);
 });
 
 test("situation overview keeps the selected map case actionable", async ({ page }) => {
@@ -255,6 +316,74 @@ test("home nearby module links ranked local stories with the map", async ({ page
   await expect(page).toHaveURL(/window=24h/);
   await expect(mapAgeSlider).toHaveValue("2");
   await expect(nearby.getByText(/Kartet følger 24 timer/i)).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("home nearby map cluster popup exposes member stories", async ({ page }) => {
+  const sluppenArticle = sampleBootstrap.articles.find((article) => article.id === "a-sluppen")!;
+  const clusterArticles: Article[] = [
+    {
+      ...sluppenArticle,
+      publicVerification: {
+        status: "verified",
+        label: "Verifisert",
+        detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+        officialSources: ["datex"],
+        reportingSources: ["adressa"],
+        situationId: "datex-sluppen",
+      },
+    },
+    {
+      ...sluppenArticle,
+      id: "a-sluppen-traffic",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Oppdatering ved Sluppen",
+      excerpt: "Trafikken går sakte ved Sluppen etter vegarbeid og innsnevring.",
+      url: "https://example.test/sluppen-trafikk",
+      publishedAt: "2026-05-26T09:48:00.000Z",
+      category: "Transport",
+      places: ["Sluppen"],
+      location: { lat: 63.39795, lng: 10.3997, label: "Sluppen" },
+    },
+    {
+      ...sampleBootstrap.articles[3]!,
+      id: "a-lade-far",
+      location: { lat: 63.4402, lng: 10.437, label: "Lade" },
+    },
+  ];
+
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleBootstrap,
+        articles: clusterArticles,
+        situations: [],
+        morningBrief: undefined,
+      }),
+    });
+  });
+
+  await page.goto("/");
+
+  const nearby = page.locator(".nearby-module");
+  await expect(nearby.getByRole("heading", { name: "I nærheten" })).toBeVisible();
+  await nearby.locator(".story-marker-cluster").click();
+
+  const popup = page.locator(".story-marker-popup");
+  await expect(popup.getByText("2 saker")).toBeVisible();
+  await expect(popup.getByText("Sluppen", { exact: true })).toBeVisible();
+  await expect(popup.getByRole("button", { name: /Starter byggingen/ })).toBeVisible();
+  await expect(popup.getByText(/Verifisert · Statens vegvesen DATEX/)).toBeVisible();
+  await expect(popup.getByText(/Kildetillit: Bekreftet/).first()).toBeVisible();
+  await popup.getByRole("button", { name: /Oppdatering ved Sluppen/ }).click();
+
+  await expect(nearby.getByRole("heading", { name: "Oppdatering ved Sluppen" })).toBeVisible();
+  await expect(
+    nearby.locator(".nearby-detail").getByText("Stedsfestet transport- eller framkommelighetssak"),
+  ).toBeVisible();
   await expectNoHorizontalPageOverflow(page);
 });
 
@@ -517,6 +646,194 @@ test("command briefing page shows AI brief traceability", async ({ page }) => {
     "href",
     "/command/radata",
   );
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("command spatial analytics links heatmap evidence to raw source payloads", async ({
+  page,
+}) => {
+  await page.route("**/api/operations/spatial-analytics**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: "2026-07-02T09:45:00.000Z",
+        window: {},
+        summary: {
+          heatmapCells: 1,
+          observations: 4,
+          unexplainedDelays: 1,
+          criticalDelays: 0,
+          bySourceConfidence: {
+            confirmed: 0,
+            likely: 1,
+            uncertain: 1,
+            speculative: 0,
+          },
+        },
+        telemetryHistory: {
+          datexTravelTime: {
+            observations: 24,
+            trackedEntities: 4,
+            firstObservedAt: "2026-07-01T09:00:00.000Z",
+            lastObservedAt: "2026-07-02T09:45:00.000Z",
+            activeDayCount: 2,
+            notableObservations: 6,
+          },
+          trafficCounters: {
+            observations: 18,
+            trackedEntities: 3,
+            firstObservedAt: "2026-07-01T10:00:00.000Z",
+            lastObservedAt: "2026-07-02T09:40:00.000Z",
+            activeDayCount: 2,
+            notableObservations: 3,
+          },
+        },
+        telemetryPatterns: [],
+        investigationQueue: [
+          {
+            id: "investigation:cell:sluppen",
+            kind: "hotspot",
+            priority: "high",
+            title: "Varmepunkt Sluppen",
+            summary: "4 observasjoner ved Sluppen.",
+            reason: "Tetthet og tverrkilde-signal bør kontrolleres i kart og rådata.",
+            updatedAt: "2026-07-02T09:40:00.000Z",
+            evidence: ["4 observasjoner", "1 trafikkhendelse", "1 nyhetssak"],
+            articleIds: [],
+            sourceItemIds: ["source:one"],
+            sourceConfidence: {
+              level: "likely",
+              label: "Sannsynlig",
+              score: 0.72,
+              rationale: "Offisielt trafikkgrunnlag støttes av redaksjonell dekning.",
+            },
+          },
+        ],
+        heatmapCells: [
+          {
+            id: "cell:sluppen",
+            center: { lat: 63.3979, lng: 10.3997 },
+            radiusMeters: 650,
+            count: 4,
+            sourceItemCount: 1,
+            sourceItemIds: ["source:one"],
+            articleCount: 1,
+            trafficEventCount: 1,
+            firstSeenAt: "2026-07-01T09:40:00.000Z",
+            lastSeenAt: "2026-07-02T09:40:00.000Z",
+            activeDayCount: 2,
+            sourceIds: ["nrk", "vegvesen_traffic_info"],
+            maxSeverity: "high",
+            sourceConfidence: {
+              level: "likely",
+              label: "Sannsynlig",
+              score: 0.72,
+              rationale: "Offisielt trafikkgrunnlag støttes av redaksjonell dekning.",
+            },
+          },
+        ],
+        unexplainedDelays: [
+          {
+            id: "delay:e6-sluppen",
+            corridorId: "e6-sluppen",
+            corridorName: "E6 Okstadbakken - Sluppen",
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [10.38, 63.37],
+                [10.4, 63.397],
+              ],
+            },
+            state: "slow",
+            delaySeconds: 360,
+            delayRatio: 1.7,
+            updatedAt: "2026-07-02T09:40:00.000Z",
+            sourceUrl: "https://example.test/datex",
+            matchedArticleIds: ["article:one"],
+            affectedEventIds: [],
+            confidence: "warning",
+            reason: "DATEX viser ca. 6 min forsinkelse uten koblet trafikkhendelse.",
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/source-items?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "source:one",
+            provider: "datex",
+            kind: "official_event",
+            title: "DATEX Sluppen payload",
+            summary: "Sanitert kildeelement for E6 ved Sluppen.",
+            fetchedAt: "2026-07-02T09:40:00.000Z",
+            captureHash: "hash-one",
+            reliabilityTier: "official",
+            linkedSituationIds: [],
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/operations/raw/source-items/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        item: {
+          id: "source:one",
+          provider: "datex",
+          kind: "official_event",
+          title: "DATEX Sluppen payload",
+          fetchedAt: "2026-07-02T09:40:00.000Z",
+          captureHash: "hash-one",
+          reliabilityTier: "official",
+          linkedSituationIds: [],
+        },
+        rawPayload: {
+          situation: {
+            id: "datex-sluppen",
+            road: "E6",
+            delaySeconds: 360,
+          },
+        },
+        normalizedPayload: {
+          title: "DATEX Sluppen payload",
+          road: "E6",
+          location: "Sluppen",
+        },
+        payloadBytes: { raw: 2048, normalized: 512 },
+        redacted: true,
+        truncated: false,
+      }),
+    });
+  });
+  await page.route("**/api/operations/raw/ai-runs**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+
+  await page.goto("/command/romlig");
+
+  await expect(page.getByRole("heading", { name: "Romlig analyse" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Signaler å undersøke" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Varmepunkt Sluppen" })).toBeVisible();
+  await page.getByRole("link", { name: "Rådata 1" }).first().click();
+
+  await expect(page).toHaveURL(/\/command\/radata\?sourceItem=source%3Aone/);
+  await expect(page.getByRole("heading", { name: "Rådata-inspektør" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "DATEX Sluppen payload" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Normalisert payload" })).toBeVisible();
+  await expect(page.getByText('"location": "Sluppen"')).toBeVisible();
+  await expect(page.getByText('"delaySeconds": 360')).toBeVisible();
   await expectNoHorizontalPageOverflow(page);
 });
 
@@ -1531,7 +1848,12 @@ test("viewer shell keeps command center tools out of the public traffic map", as
   for (const ownerOnlyPath of [
     "/command",
     "/command/brief",
+    "/command/dekning",
+    "/command/kilder",
+    "/command/romlig",
     "/command/radata",
+    "/command/tidslinje",
+    "/command/varsler",
     "/drift",
     "/lagret",
   ]) {

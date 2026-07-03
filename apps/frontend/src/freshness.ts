@@ -11,9 +11,19 @@ function sourceAttentionText(count: number): string {
   return `${count} ${count === 1 ? "kilde" : "kilder"} trenger tilsyn`;
 }
 
+const publicFreshnessHiddenSources = new Set<SourceHealth["source"]>([
+  "deepseek",
+  "internal",
+  "private_annotations",
+  "web_push",
+]);
+
 export function headerFreshnessLabel(sources: SourceHealth[], now = new Date()): string {
-  const nonOkCount = sources.filter((source) => source.state !== "ok").length;
-  const newest = sources
+  const publicSources = sources.filter(
+    (source) => !publicFreshnessHiddenSources.has(source.source),
+  );
+  const nonOkCount = publicSources.filter((source) => source.state !== "ok").length;
+  const newest = publicSources
     .map((source) => (source.lastCheckedAt ? new Date(source.lastCheckedAt).getTime() : Number.NaN))
     .filter(Number.isFinite)
     .sort((a, b) => b - a)[0];

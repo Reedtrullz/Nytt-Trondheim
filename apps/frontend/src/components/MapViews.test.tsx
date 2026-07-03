@@ -154,6 +154,32 @@ describe("NewsMap", () => {
     expect(html).toContain("Oppdatering ved Sluppen");
     expect(html).toContain('data-position="63.44,10.43"');
   });
+
+  it("shows verification and confidence context in story marker popups", () => {
+    const html = renderToStaticMarkup(
+      <NewsMap
+        items={nearbyStoryItems([
+          {
+            ...article,
+            source: "adressa",
+            sourceLabel: "Adresseavisen",
+            title: "Kollisjon stenger E6",
+            publicVerification: {
+              status: "verified",
+              label: "Verifisert",
+              detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+              officialSources: ["datex"],
+              reportingSources: ["adressa"],
+              situationId: "datex-e6",
+            },
+          },
+        ])}
+      />,
+    );
+
+    expect(html).toContain("Verifisert · Statens vegvesen DATEX + Adresseavisen");
+    expect(html).toContain("Kildetillit: Bekreftet");
+  });
 });
 
 describe("SituationMap", () => {

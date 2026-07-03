@@ -5,6 +5,7 @@ import type {
   NotificationTriggerPage,
   OperationsStatus,
   RuntimeFreshness,
+  SourceHealth,
   TrafficPulseCorridor,
   WorkerCycleMetrics,
 } from "@nytt/shared";
@@ -80,9 +81,19 @@ function sourceItemCountText(metrics?: WorkerCycleMetrics) {
   return `${count} operasjonelle objekter i siste syklus`;
 }
 
+const nonActionableAttentionSources = new Set<SourceHealth["source"]>([
+  "deepseek",
+  "internal",
+  "private_annotations",
+  "web_push",
+]);
+
 function staleSourceCount(status: OperationsStatus) {
-  return status.sources.filter((source) => source.state !== "ok" || source.activeAlerts?.length)
-    .length;
+  return status.sources.filter(
+    (source) =>
+      !nonActionableAttentionSources.has(source.source) &&
+      (source.state !== "ok" || source.activeAlerts?.length),
+  ).length;
 }
 
 function freshnessLabel(entry?: RuntimeFreshness) {

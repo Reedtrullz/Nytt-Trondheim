@@ -52,6 +52,15 @@ function clusterPlaceLabel(cluster: NewsMapCluster): string {
   return `${labels[0]} + ${labels.length - 1} område${labels.length === 2 ? "" : "r"}`;
 }
 
+function confidenceLabel(item: NearbyStoryItem): string {
+  const score = item.sourceConfidence.score;
+  const scoreLabel =
+    typeof score === "number" && Number.isFinite(score) && score > 0
+      ? ` · ${Math.round(score * 100)} %`
+      : "";
+  return `Kildetillit: ${item.sourceConfidence.label}${scoreLabel}`;
+}
+
 function NewsMapPopup({
   cluster,
   onSelect,
@@ -78,7 +87,10 @@ function NewsMapPopup({
               type="button"
               key={item.id}
               className={selectedId === item.id ? "selected" : undefined}
-              onClick={() => onSelect?.(item.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect?.(item.id);
+              }}
             >
               <span>{item.markerLabel}</span>
               <span>
@@ -86,6 +98,14 @@ function NewsMapPopup({
                 <small>
                   {item.sourceLabel} · {formatMapTime(item.publishedAt)} · {item.relevanceLabel}
                 </small>
+                <em className="story-marker-popup-trust">
+                  {item.verification ? (
+                    <span title={item.verification.detail}>
+                      {item.verification.label} · {item.verification.sourceSummary}
+                    </span>
+                  ) : null}
+                  <span title={item.sourceConfidence.rationale}>{confidenceLabel(item)}</span>
+                </em>
               </span>
             </button>
           ))}

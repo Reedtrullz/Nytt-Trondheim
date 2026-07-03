@@ -903,6 +903,45 @@ describe("private situation API", () => {
     );
   });
 
+  it("does not escalate DeepSeek provider failures into source outage alerts", async () => {
+    const { app, store } = await testApp();
+    const completedAt = new Date().toISOString();
+    vi.spyOn(store, "listSituations").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "deepseek",
+        label: "AI-analyse",
+        state: "degraded",
+        lastCheckedAt: completedAt,
+        lastFailureAt: completedAt,
+        detail: "AI-analyse feilet, men deterministisk gruppering brukes fortsatt.",
+      },
+    ] satisfies SourceHealth[]);
+    vi.spyOn(store, "listCollectorRuns").mockResolvedValue([]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const timeline = await agent
+      .get("/api/operations/timeline?sources=deepseek&kinds=stale_warning")
+      .expect(200);
+    expect(timeline.body.events).toEqual([]);
+
+    const audit = await agent
+      .get("/api/operations/source-audit?sources=deepseek&includeDiagnostics=true")
+      .expect(200);
+    expect(audit.body.alerts).toEqual([]);
+    expect(audit.body.sources).toEqual([
+      expect.objectContaining({
+        source: "deepseek",
+        healthState: "degraded",
+        openAlertCount: 0,
+        criticalAlertCount: 0,
+      }),
+    ]);
+  });
+
   it("classifies status, severity, merge and split decisions on the operations timeline", async () => {
     const { app, store } = await testApp();
     const situation = {
