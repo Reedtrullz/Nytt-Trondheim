@@ -1,8 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DashboardGrid } from "./DashboardGrid.js";
 
 describe("DashboardGrid", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("renders reusable widget controls for command surfaces", () => {
     const html = renderToStaticMarkup(
       <DashboardGrid
@@ -72,5 +76,104 @@ describe("DashboardGrid", () => {
     expect(html).not.toContain("Endre størrelse på Morgenbrief");
     expect(html).not.toContain("Dashboard-oppsett");
     expect(html).toContain("Flytt Morgenbrief senere");
+  });
+
+  it("keeps public dashboard configuration collapsed until requested", () => {
+    const html = renderToStaticMarkup(
+      <DashboardGrid
+        ariaLabel="Bypulsmoduler"
+        label="City Pulse"
+        title="Dagens oversikt"
+        configMode="toggle"
+        variant="city-pulse"
+        widgetChrome="bare"
+        showWidgetHeaders={false}
+        widgets={[
+          {
+            id: "brief",
+            title: "Morgenbrief",
+            defaultSize: "full",
+            resizable: false,
+            children: <p>Tre ting å følge.</p>,
+          },
+          {
+            id: "signals",
+            title: "Varsel og AI-spor",
+            defaultSize: "full",
+            children: <p>Åpen forklaring.</p>,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Tilpass oppsett");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("Tilbakestill");
+    expect(html).toContain('data-editable="false"');
+    expect(html).not.toContain("Dashboard-oppsett");
+    expect(html).not.toContain('draggable="true"');
+    expect(html).not.toContain("Flytt Morgenbrief senere");
+    expect(html).not.toContain("Endre størrelse på Varsel og AI-spor");
+  });
+
+  it("keeps visible public widget headers passive while configuration is collapsed", () => {
+    const html = renderToStaticMarkup(
+      <DashboardGrid
+        ariaLabel="Bypulsmoduler"
+        label="City Pulse"
+        title="Dagens oversikt"
+        configMode="toggle"
+        variant="city-pulse"
+        widgets={[
+          {
+            id: "brief",
+            title: "Morgenbrief",
+            defaultSize: "full",
+            children: <p>Tre ting å følge.</p>,
+          },
+          {
+            id: "signals",
+            title: "Varsel og AI-spor",
+            defaultSize: "full",
+            children: <p>Åpen forklaring.</p>,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("<h3>Morgenbrief</h3>");
+    expect(html).not.toContain("Morgenbrief kontroller");
+    expect(html).not.toContain("Flytt Morgenbrief tidligere");
+    expect(html).not.toContain("Endre størrelse på Morgenbrief");
+  });
+
+  it("falls back to the default layout when browser storage is unavailable", () => {
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem() {
+          throw new Error("storage blocked");
+        },
+        setItem() {
+          throw new Error("storage blocked");
+        },
+      },
+    });
+
+    const html = renderToStaticMarkup(
+      <DashboardGrid
+        storageKey="blocked-dashboard"
+        widgets={[
+          {
+            id: "summary",
+            title: "Situasjonsbilde",
+            defaultSize: "wide",
+            children: <p>Tre aktive situasjoner.</p>,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Situasjonsbilde");
+    expect(html).toContain("dashboard-widget-wide");
   });
 });

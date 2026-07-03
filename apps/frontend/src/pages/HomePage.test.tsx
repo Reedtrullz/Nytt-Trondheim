@@ -162,7 +162,9 @@ describe("CityPulseDashboard", () => {
     expect(html).toContain("Liv og helse");
     expect(html).toContain("Stengte hovedårer");
     expect(html).not.toContain("Flytt Morgenbrief senere");
+    expect(html).toContain("Tilpass oppsett");
     expect(html).not.toContain("Tilbakestill");
+    expect(html).not.toContain("Dashboard-oppsett");
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kildetillit: Bekreftet");
     expect(html).toContain("91 %");

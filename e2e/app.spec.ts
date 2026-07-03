@@ -629,6 +629,53 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
 
   await page.goto("/");
 
+  const cityPulseModules = page.getByLabel("Bypulsmoduler");
+  await expect(cityPulseModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();
+  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
+  await expect(cityPulseModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
+  await expect(cityPulseModules.locator(".dashboard-widget").first()).toHaveAttribute(
+    "data-editable",
+    "false",
+  );
+  await cityPulseModules.getByRole("button", { name: "Tilpass oppsett" }).click();
+  await expect(cityPulseModules.getByLabel("Dashboard-oppsett")).toBeVisible();
+  await expect(cityPulseModules.locator(".dashboard-widget").first()).toHaveAttribute(
+    "data-editable",
+    "true",
+  );
+  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
+  await cityPulseModules
+    .getByRole("button", { name: "Bytt modulstørrelse for Varsel og AI-spor" })
+    .click();
+  const signalWidget = cityPulseModules.locator(".dashboard-widget", {
+    hasText: "Slik vurderes høyeffekt-signaler",
+  });
+  await expect(signalWidget).toHaveClass(/dashboard-widget-compact/);
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt-city-pulse-dashboard-v1")))
+    .toContain('"signal-trace":"compact"');
+  await cityPulseModules.getByRole("button", { name: "Skjul oppsett" }).click();
+  await expect(cityPulseModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
+  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
+  await expect(cityPulseModules.locator(".dashboard-widget").first()).toHaveAttribute(
+    "data-editable",
+    "false",
+  );
+  await expectNoHorizontalPageOverflow(page);
+
+  await page.reload();
+  await expect(cityPulseModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();
+  await expect(signalWidget).toHaveClass(/dashboard-widget-compact/);
+  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
+  await cityPulseModules.getByRole("button", { name: "Tilpass oppsett" }).click();
+  await cityPulseModules.getByRole("button", { name: "Tilbakestill" }).click();
+  await expect(signalWidget).toHaveClass(/dashboard-widget-full/);
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt-city-pulse-dashboard-v1")))
+    .toContain('"signal-trace":"full"');
+  await cityPulseModules.getByRole("button", { name: "Skjul oppsett" }).click();
+  await expectNoHorizontalPageOverflow(page);
+
   const lead = page.locator(".lead-story");
   const sources = lead.locator(".source-cluster");
   await expect(lead.getByRole("heading", { name: "Tente på antibac i Trondheim" })).toBeVisible();
@@ -2943,6 +2990,26 @@ test("owner can open the real situation index and operations status", async ({ p
   await page.getByRole("link", { name: "Kommandosenter" }).click();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Command Center-matrise" })).toBeVisible();
+  const commandModules = page.getByLabel("Kommandosenter-moduler");
+  await expect(commandModules.getByLabel("Dashboard-oppsett")).toBeVisible();
+  await expect(commandModules.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
+  const sourceWidget = commandModules.locator(".dashboard-widget", {
+    has: page.getByRole("heading", { name: "Kilder" }),
+  });
+  await expect(sourceWidget).toHaveClass(/dashboard-widget-large/);
+  await commandModules.getByRole("button", { name: "Bytt modulstørrelse for Kilder" }).click();
+  await expect(sourceWidget).toHaveClass(/dashboard-widget-full/);
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt-command-dashboard-v1")))
+    .toContain('"sources":"full"');
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
+  await expect(sourceWidget).toHaveClass(/dashboard-widget-full/);
+  await commandModules.getByRole("button", { name: "Tilbakestill" }).click();
+  await expect(sourceWidget).toHaveClass(/dashboard-widget-large/);
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt-command-dashboard-v1")))
+    .toContain('"sources":"large"');
   await expect(page.getByRole("link", { name: /Raw Data Inspector/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Push Notification Trigger/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Intelligence Bridge" })).toBeVisible();

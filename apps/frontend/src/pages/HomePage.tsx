@@ -424,7 +424,6 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
       title: "Varsel og AI-spor",
       description: "Offentlig forklaring på høyeffekt-signaler.",
       defaultSize: "full",
-      resizable: false,
       children: <CityPulseSignalPanel brief={morningBrief} />,
     });
     if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
@@ -448,7 +447,7 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
       label="City Pulse"
       title="Dagens oversikt"
       storageKey="nytt-city-pulse-dashboard-v1"
-      editable={false}
+      configMode="toggle"
       showWidgetHeaders={false}
       variant="city-pulse"
       widgetChrome="bare"

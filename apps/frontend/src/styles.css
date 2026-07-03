@@ -2955,6 +2955,14 @@ button {
   padding: 9px 12px;
 }
 
+.dashboard-layout-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .dashboard-layout-config {
   display: grid;
   grid-template-columns: minmax(220px, 0.35fr) minmax(0, 1fr);
