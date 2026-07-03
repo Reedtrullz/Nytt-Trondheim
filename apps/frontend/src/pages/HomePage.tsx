@@ -19,10 +19,9 @@ import {
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
-import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
+import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
 import {
   articleCategories,
-  articleCategoryIcons,
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
@@ -1205,7 +1204,7 @@ export function HomePage({
               onClick={() => updateFilters({ category: item })}
             >
               <span className="channel-filter-icon" aria-hidden="true">
-                {articleCategoryIcons[item]}
+                <ArticleCategoryIcon name={item} />
               </span>
               <span>{articleCategoryLabels[item]}</span>
             </button>

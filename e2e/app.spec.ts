@@ -650,6 +650,28 @@ test("command briefing page shows AI brief traceability", async ({ page }) => {
   await expectNoHorizontalPageOverflow(page);
 });
 
+test("legacy drift routes redirect to canonical command center paths", async ({ page }) => {
+  await page.route("**/api/operations/coverage-bundles**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        summary: {
+          recentBundleCount: 0,
+          byKind: { incident: 0, topic: 0, update: 0 },
+          byConfidence: { high: 0, medium: 0 },
+        },
+        items: [],
+      }),
+    });
+  });
+
+  await page.goto("/drift/dekning?kind=incident&q=Flat%C3%A5sen");
+
+  await expect(page).toHaveURL(/\/command\/dekning\?kind=incident&q=Flat%C3%A5sen$/);
+  await expect(page.getByRole("heading", { name: "Dekningsgrupper" })).toBeVisible();
+});
+
 test("command spatial analytics links heatmap evidence to raw source payloads", async ({
   page,
 }) => {

@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import type { BootstrapPayload, SessionPayload } from "@nytt/shared";
 import { ApiError, api } from "./api.js";
 import { headerFreshnessLabel } from "./freshness.js";
@@ -192,6 +192,11 @@ function LoadingPage({ message }: { message: string }) {
   );
 }
 
+function LegacyCommandRedirect({ to }: { to: string }) {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}${location.hash}`} replace />;
+}
+
 function AuthenticatedApp() {
   const [data, setData] = useState<BootstrapPayload>();
   const [session, setSession] = useState<SessionPayload>();
@@ -272,18 +277,27 @@ function AuthenticatedApp() {
             <Route path="/command/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
             <Route path="/command/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/command/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
-            <Route path="/drift" element={ownerOnly(<OperationsPage />)} />
-            <Route path="/drift/brief" element={ownerOnly(<CommandBriefingPage />)} />
-            <Route path="/drift/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
-            <Route path="/drift/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
-            <Route path="/drift/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route path="/drift" element={<LegacyCommandRedirect to="/command" />} />
+            <Route path="/drift/brief" element={<LegacyCommandRedirect to="/command/brief" />} />
+            <Route
+              path="/drift/tilgang"
+              element={<LegacyCommandRedirect to="/command/tilgang" />}
+            />
+            <Route
+              path="/drift/dekning"
+              element={<LegacyCommandRedirect to="/command/dekning" />}
+            />
+            <Route path="/drift/kilder" element={<LegacyCommandRedirect to="/command/kilder" />} />
             <Route
               path="/drift/varsler"
-              element={ownerOnly(<NotificationTriggerCandidatesPage />)}
+              element={<LegacyCommandRedirect to="/command/varsler" />}
             />
-            <Route path="/drift/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
-            <Route path="/drift/radata" element={ownerOnly(<RawDataInspectorPage />)} />
-            <Route path="/drift/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
+            <Route path="/drift/romlig" element={<LegacyCommandRedirect to="/command/romlig" />} />
+            <Route path="/drift/radata" element={<LegacyCommandRedirect to="/command/radata" />} />
+            <Route
+              path="/drift/tidslinje"
+              element={<LegacyCommandRedirect to="/command/tidslinje" />}
+            />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Suspense>

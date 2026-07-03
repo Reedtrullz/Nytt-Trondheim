@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ArticleCategoryIcon } from "./components/Icons.js";
 import {
   articleCategories,
-  articleCategoryIcons,
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
@@ -76,8 +78,6 @@ describe("home filter query params", () => {
     expect(articleCategoryLabels.Transport).toBe("Trafikk");
     expect(articleCategoryLabels.Krim).toBe("Krim");
     expect(articleCategoryLabels.Vær).toBe("Vær");
-    expect(articleCategoryIcons.Transport).toBe("→");
-    expect(articleCategoryIcons.Hendelser).toBe("!");
     expect(articleTopicLabels.rosenborg).toBe("Rosenborg");
     expect(parseHomeFilters("?category=Transport").category).toBe("Transport");
     expect(parseHomeFilters("?window=2h").timeWindow).toBe("2h");
@@ -147,5 +147,16 @@ describe("home filter query params", () => {
     expect(homeTimeWindowFrom("2h", now)).toBe("2026-07-02T08:00:00.000Z");
     expect(homeTimeWindowFrom("24h", now)).toBe("2026-07-01T10:00:00.000Z");
     expect(homeTimeWindowFrom("7d", now)).toBe("2026-06-25T10:00:00.000Z");
+  });
+
+  it("renders semantic channel icons without changing filter labels", () => {
+    const emergency = renderToStaticMarkup(
+      createElement(ArticleCategoryIcon, { name: "Hendelser" }),
+    );
+    const traffic = renderToStaticMarkup(createElement(ArticleCategoryIcon, { name: "Transport" }));
+
+    expect(emergency).toContain("channel-icon");
+    expect(emergency).toContain("M12 4.5 21 19H3z");
+    expect(traffic).toContain("M4 16h16");
   });
 });

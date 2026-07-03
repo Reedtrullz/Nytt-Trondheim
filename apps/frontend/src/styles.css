@@ -418,6 +418,12 @@ button {
   line-height: 1;
 }
 
+.channel-filter-icon .channel-icon {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
+}
+
 .channel-filter.selected .channel-filter-icon {
   border-color: currentColor;
   background: var(--blue-soft);
