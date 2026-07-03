@@ -25,8 +25,15 @@ export interface HomeLocalFocusSummary {
   closestItems: HomeLocalFocusSummaryItem[];
 }
 
-const defaultRadiusKm = 10;
+export const homeLocalFocusDefaultRadiusKm = 10;
+export const homeLocalFocusRadiusOptions = [3, 4, 5, 6, 10, 20] as const;
+export const homeLocalFocusRadiusStorageKey = "nytt.home.localFocusRadius.v1";
 const earthRadiusKm = 6371;
+
+export function parseHomeLocalFocusRadius(value: string | number | null | undefined) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return homeLocalFocusRadiusOptions.find((option) => option === numeric);
+}
 
 function radians(value: number): number {
   return (value * Math.PI) / 180;
@@ -76,7 +83,7 @@ export function localFocusMetaForCard(
   const distanceKm = distanceKmBetween(focus, point);
   return {
     distanceKm,
-    withinRadius: distanceKm <= (focus.radiusKm ?? defaultRadiusKm),
+    withinRadius: distanceKm <= (focus.radiusKm ?? homeLocalFocusDefaultRadiusKm),
   };
 }
 

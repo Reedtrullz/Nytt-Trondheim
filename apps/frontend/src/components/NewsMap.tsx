@@ -1,15 +1,17 @@
 import { useEffect, useMemo } from "react";
 import L, { type LatLngTuple } from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { Circle, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import type { NearbyStoryItem } from "../homeNearby.js";
+import { homeLocalFocusDefaultRadiusKm, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
+import { nearbyDistanceLabel, type NearbyStoryItem } from "../homeNearby.js";
 import { boundsFromLatLngs } from "../mapCoordinates.js";
 import { clusterNearbyStoryItems, type NewsMapCluster } from "../newsMapClusters.js";
 import { MapAccessibility } from "./map/MapAccessibility.js";
 
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
+type MapPosition = [number, number];
 
-function FitMapToPositions({ positions }: { positions: Array<[number, number]> }) {
+function FitMapToPositions({ positions }: { positions: MapPosition[] }) {
   const map = useMap();
   const focusKey = useMemo(
     () => positions.map((position) => position.join(",")).join("|"),
@@ -35,6 +37,23 @@ function FitMapToPositions({ positions }: { positions: Array<[number, number]> }
   }, [bounds, focusKey, map]);
 
   return null;
+}
+
+function validMapPosition(point: HomeLocalFocusPoint | undefined): point is HomeLocalFocusPoint {
+  return (
+    typeof point?.lat === "number" &&
+    typeof point.lng === "number" &&
+    Number.isFinite(point.lat) &&
+    Number.isFinite(point.lng) &&
+    point.lat >= -90 &&
+    point.lat <= 90 &&
+    point.lng >= -180 &&
+    point.lng <= 180
+  );
+}
+
+function localFocusPosition(localFocus: HomeLocalFocusPoint | undefined): MapPosition | undefined {
+  return validMapPosition(localFocus) ? [localFocus.lat, localFocus.lng] : undefined;
 }
 
 function formatMapTime(value: string) {
@@ -97,6 +116,9 @@ function NewsMapPopup({
                 <b>{item.title}</b>
                 <small>
                   {item.sourceLabel} · {formatMapTime(item.publishedAt)} · {item.relevanceLabel}
+                  {item.distanceKm !== undefined
+                    ? ` · ${nearbyDistanceLabel(item.distanceKm) ?? "uten avstand"}`
+                    : ""}
                 </small>
                 <em className="story-marker-popup-trust">
                   {item.verification ? (
@@ -120,19 +142,30 @@ function NewsMapPopup({
 
 export function NewsMap({
   items,
+  localFocus,
   selectedId,
   onSelect,
 }: {
   items: NearbyStoryItem[];
+  localFocus?: HomeLocalFocusPoint;
   selectedId?: string;
   onSelect?: (id: string) => void;
 }) {
   const selected = items.find((item) => item.id === selectedId);
+  const focusPosition = localFocusPosition(localFocus);
+  const focusRadiusMeters =
+    focusPosition && (localFocus?.radiusKm ?? homeLocalFocusDefaultRadiusKm) * 1000;
   const activeId = selected?.id ?? items[0]?.id;
-  const center: LatLngTuple = selected?.position ?? items[0]?.position ?? [63.421, 10.395];
+  const center: LatLngTuple = selected?.position ??
+    focusPosition ??
+    items[0]?.position ?? [63.421, 10.395];
   const clusters = useMemo(
     () => clusterNearbyStoryItems(items, { selectedId: activeId }),
     [activeId, items],
+  );
+  const fitPositions = useMemo<MapPosition[]>(
+    () => [...(focusPosition ? [focusPosition] : []), ...clusters.map(({ position }) => position)],
+    [clusters, focusPosition],
   );
   return (
     <MapContainer
@@ -145,7 +178,20 @@ export function NewsMap({
     >
       <TileLayer url={tiles} attribution="© Kartverket" />
       <MapAccessibility label="Kart over nærliggende nyhetssaker" />
-      <FitMapToPositions positions={clusters.map(({ position }) => position)} />
+      <FitMapToPositions positions={fitPositions} />
+      {focusPosition && focusRadiusMeters ? (
+        <Circle
+          center={focusPosition}
+          radius={focusRadiusMeters}
+          pathOptions={{
+            color: "#14684b",
+            fillColor: "#14684b",
+            fillOpacity: 0.08,
+            opacity: 0.42,
+            weight: 2,
+          }}
+        />
+      ) : null}
       {clusters.map((cluster) => {
         const clustered = cluster.items.length > 1;
         return (

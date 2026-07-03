@@ -509,6 +509,37 @@ button {
   font-weight: 600;
 }
 
+.local-focus-radius {
+  display: inline-grid;
+  grid-template-columns: auto auto minmax(70px, 110px);
+  gap: 5px;
+  align-items: center;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 84%, var(--blue-soft));
+  color: var(--muted);
+}
+
+.local-focus-radius span {
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.local-focus-radius strong {
+  color: var(--ink);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.local-focus-radius input {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--blue);
+}
+
 .local-focus button.selected {
   border-color: rgba(20, 104, 75, 0.45);
   color: var(--green);

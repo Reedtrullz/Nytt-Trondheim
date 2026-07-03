@@ -657,9 +657,23 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await page.getByLabel("Postnummer eller sted").fill("7041");
   await page.getByRole("button", { name: "Bruk" }).click();
   await expect(page.getByText(/Nær Lade · innen 5 km/i)).toBeVisible();
+  const radiusControl = page.getByLabel("Velg lokal radius");
+  await expect(radiusControl).toHaveAttribute("aria-valuetext", "5 km");
+  await radiusControl.press("Home");
+  await expect(page.getByText(/Nær Lade · innen 3 km/i)).toBeVisible();
+  await expect(
+    page.getByLabel("Lokalt fokus").getByText(/stedsfestede saker er innen 3 km/),
+  ).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => window.localStorage.getItem("nytt.home.neighborhoodFocus.v1")))
     .toBe("lade");
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt.home.localFocusRadius.v1")))
+    .toBe("3");
+  await page.getByLabel("Velg nærområde").selectOption("midtbyen");
+  await expect(page.getByText(/Nær Midtbyen · innen 3 km/i)).toBeVisible();
+  await expect(page.getByLabel("Velg lokal radius")).toHaveAttribute("aria-valuetext", "3 km");
+  await expectNoHorizontalPageOverflow(page);
 });
 
 test("verified public story proof opens the linked situation room for viewers", async ({

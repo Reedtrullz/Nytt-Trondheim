@@ -49,7 +49,11 @@ import {
   homeNeighborhoodFocusStorageKey,
 } from "../homeNeighborhoodFocus.js";
 import {
+  homeLocalFocusDefaultRadiusKm,
+  homeLocalFocusRadiusOptions,
+  homeLocalFocusRadiusStorageKey,
   rankHomeStoryCardsByLocalFocus,
+  parseHomeLocalFocusRadius,
   summarizeHomeStoryCardsByLocalFocus,
   type HomeLocalFocusPoint,
   type HomeLocalFocusSummary,
@@ -67,7 +71,6 @@ const NewsMap = lazy(() =>
   import("../components/NewsMap.js").then((module) => ({ default: module.NewsMap })),
 );
 const defaultHomeFeedKey = "trondheim\u0000Alle\u0000\u0000\u0000all";
-const localFocusRadiusKm = 10;
 
 type LocalFocusState =
   | { status: "idle" }
@@ -815,6 +818,7 @@ function NearbyRail({
         <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
           <NewsMap
             items={mapNearby}
+            localFocus={localFocus}
             selectedId={selectedNearby?.id}
             onSelect={setSelectedNearbyId}
           />
@@ -970,6 +974,45 @@ export function MapTimeSlider({
   );
 }
 
+export function LocalFocusRadiusControl({
+  disabled = false,
+  onChange,
+  value,
+}: {
+  disabled?: boolean;
+  onChange?: (radiusKm: number) => void;
+  value: number;
+}) {
+  const selectedIndex = Math.max(
+    0,
+    homeLocalFocusRadiusOptions.findIndex((option) => option === value),
+  );
+  const selectedValue = homeLocalFocusRadiusOptions[selectedIndex] ?? homeLocalFocusDefaultRadiusKm;
+
+  return (
+    <label className="local-focus-radius">
+      <span>Radius</span>
+      <strong>{selectedValue} km</strong>
+      <input
+        type="range"
+        min={0}
+        max={homeLocalFocusRadiusOptions.length - 1}
+        step={1}
+        value={selectedIndex}
+        aria-label="Velg lokal radius"
+        aria-valuetext={`${selectedValue} km`}
+        disabled={disabled}
+        onChange={(event) => {
+          const next =
+            homeLocalFocusRadiusOptions[Number(event.currentTarget.value)] ??
+            homeLocalFocusDefaultRadiusKm;
+          onChange?.(next);
+        }}
+      />
+    </label>
+  );
+}
+
 function searchParamsFor(filters: HomeFilters) {
   return buildHomeSearch(filters).replace(/^\?/, "");
 }
@@ -1078,20 +1121,28 @@ export function HomePage({
   const [localFocus, setLocalFocus] = useState<LocalFocusState>({ status: "idle" });
   const [neighborhoodFocusId, setNeighborhoodFocusId] = useState("");
   const [neighborhoodFocusQuery, setNeighborhoodFocusQuery] = useState("");
+  const [focusRadiusKm, setFocusRadiusKm] = useState(homeLocalFocusDefaultRadiusKm);
+  const focusRadiusCustomizedRef = useRef(false);
   const activeLocalFocus = localFocus.status === "active" ? localFocus.point : undefined;
-  const activeLocalFocusRadiusKm = activeLocalFocus?.radiusKm ?? localFocusRadiusKm;
+  const activeLocalFocusRadiusKm = activeLocalFocus?.radiusKm ?? focusRadiusKm;
 
   useEffect(() => {
     try {
+      const storedRadius = parseHomeLocalFocusRadius(
+        window.localStorage.getItem(homeLocalFocusRadiusStorageKey),
+      );
       const option = homeNeighborhoodFocusOption(
         window.localStorage.getItem(homeNeighborhoodFocusStorageKey),
       );
       if (!option) return;
+      const radiusKm = storedRadius ?? option.point.radiusKm ?? homeLocalFocusDefaultRadiusKm;
+      focusRadiusCustomizedRef.current = storedRadius !== undefined;
+      setFocusRadiusKm(radiusKm);
       setNeighborhoodFocusId(option.id);
       setNeighborhoodFocusQuery(option.label);
       setLocalFocus({
         status: "active",
-        point: option.point,
+        point: { ...option.point, radiusKm },
         label: option.label,
         persistent: true,
       });
@@ -1103,10 +1154,35 @@ export function HomePage({
   const clearStoredNeighborhoodFocus = useCallback(() => {
     try {
       window.localStorage.removeItem(homeNeighborhoodFocusStorageKey);
+      window.localStorage.removeItem(homeLocalFocusRadiusStorageKey);
     } catch {
       // Ignore storage failures; the UI state is still cleared for this session.
     }
   }, []);
+
+  const persistFocusRadius = useCallback((radiusKm: number) => {
+    try {
+      window.localStorage.setItem(homeLocalFocusRadiusStorageKey, String(radiusKm));
+    } catch {
+      // Radius is a convenience hint. Storage failures should not block local focus.
+    }
+  }, []);
+
+  const updateLocalFocusRadius = useCallback(
+    (radiusKm: number) => {
+      const parsed = parseHomeLocalFocusRadius(radiusKm);
+      if (!parsed) return;
+      focusRadiusCustomizedRef.current = true;
+      setFocusRadiusKm(parsed);
+      persistFocusRadius(parsed);
+      setLocalFocus((current) =>
+        current.status === "active"
+          ? { ...current, point: { ...current.point, radiusKm: parsed } }
+          : current,
+      );
+    },
+    [persistFocusRadius],
+  );
 
   const requestLocalFocus = useCallback(() => {
     if (!navigator.geolocation) {
@@ -1126,18 +1202,20 @@ export function HomePage({
           point: {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-            radiusKm: localFocusRadiusKm,
+            radiusKm: focusRadiusKm,
           },
         });
       },
       (error) => setLocalFocus({ status: "error", message: geolocationErrorMessage(error) }),
       { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 8000 },
     );
-  }, [clearStoredNeighborhoodFocus]);
+  }, [clearStoredNeighborhoodFocus, focusRadiusKm]);
 
   const clearLocalFocus = useCallback(() => {
     setNeighborhoodFocusId("");
     setNeighborhoodFocusQuery("");
+    focusRadiusCustomizedRef.current = false;
+    setFocusRadiusKm(homeLocalFocusDefaultRadiusKm);
     clearStoredNeighborhoodFocus();
     setLocalFocus({ status: "idle" });
   }, [clearStoredNeighborhoodFocus]);
@@ -1149,21 +1227,26 @@ export function HomePage({
         clearLocalFocus();
         return;
       }
+      const radiusKm = focusRadiusCustomizedRef.current
+        ? focusRadiusKm
+        : (option.point.radiusKm ?? focusRadiusKm);
+      setFocusRadiusKm(radiusKm);
       setNeighborhoodFocusId(option.id);
       setNeighborhoodFocusQuery(option.label);
       try {
         window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+        window.localStorage.setItem(homeLocalFocusRadiusStorageKey, String(radiusKm));
       } catch {
         // The chosen focus still works for this session even when persistence is unavailable.
       }
       setLocalFocus({
         status: "active",
-        point: option.point,
+        point: { ...option.point, radiusKm },
         label: option.label,
         persistent: true,
       });
     },
-    [clearLocalFocus],
+    [clearLocalFocus, focusRadiusKm],
   );
 
   const applyNeighborhoodFocusQuery = useCallback(
@@ -1179,21 +1262,26 @@ export function HomePage({
         });
         return;
       }
+      const radiusKm = focusRadiusCustomizedRef.current
+        ? focusRadiusKm
+        : (option.point.radiusKm ?? focusRadiusKm);
+      setFocusRadiusKm(radiusKm);
       setNeighborhoodFocusId(option.id);
       setNeighborhoodFocusQuery(option.label);
       try {
         window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+        window.localStorage.setItem(homeLocalFocusRadiusStorageKey, String(radiusKm));
       } catch {
         // The chosen focus still works for this session even when persistence is unavailable.
       }
       setLocalFocus({
         status: "active",
-        point: option.point,
+        point: { ...option.point, radiusKm },
         label: option.label,
         persistent: true,
       });
     },
-    [clearStoredNeighborhoodFocus, neighborhoodFocusQuery],
+    [clearStoredNeighborhoodFocus, focusRadiusKm, neighborhoodFocusQuery],
   );
 
   function updateFilters(next: Partial<HomeFilters>) {
@@ -1475,6 +1563,12 @@ export function HomePage({
             />
             <button type="submit">Bruk</button>
           </form>
+          {localFocus.status === "active" ? (
+            <LocalFocusRadiusControl
+              value={activeLocalFocusRadiusKm}
+              onChange={updateLocalFocusRadius}
+            />
+          ) : null}
           {localFocus.status === "active" ? (
             <span>
               Nær {localFocus.label} · innen {activeLocalFocusRadiusKm} km

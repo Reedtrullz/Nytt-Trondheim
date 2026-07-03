@@ -5,6 +5,7 @@ import type { Article, BootstrapPayload, MorningBrief } from "@nytt/shared";
 import {
   CityPulseDashboard,
   CityPulseSignalPanel,
+  LocalFocusRadiusControl,
   LocalFocusSummaryPanel,
   MapTimeSlider,
   MorningBriefPanel,
@@ -335,6 +336,18 @@ describe("LocalFocusSummaryPanel", () => {
     expect(html).toContain("Fallulykke i Trondheim");
     expect(html).toContain("under 1 km unna");
     expect(html).toContain("2,3 km unna");
+  });
+});
+
+describe("LocalFocusRadiusControl", () => {
+  it("renders a compact radius slider for active local focus", () => {
+    const html = renderToStaticMarkup(<LocalFocusRadiusControl value={10} />);
+
+    expect(html).toContain("Radius");
+    expect(html).toContain("10 km");
+    expect(html).toContain('type="range"');
+    expect(html).toContain('aria-label="Velg lokal radius"');
+    expect(html).toContain('aria-valuetext="10 km"');
   });
 });
 

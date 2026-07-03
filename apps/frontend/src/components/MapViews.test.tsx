@@ -1,7 +1,8 @@
 import { sampleSituation, type Article } from "@nytt/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { nearbyStoryItems } from "../homeNearby.js";
+import { groupHomeArticles } from "../homeArticleGroups.js";
+import { nearbyStoryItems, nearbyStoryItemsForGroups } from "../homeNearby.js";
 
 vi.mock("leaflet", () => ({
   default: {
@@ -10,6 +11,9 @@ vi.mock("leaflet", () => ({
 }));
 
 vi.mock("react-leaflet", () => ({
+  Circle: ({ center, radius }: { center: [number, number]; radius: number }) => (
+    <div data-layer="circle-radius" data-position={center.join(",")} data-radius={radius} />
+  ),
   CircleMarker: ({
     center,
     children,
@@ -179,6 +183,21 @@ describe("NewsMap", () => {
 
     expect(html).toContain("Verifisert · Statens vegvesen DATEX + Adresseavisen");
     expect(html).toContain("Kildetillit: Bekreftet");
+  });
+
+  it("renders the active local-focus radius on the nearby map", () => {
+    const localFocus = { lat: 63.4, lng: 10.4, radiusKm: 3 };
+    const html = renderToStaticMarkup(
+      <NewsMap
+        items={nearbyStoryItemsForGroups(groupHomeArticles([article]), { localFocus })}
+        localFocus={localFocus}
+      />,
+    );
+
+    expect(html).toContain('data-layer="circle-radius"');
+    expect(html).toContain('data-position="63.4,10.4"');
+    expect(html).toContain('data-radius="3000"');
+    expect(html).toContain("under 1 km unna");
   });
 });
 
