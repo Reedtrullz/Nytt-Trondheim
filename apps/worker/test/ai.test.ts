@@ -90,13 +90,20 @@ describe("AI citation validation", () => {
 
     expect(create).toHaveBeenCalledTimes(2);
     expect(outcome.run.status).toBe("ok");
-    expect(outcome.result).toEqual({
+    expect(outcome.result).toMatchObject({
       clusters: [],
       situationUpdates: [],
       bundleHints: [],
       categoryHints: [],
       relevanceHints: [],
       operationsNotes: [],
+      diagnostics: {
+        profile: "compact_recovery",
+        attempts: [
+          expect.objectContaining({ profile: "standard", status: "failed" }),
+          expect.objectContaining({ profile: "compact_recovery", status: "ok" }),
+        ],
+      },
     });
   });
 
@@ -116,6 +123,25 @@ describe("AI citation validation", () => {
 
     expect(create).toHaveBeenCalledTimes(2);
     expect(outcome.run.status).toBe("ok");
+    const firstRequest = create.mock.calls[0]?.[0] as {
+      max_tokens: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+    const retryRequest = create.mock.calls[1]?.[0] as {
+      max_tokens: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(firstRequest.max_tokens).toBe(4096);
+    expect(retryRequest.max_tokens).toBe(2048);
+    expect(retryRequest.messages[0]?.content).toContain("compact recovery pass");
+    expect(retryRequest.messages[0]?.content).toContain("at most 2 clusters");
+    expect(outcome.result.diagnostics).toMatchObject({
+      profile: "compact_recovery",
+      attempts: [
+        { profile: "standard", status: "failed", maxTokens: 4096 },
+        { profile: "compact_recovery", status: "ok", maxTokens: 2048 },
+      ],
+    });
   });
 
   it("treats blank optional category topics as omitted", async () => {
@@ -254,6 +280,183 @@ describe("AI citation validation", () => {
     expect(payload.articles[0]?.places[0]?.length).toBeLessThanOrEqual(80);
     expect(payload.situations[0]?.summary.length).toBeLessThanOrEqual(700);
     expect(payload.situations[0]?.locationLabel.length).toBeLessThanOrEqual(80);
+  });
+
+  it("shrinks retry payloads after output-format failures", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [{ finish_reason: "length", message: { content: '{"clusters":[]}' } }],
+      })
+      .mockResolvedValueOnce({
+        choices: [{ finish_reason: "stop", message: { content: '{"clusters":[]}' } }],
+      });
+    const analyzer = new DeepSeekAnalyzer("test-key", "test-model");
+    Object.assign(analyzer, { client: { chat: { completions: { create } } } });
+    const manyArticles = Array.from({ length: 14 }, (_, index) => ({
+      ...articles[0]!,
+      id: `article-${index}`,
+      title: `Lang tittel ${index} ${"x".repeat(400)}`,
+      excerpt: `Lang ingress ${index} ${"y".repeat(1600)}`,
+      places: [`${"z".repeat(160)}`],
+    }));
+    const manySituations: Situation[] = Array.from({ length: 14 }, (_, index) => ({
+      id: `situation-${index}`,
+      type: "fire",
+      title: `Lang situasjon ${index} ${"t".repeat(400)}`,
+      summary: `Lang oppsummering ${index} ${"s".repeat(1600)}`,
+      status: "active",
+      verificationStatus: "Foreløpig fra rapportering",
+      importance: "normal",
+      updatedAt: `2026-05-26T${String(index).padStart(2, "0")}:30:00Z`,
+      createdAt: "2026-05-26T09:00:00Z",
+      locationLabel: `${"p".repeat(160)}`,
+      relatedArticleIds: [],
+      evidence: [],
+      features: [],
+      timeline: [],
+    }));
+
+    await analyzer.cluster(manyArticles, { situations: manySituations });
+
+    const firstRequest = create.mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const retryRequest = create.mock.calls[1]?.[0] as {
+      max_tokens: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+    const payloadPrefix =
+      "Analyze these public feed excerpts and active situations and output JSON: ";
+    const firstPayload = JSON.parse(
+      firstRequest.messages
+        .find((message) => message.role === "user")
+        ?.content.replace(payloadPrefix, "") ?? "{}",
+    ) as { articles: unknown[]; situations: unknown[] };
+    const retryPayload = JSON.parse(
+      retryRequest.messages
+        .find((message) => message.role === "user")
+        ?.content.replace(payloadPrefix, "") ?? "{}",
+    ) as {
+      articles: Array<{ title: string; excerpt: string; places: string[] }>;
+      situations: Array<{ summary: string; locationLabel: string }>;
+    };
+
+    expect(firstPayload.articles).toHaveLength(12);
+    expect(firstPayload.situations).toHaveLength(12);
+    expect(retryRequest.max_tokens).toBe(2048);
+    expect(retryPayload.articles).toHaveLength(8);
+    expect(retryPayload.situations).toHaveLength(6);
+    expect(retryPayload.articles[0]?.title.length).toBeLessThanOrEqual(140);
+    expect(retryPayload.articles[0]?.excerpt.length).toBeLessThanOrEqual(520);
+    expect(retryPayload.articles[0]?.places[0]?.length).toBeLessThanOrEqual(60);
+    expect(retryPayload.situations[0]?.summary.length).toBeLessThanOrEqual(420);
+    expect(retryPayload.situations[0]?.locationLabel.length).toBeLessThanOrEqual(60);
+  });
+
+  it("falls back to a brief-only DeepSeek pass after repeated structured output failures", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [{ finish_reason: "length", message: { content: '{"clusters":[]}' } }],
+      })
+      .mockResolvedValueOnce({
+        choices: [{ finish_reason: "length", message: { content: '{"clusters":[]}' } }],
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: JSON.stringify({
+                morningBrief: {
+                  paragraphs: [
+                    "Morgenbildet er rolig, men følges tett.",
+                    "Flere kilder omtaler røyk og beredskap.",
+                    "Nytt oppdaterer når sikre kilder gir mer.",
+                  ],
+                },
+                clusters: [],
+                situationUpdates: [],
+                bundleHints: [],
+                categoryHints: [],
+                relevanceHints: [],
+                operationsNotes: [],
+              }),
+            },
+          },
+        ],
+      });
+    const analyzer = new DeepSeekAnalyzer("test-key", "test-model");
+    Object.assign(analyzer, { client: { chat: { completions: { create } } } });
+    const manyArticles = Array.from({ length: 14 }, (_, index) => ({
+      ...articles[0]!,
+      id: `article-${index}`,
+      title: `Lang tittel ${index} ${"x".repeat(400)}`,
+      excerpt: `Lang ingress ${index} ${"y".repeat(1600)}`,
+      places: [`${"z".repeat(160)}`],
+    }));
+    const manySituations: Situation[] = Array.from({ length: 14 }, (_, index) => ({
+      id: `situation-${index}`,
+      type: "fire",
+      title: `Lang situasjon ${index} ${"t".repeat(400)}`,
+      summary: `Lang oppsummering ${index} ${"s".repeat(1600)}`,
+      status: "active",
+      verificationStatus: "Foreløpig fra rapportering",
+      importance: "normal",
+      updatedAt: `2026-05-26T${String(index).padStart(2, "0")}:30:00Z`,
+      createdAt: "2026-05-26T09:00:00Z",
+      locationLabel: `${"p".repeat(160)}`,
+      relatedArticleIds: [],
+      evidence: [],
+      features: [],
+      timeline: [],
+    }));
+
+    const outcome = await analyzer.cluster(manyArticles, { situations: manySituations });
+
+    const briefRequest = create.mock.calls[2]?.[0] as {
+      max_tokens: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+    const payloadPrefix =
+      "Analyze these public feed excerpts and active situations and output JSON: ";
+    const briefPayload = JSON.parse(
+      briefRequest.messages
+        .find((message) => message.role === "user")
+        ?.content.replace(payloadPrefix, "") ?? "{}",
+    ) as {
+      articles: Array<{ title: string; excerpt: string; places: string[] }>;
+      situations: Array<{ summary: string; locationLabel: string }>;
+    };
+
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(briefRequest.max_tokens).toBe(900);
+    expect(briefRequest.messages[0]?.content).toContain("final morning-brief recovery pass");
+    expect(briefRequest.messages[0]?.content).toContain("Do not produce clusters");
+    expect(briefPayload.articles).toHaveLength(6);
+    expect(briefPayload.situations).toHaveLength(3);
+    expect(briefPayload.articles[0]?.title.length).toBeLessThanOrEqual(120);
+    expect(briefPayload.articles[0]?.excerpt.length).toBeLessThanOrEqual(360);
+    expect(briefPayload.articles[0]?.places[0]?.length).toBeLessThanOrEqual(50);
+    expect(briefPayload.situations[0]?.summary.length).toBeLessThanOrEqual(260);
+    expect(briefPayload.situations[0]?.locationLabel.length).toBeLessThanOrEqual(50);
+    expect(outcome.run.status).toBe("ok");
+    expect(outcome.result.diagnostics).toMatchObject({
+      profile: "brief_only_recovery",
+      attempts: [
+        { profile: "standard", status: "failed", maxTokens: 4096 },
+        { profile: "compact_recovery", status: "failed", maxTokens: 2048 },
+        { profile: "brief_only_recovery", status: "ok", maxTokens: 900 },
+      ],
+    });
+    expect(outcome.result.morningBrief?.paragraphs).toEqual([
+      "Morgenbildet er rolig, men følges tett.",
+      "Flere kilder omtaler røyk og beredskap.",
+      "Nytt oppdaterer når sikre kilder gir mer.",
+    ]);
+    expect(outcome.result.clusters).toEqual([]);
+    expect(outcome.result.bundleHints).toEqual([]);
   });
 
   it("validates optional AI hints against literal public excerpts", () => {

@@ -1,5 +1,10 @@
 import type { Geometry, LineString, Point } from "geojson";
-import type { TrafficPulseCorridor } from "./types.js";
+import type {
+  SourceConfidenceLevel,
+  SourceConfidenceSummary,
+  SourceId,
+  TrafficPulseCorridor,
+} from "./types.js";
 
 export type TrafficEventCategory =
   | "roadworks"
@@ -219,4 +224,106 @@ export interface TravelPlanPayload {
   publicTransportSuggestions: TravelPlanTransitSuggestion[];
   sources: TrafficMapSourceStatus[];
   generatedAt: string;
+}
+
+export interface SpatialHeatmapCell {
+  id: string;
+  center: {
+    lat: number;
+    lng: number;
+  };
+  radiusMeters: number;
+  count: number;
+  sourceItemCount: number;
+  sourceItemIds?: string[];
+  articleCount: number;
+  trafficEventCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  activeDayCount: number;
+  sourceIds: Array<SourceId | TrafficMapEventSource>;
+  maxSeverity?: TrafficEventSeverity;
+  sourceConfidence?: SourceConfidenceSummary;
+}
+
+export interface UnexplainedDelayCandidate {
+  id: string;
+  corridorId: string;
+  corridorName: string;
+  geometry: LineString;
+  state: TrafficPulseCorridor["state"];
+  delaySeconds?: number;
+  delayRatio?: number;
+  updatedAt: string;
+  sourceUrl: string;
+  matchedArticleIds: string[];
+  affectedEventIds: string[];
+  confidence: "watch" | "warning" | "critical";
+  reason: string;
+  sourceConfidence?: SourceConfidenceSummary;
+}
+
+export interface SpatialInvestigationQueueItem {
+  id: string;
+  kind: "unexplained_delay" | "hotspot" | "traffic_counter_anomaly";
+  priority: "critical" | "high" | "watch";
+  title: string;
+  summary: string;
+  reason: string;
+  updatedAt: string;
+  evidence: string[];
+  articleIds: string[];
+  sourceItemIds: string[];
+  sourceConfidence?: SourceConfidenceSummary;
+  targetUrl?: string;
+}
+
+export interface TelemetryHistorySourceSummary {
+  observations: number;
+  trackedEntities: number;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  activeDayCount: number;
+  notableObservations: number;
+}
+
+export interface CommandCenterTelemetryHistorySummary {
+  datexTravelTime: TelemetryHistorySourceSummary;
+  trafficCounters: TelemetryHistorySourceSummary;
+}
+
+export interface TelemetryHistoryPattern {
+  id: string;
+  source: "datex_travel_time" | "trafikkdata";
+  title: string;
+  description: string;
+  observationCount: number;
+  notableObservationCount: number;
+  activeDayCount: number;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  maxDelaySeconds?: number;
+  maxAnomalyRatio?: number;
+  geometry?: Point;
+  sourceConfidence?: SourceConfidenceSummary;
+}
+
+export interface CommandCenterSpatialAnalyticsPayload {
+  generatedAt: string;
+  window: {
+    from?: string;
+    to?: string;
+  };
+  summary: {
+    heatmapCells: number;
+    observations: number;
+    unexplainedDelays: number;
+    criticalDelays: number;
+    bySourceConfidence: Record<SourceConfidenceLevel, number>;
+  };
+  telemetryHistory: CommandCenterTelemetryHistorySummary;
+  telemetryPatterns: TelemetryHistoryPattern[];
+  investigationQueue: SpatialInvestigationQueueItem[];
+  heatmapCells: SpatialHeatmapCell[];
+  unexplainedDelays: UnexplainedDelayCandidate[];
 }

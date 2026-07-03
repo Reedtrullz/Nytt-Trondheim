@@ -310,14 +310,14 @@ ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_telemetry_source_che
   ));
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM evidence_items WHERE source = 'dsb') THEN
-    RAISE EXCEPTION 'DSB is health-only and must not exist in evidence_items';
+  IF EXISTS (SELECT 1 FROM evidence_items WHERE source IN ('dsb','web_push')) THEN
+    RAISE EXCEPTION 'health-only source must not exist in evidence_items';
   END IF;
 END;
 $$;
 ALTER TABLE evidence_items DROP CONSTRAINT IF EXISTS evidence_items_no_health_only_source_check;
 ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_health_only_source_check
-  CHECK (source <> 'dsb');
+  CHECK (source NOT IN ('dsb','web_push'));
 DO $$
 BEGIN
   IF EXISTS (
@@ -329,7 +329,7 @@ BEGIN
       'tronderbladet','nidaros','t_a',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-      'private_annotations','deepseek'
+      'private_annotations','deepseek','web_push'
     )
   ) THEN
     RAISE EXCEPTION 'unknown source exists in evidence_items';
@@ -345,7 +345,7 @@ ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_source_id_check
     'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-    'private_annotations','deepseek'
+    'private_annotations','deepseek','web_push'
   ));
 
 CREATE TABLE IF NOT EXISTS timeline_entries (
@@ -515,7 +515,7 @@ BEGIN
       'tronderbladet','nidaros','t_a',
       'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
       'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-      'private_annotations','deepseek'
+      'private_annotations','deepseek','web_push'
     )
   ) THEN
     RAISE EXCEPTION 'unknown provider exists in source_items';
@@ -531,18 +531,18 @@ ALTER TABLE source_items ADD CONSTRAINT source_items_provider_source_id_check
     'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-    'private_annotations','deepseek'
+    'private_annotations','deepseek','web_push'
   ));
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM source_items WHERE provider = 'dsb') THEN
-    RAISE EXCEPTION 'DSB is health-only and must not exist in source_items';
+  IF EXISTS (SELECT 1 FROM source_items WHERE provider IN ('dsb','web_push')) THEN
+    RAISE EXCEPTION 'health-only provider must not exist in source_items';
   END IF;
 END;
 $$;
 ALTER TABLE source_items DROP CONSTRAINT IF EXISTS source_items_no_health_only_provider_check;
 ALTER TABLE source_items ADD CONSTRAINT source_items_no_health_only_provider_check
-  CHECK (provider <> 'dsb');
+  CHECK (provider NOT IN ('dsb','web_push'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS source_items_provider_kind_external_id_unique
   ON source_items (provider, kind, external_id)
@@ -858,6 +858,30 @@ CREATE TABLE IF NOT EXISTS datex_travel_times (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS datex_travel_time_history (
+  corridor_id text NOT NULL,
+  observed_at timestamptz NOT NULL,
+  name text NOT NULL,
+  state text NOT NULL CHECK (state IN ('free_flow', 'slow', 'congested', 'stale')),
+  travel_time_seconds real,
+  free_flow_seconds real,
+  delay_seconds real,
+  delay_ratio real,
+  trend text,
+  measurement_from timestamptz,
+  measurement_to timestamptz,
+  source_url text NOT NULL,
+  payload jsonb NOT NULL,
+  inserted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (corridor_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS datex_travel_time_history_observed_at_idx
+  ON datex_travel_time_history (observed_at DESC);
+CREATE INDEX IF NOT EXISTS datex_travel_time_history_corridor_observed_idx
+  ON datex_travel_time_history (corridor_id, observed_at DESC);
+CREATE INDEX IF NOT EXISTS datex_travel_time_history_delay_idx
+  ON datex_travel_time_history (delay_seconds DESC NULLS LAST, observed_at DESC);
+
 CREATE TABLE IF NOT EXISTS road_weather_observations (
   station_id text PRIMARY KEY,
   payload jsonb NOT NULL,
@@ -884,6 +908,27 @@ CREATE TABLE IF NOT EXISTS traffic_counter_snapshots (
 );
 CREATE INDEX IF NOT EXISTS traffic_counter_snapshots_geometry_idx
   ON traffic_counter_snapshots USING gist (geometry);
+
+CREATE TABLE IF NOT EXISTS traffic_counter_snapshot_history (
+  point_id text NOT NULL,
+  observed_at timestamptz NOT NULL,
+  payload jsonb NOT NULL,
+  volume_last_hour integer,
+  baseline_volume_last_hour integer,
+  anomaly_ratio real,
+  coverage_percent real,
+  inserted_at timestamptz NOT NULL DEFAULT now(),
+  geometry geometry(Point, 4326) NOT NULL,
+  PRIMARY KEY (point_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_observed_at_idx
+  ON traffic_counter_snapshot_history (observed_at DESC);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_point_observed_idx
+  ON traffic_counter_snapshot_history (point_id, observed_at DESC);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_anomaly_idx
+  ON traffic_counter_snapshot_history (anomaly_ratio DESC NULLS LAST, observed_at DESC);
+CREATE INDEX IF NOT EXISTS traffic_counter_snapshot_history_geometry_idx
+  ON traffic_counter_snapshot_history USING gist (geometry);
 
 CREATE TABLE IF NOT EXISTS traffic_map_events (
   id text PRIMARY KEY,
@@ -931,6 +976,30 @@ CREATE TABLE IF NOT EXISTS ai_processing_runs (
   result jsonb NOT NULL,
   error text
 );
+
+CREATE TABLE IF NOT EXISTS morning_briefs (
+  id text PRIMARY KEY,
+  generated_at timestamptz NOT NULL,
+  mode text NOT NULL CHECK (mode IN ('ai_assisted', 'deterministic')),
+  title text NOT NULL,
+  source_line text NOT NULL,
+  paragraphs jsonb NOT NULL,
+  highlights jsonb NOT NULL,
+  article_ids text[] NOT NULL,
+  situation_ids text[] NOT NULL,
+  ai_run_provider text,
+  ai_run_status text,
+  ai_run_completed_at timestamptz,
+  payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(paragraphs) = 'array'),
+  CHECK (jsonb_array_length(paragraphs) = 3),
+  CHECK (jsonb_typeof(highlights) = 'array')
+);
+CREATE INDEX IF NOT EXISTS morning_briefs_generated_at_idx
+  ON morning_briefs (generated_at DESC);
+CREATE INDEX IF NOT EXISTS morning_briefs_mode_idx ON morning_briefs (mode);
 
 CREATE TABLE IF NOT EXISTS map_features (
   id text PRIMARY KEY,
@@ -1061,7 +1130,7 @@ ALTER TABLE source_health ADD CONSTRAINT source_health_source_id_check
     'tronderbladet','nidaros','t_a',
     'datex_travel_time','datex_weather','datex_cctv','trafikkdata','vegvesen_traffic_info',
     'entur','entur_vehicle_positions','entur_service_alerts','dsb','politiloggen','internal',
-    'private_annotations','deepseek'
+    'private_annotations','deepseek','web_push'
   ));
 ALTER TABLE source_health DROP CONSTRAINT IF EXISTS source_health_state_check;
 ALTER TABLE source_health ADD CONSTRAINT source_health_state_check
@@ -1193,6 +1262,69 @@ CREATE INDEX IF NOT EXISTS auth_tokens_access_request_idx
 CREATE INDEX IF NOT EXISTS auth_tokens_user_idx
   ON auth_tokens (user_id);
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  endpoint text NOT NULL,
+  endpoint_hash text NOT NULL UNIQUE,
+  p256dh text NOT NULL,
+  auth text NOT NULL,
+  user_agent text,
+  enabled boolean NOT NULL DEFAULT true,
+  min_severity text NOT NULL DEFAULT 'warning' CHECK (min_severity IN ('critical', 'warning', 'watch')),
+  kinds text[] NOT NULL DEFAULT ARRAY[]::text[],
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_success_at timestamptz,
+  last_failure_at timestamptz,
+  failure_count integer NOT NULL DEFAULT 0 CHECK (failure_count >= 0),
+  revoked_at timestamptz,
+  CHECK (length(trim(endpoint)) > 20),
+  CHECK (length(trim(endpoint_hash)) >= 16),
+  CHECK (length(trim(p256dh)) >= 20),
+  CHECK (length(trim(auth)) >= 8),
+  CHECK (
+    kinds <@ ARRAY[
+      'public_safety',
+      'traffic_disruption',
+      'weather_hazard',
+      'service_disruption'
+    ]::text[]
+  )
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx
+  ON push_subscriptions (user_id, enabled);
+CREATE INDEX IF NOT EXISTS push_subscriptions_last_seen_idx
+  ON push_subscriptions (last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS push_notification_deliveries (
+  id text PRIMARY KEY,
+  trigger_id text NOT NULL,
+  subscription_id text NOT NULL,
+  user_id text NOT NULL,
+  status text NOT NULL CHECK (status IN ('claimed', 'sent', 'failed', 'skipped')),
+  kind text NOT NULL CHECK (kind IN ('public_safety', 'traffic_disruption', 'weather_hazard', 'service_disruption')),
+  severity text NOT NULL CHECK (severity IN ('critical', 'warning', 'watch')),
+  title text NOT NULL,
+  body text NOT NULL,
+  target_url text,
+  error_message text,
+  payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz,
+  UNIQUE (trigger_id, subscription_id),
+  CHECK (length(trim(trigger_id)) > 0),
+  CHECK (length(trim(subscription_id)) > 0),
+  CHECK (jsonb_typeof(payload) = 'object')
+);
+CREATE INDEX IF NOT EXISTS push_notification_deliveries_created_idx
+  ON push_notification_deliveries (created_at DESC);
+CREATE INDEX IF NOT EXISTS push_notification_deliveries_trigger_idx
+  ON push_notification_deliveries (trigger_id);
+CREATE INDEX IF NOT EXISTS push_notification_deliveries_subscription_idx
+  ON push_notification_deliveries (subscription_id);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "sid" varchar NOT NULL PRIMARY KEY,
   "sess" json NOT NULL,
@@ -1212,3 +1344,5 @@ INSERT INTO schema_migrations (version) VALUES ('009_collector_runs') ON CONFLIC
 INSERT INTO schema_migrations (version) VALUES ('010_coverage_bundles') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('011_access_requests') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('012_restricted_beta_auth') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('013_morning_briefs') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('014_web_push_notifications') ON CONFLICT DO NOTHING;

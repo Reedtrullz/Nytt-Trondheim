@@ -25,6 +25,11 @@ const CoverageBundlesPage = lazy(() =>
     default: module.CoverageBundlesPage,
   })),
 );
+const CommandBriefingPage = lazy(() =>
+  import("./pages/CommandBriefingPage.js").then((module) => ({
+    default: module.CommandBriefingPage,
+  })),
+);
 const OperationsPage = lazy(() =>
   import("./pages/OperationsPage.js").then((module) => ({ default: module.OperationsPage })),
 );
@@ -33,11 +38,31 @@ const OperationsTimelinePage = lazy(() =>
     default: module.OperationsTimelinePage,
   })),
 );
+const NotificationTriggerCandidatesPage = lazy(() =>
+  import("./pages/NotificationTriggerCandidatesPage.js").then((module) => ({
+    default: module.NotificationTriggerCandidatesPage,
+  })),
+);
+const NotificationSettingsPage = lazy(() =>
+  import("./pages/NotificationSettingsPage.js").then((module) => ({
+    default: module.NotificationSettingsPage,
+  })),
+);
+const RawDataInspectorPage = lazy(() =>
+  import("./pages/RawDataInspectorPage.js").then((module) => ({
+    default: module.RawDataInspectorPage,
+  })),
+);
 const SavedPage = lazy(() =>
   import("./pages/SavedPage.js").then((module) => ({ default: module.SavedPage })),
 );
 const SourceAuditPage = lazy(() =>
   import("./pages/SourceAuditPage.js").then((module) => ({ default: module.SourceAuditPage })),
+);
+const SpatialAnalyticsPage = lazy(() =>
+  import("./pages/SpatialAnalyticsPage.js").then((module) => ({
+    default: module.SpatialAnalyticsPage,
+  })),
 );
 const SportPage = lazy(() =>
   import("./pages/SportPage.js").then((module) => ({ default: module.SportPage })),
@@ -105,6 +130,7 @@ function Header({
           <NavLink to="/trafikk">Trafikkart</NavLink>
           <NavLink to="/vaer">Vær</NavLink>
           <NavLink to="/sport">Sport</NavLink>
+          <NavLink to="/varsler">Varsler</NavLink>
           {isOwner ? <NavLink to="/lagret">Lagret</NavLink> : null}
           {isOwner ? <NavLink to="/command">Kommandosenter</NavLink> : null}
         </nav>
@@ -232,16 +258,31 @@ function AuthenticatedApp() {
             <Route path="/trafikk" element={<TrafficMapPage />} />
             <Route path="/vaer" element={<WeatherPage />} />
             <Route path="/sport" element={<SportPage initialArticles={data.articles} />} />
+            <Route path="/varsler" element={<NotificationSettingsPage />} />
             <Route path="/lagret" element={ownerOnly(<SavedPage />)} />
             <Route path="/command" element={ownerOnly(<OperationsPage />)} />
+            <Route path="/command/brief" element={ownerOnly(<CommandBriefingPage />)} />
             <Route path="/command/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/command/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/command/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route
+              path="/command/varsler"
+              element={ownerOnly(<NotificationTriggerCandidatesPage />)}
+            />
+            <Route path="/command/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
+            <Route path="/command/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/command/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
             <Route path="/drift" element={ownerOnly(<OperationsPage />)} />
+            <Route path="/drift/brief" element={ownerOnly(<CommandBriefingPage />)} />
             <Route path="/drift/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/drift/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/drift/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route
+              path="/drift/varsler"
+              element={ownerOnly(<NotificationTriggerCandidatesPage />)}
+            />
+            <Route path="/drift/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
+            <Route path="/drift/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/drift/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>

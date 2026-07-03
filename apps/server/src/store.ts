@@ -6,7 +6,11 @@ import type {
   AccessRequestPage,
   AccessRequestQueryInput,
   AccessRequestSubmissionResponse,
+  AiAnalysisAttemptDiagnostics,
+  AiAnalysisProfile,
+  AiProcessingRunDiagnostics,
   AppUser,
+  AiProcessingRun,
   Article,
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleDecision,
@@ -15,6 +19,11 @@ import type {
   ArticleTopic,
   Attachment,
   BootstrapPayload,
+  CommandCenterBriefingArticleSummary,
+  CommandCenterBriefingPayload,
+  CommandCenterOperationsNote,
+  CommandCenterSpatialAnalyticsQueryInput,
+  CommandCenterTelemetryHistorySummary,
   CoverageBundleArticleSummary,
   CoverageBundleListItem,
   CoverageBundlePage,
@@ -22,15 +31,30 @@ import type {
   CoverageBundleSummary,
   EvidenceItem,
   MapFeature,
+  MorningBrief,
+  NotificationSubscriptionPreference,
+  NotificationTriggerPage,
+  NotificationTriggerQueryInput,
   OfficialEvent,
   OperationsTimelineEvent,
   OperationsTimelineQuery,
   OperationsTimelineResponse,
   OperationsStatus,
   PrivateAnnotationUpdateRequest,
+  PushDeliveryListItem,
+  PushDeliveryPage,
+  PushDeliveryStatus,
+  PushNotificationSettings,
+  PushSubscriptionInput,
+  PushSubscriptionSummary,
   Provenance,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
+  RawInspectorAiRunDetail,
+  RawInspectorAiRunFilters,
+  RawInspectorAiRunPage,
+  RawInspectorAiRunSummary,
+  RawInspectorSourceItemDetail,
   RoadCamera,
   RoadWeatherObservation,
   Situation,
@@ -52,6 +76,7 @@ import type {
   SourceItem,
   SourceItemFilters,
   SourceItemPage,
+  SourceItemRecord,
   SourceItemRelationship,
   SourceHealth,
   SourceId,
@@ -60,8 +85,11 @@ import type {
   UserPage,
   TimelineEntry,
   TrafficCounterSnapshot,
+  TrafficEventSeverity,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  TelemetryHistoryPattern,
+  SpatialHeatmapCell,
   WorkerCycleMetrics,
   WorkspaceNote,
   WorkspaceTask,
@@ -69,16 +97,23 @@ import type {
 import {
   analyzeArticleCoverage,
   activationPolicyForSource,
+  bootstrapWithMorningBrief,
+  buildNotificationTriggerPage,
   sampleArticles,
   sampleBootstrap,
   sampleNotes,
   sampleSituation,
   sampleTasks,
   sampleWorkspace,
+  sourceIdLabel,
+  sourceMixConfidenceSummary,
 } from "@nytt/shared";
 import pg from "pg";
 import type { Profile } from "passport-github2";
+import type { Point as GeoJsonPoint } from "geojson";
 import type { AuthUser } from "./auth.js";
+import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
+import { findRelatedTrafficArticles } from "./traffic/related-articles.js";
 
 export interface ArticleFilters {
   scope?: string;
@@ -201,7 +236,26 @@ export interface Store {
     filters: CoverageBundleQueryInput,
     login: string,
   ): Promise<CoverageBundlePage>;
+  listNotificationTriggers(
+    filters: NotificationTriggerQueryInput,
+    login: string,
+  ): Promise<NotificationTriggerPage>;
+  getPushSettings(userId: string, publicKey?: string): Promise<PushNotificationSettings>;
+  upsertPushSubscription(
+    userId: string,
+    input: PushSubscriptionInput,
+  ): Promise<PushSubscriptionSummary>;
+  deletePushSubscription(userId: string, id: string): Promise<void>;
+  listPushSubscriptionPreferences(login: string): Promise<NotificationSubscriptionPreference[]>;
+  listPushDeliveries(limit: number, login: string): Promise<PushDeliveryPage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
+  getRawSourceItem(id: string, login: string): Promise<RawInspectorSourceItemDetail | undefined>;
+  listRawAiRuns(filters: RawInspectorAiRunFilters, login: string): Promise<RawInspectorAiRunPage>;
+  getRawAiRun(id: string, login: string): Promise<RawInspectorAiRunDetail | undefined>;
+  listSpatialHeatmapCells(
+    filters: CommandCenterSpatialAnalyticsQueryInput,
+    login: string,
+  ): Promise<SpatialHeatmapCell[]>;
   listOfficialEvents(filters: OfficialEventFilters, login: string): Promise<OfficialEvent[]>;
   listTrafficMapEvents(filters: TrafficMapEventFilters, login: string): Promise<TrafficMapEvent[]>;
   listPublicTransportVehicles(
@@ -218,6 +272,12 @@ export interface Store {
   listRoadCameras(bounds?: Bounds): Promise<RoadCamera[]>;
   listTrafficCounterSnapshots(bounds?: Bounds): Promise<TrafficCounterSnapshot[]>;
   listTrafficPulseCorridors(limit?: number): Promise<TrafficPulseCorridor[]>;
+  getTrafficTelemetryHistorySummary(
+    filters?: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to">,
+  ): Promise<CommandCenterTelemetryHistorySummary>;
+  listTrafficTelemetryPatterns(
+    filters?: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to"> & { limit?: number },
+  ): Promise<TelemetryHistoryPattern[]>;
   listSituationSourceItems(situationId: string, login: string): Promise<SourceItem[]>;
   linkSourceItem(
     situationId: string,
@@ -275,6 +335,7 @@ export interface Store {
     login: string,
   ): Promise<OperationsTimelineResponse>;
   getOperationsStatus(): Promise<OperationsStatus>;
+  getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload>;
 }
 
 function clone<T>(value: T): T {
@@ -319,7 +380,32 @@ function normalizeAccessRequestEmail(email: string): string {
   return email.trim().toLocaleLowerCase("nb");
 }
 
+function publicPrimaryLocationForSituation(
+  situation: Situation,
+): HomeSituationSummary["primaryLocation"] {
+  const point = situation.features.find(
+    (feature) =>
+      feature.geometry.type === "Point" && feature.properties.provenance !== "private_annotation",
+  );
+  if (point?.geometry.type !== "Point") return undefined;
+  const [lng, lat] = point.geometry.coordinates;
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
+    return undefined;
+  }
+  return {
+    lat,
+    lng,
+    label: point.properties.label || situation.locationLabel,
+  };
+}
+
 function homeSituationSummary(situation: Situation): HomeSituationSummary {
+  const primaryLocation = publicPrimaryLocationForSituation(situation);
   return {
     id: situation.id,
     title: situation.title,
@@ -329,6 +415,7 @@ function homeSituationSummary(situation: Situation): HomeSituationSummary {
     updatedAt: situation.updatedAt,
     createdAt: situation.createdAt,
     locationLabel: situation.locationLabel,
+    ...(primaryLocation ? { primaryLocation } : {}),
   };
 }
 
@@ -373,6 +460,20 @@ function newAuthToken(): string {
 
 function hashAuthToken(token: string): string {
   return sha256(token);
+}
+
+function pushEndpointHash(endpoint: string): string {
+  return sha256(endpoint.trim());
+}
+
+function summarizePushDeliveries(items: PushDeliveryListItem[]): PushDeliveryPage["summary"] {
+  return {
+    total: items.length,
+    sent: items.filter((item) => item.status === "sent").length,
+    failed: items.filter((item) => item.status === "failed").length,
+    claimed: items.filter((item) => item.status === "claimed").length,
+    skipped: items.filter((item) => item.status === "skipped").length,
+  };
 }
 
 function expiresAt(ms: number): string {
@@ -427,8 +528,128 @@ type MemoryAuthToken = {
   createdBy?: string;
 };
 
+type MemoryPushSubscription = PushSubscriptionSummary & {
+  userId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+};
+
+type PushSubscriptionRow = {
+  id: string;
+  endpointHash: string;
+  enabled: boolean;
+  minSeverity: PushSubscriptionSummary["minSeverity"];
+  kinds: PushSubscriptionSummary["kinds"];
+  userAgent?: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  lastSeenAt: Date | string;
+  lastSuccessAt?: Date | string | null;
+  lastFailureAt?: Date | string | null;
+  failureCount: number;
+};
+
+type PushDeliveryRow = {
+  id: string;
+  triggerId: string;
+  subscriptionId: string;
+  userId: string;
+  status: PushDeliveryStatus;
+  kind: PushDeliveryListItem["kind"];
+  severity: PushDeliveryListItem["severity"];
+  title: string;
+  body: string;
+  targetUrl?: string | null;
+  errorMessage?: string | null;
+  createdAt: Date | string;
+  sentAt?: Date | string | null;
+};
+
 function isoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+type TelemetryHistorySummaryRow = {
+  observations: string;
+  tracked_entities: string;
+  first_observed_at: Date | string | null;
+  last_observed_at: Date | string | null;
+  active_day_count: string;
+  notable_observations: string;
+};
+
+type TelemetryHistoryPatternRow = {
+  source: TelemetryHistoryPattern["source"];
+  entity_id: string;
+  title: string | null;
+  observation_count: string;
+  notable_observation_count: string;
+  active_day_count: string;
+  first_observed_at: Date | string | null;
+  last_observed_at: Date | string | null;
+  max_delay_seconds: number | string | null;
+  max_anomaly_ratio: number | string | null;
+  geometry: GeoJsonPoint | null;
+};
+
+function telemetryHistorySummaryFromRow(
+  row: TelemetryHistorySummaryRow | undefined,
+): CommandCenterTelemetryHistorySummary["datexTravelTime"] {
+  return {
+    observations: Number(row?.observations ?? 0),
+    trackedEntities: Number(row?.tracked_entities ?? 0),
+    ...(row?.first_observed_at ? { firstObservedAt: isoString(row.first_observed_at) } : {}),
+    ...(row?.last_observed_at ? { lastObservedAt: isoString(row.last_observed_at) } : {}),
+    activeDayCount: Number(row?.active_day_count ?? 0),
+    notableObservations: Number(row?.notable_observations ?? 0),
+  };
+}
+
+function optionalNumber(value: number | string | null | undefined): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function delayDescription(seconds: number | undefined): string {
+  if (seconds === undefined) return "Gjentatt reisetidssignal i historikken.";
+  return `Maks ${Math.max(1, Math.round(seconds / 60))} min forsinkelse i historikken.`;
+}
+
+function counterDescription(ratio: number | undefined): string {
+  if (ratio === undefined) return "Gjentatt trafikktellersignal i historikken.";
+  return `Maks ${ratio.toFixed(1)}x normal trafikk i historikken.`;
+}
+
+function telemetryHistoryPatternFromRow(row: TelemetryHistoryPatternRow): TelemetryHistoryPattern {
+  const maxDelaySeconds = optionalNumber(row.max_delay_seconds);
+  const maxAnomalyRatio = optionalNumber(row.max_anomaly_ratio);
+  const title =
+    row.title ??
+    (row.source === "datex_travel_time"
+      ? `DATEX reisetid ${row.entity_id}`
+      : `Trafikkdata ${row.entity_id}`);
+  return {
+    id: `telemetry-pattern:${row.source}:${row.entity_id}`,
+    source: row.source,
+    title,
+    description:
+      row.source === "datex_travel_time"
+        ? delayDescription(maxDelaySeconds)
+        : counterDescription(maxAnomalyRatio),
+    observationCount: Number(row.observation_count),
+    notableObservationCount: Number(row.notable_observation_count),
+    activeDayCount: Number(row.active_day_count),
+    ...(row.first_observed_at ? { firstObservedAt: isoString(row.first_observed_at) } : {}),
+    ...(row.last_observed_at ? { lastObservedAt: isoString(row.last_observed_at) } : {}),
+    ...(maxDelaySeconds !== undefined ? { maxDelaySeconds } : {}),
+    ...(maxAnomalyRatio !== undefined ? { maxAnomalyRatio } : {}),
+    ...(row.geometry ? { geometry: row.geometry } : {}),
+    sourceConfidence: sourceMixConfidenceSummary([row.source], {
+      ...(row.last_observed_at ? { updatedAt: isoString(row.last_observed_at) } : {}),
+    }),
+  };
 }
 
 function accessRequestFromRow(row: AccessRequestRow): AccessRequest {
@@ -467,6 +688,41 @@ function appUserFromRow(row: UserRow): AppUser {
     updatedAt: isoString(row.updatedAt),
     ...(row.email ? { email: row.email } : {}),
     ...(row.lastLoginAt ? { lastLoginAt: isoString(row.lastLoginAt) } : {}),
+  };
+}
+
+function pushSubscriptionFromRow(row: PushSubscriptionRow): PushSubscriptionSummary {
+  return {
+    id: row.id,
+    endpointHash: row.endpointHash,
+    enabled: row.enabled,
+    minSeverity: row.minSeverity,
+    kinds: row.kinds ?? [],
+    ...(row.userAgent ? { userAgent: row.userAgent } : {}),
+    createdAt: isoString(row.createdAt),
+    updatedAt: isoString(row.updatedAt),
+    lastSeenAt: isoString(row.lastSeenAt),
+    ...(row.lastSuccessAt ? { lastSuccessAt: isoString(row.lastSuccessAt) } : {}),
+    ...(row.lastFailureAt ? { lastFailureAt: isoString(row.lastFailureAt) } : {}),
+    failureCount: Number(row.failureCount),
+  };
+}
+
+function pushDeliveryFromRow(row: PushDeliveryRow): PushDeliveryListItem {
+  return {
+    id: row.id,
+    triggerId: row.triggerId,
+    subscriptionId: row.subscriptionId,
+    userId: row.userId,
+    status: row.status,
+    kind: row.kind,
+    severity: row.severity,
+    title: row.title,
+    body: row.body,
+    ...(row.targetUrl ? { targetUrl: row.targetUrl } : {}),
+    ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+    createdAt: isoString(row.createdAt),
+    ...(row.sentAt ? { sentAt: isoString(row.sentAt) } : {}),
   };
 }
 
@@ -518,7 +774,7 @@ function sourceItemId(provider: string, kind: string, stableKey: string): string
   return `source:${sourceItemHash([provider, kind, stableKey])}`;
 }
 
-function memorySourceItemFromArticle(article: Article): SourceItem {
+function memorySourceItemFromArticle(article: Article): SourceItemRecord {
   const normalizedPayload = {
     id: article.id,
     source: article.source,
@@ -559,6 +815,8 @@ function memorySourceItemFromArticle(article: Article): SourceItem {
     reliabilityTier: article.source === "trondheim_kommune" ? "official" : "trusted_media",
     role: sourceItemRoleForProvider(article.source),
     linkedSituationIds: [],
+    rawPayload: article,
+    normalizedPayload,
   };
 }
 
@@ -571,6 +829,160 @@ function sourceItemRoleForProvider(provider: SourceId): SourceItem["role"] {
   if (role === "private") return "private";
   if (provider === "deepseek") return "ai_summary";
   return "ignored";
+}
+
+const newsroomArticleSources = new Set<SourceId>([
+  "nrk",
+  "adressa",
+  "avisa_st",
+  "snasningen",
+  "merakerposten",
+  "frostingen",
+  "ytringen",
+  "steinkjer_avisa",
+  "innherred",
+  "namdalsavisa",
+  "malviknytt",
+  "selbyggen",
+  "fjell_ljom",
+  "retten",
+  "hitra_froya",
+  "tronderbladet",
+  "nidaros",
+  "t_a",
+  "vg",
+  "dagbladet",
+]);
+
+function sourceLabelsForIds(sources: SourceId[]): string {
+  return sources.map((source) => sourceIdLabel(source)).join(", ");
+}
+
+function publicVerificationForSituation(
+  situation: Situation,
+): Article["publicVerification"] | undefined {
+  if (situation.officialSource !== "datex") return undefined;
+  if (situation.verificationStatus !== "Offentlig bekreftet") return undefined;
+  if (situation.status !== "active" && situation.status !== "preliminary") return undefined;
+  const hasDatexEvidence = situation.evidence.some(
+    (item) => item.source === "datex" && item.provenance === "official",
+  );
+  if (!hasDatexEvidence) return undefined;
+  const reportingSources = [
+    ...new Set(
+      situation.evidence
+        .filter(
+          (item) =>
+            item.provenance === "reporting_estimate" && newsroomArticleSources.has(item.source),
+        )
+        .map((item) => item.source),
+    ),
+  ];
+  if (reportingSources.length === 0) return undefined;
+  return {
+    status: "verified",
+    label: "Verifisert",
+    detail: `Bekreftet av ${sourceIdLabel("datex")} og ${sourceLabelsForIds(reportingSources)}.`,
+    officialSources: ["datex"],
+    reportingSources,
+    situationId: situation.id,
+  };
+}
+
+function publicVerificationForTrafficOfficialEvent(
+  event: TrafficMapEvent,
+  reportingSources: SourceId[],
+): Article["publicVerification"] | undefined {
+  const newsroomSources = [
+    ...new Set(reportingSources.filter((source) => newsroomArticleSources.has(source))),
+  ];
+  if (event.source !== "datex" || newsroomSources.length === 0) return undefined;
+  return {
+    status: "verified",
+    label: "Verifisert",
+    detail: `Bekreftet av ${sourceIdLabel("datex")} og ${sourceLabelsForIds(newsroomSources)}.`,
+    officialSources: ["datex"],
+    reportingSources: newsroomSources,
+  };
+}
+
+function articleOverlapsTrafficEvent(article: Article, event: TrafficMapEvent): boolean {
+  const articleMs = Date.parse(article.publishedAt);
+  if (!Number.isFinite(articleMs)) return false;
+  const validFromMs = Date.parse(event.validFrom ?? event.updatedAt);
+  if (Number.isFinite(validFromMs) && articleMs < validFromMs - 24 * 60 * 60 * 1000) {
+    return false;
+  }
+  const validToMs = Date.parse(event.validTo ?? "");
+  if (Number.isFinite(validToMs) && articleMs > validToMs + 48 * 60 * 60 * 1000) {
+    return false;
+  }
+  return true;
+}
+
+function enrichArticlesWithTrafficOfficialVerification(
+  articles: Article[],
+  officialEvents: OfficialEvent[],
+): Article[] {
+  if (articles.length === 0 || officialEvents.length === 0) return articles;
+  const candidateArticles = articles.filter(
+    (article) =>
+      !article.publicVerification &&
+      article.category === "Transport" &&
+      Boolean(article.location) &&
+      newsroomArticleSources.has(article.source),
+  );
+  if (candidateArticles.length === 0) return articles;
+
+  const verificationByArticleId = new Map<string, Article["publicVerification"]>();
+  for (const officialEvent of officialEvents) {
+    const event = officialEventToTrafficMapEvent(officialEvent);
+    if (!event || event.state === "cancelled") continue;
+    const timedCandidates = candidateArticles.filter((article) =>
+      articleOverlapsTrafficEvent(article, event),
+    );
+    if (timedCandidates.length === 0) continue;
+    const matches = findRelatedTrafficArticles(event, timedCandidates);
+    const verification = publicVerificationForTrafficOfficialEvent(
+      event,
+      matches.map((match) => match.article.source),
+    );
+    if (!verification) continue;
+    for (const match of matches) {
+      verificationByArticleId.set(match.article.id, verification);
+    }
+  }
+  if (verificationByArticleId.size === 0) return articles;
+  return articles.map((article) => {
+    const publicVerification = verificationByArticleId.get(article.id);
+    return publicVerification ? { ...article, publicVerification } : article;
+  });
+}
+
+function enrichArticlesWithSituations(articles: Article[], situations: Situation[]): Article[] {
+  if (articles.length === 0 || situations.length === 0) return articles;
+  const articleIds = new Set(articles.map((article) => article.id));
+  const situationByArticleId = new Map<string, Situation>();
+  for (const situation of [...situations].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  )) {
+    if (situation.status !== "active" && situation.status !== "preliminary") continue;
+    for (const articleId of situation.relatedArticleIds) {
+      if (!articleIds.has(articleId) || situationByArticleId.has(articleId)) continue;
+      situationByArticleId.set(articleId, situation);
+    }
+  }
+  if (situationByArticleId.size === 0) return articles;
+  return articles.map((article) => {
+    const situation = situationByArticleId.get(article.id);
+    if (!situation) return article;
+    const publicVerification = publicVerificationForSituation(situation);
+    return {
+      ...article,
+      situationId: article.situationId ?? situation.id,
+      ...(publicVerification ? { publicVerification } : {}),
+    };
+  });
 }
 
 interface SourceItemRow {
@@ -592,6 +1004,40 @@ interface SourceItemRow {
   role: SourceItem["role"] | null;
   linked_situation_ids: string[] | null;
   relationship?: SourceItemRelationship | null;
+}
+
+interface SourceItemRecordRow extends SourceItemRow {
+  raw_payload: unknown;
+  normalized_payload: unknown;
+}
+
+interface AiProcessingRunRow {
+  id: string;
+  provider: AiProcessingRun["provider"];
+  model: string;
+  status: AiProcessingRun["status"];
+  started_at: Date | string;
+  completed_at: Date | string;
+  completed_at_cursor: string;
+  article_ids: unknown;
+  result: unknown;
+  error: string | null;
+}
+
+interface SpatialHeatmapCellRow {
+  id: string;
+  center_lng: number | string;
+  center_lat: number | string;
+  observation_count: string | number;
+  source_item_count: string | number;
+  source_item_ids: string[] | null;
+  article_count: string | number;
+  traffic_event_count: string | number;
+  first_seen_at: Date | string;
+  last_seen_at: Date | string;
+  active_day_count: string | number;
+  source_ids: string[] | null;
+  severity_rank: number | string | null;
 }
 
 interface CoverageBundleRow {
@@ -640,6 +1086,336 @@ function sourceItemSelectColumns(alias = "si"): string {
        ${alias}.capture_hash, ${alias}.input_hash,
        ST_AsGeoJSON(${alias}.geo_hint)::json AS geo_hint, ${alias}.reliability_tier, ${alias}.role,
        links.linked_situation_ids`;
+}
+
+const rawPayloadMaxStringLength = 4000;
+const rawPayloadMaxArrayLength = 100;
+const rawPayloadMaxObjectKeys = 80;
+const secretKeyPattern =
+  /(?:api[_-]?key|authorization|bearer|cookie|password|passwd|secret|token|client[_-]?secret|smtp|datx|datex.*(?:user|pass|credential))/iu;
+
+interface SanitizedPayload {
+  value: unknown;
+  redacted: boolean;
+  truncated: boolean;
+  bytes: number;
+}
+
+function jsonByteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value) ?? "null", "utf8");
+}
+
+function sanitizeRawPayload(value: unknown, depth = 0): SanitizedPayload {
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return { value, redacted: false, truncated: false, bytes: jsonByteLength(value) };
+  }
+  if (typeof value === "string") {
+    const truncated = value.length > rawPayloadMaxStringLength;
+    const next = truncated ? `${value.slice(0, rawPayloadMaxStringLength)}... [truncated]` : value;
+    return { value: next, redacted: false, truncated, bytes: jsonByteLength(value) };
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, rawPayloadMaxArrayLength)
+      .map((item) => sanitizeRawPayload(item, depth + 1));
+    const truncated =
+      value.length > rawPayloadMaxArrayLength || items.some((item) => item.truncated);
+    const redacted = items.some((item) => item.redacted);
+    const next = items.map((item) => item.value);
+    if (value.length > rawPayloadMaxArrayLength) {
+      next.push(`[${value.length - rawPayloadMaxArrayLength} more items truncated]`);
+    }
+    return { value: next, redacted, truncated, bytes: jsonByteLength(value) };
+  }
+  if (typeof value === "object") {
+    if (depth > 8) {
+      return {
+        value: "[object depth truncated]",
+        redacted: false,
+        truncated: true,
+        bytes: jsonByteLength(value),
+      };
+    }
+    const entries = Object.entries(value as Record<string, unknown>);
+    const next: Record<string, unknown> = {};
+    let redacted = false;
+    let truncated = entries.length > rawPayloadMaxObjectKeys;
+    for (const [key, entryValue] of entries.slice(0, rawPayloadMaxObjectKeys)) {
+      if (secretKeyPattern.test(key)) {
+        next[key] = "[redacted]";
+        redacted = true;
+        continue;
+      }
+      const sanitized = sanitizeRawPayload(entryValue, depth + 1);
+      next[key] = sanitized.value;
+      redacted ||= sanitized.redacted;
+      truncated ||= sanitized.truncated;
+    }
+    if (entries.length > rawPayloadMaxObjectKeys) {
+      next.__truncatedKeys = entries.length - rawPayloadMaxObjectKeys;
+    }
+    return { value: next, redacted, truncated, bytes: jsonByteLength(value) };
+  }
+  return { value: String(value), redacted: false, truncated: false, bytes: jsonByteLength(value) };
+}
+
+function rawSourceItemDetailFromRecord(record: SourceItemRecord): RawInspectorSourceItemDetail {
+  const raw = sanitizeRawPayload(record.rawPayload);
+  const normalized = sanitizeRawPayload(record.normalizedPayload);
+  return {
+    item: sourceItemFromRecord(record),
+    rawPayload: raw.value,
+    normalizedPayload: normalized.value,
+    payloadBytes: {
+      raw: raw.bytes,
+      normalized: normalized.bytes,
+    },
+    redacted: raw.redacted || normalized.redacted,
+    truncated: raw.truncated || normalized.truncated,
+  };
+}
+
+function sourceItemFromRecord(record: SourceItemRecord): SourceItem {
+  const item = { ...record };
+  delete item.rawPayload;
+  delete item.normalizedPayload;
+  return item;
+}
+
+function sourceItemRecordFromRow(row: SourceItemRecordRow): SourceItemRecord {
+  return {
+    ...sourceItemFromRow(row),
+    rawPayload: row.raw_payload,
+    normalizedPayload: row.normalized_payload,
+  };
+}
+
+function articleIdsFromAiRow(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value === "string") {
+    try {
+      return articleIdsFromAiRow(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function isAiAnalysisProfile(value: unknown): value is AiAnalysisProfile {
+  return value === "standard" || value === "compact_recovery" || value === "brief_only_recovery";
+}
+
+function aiRunDiagnosticsFromResult(result: unknown): AiProcessingRunDiagnostics | undefined {
+  if (!result || typeof result !== "object" || !("diagnostics" in result)) return undefined;
+  const diagnostics = (result as { diagnostics?: unknown }).diagnostics;
+  if (!diagnostics || typeof diagnostics !== "object") return undefined;
+  const candidate = diagnostics as { profile?: unknown; attempts?: unknown };
+  if (!isAiAnalysisProfile(candidate.profile) || !Array.isArray(candidate.attempts)) {
+    return undefined;
+  }
+  const attempts = candidate.attempts.flatMap((attempt): AiAnalysisAttemptDiagnostics[] => {
+    if (!attempt || typeof attempt !== "object") return [];
+    const row = attempt as {
+      profile?: unknown;
+      status?: unknown;
+      maxTokens?: unknown;
+      articleCount?: unknown;
+      situationCount?: unknown;
+      error?: unknown;
+    };
+    if (
+      !isAiAnalysisProfile(row.profile) ||
+      (row.status !== "ok" && row.status !== "failed") ||
+      typeof row.maxTokens !== "number" ||
+      typeof row.articleCount !== "number" ||
+      typeof row.situationCount !== "number"
+    ) {
+      return [];
+    }
+    return [
+      {
+        profile: row.profile,
+        status: row.status,
+        maxTokens: row.maxTokens,
+        articleCount: row.articleCount,
+        situationCount: row.situationCount,
+        ...(typeof row.error === "string" ? { error: compactText(row.error, 240) } : {}),
+      },
+    ];
+  });
+  return attempts.length ? { profile: candidate.profile, attempts } : undefined;
+}
+
+function rawAiRunSummaryFromRow(row: AiProcessingRunRow): RawInspectorAiRunSummary {
+  const articleIds = articleIdsFromAiRow(row.article_ids);
+  const diagnostics = aiRunDiagnosticsFromResult(row.result);
+  return {
+    id: row.id,
+    provider: row.provider,
+    model: row.model,
+    status: row.status,
+    startedAt: new Date(row.started_at).toISOString(),
+    completedAt: new Date(row.completed_at).toISOString(),
+    articleCount: articleIds.length,
+    ...(diagnostics ? { diagnostics } : {}),
+    ...(row.error ? { error: row.error } : {}),
+  };
+}
+
+function rawAiRunDetailFromRow(row: AiProcessingRunRow): RawInspectorAiRunDetail {
+  const result = sanitizeRawPayload(row.result);
+  return {
+    ...rawAiRunSummaryFromRow(row),
+    articleIds: articleIdsFromAiRow(row.article_ids),
+    result: result.value,
+    resultBytes: result.bytes,
+    redacted: result.redacted,
+    truncated: result.truncated,
+  };
+}
+
+function compactText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function briefingArticleSummary(article: Article): CommandCenterBriefingArticleSummary {
+  return {
+    id: article.id,
+    title: article.title,
+    sourceLabel: article.sourceLabel,
+    publishedAt: article.publishedAt,
+    category: article.category,
+    excerpt: compactText(article.excerpt, 220),
+    ...(article.url ? { url: article.url } : {}),
+  };
+}
+
+function briefingSourceHealthSummary(
+  sources: SourceHealth[],
+): CommandCenterBriefingPayload["sourceHealthSummary"] {
+  return {
+    total: sources.length,
+    ok: sources.filter((source) => source.state === "ok").length,
+    attention: sources.filter((source) => source.state !== "ok" || source.activeAlerts?.length)
+      .length,
+    degraded: sources.filter((source) => source.state === "degraded").length,
+    disabled: sources.filter((source) => source.state === "disabled").length,
+    staleAlerts: sources.reduce((sum, source) => sum + (source.activeAlerts?.length ?? 0), 0),
+  };
+}
+
+function isOperationsNoteKind(value: unknown): value is CommandCenterOperationsNote["kind"] {
+  return (
+    value === "situation_progress" ||
+    value === "bundle_candidate" ||
+    value === "category_relevance" ||
+    value === "source_quality" ||
+    value === "other"
+  );
+}
+
+function operationsNotesFromAiResult(result: unknown): CommandCenterOperationsNote[] {
+  if (!result || typeof result !== "object" || !("operationsNotes" in result)) return [];
+  const notes = (result as { operationsNotes?: unknown }).operationsNotes;
+  if (!Array.isArray(notes)) return [];
+  return notes.slice(0, 12).flatMap((note): CommandCenterOperationsNote[] => {
+    if (!note || typeof note !== "object") return [];
+    const candidate = note as {
+      kind?: unknown;
+      subjectId?: unknown;
+      summary?: unknown;
+      citedClaims?: unknown;
+    };
+    if (
+      !isOperationsNoteKind(candidate.kind) ||
+      typeof candidate.subjectId !== "string" ||
+      typeof candidate.summary !== "string"
+    ) {
+      return [];
+    }
+    const citedClaims = Array.isArray(candidate.citedClaims)
+      ? candidate.citedClaims.flatMap((claim): CommandCenterOperationsNote["citedClaims"] => {
+          if (!claim || typeof claim !== "object") return [];
+          const value = claim as {
+            claim?: unknown;
+            articleId?: unknown;
+            supportingSnippet?: unknown;
+          };
+          if (
+            typeof value.claim !== "string" ||
+            typeof value.articleId !== "string" ||
+            typeof value.supportingSnippet !== "string"
+          ) {
+            return [];
+          }
+          return [
+            {
+              claim: compactText(value.claim, 140),
+              articleId: value.articleId,
+              supportingSnippet: compactText(value.supportingSnippet, 180),
+            },
+          ];
+        })
+      : [];
+    return [
+      {
+        kind: candidate.kind,
+        subjectId: candidate.subjectId,
+        summary: compactText(candidate.summary, 220),
+        citedClaims,
+      },
+    ];
+  });
+}
+
+function numericRowValue(value: number | string | null | undefined): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function severityFromRank(rank: number | string | null): TrafficEventSeverity | undefined {
+  switch (Math.round(numericRowValue(rank))) {
+    case 4:
+      return "critical";
+    case 3:
+      return "high";
+    case 2:
+      return "medium";
+    case 1:
+      return "low";
+    default:
+      return undefined;
+  }
+}
+
+function spatialHeatmapCellFromRow(row: SpatialHeatmapCellRow): SpatialHeatmapCell {
+  const sourceIds = (row.source_ids ?? []).filter(
+    (source): source is SpatialHeatmapCell["sourceIds"][number] => typeof source === "string",
+  );
+  const sourceItemIds = (row.source_item_ids ?? []).filter(
+    (sourceItemId): sourceItemId is string => typeof sourceItemId === "string",
+  );
+  const maxSeverity = severityFromRank(row.severity_rank);
+  return {
+    id: row.id,
+    center: {
+      lng: numericRowValue(row.center_lng),
+      lat: numericRowValue(row.center_lat),
+    },
+    radiusMeters: 650,
+    count: numericRowValue(row.observation_count),
+    sourceItemCount: numericRowValue(row.source_item_count),
+    ...(sourceItemIds.length ? { sourceItemIds } : {}),
+    articleCount: numericRowValue(row.article_count),
+    trafficEventCount: numericRowValue(row.traffic_event_count),
+    firstSeenAt: new Date(row.first_seen_at).toISOString(),
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    activeDayCount: numericRowValue(row.active_day_count),
+    sourceIds,
+    ...(maxSeverity ? { maxSeverity } : {}),
+  };
 }
 
 function coverageBundleArticleSummary(article: Article): CoverageBundleArticleSummary {
@@ -792,6 +1568,7 @@ const sourceAuditRequiredSources: SourceId[] = [
   "politiloggen",
   "internal",
   "deepseek",
+  "web_push",
   "private_annotations",
 ];
 
@@ -834,6 +1611,7 @@ const sourceAuditLabelFallbacks: Record<SourceId, string> = {
   internal: "Interne vurderinger",
   private_annotations: "Private annotasjoner",
   deepseek: "AI-analyse",
+  web_push: "Web Push",
 };
 
 const sourceAuditContractPaths: Partial<Record<SourceId, string>> = {
@@ -889,7 +1667,7 @@ function sourceAuditGroup(source: SourceId): SourceAuditProviderGroup {
     return "datex";
   if (source.startsWith("entur")) return "entur";
   if (source === "politiloggen") return "politiloggen";
-  if (source === "internal" || source === "deepseek") return "internal";
+  if (source === "internal" || source === "deepseek" || source === "web_push") return "internal";
   if (source === "private_annotations") return "private_annotation";
   if (
     [
@@ -931,7 +1709,8 @@ function sourceAuditRole(source: SourceId): SourceAuditRole {
   ) {
     return "telemetry_source";
   }
-  if (source === "internal" || source === "deepseek") return "internal_analysis";
+  if (source === "internal" || source === "deepseek" || source === "web_push")
+    return "internal_analysis";
   if (source === "private_annotations") return "private_annotation";
   if (source === "met" || source === "nve" || source === "entur_service_alerts") {
     return "context_source";
@@ -947,6 +1726,39 @@ function sourceAuditProvenance(source: SourceId): Provenance {
   if (role === "private_annotation" || role === "internal_analysis") return "private_annotation";
   if (source === "datex" || source === "politiloggen") return "official";
   return "reporting_estimate";
+}
+
+const softDeepSeekOutputFailureMarkers = [
+  "truncated by token limit",
+  "returned empty json content",
+  "returned no json object",
+  "syntaxerror",
+  "unexpected end of json input",
+  "unexpected token",
+  "invalid_enum_value",
+  "invalid_type",
+  "invalid_literal",
+  "invalid_union",
+  "unrecognized_keys",
+  "too_small",
+  "too_big",
+];
+
+function isSoftDeepSeekOutputFailure(error: string | undefined): boolean {
+  const normalized = error?.toLocaleLowerCase("en") ?? "";
+  return softDeepSeekOutputFailureMarkers.some((marker) => normalized.includes(marker));
+}
+
+function isSoftDeepSeekCollectorRun(run: SourceCollectorRun | undefined): boolean {
+  return (
+    run?.source === "deepseek" &&
+    (run.status === "failed" || run.status === "partial") &&
+    isSoftDeepSeekOutputFailure(run.errorMessage)
+  );
+}
+
+function deepSeekFallbackDetail(): string {
+  return "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.";
 }
 
 function sourceAuditTimestampInRange(
@@ -1040,9 +1852,11 @@ function sourceReliability(
 ): SourceReliabilityIndicator[] {
   const failures = latestRun?.recordsRejected ?? 0;
   const state = health?.state;
+  const softDeepSeekOutputFailure = state === "ok" && isSoftDeepSeekCollectorRun(latestRun);
+  const effectiveFailures = softDeepSeekOutputFailure ? 0 : failures;
   const level =
-    state === "degraded" || failures > 0
-      ? failures > 2
+    state === "degraded" || effectiveFailures > 0
+      ? effectiveFailures > 2
         ? "poor"
         : "watch"
       : state === "ok"
@@ -1059,8 +1873,9 @@ function sourceReliability(
       ...(score !== undefined ? { score } : {}),
       sampleSize: latestRun?.recordsSeen ?? 0,
       updatedAt: health?.lastCheckedAt ?? latestRun?.completedAt ?? generatedAt,
-      detail:
-        failures > 0
+      detail: softDeepSeekOutputFailure
+        ? deepSeekFallbackDetail()
+        : failures > 0
           ? `${failures} avvik i siste registrerte innhenting.`
           : (health?.detail ?? "Basert på kildehelse og siste worker-metrikk."),
     },
@@ -1092,12 +1907,17 @@ function sourceDiagnostics(
             key: `${source}:latest_duration_ms`,
             label: "Siste innhentingstid",
             kind: "latency" as const,
-            severity: latestRun.status === "failed" ? ("error" as const) : ("info" as const),
+            severity:
+              latestRun.status === "failed" && !isSoftDeepSeekCollectorRun(latestRun)
+                ? ("error" as const)
+                : ("info" as const),
             safeForDisplay: true as const,
             value: latestRun.durationMs ?? 0,
             unit: "ms" as const,
             observedAt: latestRun.completedAt ?? latestRun.startedAt,
-            detail: `${latestRun.recordsAccepted} akseptert, ${latestRun.recordsRejected} avvist.`,
+            detail: isSoftDeepSeekCollectorRun(latestRun)
+              ? deepSeekFallbackDetail()
+              : `${latestRun.recordsAccepted} akseptert, ${latestRun.recordsRejected} avvist.`,
           },
         ]
       : []),
@@ -1475,6 +2295,7 @@ function severityForSituation(situation: Situation): OperationsTimelineEvent["se
 }
 
 function severityForCollectorRun(run: SourceCollectorRun): OperationsTimelineEvent["severity"] {
+  if (isSoftDeepSeekCollectorRun(run)) return "info";
   if (run.status === "failed") return "critical";
   if (run.status === "partial") return "warning";
   if (run.status === "skipped") return "muted";
@@ -1506,6 +2327,19 @@ function collectorRunStatusLabel(status: SourceCollectorRun["status"]): string {
     running: "kjører",
   };
   return labels[status];
+}
+
+function collectorRunTitle(run: SourceCollectorRun): string {
+  const label = sourceAuditLabelFallbacks[run.source];
+  return isSoftDeepSeekCollectorRun(run)
+    ? `${label} brukte reserveanalyse`
+    : `${label} ${collectorRunStatusLabel(run.status)}`;
+}
+
+function collectorRunDetail(run: SourceCollectorRun): string {
+  return isSoftDeepSeekCollectorRun(run)
+    ? deepSeekFallbackDetail()
+    : `${run.recordsAccepted} inn, ${run.recordsRejected} avvik, ${run.recordsSeen} sett.`;
 }
 
 function sourceItemRelationshipLabel(relationship?: SourceItemRelationship): string {
@@ -1658,8 +2492,8 @@ function operationEventFromCollectorRun(run: SourceCollectorRun): OperationsTime
     timestamp: run.completedAt ?? run.startedAt,
     kind: "collector_run",
     severity: severityForCollectorRun(run),
-    title: `${sourceAuditLabelFallbacks[run.source]} ${collectorRunStatusLabel(run.status)}`,
-    detail: `${run.recordsAccepted} inn, ${run.recordsRejected} avvik, ${run.recordsSeen} sett.`,
+    title: collectorRunTitle(run),
+    detail: collectorRunDetail(run),
     source: run.source,
     sourceLabel: sourceAuditLabelFallbacks[run.source],
     collector: run.collector,
@@ -2017,8 +2851,10 @@ export class MemoryStore implements Store {
   private users: AppUser[] = [];
   private userIdentities: MemoryUserIdentity[] = [];
   private authTokens: MemoryAuthToken[] = [];
+  private pushSubscriptions: MemoryPushSubscription[] = [];
+  private pushDeliveries: PushDeliveryListItem[] = [];
   private savedSituations = new Set<string>();
-  private sourceItems = new Map<string, SourceItem>(
+  private sourceItems = new Map<string, SourceItemRecord>(
     sampleArticles.map((article) => {
       const item = memorySourceItemFromArticle(article);
       return [item.id, item];
@@ -2392,12 +3228,12 @@ export class MemoryStore implements Store {
       )
       .slice(0, 3)
       .map(homeSituationSummary);
-    return {
-      ...clone(sampleBootstrap),
+    return bootstrapWithMorningBrief({
       articles: articles.items,
       ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
       situations,
-    };
+      sourceHealth: clone(sampleBootstrap.sourceHealth),
+    });
   }
 
   async listArticles(filters: ArticleFilters): Promise<ArticlePage> {
@@ -2412,6 +3248,8 @@ export class MemoryStore implements Store {
             filters.category === "Alle" ||
             article.category === filters.category) &&
           (!filters.topic || articleMatchesTopic(article, filters.topic)) &&
+          (!filters.from || article.publishedAt >= filters.from) &&
+          (!filters.to || article.publishedAt <= filters.to) &&
           (!search ||
             `${article.title} ${article.excerpt} ${article.sourceLabel} ${article.category} ${article.places.join(" ")}`
               .toLocaleLowerCase("nb")
@@ -2425,7 +3263,14 @@ export class MemoryStore implements Store {
     const page = items.slice(0, limit);
     const last = page.at(-1);
     return {
-      items: clone(page),
+      items: clone(
+        enrichArticlesWithSituations(
+          page,
+          [...this.situations.values()].filter(
+            (situation) => situation.status === "preliminary" || situation.status === "active",
+          ),
+        ),
+      ),
       nextCursor:
         items.length > limit && last ? encodeCursor(last.publishedAt, last.id) : undefined,
     };
@@ -2464,12 +3309,119 @@ export class MemoryStore implements Store {
     };
   }
 
+  async listNotificationTriggers(
+    filters: NotificationTriggerQueryInput,
+  ): Promise<NotificationTriggerPage> {
+    const [situations, articles] = await Promise.all([
+      this.listSituations({ includeDismissed: false, limit: 100 }),
+      this.listArticles({ limit: 500 }),
+    ]);
+    return buildNotificationTriggerPage({
+      situations: situations.items,
+      articles: articles.items,
+      generatedAt: new Date().toISOString(),
+      filters,
+    });
+  }
+
+  async getPushSettings(userId: string, publicKey?: string): Promise<PushNotificationSettings> {
+    return {
+      configured: Boolean(publicKey),
+      ...(publicKey ? { publicKey } : {}),
+      subscriptions: clone(
+        this.pushSubscriptions
+          .filter((subscription) => subscription.userId === userId)
+          .map((subscription) => pushSubscriptionFromRow(subscription)),
+      ),
+    };
+  }
+
+  async upsertPushSubscription(
+    userId: string,
+    input: PushSubscriptionInput,
+  ): Promise<PushSubscriptionSummary> {
+    const now = new Date().toISOString();
+    const endpointHash = pushEndpointHash(input.endpoint);
+    const existing = this.pushSubscriptions.find(
+      (subscription) => subscription.endpointHash === endpointHash,
+    );
+    if (existing) {
+      existing.userId = userId;
+      existing.endpoint = input.endpoint;
+      existing.p256dh = input.keys.p256dh;
+      existing.auth = input.keys.auth;
+      existing.enabled = true;
+      existing.minSeverity = input.minSeverity ?? "warning";
+      existing.kinds = input.kinds ?? [];
+      if (input.userAgent) existing.userAgent = input.userAgent;
+      existing.updatedAt = now;
+      existing.lastSeenAt = now;
+      return clone(pushSubscriptionFromRow(existing));
+    }
+    const subscription: MemoryPushSubscription = {
+      id: randomUUID(),
+      userId,
+      endpoint: input.endpoint,
+      endpointHash,
+      p256dh: input.keys.p256dh,
+      auth: input.keys.auth,
+      enabled: true,
+      minSeverity: input.minSeverity ?? "warning",
+      kinds: input.kinds ?? [],
+      ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+      createdAt: now,
+      updatedAt: now,
+      lastSeenAt: now,
+      failureCount: 0,
+    };
+    this.pushSubscriptions.push(subscription);
+    return clone(pushSubscriptionFromRow(subscription));
+  }
+
+  async deletePushSubscription(userId: string, id: string): Promise<void> {
+    const subscription = this.pushSubscriptions.find(
+      (item) => item.userId === userId && item.id === id,
+    );
+    if (!subscription) return;
+    subscription.enabled = false;
+    subscription.updatedAt = new Date().toISOString();
+  }
+
+  async listPushSubscriptionPreferences(): Promise<NotificationSubscriptionPreference[]> {
+    return clone(
+      this.pushSubscriptions
+        .filter((subscription) => {
+          const user = this.users.find((item) => item.id === subscription.userId);
+          return subscription.enabled && user?.status !== "revoked";
+        })
+        .map((subscription) => ({
+          enabled: subscription.enabled,
+          minSeverity: subscription.minSeverity,
+          kinds: subscription.kinds,
+        })),
+    );
+  }
+
+  async listPushDeliveries(limit: number): Promise<PushDeliveryPage> {
+    const items = clone(
+      this.pushDeliveries
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, limit),
+    );
+    return {
+      generatedAt: new Date().toISOString(),
+      items,
+      summary: summarizePushDeliveries(items),
+    };
+  }
+
   async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {
     const search = filters.q?.toLocaleLowerCase("nb");
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
     const limit = filters.limit ?? 40;
     const withLinks = [...this.sourceItems.values()].map((item) => ({
-      ...item,
+      ...sourceItemFromRecord(item),
       linkedSituationIds: [...this.sourceLinks.values()]
         .filter((link) => link.sourceItemId === item.id)
         .map((link) => link.situationId)
@@ -2497,6 +3449,111 @@ export class MemoryStore implements Store {
       items: clone(page),
       nextCursor: items.length > limit && last ? encodeCursor(last.fetchedAt, last.id) : undefined,
     };
+  }
+
+  async getRawSourceItem(id: string): Promise<RawInspectorSourceItemDetail | undefined> {
+    const record = this.sourceItems.get(id);
+    if (!record) return undefined;
+    return rawSourceItemDetailFromRecord(
+      clone({
+        ...record,
+        linkedSituationIds: this.linkedSituationIdsForSourceItem(record.id),
+      }),
+    );
+  }
+
+  async listRawAiRuns(filters: RawInspectorAiRunFilters): Promise<RawInspectorAiRunPage> {
+    void filters;
+    return { items: [] };
+  }
+
+  async getRawAiRun(id: string): Promise<RawInspectorAiRunDetail | undefined> {
+    void id;
+    return undefined;
+  }
+
+  async listSpatialHeatmapCells(
+    filters: CommandCenterSpatialAnalyticsQueryInput,
+  ): Promise<SpatialHeatmapCell[]> {
+    const cells = new Map<
+      string,
+      {
+        lngSum: number;
+        latSum: number;
+        count: number;
+        sourceItemCount: number;
+        sourceItemIds: string[];
+        articleCount: number;
+        trafficEventCount: number;
+        firstSeenAt: string;
+        lastSeenAt: string;
+        activeDays: Set<string>;
+        sourceIds: Set<SpatialHeatmapCell["sourceIds"][number]>;
+      }
+    >();
+
+    for (const item of this.sourceItems.values()) {
+      if (item.geoHint?.type !== "Point") continue;
+      const observedAt = item.publishedAt ?? item.fetchedAt;
+      if (filters.from && observedAt < filters.from) continue;
+      if (filters.to && observedAt > filters.to) continue;
+      const lng = item.geoHint.coordinates[0];
+      const lat = item.geoHint.coordinates[1];
+      if (
+        typeof lng !== "number" ||
+        typeof lat !== "number" ||
+        !Number.isFinite(lng) ||
+        !Number.isFinite(lat)
+      ) {
+        continue;
+      }
+      const key = `cell:${Math.floor(lng * 100)}:${Math.floor(lat * 100)}`;
+      const current = cells.get(key) ?? {
+        lngSum: 0,
+        latSum: 0,
+        count: 0,
+        sourceItemCount: 0,
+        sourceItemIds: [],
+        articleCount: 0,
+        trafficEventCount: 0,
+        firstSeenAt: observedAt,
+        lastSeenAt: observedAt,
+        activeDays: new Set<string>(),
+        sourceIds: new Set<SpatialHeatmapCell["sourceIds"][number]>(),
+      };
+      current.lngSum += lng;
+      current.latSum += lat;
+      current.count += 1;
+      current.sourceItemCount += 1;
+      if (current.sourceItemIds.length < 12) current.sourceItemIds.push(item.id);
+      if (item.kind === "article") current.articleCount += 1;
+      if (observedAt < current.firstSeenAt) current.firstSeenAt = observedAt;
+      if (observedAt > current.lastSeenAt) current.lastSeenAt = observedAt;
+      current.activeDays.add(observedAt.slice(0, 10));
+      current.sourceIds.add(item.provider);
+      cells.set(key, current);
+    }
+
+    return [...cells.entries()]
+      .map(([id, cell]) => ({
+        id,
+        center: { lng: cell.lngSum / cell.count, lat: cell.latSum / cell.count },
+        radiusMeters: 650,
+        count: cell.count,
+        sourceItemCount: cell.sourceItemCount,
+        ...(cell.sourceItemIds.length ? { sourceItemIds: cell.sourceItemIds } : {}),
+        articleCount: cell.articleCount,
+        trafficEventCount: cell.trafficEventCount,
+        firstSeenAt: cell.firstSeenAt,
+        lastSeenAt: cell.lastSeenAt,
+        activeDayCount: cell.activeDays.size,
+        sourceIds: [...cell.sourceIds],
+      }))
+      .sort(
+        (left, right) =>
+          right.count - left.count || right.lastSeenAt.localeCompare(left.lastSeenAt),
+      )
+      .slice(0, filters.limit);
   }
 
   async listOfficialEvents(): Promise<OfficialEvent[]> {
@@ -2531,6 +3588,27 @@ export class MemoryStore implements Store {
     return [];
   }
 
+  async getTrafficTelemetryHistorySummary(): Promise<CommandCenterTelemetryHistorySummary> {
+    return {
+      datexTravelTime: {
+        observations: 0,
+        trackedEntities: 0,
+        activeDayCount: 0,
+        notableObservations: 0,
+      },
+      trafficCounters: {
+        observations: 0,
+        trackedEntities: 0,
+        activeDayCount: 0,
+        notableObservations: 0,
+      },
+    };
+  }
+
+  async listTrafficTelemetryPatterns(): Promise<TelemetryHistoryPattern[]> {
+    return [];
+  }
+
   async listSituationSourceItems(situationId: string): Promise<SourceItem[]> {
     if (!this.situations.has(situationId)) return [];
     const links = [...this.sourceLinks.values()]
@@ -2545,7 +3623,7 @@ export class MemoryStore implements Store {
       if (!item) return [];
       return [
         clone({
-          ...item,
+          ...sourceItemFromRecord(item),
           linkedSituationIds: this.linkedSituationIdsForSourceItem(item.id),
           relationship: link.relationship,
         }),
@@ -2572,7 +3650,7 @@ export class MemoryStore implements Store {
       linkedAt: new Date().toISOString(),
     });
     return clone({
-      ...item,
+      ...sourceItemFromRecord(item),
       linkedSituationIds: this.linkedSituationIdsForSourceItem(sourceItemId),
       relationship,
     });
@@ -2860,10 +3938,55 @@ export class MemoryStore implements Store {
       workerCycleMetrics: await this.getLatestWorkerCycleMetrics(),
     };
   }
+
+  async getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload> {
+    void login;
+    const bootstrap = await this.getBootstrap();
+    const sourceHealthSummary = briefingSourceHealthSummary(bootstrap.sourceHealth);
+    const articleIds = new Set(
+      bootstrap.morningBrief?.articleIds ??
+        bootstrap.articles.slice(0, 8).map((article) => article.id),
+    );
+    const situationIds = new Set(
+      bootstrap.morningBrief?.situationIds ?? bootstrap.situations.map((situation) => situation.id),
+    );
+    return {
+      generatedAt: bootstrap.morningBrief?.generatedAt ?? new Date().toISOString(),
+      ...(bootstrap.morningBrief ? { morningBrief: bootstrap.morningBrief } : {}),
+      operationsNotes: [],
+      supportingArticles: bootstrap.articles
+        .filter((article) => articleIds.has(article.id))
+        .map(briefingArticleSummary),
+      supportingSituations: bootstrap.situations.filter((situation) =>
+        situationIds.has(situation.id),
+      ),
+      sourceHealthSummary,
+      attentionSources: bootstrap.sourceHealth.filter(
+        (source) => source.state !== "ok" || source.activeAlerts?.length,
+      ),
+    };
+  }
 }
 
 export class PgStore implements Store {
   constructor(private readonly pool: pg.Pool) {}
+
+  private async listSituationsForArticleIds(articleIds: string[]): Promise<Situation[]> {
+    if (articleIds.length === 0) return [];
+    const result = await this.pool.query<{ payload: Situation }>(
+      `SELECT payload
+       FROM situations
+       WHERE status IN ('preliminary', 'active')
+         AND EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements_text(COALESCE(payload->'relatedArticleIds', '[]'::jsonb)) related(id)
+           WHERE related.id = ANY($1::text[])
+         )
+       ORDER BY updated_at DESC`,
+      [articleIds],
+    );
+    return result.rows.map((row) => row.payload);
+  }
 
   private async listHomeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
     const result = await this.pool.query<{
@@ -2901,6 +4024,16 @@ export class PgStore implements Store {
       createdAt: isoString(row.createdAt),
       locationLabel: row.locationLabel,
     }));
+  }
+
+  private async latestMorningBrief(): Promise<MorningBrief | undefined> {
+    const result = await this.pool.query<{ payload: MorningBrief }>(
+      `SELECT payload
+       FROM morning_briefs
+       ORDER BY generated_at DESC, id DESC
+       LIMIT 1`,
+    );
+    return result.rows[0]?.payload;
   }
 
   private async issuePgAuthToken(
@@ -3457,16 +4590,101 @@ export class PgStore implements Store {
   }
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
-    const [articles, situations, sourceHealth] = await Promise.all([
-      this.listArticles({ scope: "trondheim", limit: 40 }, login),
-      this.listHomeSituationSummaries(),
-      this.listSourceHealth(),
-    ]);
-    return {
+    const [articles, situations, sourceHealth, latestMorningBrief, latestAiRun] = await Promise.all(
+      [
+        this.listArticles({ scope: "trondheim", limit: 40 }, login),
+        this.listHomeSituationSummaries(),
+        this.listSourceHealth(),
+        this.latestMorningBrief(),
+        this.pool.query<{
+          provider: AiProcessingRun["provider"];
+          model: string;
+          status: AiProcessingRun["status"];
+          completedAt: Date | string;
+          result: unknown;
+        }>(
+          `SELECT provider, model, status, completed_at AS "completedAt", result
+         FROM ai_processing_runs
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+        ),
+      ],
+    );
+    const bootstrapPayload = {
       articles: articles.items,
       ...(articles.nextCursor ? { articleNextCursor: articles.nextCursor } : {}),
       situations,
       sourceHealth,
+    };
+    if (latestMorningBrief) return { ...bootstrapPayload, morningBrief: latestMorningBrief };
+    const latestAiRunRow = latestAiRun.rows[0];
+    return bootstrapWithMorningBrief(
+      bootstrapPayload,
+      latestAiRunRow
+        ? {
+            provider: latestAiRunRow.provider,
+            model: latestAiRunRow.model,
+            status: latestAiRunRow.status,
+            completedAt: new Date(latestAiRunRow.completedAt).toISOString(),
+            result: latestAiRunRow.result,
+          }
+        : undefined,
+    );
+  }
+
+  async getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload> {
+    const [bootstrap, latestAiRunResult] = await Promise.all([
+      this.getBootstrap(login),
+      this.pool.query<AiProcessingRunRow>(
+        `SELECT id, provider, model, status, started_at, completed_at,
+          to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS completed_at_cursor,
+          article_ids, result, error
+         FROM ai_processing_runs
+         ORDER BY completed_at DESC, id DESC
+         LIMIT 1`,
+      ),
+    ]);
+    const morningBrief = bootstrap.morningBrief;
+    const articleIds = [...new Set(morningBrief?.articleIds ?? [])];
+    const situationIds = [...new Set(morningBrief?.situationIds ?? [])];
+    const [articleResult, situationResult] = await Promise.all([
+      articleIds.length
+        ? this.pool.query<{ payload: Article }>(
+            "SELECT payload FROM articles WHERE id = ANY($1::text[])",
+            [articleIds],
+          )
+        : Promise.resolve({ rows: [] as Array<{ payload: Article }> }),
+      situationIds.length
+        ? this.pool.query<{ payload: Situation }>(
+            "SELECT payload FROM situations WHERE id = ANY($1::text[])",
+            [situationIds],
+          )
+        : Promise.resolve({ rows: [] as Array<{ payload: Situation }> }),
+    ]);
+    const articlesById = new Map(articleResult.rows.map((row) => [row.payload.id, row.payload]));
+    const situationsById = new Map(
+      situationResult.rows.map((row) => [row.payload.id, homeSituationSummary(row.payload)]),
+    );
+    const latestAiRun = latestAiRunResult.rows[0];
+    const sourceHealthSummary = briefingSourceHealthSummary(bootstrap.sourceHealth);
+    return {
+      generatedAt:
+        morningBrief?.generatedAt ??
+        (latestAiRun ? new Date(latestAiRun.completed_at).toISOString() : new Date().toISOString()),
+      ...(morningBrief ? { morningBrief } : {}),
+      ...(latestAiRun ? { latestAiRun: rawAiRunSummaryFromRow(latestAiRun) } : {}),
+      operationsNotes: latestAiRun ? operationsNotesFromAiResult(latestAiRun.result) : [],
+      supportingArticles: articleIds
+        .map((id) => articlesById.get(id))
+        .filter((article): article is Article => Boolean(article))
+        .map(briefingArticleSummary),
+      supportingSituations: situationIds
+        .map((id) => situationsById.get(id))
+        .filter((situation): situation is HomeSituationSummary => Boolean(situation)),
+      sourceHealthSummary,
+      attentionSources: bootstrap.sourceHealth.filter(
+        (source) => source.state !== "ok" || source.activeAlerts?.length,
+      ),
     };
   }
 
@@ -3543,7 +4761,24 @@ export class PgStore implements Store {
       params,
     );
     const limit = filters.limit ?? 40;
-    const items = result.rows.slice(0, limit).map((row) => ({ ...row.payload, saved: row.saved }));
+    const rawItems = result.rows
+      .slice(0, limit)
+      .map((row) => ({ ...row.payload, saved: row.saved }));
+    const relatedSituations = await this.listSituationsForArticleIds(
+      rawItems.map((article) => article.id),
+    );
+    const officialEvents = rawItems.some(
+      (article) =>
+        article.category === "Transport" &&
+        article.location &&
+        newsroomArticleSources.has(article.source),
+    )
+      ? await this.listOfficialEvents({ source: "datex", limit: 500 })
+      : [];
+    const items = enrichArticlesWithTrafficOfficialVerification(
+      enrichArticlesWithSituations(rawItems, relatedSituations),
+      officialEvents,
+    );
     return {
       items,
       nextCursor:
@@ -3672,6 +4907,161 @@ export class PgStore implements Store {
     };
   }
 
+  async listNotificationTriggers(
+    filters: NotificationTriggerQueryInput,
+    login: string,
+  ): Promise<NotificationTriggerPage> {
+    const [situations, articles] = await Promise.all([
+      this.listSituations({ includeDismissed: false, limit: 100 }, login),
+      this.listArticles({ limit: 500 }, login),
+    ]);
+    return buildNotificationTriggerPage({
+      situations: situations.items,
+      articles: articles.items,
+      generatedAt: new Date().toISOString(),
+      filters,
+    });
+  }
+
+  async getPushSettings(userId: string, publicKey?: string): Promise<PushNotificationSettings> {
+    const result = await this.pool.query<PushSubscriptionRow>(
+      `SELECT
+         id,
+         endpoint_hash AS "endpointHash",
+         enabled,
+         min_severity AS "minSeverity",
+         kinds,
+         user_agent AS "userAgent",
+         created_at AS "createdAt",
+         updated_at AS "updatedAt",
+         last_seen_at AS "lastSeenAt",
+         last_success_at AS "lastSuccessAt",
+         last_failure_at AS "lastFailureAt",
+         failure_count AS "failureCount"
+       FROM push_subscriptions
+       WHERE user_id=$1 AND revoked_at IS NULL
+       ORDER BY last_seen_at DESC, id DESC`,
+      [userId],
+    );
+    return {
+      configured: Boolean(publicKey),
+      ...(publicKey ? { publicKey } : {}),
+      subscriptions: result.rows.map(pushSubscriptionFromRow),
+    };
+  }
+
+  async upsertPushSubscription(
+    userId: string,
+    input: PushSubscriptionInput,
+  ): Promise<PushSubscriptionSummary> {
+    const endpointHash = pushEndpointHash(input.endpoint);
+    const result = await this.pool.query<PushSubscriptionRow>(
+      `INSERT INTO push_subscriptions
+        (id, user_id, endpoint, endpoint_hash, p256dh, auth, user_agent, enabled, min_severity, kinds)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$9)
+       ON CONFLICT (endpoint_hash) DO UPDATE SET
+         user_id=EXCLUDED.user_id,
+         endpoint=EXCLUDED.endpoint,
+         p256dh=EXCLUDED.p256dh,
+         auth=EXCLUDED.auth,
+         user_agent=EXCLUDED.user_agent,
+         enabled=true,
+         min_severity=EXCLUDED.min_severity,
+         kinds=EXCLUDED.kinds,
+         revoked_at=NULL,
+         updated_at=now(),
+         last_seen_at=now()
+       RETURNING
+         id,
+         endpoint_hash AS "endpointHash",
+         enabled,
+         min_severity AS "minSeverity",
+         kinds,
+         user_agent AS "userAgent",
+         created_at AS "createdAt",
+         updated_at AS "updatedAt",
+         last_seen_at AS "lastSeenAt",
+         last_success_at AS "lastSuccessAt",
+         last_failure_at AS "lastFailureAt",
+         failure_count AS "failureCount"`,
+      [
+        randomUUID(),
+        userId,
+        input.endpoint,
+        endpointHash,
+        input.keys.p256dh,
+        input.keys.auth,
+        input.userAgent ?? null,
+        input.minSeverity ?? "warning",
+        input.kinds ?? [],
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Kunne ikke lagre push-abonnement.");
+    return pushSubscriptionFromRow(row);
+  }
+
+  async deletePushSubscription(userId: string, id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE push_subscriptions
+       SET enabled=false, revoked_at=now(), updated_at=now()
+       WHERE user_id=$1 AND id=$2`,
+      [userId, id],
+    );
+  }
+
+  async listPushSubscriptionPreferences(): Promise<NotificationSubscriptionPreference[]> {
+    const result = await this.pool.query<{
+      enabled: boolean;
+      minSeverity: NotificationSubscriptionPreference["minSeverity"];
+      kinds: NotificationSubscriptionPreference["kinds"];
+    }>(
+      `SELECT
+         ps.enabled,
+         ps.min_severity AS "minSeverity",
+         ps.kinds
+       FROM push_subscriptions ps
+       LEFT JOIN users u ON u.id=ps.user_id
+       WHERE ps.enabled=true AND ps.revoked_at IS NULL
+         AND COALESCE(u.status, 'active') = 'active'
+       ORDER BY ps.last_seen_at DESC, ps.id DESC`,
+    );
+    return result.rows.map((row) => ({
+      enabled: row.enabled,
+      minSeverity: row.minSeverity,
+      kinds: row.kinds ?? [],
+    }));
+  }
+
+  async listPushDeliveries(limit: number): Promise<PushDeliveryPage> {
+    const result = await this.pool.query<PushDeliveryRow>(
+      `SELECT
+         id,
+         trigger_id AS "triggerId",
+         subscription_id AS "subscriptionId",
+         user_id AS "userId",
+         status,
+         kind,
+         severity,
+         title,
+         body,
+         target_url AS "targetUrl",
+         error_message AS "errorMessage",
+         created_at AS "createdAt",
+         sent_at AS "sentAt"
+       FROM push_notification_deliveries
+       ORDER BY created_at DESC, id DESC
+       LIMIT $1`,
+      [limit],
+    );
+    const items = result.rows.map(pushDeliveryFromRow);
+    return {
+      generatedAt: new Date().toISOString(),
+      items,
+      summary: summarizePushDeliveries(items),
+    };
+  }
+
   async listSourceItems(filters: SourceItemFilters): Promise<SourceItemPage> {
     const params: unknown[] = [];
     const where: string[] = [];
@@ -3730,6 +5120,178 @@ export class PgStore implements Store {
           ? encodeCursor(lastRow.fetched_at_cursor, lastRow.id)
           : undefined,
     };
+  }
+
+  async getRawSourceItem(
+    id: string,
+    _login: string,
+  ): Promise<RawInspectorSourceItemDetail | undefined> {
+    void _login;
+    const record = await this.getSourceItemRecord(id);
+    return record ? rawSourceItemDetailFromRecord(record) : undefined;
+  }
+
+  async listRawAiRuns(
+    filters: RawInspectorAiRunFilters,
+    _login: string,
+  ): Promise<RawInspectorAiRunPage> {
+    void _login;
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.provider) {
+      params.push(filters.provider);
+      where.push(`provider = $${params.length}`);
+    }
+    if (filters.status) {
+      params.push(filters.status);
+      where.push(`status = $${params.length}`);
+    }
+    if (filters.q) {
+      params.push(`%${filters.q}%`);
+      where.push(
+        `(id ILIKE $${params.length}
+          OR model ILIKE $${params.length}
+          OR COALESCE(error, '') ILIKE $${params.length}
+          OR article_ids::text ILIKE $${params.length}
+          OR result::text ILIKE $${params.length})`,
+      );
+    }
+    if (filters.cursor) {
+      const cursor = decodeCursor(filters.cursor);
+      params.push(cursor.timestamp);
+      const timestampIndex = params.length;
+      if (cursor.id) {
+        params.push(cursor.id);
+        where.push(
+          `(completed_at < $${timestampIndex} OR (completed_at = $${timestampIndex} AND id < $${params.length}))`,
+        );
+      } else {
+        where.push(`completed_at < $${timestampIndex}`);
+      }
+    }
+
+    params.push((filters.limit ?? 20) + 1);
+    const result = await this.pool.query<AiProcessingRunRow>(
+      `SELECT id, provider, model, status, started_at, completed_at,
+        to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS completed_at_cursor,
+        article_ids, result, error
+       FROM ai_processing_runs
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY completed_at DESC, id DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    const limit = filters.limit ?? 20;
+    const visibleRows = result.rows.slice(0, limit);
+    const lastRow = visibleRows.at(-1);
+    return {
+      items: visibleRows.map(rawAiRunSummaryFromRow),
+      nextCursor:
+        result.rows.length > limit && lastRow
+          ? encodeCursor(lastRow.completed_at_cursor, lastRow.id)
+          : undefined,
+    };
+  }
+
+  async getRawAiRun(id: string, _login: string): Promise<RawInspectorAiRunDetail | undefined> {
+    void _login;
+    const result = await this.pool.query<AiProcessingRunRow>(
+      `SELECT id, provider, model, status, started_at, completed_at,
+        to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS completed_at_cursor,
+        article_ids, result, error
+       FROM ai_processing_runs
+       WHERE id = $1`,
+      [id],
+    );
+    const row = result.rows[0];
+    return row ? rawAiRunDetailFromRow(row) : undefined;
+  }
+
+  async listSpatialHeatmapCells(
+    filters: CommandCenterSpatialAnalyticsQueryInput,
+    _login: string,
+  ): Promise<SpatialHeatmapCell[]> {
+    void _login;
+    const params: unknown[] = [];
+    const sourceWhere = ["si.geo_hint IS NOT NULL"];
+    const trafficWhere = ["tme.geometry IS NOT NULL"];
+
+    if (filters.from) {
+      params.push(filters.from);
+      const index = params.length;
+      sourceWhere.push(`COALESCE(si.published_at, si.fetched_at) >= $${index}`);
+      trafficWhere.push(`COALESCE(tme.updated_at, tme.valid_from) >= $${index}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      const index = params.length;
+      sourceWhere.push(`COALESCE(si.published_at, si.fetched_at) <= $${index}`);
+      trafficWhere.push(`COALESCE(tme.updated_at, tme.valid_from) <= $${index}`);
+    }
+
+    params.push(filters.limit ?? 80);
+    const result = await this.pool.query<SpatialHeatmapCellRow>(
+      `WITH observations AS (
+         SELECT
+           'source_item'::text AS observation_type,
+           si.id::text AS source_item_id,
+           si.provider::text AS source_id,
+           si.kind::text AS item_kind,
+           NULL::text AS severity,
+           COALESCE(si.published_at, si.fetched_at) AS observed_at,
+           ST_Centroid(si.geo_hint) AS point
+         FROM source_items si
+         WHERE ${sourceWhere.join(" AND ")}
+         UNION ALL
+         SELECT
+           'traffic_event'::text AS observation_type,
+           NULL::text AS source_item_id,
+           tme.source::text AS source_id,
+           tme.category::text AS item_kind,
+           tme.severity::text AS severity,
+           COALESCE(tme.updated_at, tme.valid_from) AS observed_at,
+           ST_Centroid(tme.geometry) AS point
+         FROM traffic_map_events tme
+         WHERE ${trafficWhere.join(" AND ")}
+       ),
+       valid_points AS (
+         SELECT *,
+           floor(ST_X(point) * 100)::int AS lng_cell,
+           floor(ST_Y(point) * 100)::int AS lat_cell
+         FROM observations
+         WHERE ST_X(point) BETWEEN 9.5 AND 11.2
+           AND ST_Y(point) BETWEEN 62.9 AND 64.1
+       )
+       SELECT
+         concat('cell:', lng_cell, ':', lat_cell) AS id,
+         avg(ST_X(point)) AS center_lng,
+         avg(ST_Y(point)) AS center_lat,
+         count(*)::text AS observation_count,
+         count(*) FILTER (WHERE observation_type = 'source_item')::text AS source_item_count,
+         COALESCE(
+           (array_agg(source_item_id ORDER BY observed_at DESC) FILTER (WHERE source_item_id IS NOT NULL))[1:12],
+           ARRAY[]::text[]
+         ) AS source_item_ids,
+         count(*) FILTER (WHERE observation_type = 'source_item' AND item_kind = 'article')::text AS article_count,
+         count(*) FILTER (WHERE observation_type = 'traffic_event')::text AS traffic_event_count,
+         min(observed_at) AS first_seen_at,
+         max(observed_at) AS last_seen_at,
+         count(DISTINCT observed_at::date)::text AS active_day_count,
+         array_agg(DISTINCT source_id ORDER BY source_id) AS source_ids,
+         max(CASE severity
+           WHEN 'critical' THEN 4
+           WHEN 'high' THEN 3
+           WHEN 'medium' THEN 2
+           WHEN 'low' THEN 1
+           ELSE 0
+         END) AS severity_rank
+       FROM valid_points
+       GROUP BY lng_cell, lat_cell
+       ORDER BY observation_count DESC, last_seen_at DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows.map(spatialHeatmapCellFromRow);
   }
 
   async listOfficialEvents(filters: OfficialEventFilters): Promise<OfficialEvent[]> {
@@ -4067,6 +5629,21 @@ export class PgStore implements Store {
     );
     const row = result.rows[0];
     return row ? sourceItemFromRow(row) : undefined;
+  }
+
+  private async getSourceItemRecord(id: string): Promise<SourceItemRecord | undefined> {
+    const result = await this.pool.query<SourceItemRecordRow>(
+      `SELECT ${sourceItemSelectColumns("si")}, si.raw_payload, si.normalized_payload
+       FROM source_items si
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(array_agg(ssi.situation_id ORDER BY ssi.situation_id), '{}') AS linked_situation_ids
+         FROM situation_source_items ssi WHERE ssi.source_item_id = si.id
+       ) links ON true
+       WHERE si.id = $1`,
+      [id],
+    );
+    const row = result.rows[0];
+    return row ? sourceItemRecordFromRow(row) : undefined;
   }
 
   async listSavedArticles(login: string) {
@@ -4549,6 +6126,152 @@ export class PgStore implements Store {
     return result.rows.map((row) =>
       withTrafficPulseStaleOverlay(row.payload, row.measurementTo, row.updatedAt, responseTimeMs),
     );
+  }
+
+  async getTrafficTelemetryHistorySummary(
+    filters: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to"> = {},
+  ): Promise<CommandCenterTelemetryHistorySummary> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.from) {
+      params.push(filters.from);
+      where.push(`observed_at >= $${params.length}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      where.push(`observed_at <= $${params.length}`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const [travelTime, trafficCounters] = await Promise.all([
+      this.pool.query<TelemetryHistorySummaryRow>(
+        `SELECT
+           count(*)::text AS observations,
+           count(DISTINCT corridor_id)::text AS tracked_entities,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           )::text AS notable_observations
+         FROM datex_travel_time_history
+         ${whereSql}`,
+        params,
+      ),
+      this.pool.query<TelemetryHistorySummaryRow>(
+        `SELECT
+           count(*)::text AS observations,
+           count(DISTINCT point_id)::text AS tracked_entities,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7)::text AS notable_observations
+         FROM traffic_counter_snapshot_history
+         ${whereSql}`,
+        params,
+      ),
+    ]);
+
+    return {
+      datexTravelTime: telemetryHistorySummaryFromRow(travelTime.rows[0]),
+      trafficCounters: telemetryHistorySummaryFromRow(trafficCounters.rows[0]),
+    };
+  }
+
+  async listTrafficTelemetryPatterns(
+    filters: Pick<CommandCenterSpatialAnalyticsQueryInput, "from" | "to"> & { limit?: number } = {},
+  ): Promise<TelemetryHistoryPattern[]> {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters.from) {
+      params.push(filters.from);
+      where.push(`observed_at >= $${params.length}`);
+    }
+    if (filters.to) {
+      params.push(filters.to);
+      where.push(`observed_at <= $${params.length}`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const limit = Math.min(30, Math.max(1, filters.limit ?? 12));
+    const limitParam = params.length + 1;
+    const queryParams = [...params, limit];
+    const [travelTime, trafficCounters] = await Promise.all([
+      this.pool.query<TelemetryHistoryPatternRow>(
+        `SELECT
+           'datex_travel_time'::text AS source,
+           corridor_id AS entity_id,
+           (array_agg(name ORDER BY observed_at DESC))[1] AS title,
+           count(*)::text AS observation_count,
+           count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           )::text AS notable_observation_count,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           max(delay_seconds) AS max_delay_seconds,
+           NULL::real AS max_anomaly_ratio,
+           NULL::json AS geometry
+         FROM datex_travel_time_history
+         ${whereSql}
+         GROUP BY corridor_id
+         HAVING count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           ) >= 2
+           OR count(DISTINCT observed_at::date) >= 2
+         ORDER BY count(*) FILTER (
+             WHERE state IN ('slow', 'congested')
+                OR COALESCE(delay_seconds, 0) >= 180
+           ) DESC,
+           count(DISTINCT observed_at::date) DESC,
+           max(delay_seconds) DESC NULLS LAST,
+           max(observed_at) DESC
+         LIMIT $${limitParam}`,
+        queryParams,
+      ),
+      this.pool.query<TelemetryHistoryPatternRow>(
+        `SELECT
+           'trafikkdata'::text AS source,
+           point_id AS entity_id,
+           COALESCE(
+             (array_remove(array_agg(NULLIF(payload->>'name', '') ORDER BY observed_at DESC), NULL))[1],
+             point_id
+           ) AS title,
+           count(*)::text AS observation_count,
+           count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7)::text AS notable_observation_count,
+           count(DISTINCT observed_at::date)::text AS active_day_count,
+           min(observed_at) AS first_observed_at,
+           max(observed_at) AS last_observed_at,
+           NULL::real AS max_delay_seconds,
+           max(anomaly_ratio) AS max_anomaly_ratio,
+           (array_agg(ST_AsGeoJSON(geometry)::json ORDER BY observed_at DESC))[1] AS geometry
+         FROM traffic_counter_snapshot_history
+         ${whereSql}
+         GROUP BY point_id
+         HAVING count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7) >= 2
+           OR count(DISTINCT observed_at::date) >= 2
+         ORDER BY count(*) FILTER (WHERE COALESCE(anomaly_ratio, 0) >= 1.7) DESC,
+           count(DISTINCT observed_at::date) DESC,
+           max(anomaly_ratio) DESC NULLS LAST,
+           max(observed_at) DESC
+         LIMIT $${limitParam}`,
+        queryParams,
+      ),
+    ]);
+
+    return [...travelTime.rows, ...trafficCounters.rows]
+      .map(telemetryHistoryPatternFromRow)
+      .sort(
+        (left, right) =>
+          right.notableObservationCount - left.notableObservationCount ||
+          right.activeDayCount - left.activeDayCount ||
+          (right.maxDelaySeconds ?? 0) - (left.maxDelaySeconds ?? 0) ||
+          (right.maxAnomalyRatio ?? 0) - (left.maxAnomalyRatio ?? 0) ||
+          (right.lastObservedAt ?? "").localeCompare(left.lastObservedAt ?? "") ||
+          left.id.localeCompare(right.id),
+      )
+      .slice(0, limit);
   }
 
   async getLatestWorkerCycleMetrics(): Promise<WorkerCycleMetrics | undefined> {

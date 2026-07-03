@@ -15,10 +15,12 @@
     "fast-xml-parser": "^5.2.3",
     "openai": "^5.1.1",
     "pg": "^8.16.0",
+    "web-push": "^3.6.7",
     "zod": "^3.25.56"
   },
   "devDependencies": {
     "@types/pg": "^8.15.4",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   }

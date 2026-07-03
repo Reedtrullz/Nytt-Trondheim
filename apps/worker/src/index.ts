@@ -13,7 +13,11 @@ import type {
   TrafficCounterSnapshot,
   WorkerCycleMetrics,
 } from "@nytt/shared";
-import { analyzeArticleCoverage } from "@nytt/shared";
+import {
+  analyzeArticleCoverage,
+  buildMorningBrief,
+  buildNotificationTriggerPage,
+} from "@nytt/shared";
 import {
   collectFrontpage,
   collectMunicipality,
@@ -70,6 +74,7 @@ import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 import { WorkerRepository } from "./repository.js";
+import { deliverPushNotifications, type PushDeliveryMetrics } from "./push-notifications.js";
 import {
   collectTrafficInfoMessages,
   defaultTrafficInfoEndpoint,
@@ -225,6 +230,27 @@ export function isSoftDeepSeekOutputFailure(error: string | undefined): boolean 
   return softDeepSeekOutputFailureMarkers.some((marker) => normalized.includes(marker));
 }
 
+function softDeepSeekOutputFailureDetail(error: string | undefined): string {
+  const normalized = error?.toLocaleLowerCase("en") ?? "";
+  if (normalized.includes("truncated by token limit")) {
+    return "Siste AI-respons traff token-grensen og ble forkastet før lagring.";
+  }
+  if (
+    normalized.includes("returned empty json content") ||
+    normalized.includes("returned no json object")
+  ) {
+    return "Siste AI-respons manglet et komplett JSON-objekt.";
+  }
+  if (
+    normalized.includes("unexpected end of json input") ||
+    normalized.includes("unexpected token") ||
+    normalized.includes("syntaxerror")
+  ) {
+    return "Siste AI-respons var ikke gyldig JSON.";
+  }
+  return "Siste AI-respons passet ikke den forventede trygge strukturen.";
+}
+
 function deepSeekOkHealthDetail(result: DeepSeekAnalysisResult): string {
   return [
     `${result.clusters.length} validerte kandidatgrupper`,
@@ -270,12 +296,47 @@ export function sourceHealthFromDeepSeekAnalysis(
     nextPollAt,
     detail: [
       softOutputFailure
-        ? "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering brukes fortsatt."
+        ? "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering og reservebrief brukes fortsatt."
         : "AI-analyse feilet, men deterministisk gruppering brukes fortsatt.",
-      analysis.run.error,
+      softOutputFailure ? softDeepSeekOutputFailureDetail(analysis.run.error) : analysis.run.error,
     ]
       .filter(Boolean)
       .join(" "),
+  };
+}
+
+export function sourceHealthFromPushDelivery(
+  metrics: PushDeliveryMetrics,
+  checkedAt: string,
+  nextPollAt: string,
+): SourceHealth {
+  if (!metrics.configured) {
+    return {
+      source: "web_push",
+      label: "Web Push",
+      state: "disabled",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "WEB_PUSH_VAPID_PUBLIC_KEY og WEB_PUSH_VAPID_PRIVATE_KEY er ikke konfigurert.",
+    };
+  }
+
+  const failed = metrics.failed > 0;
+  return {
+    source: "web_push",
+    label: "Web Push",
+    state: failed ? "degraded" : "ok",
+    lastCheckedAt: checkedAt,
+    ...(failed ? { lastFailureAt: checkedAt } : {}),
+    nextPollAt,
+    detail: [
+      `${metrics.candidates} kandidater vurdert`,
+      `${metrics.subscriptions} aktive abonnementer`,
+      `${metrics.claimed} levering${metrics.claimed === 1 ? "" : "er"} reservert`,
+      `${metrics.sent} sendt`,
+      `${metrics.failed} feilet`,
+      `${metrics.skipped} hoppet over`,
+    ].join(", "),
   };
 }
 
@@ -1294,8 +1355,28 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     ...resolvedDatexSituations,
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
+  const briefArticles = await repository.recentArticles(24);
+  const briefSituations = await repository.homeSituationSummaries(3);
+  const morningBrief = buildMorningBrief({
+    articles: briefArticles,
+    situations: briefSituations,
+    sourceHealth: await repository.sourceHealth(),
+    latestAiRun: analysis.run,
+    generatedAt: analysis.run.completedAt,
+  });
+  await repository.upsertMorningBrief(morningBrief);
+  const notificationTriggers = buildNotificationTriggerPage({
+    situations: await repository.trackedSituations(),
+    articles: briefArticles,
+    generatedAt: analysis.run.completedAt,
+    filters: { severities: ["critical", "warning"], limit: 10 },
+  });
+  const pushMetrics = await deliverPushNotifications(notificationTriggers.items, repository);
+  await repository.setHealth(
+    sourceHealthFromPushDelivery(pushMetrics, analysis.run.completedAt, nextPollAt),
+  );
   console.log(
-    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints`,
+    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief; push ${pushMetrics.configured ? "configured" : "disabled"} ${pushMetrics.sent} sent / ${pushMetrics.failed} failed / ${pushMetrics.skipped} skipped`,
   );
   const workerMetrics = buildWorkerCycleMetrics({
     cycleStartedAt,

@@ -6,6 +6,7 @@ import {
   distanceKmBetween,
   localFocusMetaForCard,
   rankHomeStoryCardsByLocalFocus,
+  summarizeHomeStoryCardsByLocalFocus,
 } from "./homeLocalFocus.js";
 
 function article(overrides: Partial<Article> = {}): Article {
@@ -81,5 +82,40 @@ describe("home local focus", () => {
     );
 
     expect(rankHomeStoryCardsByLocalFocus(cards, undefined)).toBe(cards);
+  });
+
+  it("summarizes local-focus coverage and closest story cards", () => {
+    const cards = homeStoryCardsForGroups(
+      groupHomeArticles([
+        article({
+          id: "far",
+          title: "Sak fra Orkanger",
+          location: { lat: 63.312, lng: 9.853, label: "Orkanger" },
+          places: ["Orkanger"],
+        }),
+        article({
+          id: "near",
+          title: "Sak fra Elgeseter",
+          location: { lat: 63.4166, lng: 10.3966, label: "Elgeseter" },
+          places: ["Elgeseter"],
+        }),
+        article({ id: "unlocated", title: "Sak uten sted", location: undefined, places: [] }),
+      ]),
+    );
+
+    const summary = summarizeHomeStoryCardsByLocalFocus(
+      cards,
+      { lat: 63.4166, lng: 10.3966, radiusKm: 4 },
+      2,
+    );
+
+    expect(summary.locatedCount).toBe(2);
+    expect(summary.withinRadiusCount).toBe(1);
+    expect(summary.closestItems.map((item) => item.id)).toEqual(["article:near", "article:far"]);
+    expect(summary.closestItems[0]).toMatchObject({
+      title: "Sak fra Elgeseter",
+      locationLabel: "Elgeseter",
+      withinRadius: true,
+    });
   });
 });

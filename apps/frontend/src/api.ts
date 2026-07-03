@@ -9,15 +9,28 @@ import type {
   ArticlePage,
   ArticleTopic,
   BootstrapPayload,
+  CommandCenterBriefingPayload,
+  CommandCenterSpatialAnalyticsPayload,
+  CommandCenterSpatialAnalyticsQueryInput,
   CoverageBundlePage,
   CoverageBundleQueryInput,
   EmailLoginRequestInput,
   MapFeature,
+  NotificationTriggerPage,
+  NotificationTriggerQueryInput,
   OperationsTimelineQuery,
   OperationsTimelineResponse,
   OperationsStatus,
   PrivateAnnotationUpdateRequest,
   PrivateMapFeatureInput,
+  PushDeliveryPage,
+  PushNotificationSettings,
+  PushSubscriptionInput,
+  PushSubscriptionSummary,
+  RawInspectorAiRunDetail,
+  RawInspectorAiRunFilters,
+  RawInspectorAiRunPage,
+  RawInspectorSourceItemDetail,
   SessionPayload,
   Situation,
   SituationMapWorkspace,
@@ -224,6 +237,70 @@ export const api = {
       `/api/operations/coverage-bundles${search ? `?${search}` : ""}`,
     );
   },
+  notificationTriggers: (query: NotificationTriggerQueryInput = { limit: 30 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (Array.isArray(value) && value.length > 0) {
+        parameters.set(key, value.join(","));
+      } else if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<NotificationTriggerPage>(
+      `/api/operations/notification-triggers${search ? `?${search}` : ""}`,
+    );
+  },
+  notificationSettings: () => request<PushNotificationSettings>("/api/notifications/settings"),
+  subscribeToNotifications: (input: PushSubscriptionInput) =>
+    request<PushSubscriptionSummary>("/api/notifications/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  unsubscribeFromNotifications: (id: string) =>
+    request<void>(`/api/notifications/subscriptions/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  notificationDeliveries: (limit = 50) =>
+    request<PushDeliveryPage>(`/api/operations/notification-deliveries?limit=${limit}`),
+  spatialAnalytics: (
+    query: CommandCenterSpatialAnalyticsQueryInput = { minDelaySeconds: 180, limit: 80 },
+  ) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<CommandCenterSpatialAnalyticsPayload>(
+      `/api/operations/spatial-analytics${search ? `?${search}` : ""}`,
+    );
+  },
+  rawSourceItem: (id: string) =>
+    request<RawInspectorSourceItemDetail>(
+      `/api/operations/raw/source-items/${encodeURIComponent(id)}`,
+    ),
+  rawAiRuns: (query: RawInspectorAiRunFilters = { limit: 20 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<RawInspectorAiRunPage>(
+      `/api/operations/raw/ai-runs${search ? `?${search}` : ""}`,
+    );
+  },
+  rawAiRun: (id: string) =>
+    request<RawInspectorAiRunDetail>(`/api/operations/raw/ai-runs/${encodeURIComponent(id)}`),
   operationsTimeline: (query: OperationsTimelineQuery = {}) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
@@ -296,6 +373,7 @@ export const api = {
   },
   savedArticles: () => request<ArticlePage["items"]>("/api/saved/articles"),
   operations: () => request<OperationsStatus>("/api/operations/status"),
+  commandBriefing: () => request<CommandCenterBriefingPayload>("/api/operations/briefing"),
   workspace: (id: string) => request<SituationWorkspace>(situationPath(id)),
   saveArticle: (id: string, saved: boolean) =>
     request<void>(`/api/saved/articles/${id}`, { method: saved ? "PUT" : "DELETE" }),

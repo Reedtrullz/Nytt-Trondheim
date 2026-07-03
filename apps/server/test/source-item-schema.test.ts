@@ -56,7 +56,13 @@ describe("source item schema", () => {
     expect(schema).toContain("s.payload->>'officialEventId'");
     expect(schema).toContain("WHERE si.kind = 'official_event'");
     expect(schema).toContain("ON CONFLICT (situation_id, source_item_id) DO NOTHING");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS datex_travel_time_history");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS traffic_counter_snapshot_history");
     expect(schema).not.toMatch(/INSERT INTO source_items[\s\S]*FROM datex_travel_times/);
+    expect(schema).not.toMatch(/INSERT INTO source_items[\s\S]*FROM datex_travel_time_history/);
+    expect(schema).not.toMatch(
+      /INSERT INTO source_items[\s\S]*FROM traffic_counter_snapshot_history/,
+    );
     expect(schema).not.toContain("datex_travel_time', 'official_event'");
   });
 
@@ -125,6 +131,11 @@ describe("source item schema", () => {
       expect(evidenceSourceConstraint).toContain(provider);
       expect(sourceItemProviderConstraint).toContain(provider);
     }
+    expect(sourceHealthConstraint).toContain("web_push");
+    expect(evidenceSourceConstraint).toContain("web_push");
+    expect(sourceItemProviderConstraint).toContain("web_push");
+    expect(schema).toContain("CHECK (source NOT IN ('dsb','web_push'))");
+    expect(schema).toContain("CHECK (provider NOT IN ('dsb','web_push'))");
     expect(schema).toContain("traffic_map_events_source_check");
     expect(schema).toContain("CHECK (source IN ('vegvesen_traffic_info'))");
     expect(schema).toContain("source_items_entur_vehicle_positions_kind_check");
@@ -211,6 +222,18 @@ describe("source item schema", () => {
     expect(schema).not.toContain("'coverage_bundles'");
   });
 
+  it("stores generated morning briefs outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS morning_briefs");
+    expect(schema).toContain("mode text NOT NULL CHECK (mode IN ('ai_assisted', 'deterministic'))");
+    expect(schema).toContain("paragraphs jsonb NOT NULL");
+    expect(schema).toContain("CHECK (jsonb_array_length(paragraphs) = 3)");
+    expect(schema).toContain("morning_briefs_generated_at_idx");
+    expect(schema).toContain("013_morning_briefs");
+    expect(schema).not.toMatch(/morning_briefs[\s\S]{0,160}source_items/);
+  });
+
   it("stores access requests outside source_items", async () => {
     const schema = await readFile(schemaPath, "utf8");
 
@@ -242,5 +265,19 @@ describe("source item schema", () => {
     expect(schema).not.toMatch(/CREATE TABLE IF NOT EXISTS auth_tokens[\s\S]*raw_payload/);
     expect(schema).not.toMatch(/auth_tokens[\s\S]{0,120}source_items/);
     expect(schema).not.toMatch(/user_identities[\s\S]{0,120}source_items/);
+  });
+
+  it("stores Web Push subscriptions and deliveries outside source_items", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS push_subscriptions");
+    expect(schema).toContain("endpoint_hash text NOT NULL UNIQUE");
+    expect(schema).toContain("min_severity text NOT NULL DEFAULT 'warning'");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS push_notification_deliveries");
+    expect(schema).toContain("UNIQUE (trigger_id, subscription_id)");
+    expect(schema).toContain("push_notification_deliveries_created_idx");
+    expect(schema).toContain("014_web_push_notifications");
+    expect(schema).not.toMatch(/push_subscriptions[\s\S]{0,160}source_items/);
+    expect(schema).not.toMatch(/push_notification_deliveries[\s\S]{0,160}source_items/);
   });
 });

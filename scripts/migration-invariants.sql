@@ -202,6 +202,24 @@ SELECT pg_temp.expect_check_violation(
 );
 
 SELECT pg_temp.expect_check_violation(
+  'Web Push must stay out of evidence_items',
+  $$INSERT INTO evidence_items (
+      id, situation_id, source, source_url, provenance, confidence, payload, extracted_at
+    ) VALUES (
+      'ci-evidence-web-push',
+      'ci-guardrail-situation',
+      'web_push',
+      'https://example.invalid/ci',
+      'private_annotation',
+      0.1,
+      '{}'::jsonb,
+      now()
+    )$$,
+  'evidence_items_no_health_only_source_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
   'telemetry evidence ' || source_id,
   format(
     $stmt$INSERT INTO evidence_items (
@@ -262,6 +280,24 @@ SELECT pg_temp.expect_check_violation(
       '{}'::jsonb,
       'ci-hash-dsb',
       'official'
+    )$$,
+  'source_items_no_health_only_provider_check',
+  NULL
+);
+
+SELECT pg_temp.expect_check_violation(
+  'Web Push must stay out of source_items',
+  $$INSERT INTO source_items (
+      id, provider, kind, fetched_at, raw_payload, normalized_payload, capture_hash, reliability_tier
+    ) VALUES (
+      'ci-source-web-push',
+      'web_push',
+      'reporter_note',
+      now(),
+      '{}'::jsonb,
+      '{}'::jsonb,
+      'ci-hash-web-push',
+      'internal'
     )$$,
   'source_items_no_health_only_provider_check',
   NULL
@@ -333,6 +369,15 @@ VALUES
   ('entur_vehicle_positions'),
   ('entur_service_alerts'),
   ('bane_nor');
+
+INSERT INTO source_health (source, label, state, last_checked_at, detail)
+VALUES (
+  'web_push',
+  'Web Push',
+  'ok',
+  now(),
+  'CI verifies Web Push can be reported as source_health without evidence/source_items rows'
+);
 
 INSERT INTO source_items (
   id,

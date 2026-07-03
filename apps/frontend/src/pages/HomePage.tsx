@@ -1,7 +1,24 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { Article, BootstrapPayload } from "@nytt/shared";
+import {
+  buildMorningBrief,
+  publicNotificationTriggerGuidance,
+  type Article,
+  type BootstrapPayload,
+  type NotificationTriggerSeverity,
+  type SourceConfidenceSummary,
+} from "@nytt/shared";
 import { api } from "../api.js";
+import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
 import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
 import {
   articleCategories,
@@ -15,18 +32,32 @@ import {
   searchSummary,
   type ArticleCategoryFilter,
   type HomeFilters,
+  type HomeTimeWindow,
 } from "../homeFilters.js";
 import { groupHomeArticles, type HomeArticleGroup } from "../homeArticleGroups.js";
 import {
-  nearbyStoryItemsForGroups,
+  nearbyDistanceLabel,
+  nearbyStoryItemsForGroupsAndSituations,
   nearbyStorySummary,
   type NearbyStoryItem,
 } from "../homeNearby.js";
-import { rankHomeStoryCardsByLocalFocus, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
+import {
+  homeNeighborhoodFocusOption,
+  homeNeighborhoodFocusOptions,
+  homeNeighborhoodFocusOptionForQuery,
+  homeNeighborhoodFocusStorageKey,
+} from "../homeNeighborhoodFocus.js";
+import {
+  rankHomeStoryCardsByLocalFocus,
+  summarizeHomeStoryCardsByLocalFocus,
+  type HomeLocalFocusPoint,
+  type HomeLocalFocusSummary,
+} from "../homeLocalFocus.js";
 import {
   homeStoryCardsForGroups,
   sourceClusterLabelForGroup,
   type HomeStoryCard,
+  type HomeStoryVerification,
 } from "../homeStoryCards.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
@@ -40,7 +71,7 @@ const localFocusRadiusKm = 10;
 type LocalFocusState =
   | { status: "idle" }
   | { status: "locating" }
-  | { status: "active"; point: HomeLocalFocusPoint }
+  | { status: "active"; point: HomeLocalFocusPoint; label: string; persistent: boolean }
   | { status: "error"; message: string };
 
 function formatTime(date: string) {
@@ -49,6 +80,17 @@ function formatTime(date: string) {
     minute: "2-digit",
     timeZone: "Europe/Oslo",
   }).format(new Date(date));
+}
+
+function notificationSeverityLabel(severity: NotificationTriggerSeverity) {
+  switch (severity) {
+    case "critical":
+      return "Kritisk";
+    case "warning":
+      return "Varsel";
+    case "watch":
+      return "Følg med";
+  }
 }
 
 function SaveButton({
@@ -123,6 +165,197 @@ function SituationBanner({
   );
 }
 
+export function MorningBriefPanel({
+  brief,
+  articles = [],
+  situations = [],
+}: {
+  brief?: BootstrapPayload["morningBrief"];
+  articles?: Article[];
+  situations?: BootstrapPayload["situations"];
+}) {
+  if (!brief) return null;
+  const modeLabel = brief.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief";
+  const articlesById = new Map(articles.map((article) => [article.id, article]));
+  const situationsById = new Map(situations.map((situation) => [situation.id, situation]));
+  const linkedArticles = brief.articleIds
+    .flatMap((id) => {
+      const article = articlesById.get(id);
+      const href = article ? safeExternalUrl(article.url) : undefined;
+      return article && href ? [{ article, href }] : [];
+    })
+    .slice(0, 3);
+  const linkedSituations = brief.situationIds
+    .flatMap((id) => {
+      const situation = situationsById.get(id);
+      return situation ? [situation] : [];
+    })
+    .slice(0, 2);
+  const hasSourceLinks = linkedArticles.length > 0 || linkedSituations.length > 0;
+  return (
+    <section
+      className={`morning-brief morning-brief-${brief.mode}`}
+      aria-labelledby="morning-brief-heading"
+    >
+      <div className="morning-brief-copy">
+        <p className="label">{modeLabel}</p>
+        <div className="morning-brief-heading">
+          <h2 id="morning-brief-heading">{brief.title}</h2>
+          <span>{formatTime(brief.generatedAt)}</span>
+        </div>
+        <div className="morning-brief-paragraphs">
+          {brief.paragraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
+        <small>{brief.sourceLine}</small>
+        {brief.aiRun ? (
+          <p className="morning-brief-ai-trace">
+            <span>AI-spor</span>
+            <span>
+              {brief.aiRun.provider === "deepseek" ? "DeepSeek" : "Deterministisk"} ·{" "}
+              {brief.aiRun.model} · {brief.aiRun.status.toUpperCase()} ·{" "}
+              {formatTime(brief.aiRun.completedAt)}
+            </span>
+          </p>
+        ) : null}
+        {hasSourceLinks ? (
+          <div className="morning-brief-sources" aria-label="Morgenbrief-grunnlag">
+            <span>Grunnlag</span>
+            <div>
+              {linkedArticles.map(({ article, href }) => (
+                <a href={href} key={article.id} rel="noreferrer noopener" target="_blank">
+                  {article.title}
+                </a>
+              ))}
+              {linkedSituations.map((situation) => (
+                <a href={`/situasjoner/${situation.id}`} key={situation.id}>
+                  {situation.title}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <dl className="morning-brief-highlights" aria-label="Morgenbrief-nøkkeltall">
+        {brief.highlights.map((highlight) => (
+          <div key={highlight.label}>
+            <dt>{highlight.label}</dt>
+            <dd>
+              <strong>{highlight.value}</strong>
+              <span>{highlight.detail}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+export function CityPulseSignalPanel({ brief }: { brief?: BootstrapPayload["morningBrief"] }) {
+  return (
+    <section className="city-pulse-signal-panel" aria-labelledby="city-pulse-signal-heading">
+      <div className="section-heading-row">
+        <div>
+          <p className="label">Varsel og AI-spor</p>
+          <h2 id="city-pulse-signal-heading">Slik vurderes høyeffekt-signaler</h2>
+        </div>
+        <Link to="/varsler">
+          Åpne varsler <ArrowIcon />
+        </Link>
+      </div>
+      <div className="city-pulse-signal-status">
+        <div>
+          <span>Morgenbrief</span>
+          <strong>{brief?.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief"}</strong>
+        </div>
+        <div>
+          <span>Siste analyse</span>
+          <strong>{brief?.aiRun ? formatTime(brief.aiRun.completedAt) : "Ikke lagret"}</strong>
+        </div>
+        <div>
+          <span>Varselregler</span>
+          <strong>{publicNotificationTriggerGuidance.length} offentlige kategorier</strong>
+        </div>
+      </div>
+      <div className="city-pulse-signal-guidance">
+        {publicNotificationTriggerGuidance.map((item) => (
+          <article key={item.kind}>
+            <span>{notificationSeverityLabel(item.severity)}</span>
+            <strong>{item.title}</strong>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
+  const morningBrief = useMemo(
+    () =>
+      data.morningBrief ??
+      buildMorningBrief({
+        articles: data.articles,
+        situations: data.situations,
+        sourceHealth: data.sourceHealth,
+      }),
+    [data.articles, data.morningBrief, data.situations, data.sourceHealth],
+  );
+  const widgets = useMemo(() => {
+    const nextWidgets: DashboardWidgetDefinition[] = [];
+    nextWidgets.push({
+      id: "morning-brief",
+      title: "Morgenbrief",
+      description: "Dagens prioriterte bypuls.",
+      defaultSize: "full",
+      resizable: false,
+      children: (
+        <MorningBriefPanel
+          articles={data.articles}
+          brief={morningBrief}
+          situations={data.situations}
+        />
+      ),
+    });
+    nextWidgets.push({
+      id: "signal-trace",
+      title: "Varsel og AI-spor",
+      description: "Offentlig forklaring på høyeffekt-signaler.",
+      defaultSize: "full",
+      resizable: false,
+      children: <CityPulseSignalPanel brief={morningBrief} />,
+    });
+    if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
+      nextWidgets.push({
+        id: "situation-banner",
+        title: "Situasjon",
+        description: "Pågående eller foreløpig offentlig hendelse.",
+        defaultSize: "full",
+        resizable: false,
+        children: <SituationBanner situations={data.situations} />,
+      });
+    }
+    return nextWidgets;
+  }, [data.articles, data.situations, morningBrief]);
+
+  if (widgets.length === 0) return null;
+
+  return (
+    <DashboardGrid
+      ariaLabel="Bypulsmoduler"
+      label="City Pulse"
+      title="Dagens oversikt"
+      storageKey="nytt-city-pulse-dashboard-v1"
+      editable={false}
+      showWidgetHeaders={false}
+      variant="city-pulse"
+      widgetChrome="bare"
+      widgets={widgets}
+    />
+  );
+}
+
 function SourceCluster({ group }: { group: HomeArticleGroup }) {
   if (group.articles.length < 2) return null;
   const label = sourceClusterLabelForGroup(group);
@@ -194,12 +427,19 @@ function LeadStory({
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
+          {card.verification ? (
+            <span className="story-badge story-badge-verified" title={card.verification.detail}>
+              {card.verification.label}
+            </span>
+          ) : null}
+          <StoryConfidenceBadge confidence={card.sourceConfidence} />
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
             </span>
           ))}
         </div>
+        <StoryVerificationProof verification={card.verification} />
         <SourceCluster group={group} />
         <div className="lead-footer">
           <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
@@ -227,6 +467,35 @@ function storyKindLabel(kind: HomeStoryCard["cardKind"]): string {
     case "sak":
       return "Sak";
   }
+}
+
+export function StoryVerificationProof({ verification }: { verification?: HomeStoryVerification }) {
+  if (!verification) return null;
+  return (
+    <p className="story-verification-proof">
+      <span>{verification.label}</span>
+      <span>{verification.sourceSummary}</span>
+      <span className="sr-only">{verification.detail}</span>
+    </p>
+  );
+}
+
+export function StoryConfidenceBadge({ confidence }: { confidence: SourceConfidenceSummary }) {
+  const score = confidence.score;
+  const scoreLabel =
+    typeof score === "number" && Number.isFinite(score) && score > 0
+      ? ` · ${Math.round(score * 100)} %`
+      : "";
+  return (
+    <span
+      className={`story-badge story-confidence story-confidence-${confidence.level}`}
+      title={confidence.rationale}
+      aria-label={`Kildetillit: ${confidence.label}${scoreLabel}`}
+    >
+      Kildetillit: {confidence.label}
+      {scoreLabel}
+    </span>
+  );
 }
 
 function StoryCard({
@@ -271,12 +540,19 @@ function StoryCard({
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
+          {card.verification ? (
+            <span className="story-badge story-badge-verified" title={card.verification.detail}>
+              {card.verification.label}
+            </span>
+          ) : null}
+          <StoryConfidenceBadge confidence={card.sourceConfidence} />
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
             </span>
           ))}
         </div>
+        <StoryVerificationProof verification={card.verification} />
         <SourceCluster group={card.group} />
       </div>
       <div className="story-card-side">
@@ -309,29 +585,82 @@ function geolocationErrorMessage(error?: GeolocationPositionError): string {
   return "Kunne ikke hente posisjon.";
 }
 
+export function LocalFocusSummaryPanel({
+  label,
+  radiusKm,
+  summary,
+}: {
+  label: string;
+  radiusKm: number;
+  summary: HomeLocalFocusSummary;
+}) {
+  const radiusLabel = `${radiusKm} km`;
+  return (
+    <section className="local-focus-summary" aria-label="Lokalt fokus">
+      <div>
+        <p className="label">Lokalt fokus</p>
+        <h2>Nær {label}</h2>
+        <p>
+          {summary.locatedCount > 0
+            ? `${summary.withinRadiusCount} av ${summary.locatedCount} stedsfestede saker er innen ${radiusLabel}.`
+            : `Ingen stedsfestede saker i utvalget kan måles mot ${label} ennå.`}
+        </p>
+      </div>
+      {summary.closestItems.length > 0 ? (
+        <ol>
+          {summary.closestItems.map((item) => (
+            <li key={item.id}>
+              <span>
+                <b>{item.title}</b>
+                {item.locationLabel ? <small>{item.locationLabel}</small> : null}
+              </span>
+              <em className={item.withinRadius ? "near" : undefined}>
+                {nearbyDistanceLabel(item.distanceKm)}
+              </em>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
 function NearbyRail({
   articles,
   data,
   groups,
   localFocus,
+  onTimeWindowChange,
+  timeWindow,
+  timeWindowLabel,
 }: {
   articles: Article[];
   data: BootstrapPayload;
   groups: HomeArticleGroup[];
   localFocus?: HomeLocalFocusPoint;
+  onTimeWindowChange: (timeWindow: HomeTimeWindow) => void;
+  timeWindow: HomeTimeWindow;
+  timeWindowLabel?: string;
 }) {
   const allNearby = useMemo(
-    () => nearbyStoryItemsForGroups(groups, { limit: Number.MAX_SAFE_INTEGER, localFocus }),
-    [groups, localFocus],
+    () =>
+      nearbyStoryItemsForGroupsAndSituations(groups, data.situations, {
+        limit: Number.MAX_SAFE_INTEGER,
+        localFocus,
+      }),
+    [data.situations, groups, localFocus],
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
+  const mapNearby = useMemo(() => allNearby.slice(0, 24), [allNearby]);
   const [selectedNearbyId, setSelectedNearbyId] = useState<string>();
   const nearbyIds = nearby.map((item) => item.id).join("|");
-  const selectedNearby = nearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
+  const mapNearbyIds = mapNearby.map((item) => item.id).join("|");
+  const selectedNearby = mapNearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
   const selectedTarget = nearbyMapTarget(selectedNearby);
   const selectedArticleUrl = selectedNearby
-    ? safeExternalUrl(selectedNearby.article.url)
+    ? safeExternalUrl(selectedNearby.article?.url)
     : undefined;
+  const selectedDistance = localFocus ? nearbyDistanceLabel(selectedNearby?.distanceKm) : undefined;
   const municipalityArchiveUrl = safeExternalUrl(
     "https://www.trondheim.kommune.no/aktuelt/nyheter/",
   );
@@ -339,9 +668,9 @@ function NearbyRail({
 
   useEffect(() => {
     setSelectedNearbyId((current) =>
-      current && nearby.some((item) => item.id === current) ? current : nearby[0]?.id,
+      current && mapNearby.some((item) => item.id === current) ? current : nearby[0]?.id,
     );
-  }, [nearby, nearbyIds]);
+  }, [mapNearby, mapNearbyIds, nearby, nearbyIds]);
 
   return (
     <aside className="home-rail">
@@ -349,14 +678,22 @@ function NearbyRail({
         <div className="rail-title">
           <div>
             <h2 id="nearby-heading">I nærheten</h2>
-            <p>{nearbyStorySummary(nearby, allNearby.length)}</p>
+            <p>
+              {nearbyStorySummary(nearby, allNearby.length)}
+              {timeWindowLabel ? ` Kartet følger ${timeWindowLabel.toLocaleLowerCase("nb")}.` : ""}
+            </p>
           </div>
           <Link to="/situasjoner">
             Åpne situasjonskart <ArrowIcon />
           </Link>
         </div>
+        <MapTimeSlider value={timeWindow} onChange={onTimeWindowChange} />
         <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
-          <NewsMap items={nearby} selectedId={selectedNearby?.id} onSelect={setSelectedNearbyId} />
+          <NewsMap
+            items={mapNearby}
+            selectedId={selectedNearby?.id}
+            onSelect={setSelectedNearbyId}
+          />
         </Suspense>
         {nearby.length > 0 ? (
           <>
@@ -376,6 +713,9 @@ function NearbyRail({
                       <b>{item.title}</b>
                       <small>
                         {item.locationLabel} · {item.sourceLabel}
+                        {localFocus
+                          ? ` · ${nearbyDistanceLabel(item.distanceKm) ?? "uten avstand"}`
+                          : ""}
                       </small>
                     </span>
                     <em className={`nearby-kind nearby-kind-${item.kind}`}>
@@ -392,6 +732,7 @@ function NearbyRail({
               </p>
               <h3>{selectedNearby?.title}</h3>
               <p>{selectedNearby?.relevanceDetail}</p>
+              {selectedDistance ? <p className="nearby-distance">{selectedDistance}</p> : null}
               <div className="nearby-detail-actions">
                 <Link to={selectedTarget.to}>
                   {selectedTarget.label} <ArrowIcon />
@@ -464,6 +805,47 @@ function NearbyRail({
   );
 }
 
+export function MapTimeSlider({
+  value,
+  onChange,
+}: {
+  value: HomeTimeWindow;
+  onChange?: (timeWindow: HomeTimeWindow) => void;
+}) {
+  const selectedIndex = Math.max(0, homeTimeWindows.indexOf(value));
+  const selectedValue = homeTimeWindows[selectedIndex] ?? "all";
+  const selectedLabel = homeTimeWindowLabels[selectedValue];
+
+  return (
+    <div className="nearby-time-slider" aria-label="Kartperiode">
+      <div>
+        <span>Kartperiode</span>
+        <strong>{selectedLabel}</strong>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={homeTimeWindows.length - 1}
+        step={1}
+        value={selectedIndex}
+        aria-label="Filtrer kart etter alder"
+        aria-valuetext={selectedLabel}
+        onChange={(event) => {
+          const next = homeTimeWindows[Number(event.currentTarget.value)] ?? "all";
+          onChange?.(next);
+        }}
+      />
+      <div className="nearby-time-slider-labels" aria-hidden="true">
+        {homeTimeWindows.map((window) => (
+          <span className={window === selectedValue ? "selected" : ""} key={window}>
+            {homeTimeWindowLabels[window]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function searchParamsFor(filters: HomeFilters) {
   return buildHomeSearch(filters).replace(/^\?/, "");
 }
@@ -500,18 +882,53 @@ export function HomePage({
   const [saveError, setSaveError] = useState<string>();
   const timeWindowFrom = useMemo(() => homeTimeWindowFrom(timeWindow), [timeWindow]);
   const [localFocus, setLocalFocus] = useState<LocalFocusState>({ status: "idle" });
+  const [neighborhoodFocusId, setNeighborhoodFocusId] = useState("");
+  const [neighborhoodFocusQuery, setNeighborhoodFocusQuery] = useState("");
   const activeLocalFocus = localFocus.status === "active" ? localFocus.point : undefined;
+  const activeLocalFocusRadiusKm = activeLocalFocus?.radiusKm ?? localFocusRadiusKm;
+
+  useEffect(() => {
+    try {
+      const option = homeNeighborhoodFocusOption(
+        window.localStorage.getItem(homeNeighborhoodFocusStorageKey),
+      );
+      if (!option) return;
+      setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
+      setLocalFocus({
+        status: "active",
+        point: option.point,
+        label: option.label,
+        persistent: true,
+      });
+    } catch {
+      // Local focus is a convenience hint. Storage failures should not block the feed.
+    }
+  }, []);
+
+  const clearStoredNeighborhoodFocus = useCallback(() => {
+    try {
+      window.localStorage.removeItem(homeNeighborhoodFocusStorageKey);
+    } catch {
+      // Ignore storage failures; the UI state is still cleared for this session.
+    }
+  }, []);
 
   const requestLocalFocus = useCallback(() => {
     if (!navigator.geolocation) {
       setLocalFocus({ status: "error", message: "Nettleseren støtter ikke posisjon her." });
       return;
     }
+    setNeighborhoodFocusId("");
+    setNeighborhoodFocusQuery("");
+    clearStoredNeighborhoodFocus();
     setLocalFocus({ status: "locating" });
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocalFocus({
           status: "active",
+          label: "din posisjon",
+          persistent: false,
           point: {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
@@ -522,9 +939,68 @@ export function HomePage({
       (error) => setLocalFocus({ status: "error", message: geolocationErrorMessage(error) }),
       { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 8000 },
     );
-  }, []);
+  }, [clearStoredNeighborhoodFocus]);
 
-  const clearLocalFocus = useCallback(() => setLocalFocus({ status: "idle" }), []);
+  const clearLocalFocus = useCallback(() => {
+    setNeighborhoodFocusId("");
+    setNeighborhoodFocusQuery("");
+    clearStoredNeighborhoodFocus();
+    setLocalFocus({ status: "idle" });
+  }, [clearStoredNeighborhoodFocus]);
+
+  const selectNeighborhoodFocus = useCallback(
+    (value: string) => {
+      const option = homeNeighborhoodFocusOption(value);
+      if (!option) {
+        clearLocalFocus();
+        return;
+      }
+      setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
+      try {
+        window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+      } catch {
+        // The chosen focus still works for this session even when persistence is unavailable.
+      }
+      setLocalFocus({
+        status: "active",
+        point: option.point,
+        label: option.label,
+        persistent: true,
+      });
+    },
+    [clearLocalFocus],
+  );
+
+  const applyNeighborhoodFocusQuery = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const option = homeNeighborhoodFocusOptionForQuery(neighborhoodFocusQuery);
+      if (!option) {
+        setNeighborhoodFocusId("");
+        clearStoredNeighborhoodFocus();
+        setLocalFocus({
+          status: "error",
+          message: "Fant ikke nærområdet. Prøv postnummer eller stedsnavn i Trondheim.",
+        });
+        return;
+      }
+      setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
+      try {
+        window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+      } catch {
+        // The chosen focus still works for this session even when persistence is unavailable.
+      }
+      setLocalFocus({
+        status: "active",
+        point: option.point,
+        label: option.label,
+        persistent: true,
+      });
+    },
+    [clearStoredNeighborhoodFocus, neighborhoodFocusQuery],
+  );
 
   function updateFilters(next: Partial<HomeFilters>) {
     const merged: HomeFilters = { ...filters, ...next };
@@ -610,6 +1086,13 @@ export function HomePage({
   const displayedGroups = useMemo(
     () => displayedStoryCards.map((card) => card.group),
     [displayedStoryCards],
+  );
+  const localFocusSummary = useMemo(
+    () =>
+      activeLocalFocus
+        ? summarizeHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus, 3)
+        : undefined,
+    [activeLocalFocus, storyCards],
   );
   const leadCard = displayedStoryCards[0];
   const secondaryCards = displayedStoryCards.slice(1);
@@ -757,17 +1240,49 @@ export function HomePage({
             {localFocus.status === "locating"
               ? "Finner posisjon"
               : localFocus.status === "active"
-                ? "Nær meg aktiv"
+                ? "Lokalt fokus aktivt"
                 : "Nær meg"}
           </button>
+          <select
+            aria-label="Velg nærområde"
+            value={neighborhoodFocusId}
+            onChange={(event) => selectNeighborhoodFocus(event.target.value)}
+          >
+            <option value="">Velg område</option>
+            {homeNeighborhoodFocusOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <form className="local-focus-search" onSubmit={applyNeighborhoodFocusQuery}>
+            <input
+              aria-label="Postnummer eller sted"
+              inputMode="search"
+              placeholder="Postnummer/sted"
+              value={neighborhoodFocusQuery}
+              onChange={(event) => setNeighborhoodFocusQuery(event.target.value)}
+            />
+            <button type="submit">Bruk</button>
+          </form>
           {localFocus.status === "active" ? (
-            <span>Innen {localFocusRadiusKm} km</span>
+            <span>
+              Nær {localFocus.label} · innen {activeLocalFocusRadiusKm} km
+              {localFocus.persistent ? " · huskes her" : ""}
+            </span>
           ) : localFocus.status === "error" ? (
             <span role="status">{localFocus.message}</span>
           ) : null}
         </div>
       </div>
-      {!isTextSearch ? <SituationBanner situations={initialData.situations} /> : null}
+      {localFocus.status === "active" && localFocusSummary ? (
+        <LocalFocusSummaryPanel
+          label={localFocus.label}
+          radiusKm={activeLocalFocusRadiusKm}
+          summary={localFocusSummary}
+        />
+      ) : null}
+      {!isTextSearch ? <CityPulseDashboard data={initialData} /> : null}
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
@@ -812,6 +1327,9 @@ export function HomePage({
           articles={articles}
           groups={displayedGroups}
           localFocus={activeLocalFocus}
+          onTimeWindowChange={(nextWindow) => updateFilters({ timeWindow: nextWindow })}
+          timeWindow={timeWindow}
+          timeWindowLabel={timeWindow === "all" ? undefined : homeTimeWindowLabels[timeWindow]}
           data={initialData}
         />
       </div>

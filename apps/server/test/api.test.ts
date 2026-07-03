@@ -21,6 +21,8 @@ import type {
   RoadCamera,
   RoadWeatherObservation,
   Situation,
+  MorningBrief,
+  SourceCollectorRun,
   SourceHealth,
   SourceItem,
   TrafficCounterSnapshot,
@@ -74,6 +76,25 @@ async function testAppWithRateLimit(rateLimitEnabled: boolean) {
     uploadDir,
     runtimeStatusDir: uploadDir,
     rateLimitEnabled,
+  });
+  return { ...runtime, uploadDir };
+}
+
+async function testAppWithPushPublicKey(publicKey = "test-public-vapid-key") {
+  const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
+  const runtime = await createApp({
+    port: 0,
+    nodeEnv: "development",
+    publicOrigin: "http://localhost",
+    seedDemo: true,
+    devAuthBypass: true,
+    githubAllowedLogin: "Reedtrullz",
+    sessionSecret: "test-only-secret",
+    uploadDir,
+    runtimeStatusDir: uploadDir,
+    rateLimitEnabled: true,
+    webPushPublicKey: publicKey,
+    webPushConfigured: true,
   });
   return { ...runtime, uploadDir };
 }
@@ -149,6 +170,27 @@ describe("private situation API", () => {
     );
   });
 
+  it("treats Web Push as configured only when both VAPID keys exist", () => {
+    withEnvValue("WEB_PUSH_VAPID_PRIVATE_KEY", undefined, () => {
+      expect(
+        withEnvValue(
+          "WEB_PUSH_VAPID_PUBLIC_KEY",
+          "public-key",
+          () => loadConfig().webPushConfigured,
+        ),
+      ).toBe(false);
+    });
+    withEnvValue("WEB_PUSH_VAPID_PRIVATE_KEY", "private-key", () => {
+      expect(
+        withEnvValue(
+          "WEB_PUSH_VAPID_PUBLIC_KEY",
+          "public-key",
+          () => loadConfig().webPushConfigured,
+        ),
+      ).toBe(true);
+    });
+  });
+
   it("can disable API rate limiting through config", async () => {
     const { app } = await testAppWithRateLimit(false);
     const agent = request.agent(app);
@@ -187,6 +229,15 @@ describe("private situation API", () => {
     expect(response.body.articles.length).toBeGreaterThan(0);
     expect(response.body.sourceHealth.length).toBeGreaterThan(0);
     expect(response.body.situations.length).toBeGreaterThan(0);
+    expect(response.body.morningBrief).toEqual(
+      expect.objectContaining({
+        title: "Morgenbrief",
+        paragraphs: expect.arrayContaining([expect.any(String)]),
+        highlights: expect.arrayContaining([expect.objectContaining({ label: "Saker" })]),
+        sourceLine: expect.any(String),
+      }),
+    );
+    expect(response.body.morningBrief.paragraphs).toHaveLength(3);
     expect(response.body.situations.length).toBeLessThanOrEqual(3);
     for (const situation of response.body.situations as Array<Record<string, unknown>>) {
       expect(["preliminary", "active"]).toContain(situation.status);
@@ -202,6 +253,13 @@ describe("private situation API", () => {
           locationLabel: expect.any(String),
         }),
       );
+      expect(situation.primaryLocation).toEqual(
+        expect.objectContaining({
+          lat: expect.any(Number),
+          lng: expect.any(Number),
+          label: expect.any(String),
+        }),
+      );
       expect(situation).not.toHaveProperty("evidence");
       expect(situation).not.toHaveProperty("features");
       expect(situation).not.toHaveProperty("timeline");
@@ -210,6 +268,89 @@ describe("private situation API", () => {
       expect(situation).not.toHaveProperty("provenanceSummary");
       expect(situation).not.toHaveProperty("sourceConfidence");
     }
+  });
+
+  it("serves the latest stored morning brief from PgStore bootstrap when available", async () => {
+    const article: Article = {
+      id: "article-one",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Kø på E6 ved Sluppen",
+      excerpt: "Trafikken går sakte ved Sluppen.",
+      url: "https://example.test/article-one",
+      publishedAt: "2026-07-02T07:20:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["Sluppen", "Trondheim"],
+    };
+    const storedBrief: MorningBrief = {
+      generatedAt: "2026-07-02T07:30:00.000Z",
+      title: "Morgenbrief",
+      mode: "ai_assisted",
+      sourceLine: "AI-assistert · 5/6 kilder OK",
+      paragraphs: [
+        "Lagret brief fra worker.",
+        "Denne teksten skal ikke beregnes på nytt i serveren.",
+        "Siste avsnitt kommer også fra morning_briefs.",
+      ],
+      highlights: [
+        { label: "Saker", value: "1", detail: "Transport leder bildet" },
+        { label: "Situasjoner", value: "0", detail: "Aktive eller til vurdering" },
+        { label: "Kilder", value: "5/6", detail: "Rapporterer OK" },
+      ],
+      articleIds: [article.id],
+      situationIds: [],
+    };
+    const captured: string[] = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push(normalizedSql);
+        if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
+          expect(params).toEqual(["Reedtrullz", "trondheim", 41]);
+          return { rows: [{ payload: article, saved: false }] };
+        }
+        if (normalizedSql.includes("FROM situations WHERE status IN")) {
+          return { rows: [] };
+        }
+        if (normalizedSql.includes("FROM source_health")) {
+          return {
+            rows: [
+              {
+                source: "nrk",
+                label: "NRK Trøndelag",
+                state: "ok",
+                detail: "RSS",
+              } satisfies SourceHealth,
+            ],
+          };
+        }
+        if (normalizedSql.includes("FROM morning_briefs")) {
+          return { rows: [{ payload: storedBrief }] };
+        }
+        if (normalizedSql.includes("FROM ai_processing_runs")) {
+          return {
+            rows: [
+              {
+                provider: "deepseek",
+                model: "deepseek-v4-flash",
+                status: "ok",
+                completedAt: "2026-07-02T07:25:00.000Z",
+                result: { morningBrief: { paragraphs: ["Skal", "ikke", "brukes"] } },
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+    const bootstrap = await store.getBootstrap("Reedtrullz");
+
+    expect(bootstrap.articles).toEqual([{ ...article, saved: false }]);
+    expect(bootstrap.morningBrief).toBe(storedBrief);
+    expect(captured.some((sql) => sql.includes("FROM morning_briefs"))).toBe(true);
   });
 
   it("accepts only the configured GitHub owner account", () => {
@@ -238,7 +379,12 @@ describe("private situation API", () => {
       rateLimitEnabled: true,
     });
     await request(app).get("/api/bootstrap").expect(401);
+    await request(app).get("/api/notifications/settings").expect(401);
     await request(app).get("/api/operations/coverage-bundles").expect(401);
+    await request(app).get("/api/operations/notification-triggers").expect(401);
+    await request(app).get("/api/operations/notification-deliveries").expect(401);
+    await request(app).get("/api/operations/spatial-analytics").expect(401);
+    await request(app).get("/api/operations/raw/ai-runs").expect(401);
     await request(app).get("/api/access-requests").expect(401);
     await request(app)
       .post("/api/access-requests")
@@ -678,6 +824,85 @@ describe("private situation API", () => {
     expect(JSON.stringify(response.body.events)).not.toContain('"relationship":"activation"');
   });
 
+  it("keeps soft DeepSeek output failures as fallback diagnostics, not critical incidents", async () => {
+    const { app, store } = await testApp();
+    const completedAt = new Date().toISOString();
+    const softRun = {
+      id: "deepseek:soft-json",
+      source: "deepseek",
+      collector: "deepseek",
+      status: "failed",
+      startedAt: completedAt,
+      completedAt,
+      durationMs: 121_000,
+      recordsSeen: 1,
+      recordsAccepted: 0,
+      recordsRejected: 1,
+      errorCode: "parse_or_collection_failure",
+      errorMessage: "Error: DeepSeek JSON response was truncated by token limit.",
+    } satisfies SourceCollectorRun;
+    vi.spyOn(store, "listSituations").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceItems").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([
+      {
+        source: "deepseek",
+        label: "AI-analyse",
+        state: "ok",
+        lastCheckedAt: completedAt,
+        detail:
+          "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering og reservebrief brukes fortsatt.",
+      },
+    ] satisfies SourceHealth[]);
+    vi.spyOn(store, "listCollectorRuns").mockResolvedValue([softRun]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const timeline = await agent
+      .get("/api/operations/timeline?sources=deepseek&kinds=collector_run")
+      .expect(200);
+    expect(timeline.body.events).toEqual([
+      expect.objectContaining({
+        kind: "collector_run",
+        source: "deepseek",
+        severity: "info",
+        role: "private",
+        title: "AI-analyse brukte reserveanalyse",
+        detail:
+          "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.",
+      }),
+    ]);
+    expect(JSON.stringify(timeline.body.events)).not.toContain("trenger tilsyn");
+
+    const audit = await agent
+      .get("/api/operations/source-audit?sources=deepseek&includeDiagnostics=true")
+      .expect(200);
+    expect(audit.body.alerts).toEqual([]);
+    expect(audit.body.sources).toEqual([
+      expect.objectContaining({
+        source: "deepseek",
+        healthState: "ok",
+        reliability: [
+          expect.objectContaining({
+            level: "good",
+            detail:
+              "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.",
+          }),
+        ],
+      }),
+    ]);
+    expect(audit.body.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "deepseek:latest_duration_ms",
+          severity: "info",
+          detail:
+            "Strukturert AI-respons ble forkastet; deterministisk gruppering og reservebrief brukes fortsatt.",
+        }),
+      ]),
+    );
+  });
+
   it("classifies status, severity, merge and split decisions on the operations timeline", async () => {
     const { app, store } = await testApp();
     const situation = {
@@ -1024,6 +1249,71 @@ describe("private situation API", () => {
       sourceItemIds: [sourceItemId],
     });
     expect(patched.body.properties.measurement).toEqual({ radiusMeters: 750 });
+  });
+
+  it("keeps raw source payloads behind the owner-only raw inspector", async () => {
+    const { agent } = await ownerAgent();
+    const sourceItems = await agent.get("/api/source-items?limit=1").expect(200);
+    const item = sourceItems.body.items[0] as Record<string, unknown>;
+    expect(item).toMatchObject({ id: expect.any(String), provider: expect.any(String) });
+    expect(item).not.toHaveProperty("rawPayload");
+    expect(item).not.toHaveProperty("normalizedPayload");
+
+    const raw = await agent
+      .get(`/api/operations/raw/source-items/${encodeURIComponent(String(item.id))}`)
+      .expect(200);
+    expect(raw.body.item).toMatchObject({ id: item.id });
+    expect(raw.body.rawPayload).toBeDefined();
+    expect(raw.body.normalizedPayload).toBeDefined();
+    expect(raw.body.payloadBytes).toMatchObject({
+      raw: expect.any(Number),
+      normalized: expect.any(Number),
+    });
+
+    await agent.get("/api/operations/raw/source-items/source:missing").expect(404);
+  });
+
+  it("returns an owner-only AI raw inspector page shape", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent
+      .get("/api/operations/raw/ai-runs?provider=deepseek&status=degraded&limit=5")
+      .expect(200);
+
+    expect(response.body).toMatchObject({ items: expect.any(Array) });
+    expect(JSON.stringify(response.body)).not.toContain("raw_payload");
+  });
+
+  it("returns a derived owner-only briefing review without raw payloads", async () => {
+    const { agent } = await ownerAgent();
+    const response = await agent.get("/api/operations/briefing").expect(200);
+
+    expect(response.body).toMatchObject({
+      generatedAt: expect.any(String),
+      morningBrief: expect.objectContaining({
+        title: "Morgenbrief",
+        paragraphs: expect.arrayContaining([expect.any(String)]),
+      }),
+      operationsNotes: expect.any(Array),
+      supportingArticles: expect.arrayContaining([
+        expect.objectContaining({
+          id: expect.any(String),
+          title: expect.any(String),
+          sourceLabel: expect.any(String),
+        }),
+      ]),
+      supportingSituations: expect.any(Array),
+      sourceHealthSummary: expect.objectContaining({
+        total: expect.any(Number),
+        ok: expect.any(Number),
+        attention: expect.any(Number),
+      }),
+      attentionSources: expect.any(Array),
+    });
+    const serialized = JSON.stringify(response.body);
+    expect(serialized).not.toContain("rawPayload");
+    expect(serialized).not.toContain("normalizedPayload");
+    expect(serialized).not.toContain("raw_payload");
+    expect(serialized).not.toContain("normalized_payload");
   });
 
   it("rejects private feature provenance links that are not attached to the situation", async () => {
@@ -2221,6 +2511,358 @@ describe("private situation API", () => {
     expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
   });
 
+  it("serves notification trigger candidates as private derived operations data", async () => {
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent
+      .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      generatedAt: expect.any(String),
+      summary: expect.objectContaining({
+        total: expect.any(Number),
+        critical: expect.any(Number),
+        warning: expect.any(Number),
+        officialBacked: expect.any(Number),
+      }),
+      pushStatus: expect.objectContaining({
+        configured: false,
+        label: "Ikke konfigurert",
+        blockedCandidates: expect.any(Number),
+      }),
+      items: expect.any(Array),
+    });
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(response.body.items[0]).toMatchObject({
+      id: expect.stringContaining("notification:"),
+      deliveryState: "not_configured",
+      title: expect.any(String),
+      detail: expect.stringContaining("Web Push er ikke konfigurert"),
+      score: expect.any(Number),
+      confidence: expect.objectContaining({ level: expect.any(String) }),
+      reasons: expect.arrayContaining([expect.any(String)]),
+      links: expect.arrayContaining([expect.objectContaining({ label: expect.any(String) })]),
+    });
+    expect(JSON.stringify(response.body)).not.toContain("rawPayload");
+    expect(JSON.stringify(response.body)).not.toContain("normalizedPayload");
+    expect(JSON.stringify(response.body)).not.toContain("raw_payload");
+  });
+
+  it("marks notification trigger candidates as waiting when no active subscription matches", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent
+      .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")
+      .expect(200);
+
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(response.body.items[0]).toMatchObject({
+      id: expect.stringContaining("notification:"),
+      deliveryState: "no_subscribers",
+      detail: expect.stringContaining("Ingen aktive push-abonnement"),
+    });
+    expect(response.body.pushStatus).toMatchObject({
+      configured: true,
+      label: "Mangler match",
+      activeSubscriptions: 0,
+      matchingCandidates: 0,
+    });
+  });
+
+  it("marks notification trigger candidates as ready when an active subscription matches", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    await agent
+      .post("/api/notifications/subscriptions")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .send({
+        endpoint: "https://push.example.test/send/ready-state-token",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        minSeverity: "warning",
+        kinds: [],
+      })
+      .expect(201);
+
+    const response = await agent
+      .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")
+      .expect(200);
+
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(response.body.items[0]).toMatchObject({
+      id: expect.stringContaining("notification:"),
+      deliveryState: "ready",
+      detail: expect.stringContaining("Klar for Web Push"),
+    });
+    expect(response.body.pushStatus).toMatchObject({
+      configured: true,
+      label: "Klar",
+      activeSubscriptions: 1,
+      matchingCandidates: expect.any(Number),
+      readyCandidates: expect.any(Number),
+    });
+  });
+
+  it("lets signed-in users manage Web Push subscriptions without exposing endpoint secrets", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    const csrf = session.body.csrfToken as string;
+
+    const initial = await agent.get("/api/notifications/settings").expect(200);
+    expect(initial.body).toMatchObject({
+      configured: true,
+      publicKey: "test-public-vapid-key",
+      subscriptions: [],
+    });
+
+    const subscription = await agent
+      .post("/api/notifications/subscriptions")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        endpoint: "https://push.example.test/send/very-secret-endpoint-token",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        userAgent: "Vitest Browser",
+        minSeverity: "critical",
+        kinds: ["traffic_disruption"],
+      })
+      .expect(201);
+
+    expect(subscription.body).toMatchObject({
+      id: expect.any(String),
+      endpointHash: expect.any(String),
+      enabled: true,
+      minSeverity: "critical",
+      kinds: ["traffic_disruption"],
+      userAgent: "Vitest Browser",
+    });
+    expect(JSON.stringify(subscription.body)).not.toContain("very-secret-endpoint-token");
+    expect(JSON.stringify(subscription.body)).not.toContain("p256dh-key-material");
+    expect(JSON.stringify(subscription.body)).not.toContain("auth-key");
+
+    const settings = await agent.get("/api/notifications/settings").expect(200);
+    expect(settings.body.subscriptions).toHaveLength(1);
+
+    await agent
+      .delete(`/api/notifications/subscriptions/${subscription.body.id as string}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(204);
+    const afterDelete = await agent.get("/api/notifications/settings").expect(200);
+    expect(afterDelete.body.subscriptions[0]).toMatchObject({ enabled: false });
+  });
+
+  it("requires Web Push configuration before accepting subscriptions", async () => {
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    await agent
+      .post("/api/notifications/subscriptions")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .send({
+        endpoint: "https://push.example.test/send/disabled",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+      })
+      .expect(503);
+  });
+
+  it("serves recent notification delivery history as owner-only operations data", async () => {
+    await request((await testAppWithEmail(false)).app)
+      .get("/api/operations/notification-deliveries")
+      .expect(401);
+    const { agent } = await ownerAgent();
+
+    const response = await agent
+      .get("/api/operations/notification-deliveries?limit=10")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      generatedAt: expect.any(String),
+      items: expect.any(Array),
+      summary: expect.objectContaining({
+        total: expect.any(Number),
+        sent: expect.any(Number),
+        failed: expect.any(Number),
+      }),
+    });
+  });
+
+  it("serves command center spatial analytics as derived operations data", async () => {
+    const { app, store } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    vi.spyOn(store, "listSpatialHeatmapCells").mockResolvedValue([
+      {
+        id: "cell:1039:6339",
+        center: { lat: 63.39, lng: 10.39 },
+        radiusMeters: 650,
+        count: 3,
+        sourceItemCount: 2,
+        sourceItemIds: ["source:item-one", "source:item-two"],
+        articleCount: 1,
+        trafficEventCount: 1,
+        firstSeenAt: "2026-07-01T09:40:00.000Z",
+        lastSeenAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 2,
+        sourceIds: ["nrk", "vegvesen_traffic_info"],
+        maxSeverity: "high",
+      },
+    ]);
+    vi.spyOn(store, "listTrafficPulseCorridors").mockResolvedValue([
+      {
+        id: "100141",
+        name: "E6 Okstadbakken - E6 Sluppenrampene",
+        state: "slow",
+        travelTimeSeconds: 900,
+        freeFlowSeconds: 540,
+        delaySeconds: 360,
+        delayRatio: 1.67,
+        measurementFrom: "2026-07-02T09:35:00.000Z",
+        measurementTo: "2026-07-02T09:40:00.000Z",
+        updatedAt: "2026-07-02T09:40:20.000Z",
+        sourceUrl: "https://example.test/datex-travel-time",
+      },
+    ]);
+    vi.spyOn(store, "listTrafficCounterSnapshots").mockResolvedValue([
+      {
+        id: "trafikkdata:06970V72811",
+        source: "trafikkdata",
+        pointId: "06970V72811",
+        name: "E6 Sluppen",
+        updatedAt: "2026-07-02T09:40:00.000Z",
+        geometry: { type: "Point", coordinates: [10.39, 63.39] },
+        volumeLastHour: 2200,
+        baselineVolumeLastHour: 800,
+        anomalyRatio: 2.75,
+        coveragePercent: 94,
+      },
+    ]);
+    vi.spyOn(store, "getTrafficTelemetryHistorySummary").mockResolvedValue({
+      datexTravelTime: {
+        observations: 144,
+        trackedEntities: 12,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        activeDayCount: 3,
+        notableObservations: 18,
+      },
+      trafficCounters: {
+        observations: 96,
+        trackedEntities: 8,
+        firstObservedAt: "2026-07-01T07:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 2,
+        notableObservations: 5,
+      },
+    });
+    vi.spyOn(store, "listTrafficTelemetryPatterns").mockResolvedValue([
+      {
+        id: "telemetry-pattern:datex_travel_time:e6-sluppen",
+        source: "datex_travel_time",
+        title: "E6 Sluppen",
+        description: "Maks 8 min forsinkelse i historikken.",
+        observationCount: 18,
+        notableObservationCount: 7,
+        activeDayCount: 3,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        maxDelaySeconds: 480,
+      },
+    ]);
+
+    const response = await agent
+      .get("/api/operations/spatial-analytics?minDelaySeconds=180&limit=20")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      summary: {
+        heatmapCells: 1,
+        observations: 3,
+        unexplainedDelays: expect.any(Number),
+        criticalDelays: expect.any(Number),
+        bySourceConfidence: expect.objectContaining({
+          confirmed: expect.any(Number),
+          likely: expect.any(Number),
+          uncertain: expect.any(Number),
+          speculative: expect.any(Number),
+        }),
+      },
+      telemetryHistory: {
+        datexTravelTime: {
+          observations: 144,
+          trackedEntities: 12,
+          activeDayCount: 3,
+          notableObservations: 18,
+        },
+        trafficCounters: {
+          observations: 96,
+          trackedEntities: 8,
+          activeDayCount: 2,
+          notableObservations: 5,
+        },
+      },
+      telemetryPatterns: [
+        expect.objectContaining({
+          id: "telemetry-pattern:datex_travel_time:e6-sluppen",
+          source: "datex_travel_time",
+          title: "E6 Sluppen",
+          notableObservationCount: 7,
+          activeDayCount: 3,
+          maxDelaySeconds: 480,
+        }),
+      ],
+      investigationQueue: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "traffic_counter_anomaly",
+          priority: "high",
+          title: "E6 Sluppen",
+          evidence: expect.arrayContaining(["2.8x normal trafikk"]),
+          sourceItemIds: [],
+          articleIds: [],
+        }),
+        expect.objectContaining({
+          kind: expect.stringMatching(/^(hotspot|unexplained_delay)$/u),
+          priority: expect.stringMatching(/^(critical|high|watch)$/u),
+          title: expect.any(String),
+          evidence: expect.any(Array),
+          sourceItemIds: expect.any(Array),
+          articleIds: expect.any(Array),
+        }),
+      ]),
+      heatmapCells: [
+        expect.objectContaining({
+          id: "cell:1039:6339",
+          count: 3,
+          firstSeenAt: "2026-07-01T09:40:00.000Z",
+          activeDayCount: 2,
+          sourceItemIds: ["source:item-one", "source:item-two"],
+          sourceIds: ["nrk", "vegvesen_traffic_info"],
+          sourceConfidence: expect.objectContaining({
+            level: "confirmed",
+            label: "Bekreftet",
+            score: expect.any(Number),
+          }),
+        }),
+      ],
+    });
+    expect(response.body).not.toHaveProperty("rawPayload");
+    expect(response.body).not.toHaveProperty("sourceItems");
+    expect(JSON.stringify(response.body)).not.toContain("raw_payload");
+  });
+
   it("stores uploaded private attachment metadata with a content checksum", async () => {
     const { agent, csrf } = await ownerAgent();
     const bytes = Buffer.from("privat vedlegg");
@@ -2383,6 +3025,59 @@ describe("private situation API", () => {
     expect(alerts).toEqual([alert]);
   });
 
+  it("PgStore includes temporal evidence when listing spatial heatmap cells", async () => {
+    let capturedSql = "";
+    let capturedParams: unknown[] | undefined;
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        capturedSql = sql.replace(/\s+/g, " ").trim();
+        capturedParams = params;
+        return {
+          rows: [
+            {
+              id: "cell:1039:6339",
+              center_lng: "10.39",
+              center_lat: "63.39",
+              observation_count: "4",
+              source_item_count: "3",
+              source_item_ids: ["source:item-one", "source:item-two"],
+              article_count: "2",
+              traffic_event_count: "1",
+              first_seen_at: "2026-06-30T09:40:00.000Z",
+              last_seen_at: "2026-07-02T09:40:00.000Z",
+              active_day_count: "3",
+              source_ids: ["nrk", "vegvesen_traffic_info"],
+              severity_rank: "3",
+            },
+          ],
+        };
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await expect(
+      store.listSpatialHeatmapCells(
+        {
+          from: "2026-06-30T00:00:00.000Z",
+          to: "2026-07-02T23:59:59.000Z",
+          limit: 5,
+        },
+        "Reedtrullz",
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "cell:1039:6339",
+        firstSeenAt: "2026-06-30T09:40:00.000Z",
+        lastSeenAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 3,
+        maxSeverity: "high",
+      }),
+    ]);
+    expect(capturedSql).toContain("min(observed_at) AS first_seen_at");
+    expect(capturedSql).toContain("count(DISTINCT observed_at::date)::text AS active_day_count");
+    expect(capturedParams).toEqual(["2026-06-30T00:00:00.000Z", "2026-07-02T23:59:59.000Z", 5]);
+  });
+
   it("PgStore lists road weather, camera, and counter rows with bounds SQL filters", async () => {
     const weatherPayload: RoadWeatherObservation = {
       id: "datex-weather:SN123",
@@ -2449,6 +3144,181 @@ describe("private situation API", () => {
     expect(captured[2]?.sql).toContain("geometry && ST_MakeEnvelope($1, $2, $3, $4, 4326)");
     expect(captured[2]?.sql).toContain("ORDER BY updated_at DESC, point_id ASC");
     expect(captured[2]?.params).toEqual([10.2, 63.3, 10.5, 63.5]);
+  });
+
+  it("PgStore summarizes telemetry history with the spatial analytics time window", async () => {
+    const captured: Array<{ sql: string; params: unknown[] | undefined }> = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push({ sql: normalizedSql, params });
+        if (normalizedSql.includes("FROM datex_travel_time_history")) {
+          return {
+            rows: [
+              {
+                observations: "144",
+                tracked_entities: "12",
+                first_observed_at: new Date("2026-06-30T09:00:00.000Z"),
+                last_observed_at: new Date("2026-07-02T09:45:00.000Z"),
+                active_day_count: "3",
+                notable_observations: "18",
+              },
+            ],
+          };
+        }
+        if (normalizedSql.includes("FROM traffic_counter_snapshot_history")) {
+          return {
+            rows: [
+              {
+                observations: "96",
+                tracked_entities: "8",
+                first_observed_at: "2026-07-01T07:00:00.000Z",
+                last_observed_at: "2026-07-02T09:40:00.000Z",
+                active_day_count: "2",
+                notable_observations: "5",
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await expect(
+      store.getTrafficTelemetryHistorySummary({
+        from: "2026-06-30T00:00:00.000Z",
+        to: "2026-07-02T23:59:59.000Z",
+      }),
+    ).resolves.toEqual({
+      datexTravelTime: {
+        observations: 144,
+        trackedEntities: 12,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        activeDayCount: 3,
+        notableObservations: 18,
+      },
+      trafficCounters: {
+        observations: 96,
+        trackedEntities: 8,
+        firstObservedAt: "2026-07-01T07:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:40:00.000Z",
+        activeDayCount: 2,
+        notableObservations: 5,
+      },
+    });
+    expect(captured).toHaveLength(2);
+    expect(captured[0]?.sql).toContain("FROM datex_travel_time_history");
+    expect(captured[0]?.sql).toContain("observed_at >= $1");
+    expect(captured[0]?.sql).toContain("observed_at <= $2");
+    expect(captured[0]?.sql).toContain("count(DISTINCT corridor_id)");
+    expect(captured[0]?.sql).toContain("COALESCE(delay_seconds, 0) >= 180");
+    expect(captured[1]?.sql).toContain("FROM traffic_counter_snapshot_history");
+    expect(captured[1]?.sql).toContain("count(DISTINCT point_id)");
+    expect(captured[1]?.sql).toContain("COALESCE(anomaly_ratio, 0) >= 1.7");
+    expect(captured[0]?.params).toEqual(["2026-06-30T00:00:00.000Z", "2026-07-02T23:59:59.000Z"]);
+    expect(captured[1]?.params).toEqual(["2026-06-30T00:00:00.000Z", "2026-07-02T23:59:59.000Z"]);
+  });
+
+  it("PgStore ranks recurring telemetry patterns from history tables", async () => {
+    const captured: Array<{ sql: string; params: unknown[] | undefined }> = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push({ sql: normalizedSql, params });
+        if (normalizedSql.includes("FROM datex_travel_time_history")) {
+          return {
+            rows: [
+              {
+                source: "datex_travel_time",
+                entity_id: "e6-sluppen",
+                title: "E6 Sluppen",
+                observation_count: "18",
+                notable_observation_count: "7",
+                active_day_count: "3",
+                first_observed_at: new Date("2026-06-30T09:00:00.000Z"),
+                last_observed_at: new Date("2026-07-02T09:45:00.000Z"),
+                max_delay_seconds: 480,
+                max_anomaly_ratio: null,
+                geometry: null,
+              },
+            ],
+          };
+        }
+        if (normalizedSql.includes("FROM traffic_counter_snapshot_history")) {
+          return {
+            rows: [
+              {
+                source: "trafikkdata",
+                entity_id: "06970V72811",
+                title: "Kroppanbrua",
+                observation_count: "12",
+                notable_observation_count: "5",
+                active_day_count: "2",
+                first_observed_at: "2026-07-01T07:00:00.000Z",
+                last_observed_at: "2026-07-02T09:40:00.000Z",
+                max_delay_seconds: null,
+                max_anomaly_ratio: 2.75,
+                geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await expect(
+      store.listTrafficTelemetryPatterns({
+        from: "2026-06-30T00:00:00.000Z",
+        to: "2026-07-02T23:59:59.000Z",
+        limit: 8,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "telemetry-pattern:datex_travel_time:e6-sluppen",
+        source: "datex_travel_time",
+        title: "E6 Sluppen",
+        description: "Maks 8 min forsinkelse i historikken.",
+        observationCount: 18,
+        notableObservationCount: 7,
+        activeDayCount: 3,
+        firstObservedAt: "2026-06-30T09:00:00.000Z",
+        lastObservedAt: "2026-07-02T09:45:00.000Z",
+        maxDelaySeconds: 480,
+        sourceConfidence: expect.objectContaining({ level: "uncertain" }),
+      }),
+      expect.objectContaining({
+        id: "telemetry-pattern:trafikkdata:06970V72811",
+        source: "trafikkdata",
+        title: "Kroppanbrua",
+        description: "Maks 2.8x normal trafikk i historikken.",
+        observationCount: 12,
+        notableObservationCount: 5,
+        activeDayCount: 2,
+        maxAnomalyRatio: 2.75,
+        geometry: { type: "Point", coordinates: [10.384529, 63.391793] },
+      }),
+    ]);
+    expect(captured[0]?.sql).toContain("FROM datex_travel_time_history");
+    expect(captured[0]?.sql).toContain("GROUP BY corridor_id");
+    expect(captured[0]?.sql).toContain("HAVING count(*) FILTER");
+    expect(captured[0]?.sql).toContain("LIMIT $3");
+    expect(captured[1]?.sql).toContain("FROM traffic_counter_snapshot_history");
+    expect(captured[1]?.sql).toContain("GROUP BY point_id");
+    expect(captured[1]?.sql).toContain("ST_AsGeoJSON(geometry)::json");
+    expect(captured[0]?.params).toEqual([
+      "2026-06-30T00:00:00.000Z",
+      "2026-07-02T23:59:59.000Z",
+      8,
+    ]);
+    expect(captured[1]?.params).toEqual([
+      "2026-06-30T00:00:00.000Z",
+      "2026-07-02T23:59:59.000Z",
+      8,
+    ]);
   });
 
   it("includes DATEX traffic pulse rows in PgStore operations status with stale overlay", async () => {
