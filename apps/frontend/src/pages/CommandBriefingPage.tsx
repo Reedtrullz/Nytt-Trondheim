@@ -5,6 +5,8 @@ import type {
   AiProcessingRunDiagnostics,
   CommandCenterBriefingPayload,
   CommandCenterOperationsNote,
+  MorningBrief,
+  RawInspectorAiRunSummary,
   SourceHealth,
 } from "@nytt/shared";
 import { api, ApiError } from "../api.js";
@@ -49,8 +51,58 @@ function analysisProfileLabel(diagnostics?: AiProcessingRunDiagnostics) {
   return diagnostics ? analysisProfileLabels[diagnostics.profile] : "Ukjent profil";
 }
 
+export function analysisModeSummary(
+  run?: RawInspectorAiRunSummary,
+  morningBrief?: MorningBrief,
+): {
+  detail: string;
+  label: string;
+  tone: "ai" | "fallback" | "degraded" | "missing";
+} {
+  if (!run) {
+    return {
+      label:
+        morningBrief?.mode === "deterministic" ? "Reserve uten lagret kjøring" : "Ikke registrert",
+      detail: "Ingen analysekjøring er lagret for denne briefen ennå.",
+      tone: "missing",
+    };
+  }
+
+  if (run.provider === "deterministic" || run.status === "disabled") {
+    return {
+      label: "Deterministisk reserve",
+      detail:
+        "Provideranalyse er avslått; regelbasert clustering, situasjonskobling og reservebrief brukes.",
+      tone: "fallback",
+    };
+  }
+
+  const successfulAttempt = [...(run.diagnostics?.attempts ?? [])]
+    .reverse()
+    .find((attempt) => attempt.status === "ok");
+  const hadFailedAttempt = (run.diagnostics?.attempts ?? []).some(
+    (attempt) => attempt.status === "failed",
+  );
+  if (run.status === "degraded" || hadFailedAttempt) {
+    return {
+      label: successfulAttempt ? "Gjenopprettet provideranalyse" : "Degradert provideranalyse",
+      detail: successfulAttempt
+        ? `${analysisProfileLabels[successfulAttempt.profile]} fullførte etter tidligere avvik.`
+        : "Provideranalysen feilet eller manglet strukturert svar; deterministisk analyse brukes som sikring.",
+      tone: "degraded",
+    };
+  }
+
+  return {
+    label: "Provideranalyse brukt",
+    detail: `${run.model} fullførte ${analysisProfileLabel(run.diagnostics).toLowerCase()}.`,
+    tone: "ai",
+  };
+}
+
 export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenterBriefingPayload }) {
   const { morningBrief } = briefing;
+  const analysisMode = analysisModeSummary(briefing.latestAiRun, morningBrief);
   const widgets = useMemo<DashboardWidgetDefinition[]>(
     () => [
       {
@@ -113,52 +165,63 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
               ) : null}
             </div>
             {briefing.latestAiRun ? (
-              <dl className="command-briefing-ai-meta">
-                <div>
-                  <dt>Status</dt>
-                  <dd>{briefing.latestAiRun.status}</dd>
+              <>
+                <div className={`command-briefing-analysis-mode mode-${analysisMode.tone}`}>
+                  <span>Analysemodus</span>
+                  <strong>{analysisMode.label}</strong>
+                  <p>{analysisMode.detail}</p>
                 </div>
-                <div>
-                  <dt>Modell</dt>
-                  <dd>{briefing.latestAiRun.model}</dd>
-                </div>
-                <div>
-                  <dt>Saker lest</dt>
-                  <dd>{briefing.latestAiRun.articleCount}</dd>
-                </div>
-                <div>
-                  <dt>Profil</dt>
-                  <dd>{analysisProfileLabel(briefing.latestAiRun.diagnostics)}</dd>
-                </div>
-                {briefing.latestAiRun.diagnostics ? (
+                <dl className="command-briefing-ai-meta">
                   <div>
-                    <dt>Forsøk</dt>
-                    <dd>
-                      {briefing.latestAiRun.diagnostics.attempts.length} ·{" "}
-                      {briefing.latestAiRun.diagnostics.attempts
-                        .map(
-                          (attempt) =>
-                            `${analysisProfileLabels[attempt.profile]} ${
-                              attempt.status === "ok" ? "OK" : "feilet"
-                            }`,
-                        )
-                        .join(", ")}
-                    </dd>
+                    <dt>Status</dt>
+                    <dd>{briefing.latestAiRun.status}</dd>
                   </div>
-                ) : null}
-                <div>
-                  <dt>Ferdig</dt>
-                  <dd>{time(briefing.latestAiRun.completedAt)}</dd>
-                </div>
-                {briefing.latestAiRun.error ? (
                   <div>
-                    <dt>Avvik</dt>
-                    <dd>{briefing.latestAiRun.error}</dd>
+                    <dt>Modell</dt>
+                    <dd>{briefing.latestAiRun.model}</dd>
                   </div>
-                ) : null}
-              </dl>
+                  <div>
+                    <dt>Saker lest</dt>
+                    <dd>{briefing.latestAiRun.articleCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Profil</dt>
+                    <dd>{analysisProfileLabel(briefing.latestAiRun.diagnostics)}</dd>
+                  </div>
+                  {briefing.latestAiRun.diagnostics ? (
+                    <div>
+                      <dt>Forsøk</dt>
+                      <dd>
+                        {briefing.latestAiRun.diagnostics.attempts.length} ·{" "}
+                        {briefing.latestAiRun.diagnostics.attempts
+                          .map(
+                            (attempt) =>
+                              `${analysisProfileLabels[attempt.profile]} ${
+                                attempt.status === "ok" ? "OK" : "feilet"
+                              }`,
+                          )
+                          .join(", ")}
+                      </dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt>Ferdig</dt>
+                    <dd>{time(briefing.latestAiRun.completedAt)}</dd>
+                  </div>
+                  {briefing.latestAiRun.error ? (
+                    <div>
+                      <dt>Avvik</dt>
+                      <dd>{briefing.latestAiRun.error}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </>
             ) : (
-              <p className="command-briefing-empty">Ingen analysekjøringer er lagret ennå.</p>
+              <div className={`command-briefing-analysis-mode mode-${analysisMode.tone}`}>
+                <span>Analysemodus</span>
+                <strong>{analysisMode.label}</strong>
+                <p>{analysisMode.detail}</p>
+              </div>
             )}
           </section>
         ),
@@ -313,7 +376,7 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
         ),
       },
     ],
-    [briefing, morningBrief],
+    [analysisMode.detail, analysisMode.label, analysisMode.tone, briefing, morningBrief],
   );
 
   return (
@@ -349,6 +412,11 @@ export function CommandBriefingDashboard({ briefing }: { briefing: CommandCenter
                 )} · ${time(briefing.latestAiRun.completedAt)}`
               : "Ingen analysekjøring funnet"}
           </small>
+        </article>
+        <article className={`command-briefing-summary-mode mode-${analysisMode.tone}`}>
+          <span>Analysemodus</span>
+          <strong>{analysisMode.label}</strong>
+          <small>{analysisMode.detail}</small>
         </article>
         <article>
           <span>Kilder OK</span>

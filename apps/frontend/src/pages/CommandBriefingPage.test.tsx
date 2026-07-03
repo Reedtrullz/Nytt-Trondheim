@@ -139,6 +139,9 @@ describe("CommandBriefingDashboard", () => {
     expect(html).toContain("Publisert bypuls");
     expect(html).not.toContain("Endre størrelse på Analysespor");
     expect(html).toContain("Analysekjøring");
+    expect(html).toContain("Analysemodus");
+    expect(html).toContain("Gjenopprettet provideranalyse");
+    expect(html).toContain("Kun morgenbrief fullførte etter tidligere avvik.");
     expect(html).toContain("Automatisk analyse");
     expect(html).toContain("deepseek-v4-flash");
     expect(html).toContain("Kun morgenbrief");
@@ -152,5 +155,47 @@ describe("CommandBriefingDashboard", () => {
     expect(html).not.toContain("AI-operatørnotater");
     expect(html).not.toContain("Slå sammen");
     expect(html).not.toContain("Godkjenn brief");
+  });
+
+  it("makes deterministic production analysis mode explicit", () => {
+    const deterministicBriefing: CommandCenterBriefingPayload = {
+      ...briefing,
+      morningBrief: {
+        ...briefing.morningBrief!,
+        mode: "deterministic",
+        sourceLine: "Deterministisk reserve · 1/2 kilder OK",
+        aiRun: {
+          provider: "deterministic",
+          model: "none",
+          status: "disabled",
+          completedAt: "2026-07-02T07:00:01.000Z",
+        },
+      },
+      latestAiRun: {
+        id: "ai:deterministic",
+        provider: "deterministic",
+        model: "none",
+        status: "disabled",
+        startedAt: "2026-07-02T06:59:00.000Z",
+        completedAt: "2026-07-02T07:00:01.000Z",
+        articleCount: 24,
+        error: "DEEPSEEK_ANALYSIS_ENABLED er ikke satt til true; deterministisk analyse brukes.",
+      },
+      operationsNotes: [],
+    };
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CommandBriefingDashboard briefing={deterministicBriefing} />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Analysemodus");
+    expect(html).toContain("Deterministisk reserve");
+    expect(html).toContain("Provideranalyse er avslått");
+    expect(html).toContain("regelbasert clustering");
+    expect(html).toContain("mode-fallback");
+    expect(html).toContain("none");
+    expect(html).toContain("Ingen operatørnotater");
   });
 });
