@@ -1956,14 +1956,12 @@ test("searching from trafikk navigates home and shows filtered results", async (
   await expect(page.locator(".situation-banner")).toHaveCount(0);
 });
 
-test("home keeps Vær as weather page navigation, not an article category filter", async ({
-  page,
-}) => {
+test("home keeps Vær as weather page navigation and a thematic feed filter", async ({ page }) => {
   await page.goto("/?q=bru&category=V%C3%A6r&scope=trondelag");
 
   await expect(page.getByRole("link", { name: "Vær" })).toHaveAttribute("href", "/vaer");
-  await expect(page.getByRole("button", { name: "Vær" })).toHaveCount(0);
-  await expect(page.getByText('Ingen saker samsvarer med "bru" i Trøndelag.')).toBeVisible();
+  await expect(page.getByRole("button", { name: "Vær" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trøndelag.')).toBeVisible();
 });
 
 test("sport page shows a World Cup desk with local sport stories", async ({ page }) => {
