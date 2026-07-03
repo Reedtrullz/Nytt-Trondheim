@@ -44,6 +44,12 @@ const candidate: NotificationTriggerCandidate = {
       situationId: "road-one",
     },
   ],
+  publicSurface: {
+    state: "visible",
+    label: "Synlig på Bypuls",
+    detail: "Sjekk rute nå · Oppdatert nå",
+    reason: "Samme offentlige varselregel treffer City Pulse-datasettet.",
+  },
 };
 
 function repository(overrides: Record<string, unknown> = {}) {
@@ -52,6 +58,7 @@ function repository(overrides: Record<string, unknown> = {}) {
       {
         id: "subscription-one",
         userId: "viewer-one",
+        role: "viewer",
         endpoint: "https://push.example.test/send/secret",
         keys: {
           p256dh: "p256dh-key-material-that-is-long-enough",
@@ -136,6 +143,7 @@ describe("push notifications", () => {
         {
           id: "subscription-one",
           userId: "viewer-one",
+          role: "viewer",
           endpoint: "https://push.example.test/send/secret",
           keys: {
             p256dh: "p256dh-key-material-that-is-long-enough",
@@ -164,6 +172,7 @@ describe("push notifications", () => {
         {
           id: "subscription-one",
           userId: "viewer-one",
+          role: "viewer",
           endpoint: "https://push.example.test/send/secret",
           keys: {
             p256dh: "p256dh-key-material-that-is-long-enough",
@@ -196,6 +205,66 @@ describe("push notifications", () => {
     expect(metrics).toMatchObject({ claimed: 0, sent: 0, skipped: 1 });
     expect(repo.claimPushDelivery).not.toHaveBeenCalled();
     expect(webPushMock.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("keeps command-center-only candidates away from viewer subscriptions", async () => {
+    const commandCenterCandidate: NotificationTriggerCandidate = {
+      ...candidate,
+      id: "notification:spatial:delay-one",
+      publicSurface: {
+        state: "hidden",
+        label: "Kun Command Center",
+        detail: "Dette er et romlig operatørsignal og vises ikke direkte på City Pulse.",
+        reason:
+          "Telemetriavvik krever manuell kontroll mot trafikkart, nyheter og offisielle hendelser før offentlig varsel.",
+      },
+    };
+    const repo = repository({
+      activePushSubscriptions: vi.fn().mockResolvedValue([
+        {
+          id: "subscription-viewer",
+          userId: "viewer-one",
+          role: "viewer",
+          endpoint: "https://push.example.test/send/viewer",
+          keys: {
+            p256dh: "p256dh-key-material-that-is-long-enough",
+            auth: "auth-key-long-enough",
+          },
+          minSeverity: "warning",
+          kinds: [],
+        },
+        {
+          id: "subscription-owner",
+          userId: "owner-one",
+          role: "owner",
+          endpoint: "https://push.example.test/send/owner",
+          keys: {
+            p256dh: "p256dh-key-material-that-is-long-enough",
+            auth: "auth-key-long-enough",
+          },
+          minSeverity: "warning",
+          kinds: [],
+        },
+      ]),
+    });
+
+    const metrics = await deliverPushNotifications([commandCenterCandidate], repo, {
+      publicKey: "public-key",
+      privateKey: "private-key",
+      subject: "mailto:test@example.test",
+    });
+
+    expect(metrics).toMatchObject({ subscriptions: 2, claimed: 1, sent: 1, skipped: 1 });
+    expect(repo.claimPushDelivery).toHaveBeenCalledOnce();
+    expect(repo.claimPushDelivery).toHaveBeenCalledWith(
+      commandCenterCandidate,
+      expect.objectContaining({ id: "subscription-owner", role: "owner" }),
+    );
+    expect(webPushMock.sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: "https://push.example.test/send/owner" }),
+      expect.any(String),
+      expect.objectContaining({ TTL: 600 }),
+    );
   });
 
   it("loads VAPID config only when public and private keys exist", () => {

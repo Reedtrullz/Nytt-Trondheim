@@ -186,6 +186,7 @@ describe("notification trigger candidates", () => {
       kind: "traffic_disruption",
       severity: "critical",
       deliveryState: "candidate_only",
+      detail: expect.stringContaining("Leveringsstatus avklares"),
       situationId: "situation-one",
       sourceIds: ["datex"],
       matchedKeywords: expect.arrayContaining(["stengt"]),

@@ -735,7 +735,8 @@ function situationCandidate(
     deliveryState: "candidate_only",
     title: situation.title,
     body: `${situation.locationLabel}: ${situation.summary}`,
-    detail: "Kandidat for systemvarsel. Ingen push er sendt i denne versjonen.",
+    detail:
+      "Kandidat for systemvarsel. Leveringsstatus avklares mot Web Push-konfigurasjon og abonnement.",
     score,
     confidence: confidenceFromScore(score, sourceIds.length, generatedAt),
     generatedAt,
@@ -807,7 +808,8 @@ function articleCandidate(
     deliveryState: "candidate_only",
     title: article.title,
     body: article.excerpt,
-    detail: "Artikkelbasert kandidat før egen situasjon er bekreftet. Ingen push er sendt.",
+    detail:
+      "Artikkelbasert kandidat før egen situasjon er bekreftet. Leveringsstatus avklares mot Web Push-konfigurasjon og abonnement.",
     score,
     confidence: confidenceFromScore(score, official ? 1 : 0, generatedAt),
     generatedAt,
@@ -1022,7 +1024,7 @@ function deliveryDetail(state: NotificationTriggerDeliveryState): string {
     case "suppressed":
       return "Utløseren er under terskelen, dempet eller allerede håndtert for automatiske push-varsler.";
     case "candidate_only":
-      return "Kandidat for systemvarsel. Ingen push er sendt i denne visningen.";
+      return "Kandidat for systemvarsel før Web Push-levering er vurdert.";
   }
 }
 

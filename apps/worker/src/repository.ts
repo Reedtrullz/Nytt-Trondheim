@@ -23,6 +23,7 @@ import type {
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  UserRole,
   WorkerCycleMetrics,
 } from "@nytt/shared";
 
@@ -58,6 +59,7 @@ export interface PublicTransportBounds {
 export interface PushDeliveryTarget {
   id: string;
   userId: string;
+  role: UserRole;
   endpoint: string;
   keys: {
     p256dh: string;
@@ -214,6 +216,7 @@ export class WorkerRepository {
     const result = await this.pool.query<{
       id: string;
       userId: string;
+      role: UserRole;
       endpoint: string;
       p256dh: string;
       auth: string;
@@ -223,6 +226,7 @@ export class WorkerRepository {
       `SELECT
          ps.id,
          ps.user_id AS "userId",
+         COALESCE(u.role, 'viewer') AS role,
          ps.endpoint,
          ps.p256dh,
          ps.auth,
@@ -237,6 +241,7 @@ export class WorkerRepository {
     return result.rows.map((row) => ({
       id: row.id,
       userId: row.userId,
+      role: row.role === "owner" ? "owner" : "viewer",
       endpoint: row.endpoint,
       keys: { p256dh: row.p256dh, auth: row.auth },
       minSeverity: row.minSeverity,

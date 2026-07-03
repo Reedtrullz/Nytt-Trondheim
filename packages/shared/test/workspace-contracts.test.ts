@@ -206,7 +206,8 @@ describe("workspace contract schemas", () => {
           deliveryState: "candidate_only",
           title: "Steinsprang, vegen er stengt",
           body: "Gangåsvegen: Vegen er stengt.",
-          detail: "Kandidat for systemvarsel. Ingen push er sendt.",
+          detail:
+            "Kandidat for systemvarsel. Leveringsstatus avklares mot Web Push-konfigurasjon og abonnement.",
           score: 0.91,
           confidence: {
             level: "confirmed",

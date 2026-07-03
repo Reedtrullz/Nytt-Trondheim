@@ -4,7 +4,7 @@ import {
   notificationSubscriptionMatchesCandidate,
   type NotificationTriggerCandidate,
 } from "@nytt/shared";
-import type { WorkerRepository } from "./repository.js";
+import type { PushDeliveryTarget, WorkerRepository } from "./repository.js";
 
 interface WebPushConfig {
   publicKey: string;
@@ -63,6 +63,18 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+function canDeliverToSubscription(
+  candidate: NotificationTriggerCandidate,
+  subscription: PushDeliveryTarget,
+) {
+  const publicSurfaceState = candidate.publicSurface?.state;
+  if (publicSurfaceState && publicSurfaceState !== "visible" && subscription.role !== "owner") {
+    return false;
+  }
+  if (!publicSurfaceState && subscription.role !== "owner") return false;
+  return notificationSubscriptionMatchesCandidate(subscription, candidate);
+}
+
 export async function deliverPushNotifications(
   candidates: NotificationTriggerCandidate[],
   repository: Pick<
@@ -102,7 +114,7 @@ export async function deliverPushNotifications(
       continue;
     }
     for (const subscription of subscriptions) {
-      if (!notificationSubscriptionMatchesCandidate(subscription, candidate)) {
+      if (!canDeliverToSubscription(candidate, subscription)) {
         metrics.skipped += 1;
         continue;
       }

@@ -345,6 +345,7 @@ describe("WorkerRepository", () => {
         {
           id: "subscription-one",
           userId: "viewer-one",
+          role: "viewer",
           endpoint: "https://push.example.test/send/secret",
           p256dh: "p256dh-key-material-that-is-long-enough",
           auth: "auth-key-long-enough",
@@ -359,6 +360,7 @@ describe("WorkerRepository", () => {
       {
         id: "subscription-one",
         userId: "viewer-one",
+        role: "viewer",
         endpoint: "https://push.example.test/send/secret",
         keys: {
           p256dh: "p256dh-key-material-that-is-long-enough",
@@ -371,6 +373,7 @@ describe("WorkerRepository", () => {
 
     const sql = String(query.mock.calls[0]?.[0]);
     expect(sql).toContain("LEFT JOIN users u ON u.id=ps.user_id");
+    expect(sql).toContain("COALESCE(u.role, 'viewer') AS role");
     expect(sql).toContain("COALESCE(u.status, 'active') = 'active'");
     expect(sql).not.toContain("source_items");
   });
