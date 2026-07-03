@@ -38,6 +38,10 @@ const status: OperationsStatus = {
     resolved: 3,
     dismissed: 4,
   },
+  situationPublicationCounts: {
+    public: 3,
+    command_center: 2,
+  },
   latestCollectionAt: "2026-06-02T06:00:00.000Z",
   trafficPulse: [],
   workerCycleMetrics: {
@@ -227,6 +231,7 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Utdatert");
     expect(html).toContain("Gjenopprettingstest");
     expect(html).toContain("Kommandosenter");
+    expect(html).toContain("2 kun Command Center");
     expect(html).toContain("Intelligence Bridge");
     expect(html).toContain("Morgenbrief, AI-spor");
     expect(html).toContain("ai_assisted");

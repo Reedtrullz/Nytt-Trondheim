@@ -3,6 +3,7 @@ import type {
   SourceConfidenceLevel,
   SourceId,
   SituationLifecycle,
+  SituationPublicVisibility,
   WorkspaceMapQueryInput,
 } from "@nytt/shared";
 
@@ -54,9 +55,18 @@ export const workspaceConfidenceOptions: Array<{ value: SourceConfidenceLevel; l
   { value: "speculative", label: "Spekulativ" },
 ];
 
+export const workspacePublicationOptions: Array<{
+  value: SituationPublicVisibility;
+  label: string;
+}> = [
+  { value: "public", label: "City Pulse" },
+  { value: "command_center", label: "Kun Command Center" },
+];
+
 export interface SituationWorkspaceFilters {
   q: string;
   statuses: SituationLifecycle[];
+  publicVisibility: SituationPublicVisibility[];
   sources: SourceId[];
   provenances: Provenance[];
   confidenceLevels: SourceConfidenceLevel[];
@@ -66,6 +76,9 @@ export interface SituationWorkspaceFilters {
 
 const defaultStatuses: SituationLifecycle[] = ["preliminary", "active"];
 const statusSet = new Set<SituationLifecycle>(workspaceStatusOptions.map((option) => option.value));
+const publicationSet = new Set<SituationPublicVisibility>(
+  workspacePublicationOptions.map((option) => option.value),
+);
 const sourceSet = new Set<SourceId>(workspaceSourceOptions.map((option) => option.value));
 const provenanceSet = new Set<Provenance>(workspaceProvenanceOptions.map((option) => option.value));
 const confidenceSet = new Set<SourceConfidenceLevel>(
@@ -101,6 +114,7 @@ export function parseSituationWorkspaceFilters(search: string): SituationWorkspa
   return {
     q: (parameters.get("q") ?? "").trim(),
     statuses: statuses.length ? statuses : defaultStatuses,
+    publicVisibility: parseCsv(parameters.get("publication"), publicationSet),
     sources: parseCsv(parameters.get("sources"), sourceSet),
     provenances: parseCsv(parameters.get("provenance"), provenanceSet),
     confidenceLevels: parseCsv(parameters.get("confidence"), confidenceSet),
@@ -114,6 +128,7 @@ export function buildSituationWorkspaceSearch(filters: SituationWorkspaceFilters
   const query = filters.q.trim();
   if (query) parameters.set("q", query);
   writeCsv(parameters, "status", filters.statuses, defaultStatuses);
+  writeCsv(parameters, "publication", filters.publicVisibility);
   writeCsv(parameters, "sources", filters.sources);
   writeCsv(parameters, "provenance", filters.provenances);
   writeCsv(parameters, "confidence", filters.confidenceLevels);
@@ -128,6 +143,7 @@ export function workspaceQueryFromFilters(
 ): WorkspaceMapQueryInput {
   return {
     statuses: filters.statuses,
+    publicVisibility: filters.publicVisibility.length ? filters.publicVisibility : undefined,
     sources: filters.sources.length ? filters.sources : undefined,
     provenances: filters.provenances.length ? filters.provenances : undefined,
     confidenceLevels: filters.confidenceLevels.length ? filters.confidenceLevels : undefined,

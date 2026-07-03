@@ -78,6 +78,10 @@ const _operationsStatusTypeCheck = {
     resolved: 0,
     dismissed: 0,
   },
+  situationPublicationCounts: {
+    public: 0,
+    command_center: 0,
+  },
   trafficPulse: [_trafficPulseCorridorTypeCheck],
 } satisfies OperationsStatus;
 

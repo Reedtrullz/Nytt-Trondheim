@@ -10,6 +10,10 @@ import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
 import { SituationExplanationPanel } from "../components/situations/SituationExplanation.js";
+import {
+  SituationPublicationControls,
+  type SituationPublicVisibility,
+} from "../components/situations/SituationPublicationControls.js";
 import { SituationSourceItemsPanel } from "../components/situations/SituationSourceItemsPanel.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { formatSituationTimestamp } from "../situationTime.js";
@@ -42,6 +46,7 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
   const [noteText, setNoteText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [savingSituation, setSavingSituation] = useState(false);
+  const [savingPublication, setSavingPublication] = useState(false);
   const [error, setError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
   const [actionMessage, setActionMessage] = useState<string>();
@@ -126,6 +131,7 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
         : situation.status === "dismissed"
           ? "Avvist som feilkobling"
           : "Pågår";
+  const publicVisibility = situation.publicVisibility ?? "public";
 
   async function performAction<T>(
     request: () => Promise<T>,
@@ -344,6 +350,23 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
     );
   }
 
+  async function setPublication(nextVisibility: SituationPublicVisibility) {
+    if (!canManage || savingPublication || nextVisibility === publicVisibility) return;
+    setSavingPublication(true);
+    try {
+      await performAction(
+        () => api.setSituationPublication(id, nextVisibility),
+        (updated) =>
+          setWorkspace((current) => (current ? { ...current, situation: updated } : current)),
+        nextVisibility === "public"
+          ? "Situasjonen er synlig i City Pulse."
+          : "Situasjonen er skjult fra City Pulse.",
+      );
+    } finally {
+      setSavingPublication(false);
+    }
+  }
+
   async function deleteTask(taskId: string) {
     await performAction(
       () => api.deleteTask(id, taskId),
@@ -445,6 +468,11 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
                   Avvis feilkobling
                 </button>
               ) : null}
+              <SituationPublicationControls
+                publicVisibility={publicVisibility}
+                saving={savingPublication}
+                onChange={(nextVisibility) => void setPublication(nextVisibility)}
+              />
             </>
           ) : null}
           {situation.dismissalReason ? (

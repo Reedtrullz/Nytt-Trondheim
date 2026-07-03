@@ -57,6 +57,7 @@ describe("frontend source item API helpers", () => {
 
     await api.situationMapWorkspace({
       statuses: ["preliminary", "active"],
+      publicVisibility: ["public"],
       sources: ["nrk", "adressa"],
       provenances: ["official", "reporting_estimate"],
       confidenceLevels: ["confirmed"],
@@ -65,7 +66,7 @@ describe("frontend source item API helpers", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/situations/workspace-map?statuses=preliminary%2Cactive&sources=nrk%2Cadressa&provenances=official%2Creporting_estimate&confidenceLevels=confirmed&includePrivateAnnotations=false&q=Bymarka",
+      "/api/situations/workspace-map?statuses=preliminary%2Cactive&publicVisibility=public&sources=nrk%2Cadressa&provenances=official%2Creporting_estimate&confidenceLevels=confirmed&includePrivateAnnotations=false&q=Bymarka",
       expect.objectContaining({ credentials: "include" }),
     );
   });
@@ -430,6 +431,30 @@ describe("frontend source item API helpers", () => {
         method: "PATCH",
         headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
         body: JSON.stringify({ status: "revoked" }),
+      }),
+    );
+  });
+
+  it("updates situation publication through the owner API helper", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(
+        okResponse({ id: "situation-one", publicVisibility: "command_center" }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.setSituationPublication("situation one", "command_center");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/situations/situation%20one/publication",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify({ publicVisibility: "command_center" }),
       }),
     );
   });

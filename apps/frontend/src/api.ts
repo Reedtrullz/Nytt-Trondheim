@@ -348,6 +348,7 @@ export const api = {
   situationMapWorkspace: (
     query: {
       statuses?: Situation["status"][];
+      publicVisibility?: NonNullable<Situation["publicVisibility"]>[];
       sources?: string[];
       provenances?: string[];
       confidenceLevels?: string[];
@@ -357,6 +358,9 @@ export const api = {
   ) => {
     const parameters = new URLSearchParams();
     if (query.statuses?.length) parameters.set("statuses", query.statuses.join(","));
+    if (query.publicVisibility?.length) {
+      parameters.set("publicVisibility", query.publicVisibility.join(","));
+    }
     if (query.sources?.length) parameters.set("sources", query.sources.join(","));
     if (query.provenances?.length) parameters.set("provenances", query.provenances.join(","));
     if (query.confidenceLevels?.length) {
@@ -387,6 +391,14 @@ export const api = {
     request<SituationWorkspace["situation"]>(`${situationPath(id)}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status, dismissalReason }),
+    }),
+  setSituationPublication: (
+    id: string,
+    publicVisibility: NonNullable<Situation["publicVisibility"]>,
+  ) =>
+    request<SituationWorkspace["situation"]>(`${situationPath(id)}/publication`, {
+      method: "PATCH",
+      body: JSON.stringify({ publicVisibility }),
     }),
   addFeature: (id: string, feature: PrivateMapFeatureInput) =>
     request<MapFeature>(`${situationPath(id)}/features`, {

@@ -233,6 +233,10 @@ function OperationsSummaryTiles({ status }: { status: OperationsStatus }) {
         <span>Aktuelle situasjoner</span>
       </article>
       <article>
+        <strong>{status.situationPublicationCounts.public}</strong>
+        <span>{status.situationPublicationCounts.command_center} kun Command Center</span>
+      </article>
+      <article>
         <strong>{status.situationCounts.dismissed}</strong>
         <span>Avviste feilkoblinger</span>
       </article>

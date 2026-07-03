@@ -26,6 +26,7 @@ import {
   publicTransportMapQuerySchema,
   pushSubscriptionInputSchema,
   rawInspectorAiRunQuerySchema,
+  situationPublicationInputSchema,
   sourceItemLinkInputSchema,
   sourceItemQuerySchema,
   sourceAuditFilterQuerySchema,
@@ -34,6 +35,7 @@ import {
   sourceConfidenceLevelFromScore,
   sourceConfidenceLabels,
   sourceMixConfidenceSummary,
+  situationPublicVisibility,
   taskInputSchema,
   trafficMapQuerySchema,
   travelPlanQuerySchema,
@@ -764,6 +766,12 @@ function situationMatchesWorkspaceQuery(
 ): boolean {
   if (query.situationIds && !query.situationIds.includes(situation.id)) return false;
   if (query.statuses && !query.statuses.includes(situation.status)) return false;
+  if (
+    query.publicVisibility &&
+    !query.publicVisibility.includes(situationPublicVisibility(situation))
+  ) {
+    return false;
+  }
   if (query.types && !query.types.includes(situation.type)) return false;
   if (query.sources) {
     const sources = sourceIdsForSituation(situation, sourceItems);
@@ -830,6 +838,7 @@ function mapFirstSituationFromWorkspace(
     title: situation.title,
     summary: situation.summary,
     status: situation.status,
+    publicVisibility: situationPublicVisibility(situation),
     importance: situation.importance,
     updatedAt: situation.updatedAt,
     locationLabel: situation.locationLabel,
@@ -1592,6 +1601,20 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         String(req.params.id),
         status,
         dismissalReason,
+      );
+      if (!situation) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      res.json(situation);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/situations/:id/publication", requireOwner, async (req, res, next) => {
+    try {
+      const { publicVisibility } = situationPublicationInputSchema.parse(req.body);
+      const situation = await store.setSituationPublicVisibility(
+        String(req.params.id),
+        publicVisibility,
       );
       if (!situation) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.json(situation);

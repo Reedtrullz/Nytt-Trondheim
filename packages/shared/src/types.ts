@@ -1036,6 +1036,7 @@ export interface MapFirstSituation {
   title: string;
   summary: string;
   status: SituationLifecycle;
+  publicVisibility: NonNullable<Situation["publicVisibility"]>;
   importance: Situation["importance"];
   updatedAt: string;
   locationLabel: string;
@@ -1260,6 +1261,7 @@ export interface OperationsStatus {
   sources: SourceHealth[];
   articleCount: number;
   situationCounts: Record<SituationLifecycle, number>;
+  situationPublicationCounts: Record<NonNullable<Situation["publicVisibility"]>, number>;
   latestAiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt" | "error">;
   latestCollectionAt?: string;
   trafficPulse?: TrafficPulseCorridor[];

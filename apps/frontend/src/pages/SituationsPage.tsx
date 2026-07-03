@@ -6,6 +6,7 @@ import type { MapFirstSituation, Provenance, SourceConfidenceLevel } from "@nytt
 import { api } from "../api.js";
 import { MapAccessibility } from "../components/map/MapAccessibility.js";
 import { SituationWorkspaceLayer } from "../components/map/SituationWorkspaceLayer.js";
+import { SituationPublicationBadge } from "../components/situations/SituationPublicationControls.js";
 import { boundsFromLatLngs, latLngsFromGeometry, type LeafletBounds } from "../mapCoordinates.js";
 import { resolveSelectedSituation } from "../situationMapSelection.js";
 import { formatSituationTimestamp } from "../situationTime.js";
@@ -14,6 +15,7 @@ import {
   parseSituationWorkspaceFilters,
   toggleFilterValue,
   workspaceConfidenceOptions,
+  workspacePublicationOptions,
   workspaceProvenanceOptions,
   workspaceQueryFromFilters,
   workspaceSourceOptions,
@@ -164,6 +166,23 @@ function SituationFilterPanel({
           />
         ))}
       </section>
+      {canSeePrivate ? (
+        <section>
+          <h3>Publisering</h3>
+          {workspacePublicationOptions.map((option) => (
+            <FilterCheckbox
+              key={option.value}
+              checked={filters.publicVisibility.includes(option.value)}
+              label={option.label}
+              onChange={() =>
+                patch({
+                  publicVisibility: toggleFilterValue(filters.publicVisibility, option.value),
+                })
+              }
+            />
+          ))}
+        </section>
+      ) : null}
       <section>
         <h3>Kilder</h3>
         {workspaceSourceOptions.map((option) => (
@@ -219,6 +238,7 @@ function SituationFilterPanel({
           onChange({
             q: "",
             statuses: ["preliminary", "active"],
+            publicVisibility: [],
             sources: [],
             provenances: [],
             confidenceLevels: [],
@@ -262,6 +282,7 @@ function SituationList({
               <span className={`case-status ${situation.status}`}>
                 {statusLabel(situation.status)}
               </span>
+              <SituationPublicationBadge publicVisibility={situation.publicVisibility} />
               <strong>{situation.title}</strong>
               <small>
                 {situation.locationLabel} · {situation.sourceConfidence.label}
@@ -403,6 +424,7 @@ function SituationDetailDrawer({
       </header>
       <div className="situation-detail-badges">
         <span className={`status ${situation.status}`}>{statusLabel(situation.status)}</span>
+        <SituationPublicationBadge publicVisibility={situation.publicVisibility} />
         <span
           className={`trust-badge confidence-${confidenceTone(situation.sourceConfidence.level)}`}
         >
@@ -475,10 +497,14 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
   const searchText = searchParams.toString();
   const parsedFilters = useMemo(() => parseSituationWorkspaceFilters(searchText), [searchText]);
   const filters = useMemo(
-    () => (canSeePrivate ? parsedFilters : { ...parsedFilters, includePrivateAnnotations: false }),
+    () =>
+      canSeePrivate
+        ? parsedFilters
+        : { ...parsedFilters, includePrivateAnnotations: false, publicVisibility: [] },
     [canSeePrivate, parsedFilters],
   );
   const statusKey = filters.statuses.join(",");
+  const publicationKey = filters.publicVisibility.join(",");
   const sourceKey = filters.sources.join(",");
   const provenanceKey = filters.provenances.join(",");
   const confidenceKey = filters.confidenceLevels.join(",");
@@ -487,6 +513,7 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
     [
       confidenceKey,
       filters.includePrivateAnnotations,
+      publicationKey,
       filters.q,
       provenanceKey,
       sourceKey,

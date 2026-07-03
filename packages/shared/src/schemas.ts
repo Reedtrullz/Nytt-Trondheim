@@ -819,6 +819,7 @@ export const workspaceMapQuerySchema = z
   .object({
     situationIds: csvListSchema(z.string().trim().min(1).max(200)),
     statuses: csvListSchema(situationLifecycleSchema),
+    publicVisibility: csvListSchema(situationPublicVisibilitySchema),
     types: csvListSchema(situationTypeSchema),
     layers: csvListSchema(situationMapLayerSchema),
     sources: csvListSchema(sourceIdSchema),
@@ -1322,3 +1323,9 @@ export const lifecycleInputSchema = z
     message: "Avviste situasjoner krever en begrunnelse.",
     path: ["dismissalReason"],
   });
+
+export const situationPublicationInputSchema = z
+  .object({
+    publicVisibility: situationPublicVisibilitySchema,
+  })
+  .strict();

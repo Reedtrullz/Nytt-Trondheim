@@ -29,6 +29,10 @@ describe("worker cycle metrics shared contract", () => {
         resolved: 0,
         dismissed: 0,
       },
+      situationPublicationCounts: {
+        public: 0,
+        command_center: 0,
+      },
       workerCycleMetrics: metrics,
     };
 

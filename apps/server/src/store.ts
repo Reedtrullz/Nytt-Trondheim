@@ -297,6 +297,10 @@ export interface Store {
     status: Situation["status"],
     dismissalReason?: Situation["dismissalReason"],
   ): Promise<Situation | undefined>;
+  setSituationPublicVisibility(
+    id: string,
+    publicVisibility: NonNullable<Situation["publicVisibility"]>,
+  ): Promise<Situation | undefined>;
   getWorkspace(id: string, login?: string): Promise<SituationWorkspace | undefined>;
   addPrivateFeature(situationId: string, feature: MapFeature): Promise<MapFeature>;
   updatePrivateFeature(
@@ -3748,6 +3752,17 @@ export class MemoryStore implements Store {
     return clone(situation);
   }
 
+  async setSituationPublicVisibility(
+    id: string,
+    publicVisibility: NonNullable<Situation["publicVisibility"]>,
+  ): Promise<Situation | undefined> {
+    const situation = this.situations.get(id);
+    if (!situation) return undefined;
+    situation.publicVisibility = publicVisibility;
+    situation.updatedAt = new Date().toISOString();
+    return clone(situation);
+  }
+
   async getWorkspace(id: string): Promise<SituationWorkspace | undefined> {
     const situation = this.situations.get(id);
     if (!situation) return undefined;
@@ -3953,15 +3968,25 @@ export class MemoryStore implements Store {
   }
 
   async getOperationsStatus(): Promise<OperationsStatus> {
+    const situationCounts: OperationsStatus["situationCounts"] = {
+      preliminary: 0,
+      active: 0,
+      resolved: 0,
+      dismissed: 0,
+    };
+    const situationPublicationCounts: OperationsStatus["situationPublicationCounts"] = {
+      public: 0,
+      command_center: 0,
+    };
+    for (const situation of this.situations.values()) {
+      situationCounts[situation.status] += 1;
+      situationPublicationCounts[isPublicSituation(situation) ? "public" : "command_center"] += 1;
+    }
     return {
       sources: await this.listSourceHealth(),
       articleCount: this.articles.length,
-      situationCounts: {
-        preliminary: 0,
-        active: this.situations.size,
-        resolved: 0,
-        dismissed: 0,
-      },
+      situationCounts,
+      situationPublicationCounts,
       trafficPulse: await this.listTrafficPulseCorridors(),
       workerCycleMetrics: await this.getLatestWorkerCycleMetrics(),
     };
@@ -5825,6 +5850,29 @@ export class PgStore implements Store {
     return updated;
   }
 
+  async setSituationPublicVisibility(
+    id: string,
+    publicVisibility: NonNullable<Situation["publicVisibility"]>,
+  ) {
+    const current = await this.pool.query<{ payload: Situation }>(
+      "SELECT payload FROM situations WHERE id=$1",
+      [id],
+    );
+    if (!current.rows[0]) return undefined;
+    const updatedAt = new Date().toISOString();
+    const updated: Situation = {
+      ...current.rows[0].payload,
+      publicVisibility,
+      updatedAt,
+    };
+    await this.pool.query("UPDATE situations SET updated_at=$2, payload=$3 WHERE id=$1", [
+      id,
+      updatedAt,
+      updated,
+    ]);
+    return updated;
+  }
+
   async getWorkspace(id: string, login?: string): Promise<SituationWorkspace | undefined> {
     const situationResult = await this.pool.query<{ payload: Situation; saved: boolean }>(
       `SELECT s.payload,
@@ -6319,11 +6367,26 @@ export class PgStore implements Store {
   }
 
   async getOperationsStatus(): Promise<OperationsStatus> {
-    const [sources, articleCount, situationCounts, latestAiRun, trafficPulse] = await Promise.all([
+    const [
+      sources,
+      articleCount,
+      situationCounts,
+      situationPublicationCounts,
+      latestAiRun,
+      trafficPulse,
+    ] = await Promise.all([
       this.listSourceHealth(),
       this.pool.query<{ count: string }>("SELECT count(*)::text AS count FROM articles"),
       this.pool.query<{ status: Situation["status"]; count: string }>(
         "SELECT status, count(*)::text AS count FROM situations GROUP BY status",
+      ),
+      this.pool.query<{
+        publicVisibility: NonNullable<Situation["publicVisibility"]>;
+        count: string;
+      }>(
+        `SELECT COALESCE(payload->>'publicVisibility', 'public') AS "publicVisibility",
+          count(*)::text AS count
+         FROM situations GROUP BY COALESCE(payload->>'publicVisibility', 'public')`,
       ),
       this.pool.query<{
         provider: "deepseek" | "deterministic";
@@ -6345,10 +6408,18 @@ export class PgStore implements Store {
       dismissed: 0,
     };
     for (const row of situationCounts.rows) counts[row.status] = Number(row.count);
+    const publicationCounts: OperationsStatus["situationPublicationCounts"] = {
+      public: 0,
+      command_center: 0,
+    };
+    for (const row of situationPublicationCounts.rows) {
+      publicationCounts[row.publicVisibility] = Number(row.count);
+    }
     return {
       sources,
       articleCount: Number(articleCount.rows[0]?.count ?? 0),
       situationCounts: counts,
+      situationPublicationCounts: publicationCounts,
       latestAiRun: latestAiRun.rows[0],
       trafficPulse,
       workerCycleMetrics,

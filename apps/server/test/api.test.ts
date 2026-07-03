@@ -701,6 +701,22 @@ describe("private situation API", () => {
           expect.not.arrayContaining([expect.objectContaining({ id: "command-only-ras" })]),
         );
       });
+    await owner
+      .get("/api/situations/workspace-map?publicVisibility=command_center")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.situations).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "command-only-ras",
+              publicVisibility: "command_center",
+            }),
+          ]),
+        );
+        expect(response.body.situations).toEqual(
+          expect.not.arrayContaining([expect.objectContaining({ publicVisibility: "public" })]),
+        );
+      });
 
     const viewerRuntime = await testAppWithEmail(false);
     addMemorySituation(viewerRuntime.store, commandOnlySituation);
@@ -725,6 +741,59 @@ describe("private situation API", () => {
     await viewer.get("/api/situations/command-only-ras/timeline").expect(404);
     await viewer.get("/api/situations/command-only-ras/articles").expect(404);
     await viewer.get("/api/situations/command-only-ras/source-items").expect(404);
+  });
+
+  it("lets the owner publish a command-center-only situation to City Pulse", async () => {
+    const commandOnlySituation = {
+      ...sampleSituation,
+      id: "publishable-command-only",
+      title: "Publiserbar intern situasjon",
+      summary: "Vurdert i Command Center før den vises offentlig.",
+      publicVisibility: "command_center",
+      updatedAt: "2026-07-03T04:05:00.000Z",
+      createdAt: "2026-07-03T03:55:00.000Z",
+      relatedArticleIds: [],
+    } satisfies Situation;
+
+    const ownerRuntime = await testApp();
+    addMemorySituation(ownerRuntime.store, commandOnlySituation);
+    const owner = request.agent(ownerRuntime.app);
+    const ownerSession = await owner.get("/api/session").expect(200);
+    const published = await owner
+      .patch("/api/situations/publishable-command-only/publication")
+      .set("X-CSRF-Token", ownerSession.body.csrfToken as string)
+      .send({ publicVisibility: "public" })
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toEqual(
+          expect.objectContaining({
+            id: "publishable-command-only",
+            publicVisibility: "public",
+          }),
+        );
+      });
+
+    await owner
+      .get("/api/bootstrap")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.situations).toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: "publishable-command-only" })]),
+        );
+      });
+
+    const viewerRuntime = await testAppWithEmail(false);
+    addMemorySituation(viewerRuntime.store, published.body as Situation);
+    const viewer = await loginViewer(viewerRuntime);
+    await viewer
+      .get("/api/situations")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.items).toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: "publishable-command-only" })]),
+        );
+      });
+    await viewer.get("/api/situations/publishable-command-only").expect(200);
   });
 
   it("lets the owner grant viewer access without a prior request", async () => {
@@ -1805,6 +1874,7 @@ describe("private situation API", () => {
       ],
       articleCount: 1,
       situationCounts: { preliminary: 0, active: 1, resolved: 0, dismissed: 0 },
+      situationPublicationCounts: { public: 1, command_center: 0 },
       latestAiRun: undefined,
       trafficPulse: [],
       latestCollectionAt,
@@ -3598,6 +3668,14 @@ describe("private situation API", () => {
         if (normalizedSql.includes("FROM situations GROUP BY status")) {
           return { rows: [{ status: "active", count: "2" }] };
         }
+        if (normalizedSql.includes("GROUP BY COALESCE(payload->>'publicVisibility', 'public')")) {
+          return {
+            rows: [
+              { publicVisibility: "public", count: "1" },
+              { publicVisibility: "command_center", count: "1" },
+            ],
+          };
+        }
         if (normalizedSql.includes("FROM ai_processing_runs")) return { rows: [] };
         if (normalizedSql.includes("FROM worker_cycle_metrics")) return { rows: [] };
         if (normalizedSql.includes("FROM datex_travel_times")) {
@@ -3663,6 +3741,10 @@ describe("private situation API", () => {
 
       expect(status.articleCount).toBe(7);
       expect(status.situationCounts.active).toBe(2);
+      expect(status.situationPublicationCounts).toEqual({
+        public: 1,
+        command_center: 1,
+      });
       expect(status.trafficPulse?.map((corridor) => corridor.name)).toEqual([
         "E6 Omkjøring",
         "E6 Sluppen",
