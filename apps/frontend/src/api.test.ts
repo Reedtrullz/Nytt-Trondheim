@@ -63,10 +63,12 @@ describe("frontend source item API helpers", () => {
       confidenceLevels: ["confirmed"],
       includePrivateAnnotations: false,
       q: "Bymarka",
+      from: "2026-07-03T08:00:00.000Z",
+      to: "2026-07-03T10:00:00.000Z",
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/situations/workspace-map?statuses=preliminary%2Cactive&publicVisibility=public&sources=nrk%2Cadressa&provenances=official%2Creporting_estimate&confidenceLevels=confirmed&includePrivateAnnotations=false&q=Bymarka",
+      "/api/situations/workspace-map?statuses=preliminary%2Cactive&publicVisibility=public&sources=nrk%2Cadressa&provenances=official%2Creporting_estimate&confidenceLevels=confirmed&includePrivateAnnotations=false&q=Bymarka&from=2026-07-03T08%3A00%3A00.000Z&to=2026-07-03T10%3A00%3A00.000Z",
       expect.objectContaining({ credentials: "include" }),
     );
   });

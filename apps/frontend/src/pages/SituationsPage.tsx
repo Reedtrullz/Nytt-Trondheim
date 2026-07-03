@@ -20,6 +20,8 @@ import {
   workspaceQueryFromFilters,
   workspaceSourceOptions,
   workspaceStatusOptions,
+  workspaceTimeWindowLabels,
+  workspaceTimeWindowOptions,
   type SituationWorkspaceFilters,
 } from "../situationWorkspaceFilters.js";
 
@@ -156,6 +158,22 @@ function SituationFilterPanel({
         <input placeholder="Søk i situasjoner" value={filters.q} onChange={searchChanged} />
       </label>
       <section>
+        <h3>Tidsrom</h3>
+        <div className="workspace-time-filter" role="group" aria-label="Filtrer på tidsrom">
+          {workspaceTimeWindowOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={filters.timeWindow === option.value ? "selected" : undefined}
+              aria-pressed={filters.timeWindow === option.value}
+              onClick={() => patch({ timeWindow: option.value })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </section>
+      <section>
         <h3>Status</h3>
         {workspaceStatusOptions.map((option) => (
           <FilterCheckbox
@@ -242,6 +260,7 @@ function SituationFilterPanel({
             sources: [],
             provenances: [],
             confidenceLevels: [],
+            timeWindow: "all",
             includePrivateAnnotations: canSeePrivate,
           })
         }
@@ -354,12 +373,15 @@ function TimelinePanel({
 
 function SituationMapSelectionCard({
   situation,
+  canSeePrivate,
   onClose,
 }: {
   situation?: MapFirstSituation;
+  canSeePrivate: boolean;
   onClose: () => void;
 }) {
   if (!situation) return null;
+  const openLabel = canSeePrivate ? "Åpne arbeidsrom" : "Åpne situasjonsrom";
   return (
     <section className="situation-map-selection" aria-label="Valgt situasjon i kartet">
       <div>
@@ -370,7 +392,7 @@ function SituationMapSelectionCard({
         </small>
       </div>
       <div className="situation-map-selection-actions">
-        <Link to={`/situasjoner/${situation.id}`}>Åpne arbeidsrom</Link>
+        <Link to={`/situasjoner/${situation.id}`}>{openLabel}</Link>
         <button type="button" onClick={onClose}>
           Tøm valg
         </button>
@@ -408,6 +430,13 @@ function SituationDetailDrawer({
       </aside>
     );
   }
+
+  const sourceHeading = canSeePrivate ? "Proveniens" : "Kilder";
+  const timelineHeading = canSeePrivate ? "Siste utvikling" : "Siste nytt";
+  const timelineEmpty = canSeePrivate
+    ? "Ingen tidslinjepunkter i dette filteret."
+    : "Ingen offentlige oppdateringer i dette filteret.";
+  const openLabel = canSeePrivate ? "Åpne arbeidsrom" : "Åpne situasjonsrom";
 
   return (
     <aside className="situation-detail-drawer" aria-label="Situasjonsdetaljer">
@@ -450,7 +479,7 @@ function SituationDetailDrawer({
         </div>
       </dl>
       <section>
-        <h3>Proveniens</h3>
+        <h3>{sourceHeading}</h3>
         <ul className="situation-provenance-list">
           {situation.provenanceSummary.map((summary) => (
             <li key={summary.provenance}>
@@ -463,7 +492,7 @@ function SituationDetailDrawer({
         </ul>
       </section>
       <section>
-        <h3>Siste utvikling</h3>
+        <h3>{timelineHeading}</h3>
         {situation.timelinePreview.length ? (
           <ol className="situation-preview-timeline">
             {situation.timelinePreview.map((entry) => (
@@ -474,11 +503,11 @@ function SituationDetailDrawer({
             ))}
           </ol>
         ) : (
-          <p>Ingen tidslinjepunkter i dette filteret.</p>
+          <p>{timelineEmpty}</p>
         )}
       </section>
       <Link className="primary-link" to={`/situasjoner/${situation.id}`}>
-        Åpne arbeidsrom
+        {openLabel}
       </Link>
       {canSeePrivate ? (
         <Link
@@ -508,6 +537,7 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
   const sourceKey = filters.sources.join(",");
   const provenanceKey = filters.provenances.join(",");
   const confidenceKey = filters.confidenceLevels.join(",");
+  const timeWindowKey = filters.timeWindow;
   const query = useMemo(
     () => workspaceQueryFromFilters(filters),
     [
@@ -518,6 +548,7 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
       provenanceKey,
       sourceKey,
       statusKey,
+      timeWindowKey,
     ],
   );
   const [workspace, setWorkspace] =
@@ -579,7 +610,7 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
           <p>
             {canSeePrivate
               ? "Privat arbeidsflate for hendelser, kildegrunnlag, tidslinje og egne markeringer."
-              : "Kartvisning for offentlige situasjoner, kildegrunnlag og siste utvikling."}
+              : "Offentlig kartvisning for pågående situasjoner, åpne kilder og siste nytt."}
           </p>
         </div>
         <div className="situation-workspace-metrics" aria-label="Situasjonsstatus">
@@ -599,7 +630,11 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
           ) : null}
           <article>
             <strong>{loading ? "–" : (workspace?.timeline.length ?? 0)}</strong>
-            <span>Tidslinjepunkt</span>
+            <span>{canSeePrivate ? "Tidslinjepunkt" : "Oppdateringer"}</span>
+          </article>
+          <article>
+            <strong>{workspaceTimeWindowLabels[filters.timeWindow]}</strong>
+            <span>Tidsvindu</span>
           </article>
         </div>
       </section>
@@ -635,6 +670,7 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
           </MapContainer>
           <SituationMapSelectionCard
             situation={selectedSituation}
+            canSeePrivate={canSeePrivate}
             onClose={clearSelectedSituation}
           />
           {loading ? <p className="map-state">Henter situasjonskart ...</p> : null}

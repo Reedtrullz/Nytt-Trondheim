@@ -76,6 +76,10 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
 
     setSourceItems([]);
     setSourceItemsError(undefined);
+    if (!canManage) {
+      setSourceItemsLoading(false);
+      return;
+    }
     setSourceItemsLoading(true);
 
     void api
@@ -93,7 +97,7 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
     return () => {
       ignore = true;
     };
-  }, [id, sourceItemsRetry]);
+  }, [canManage, id, sourceItemsRetry]);
 
   function retrySourceItems() {
     setSourceItemsRetry((attempt) => attempt + 1);
@@ -519,24 +523,26 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
               </article>
             ))}
           </section>
-          <SituationSourceItemsPanel
-            sourceItems={sourceItems}
-            loading={sourceItemsLoading}
-            error={sourceItemsError}
-            canManage={canManage}
-            search={sourceItemSearch}
-            relationship={sourceItemRelationship}
-            candidates={sourceItemCandidates}
-            candidatesLoading={sourceItemCandidatesLoading}
-            candidatesError={sourceItemCandidatesError}
-            linkingSourceItemId={linkingSourceItemId}
-            onRetry={retrySourceItems}
-            onSearchChange={setSourceItemSearch}
-            onRelationshipChange={setSourceItemRelationship}
-            onLoadCandidates={() => void loadSourceItemCandidates()}
-            onLink={(sourceItemId) => void linkSourceItemToSituation(sourceItemId)}
-            onUnlink={(sourceItemId) => void unlinkSourceItemFromSituation(sourceItemId)}
-          />
+          {canManage ? (
+            <SituationSourceItemsPanel
+              sourceItems={sourceItems}
+              loading={sourceItemsLoading}
+              error={sourceItemsError}
+              canManage={canManage}
+              search={sourceItemSearch}
+              relationship={sourceItemRelationship}
+              candidates={sourceItemCandidates}
+              candidatesLoading={sourceItemCandidatesLoading}
+              candidatesError={sourceItemCandidatesError}
+              linkingSourceItemId={linkingSourceItemId}
+              onRetry={retrySourceItems}
+              onSearchChange={setSourceItemSearch}
+              onRelationshipChange={setSourceItemRelationship}
+              onLoadCandidates={() => void loadSourceItemCandidates()}
+              onLink={(sourceItemId) => void linkSourceItemToSituation(sourceItemId)}
+              onUnlink={(sourceItemId) => void unlinkSourceItemFromSituation(sourceItemId)}
+            />
+          ) : null}
           <section className="related">
             <h2>Relaterte saker</h2>
             {workspace.relatedArticles.map((article) => {

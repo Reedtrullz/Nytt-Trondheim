@@ -63,6 +63,22 @@ export const workspacePublicationOptions: Array<{
   { value: "command_center", label: "Kun Command Center" },
 ];
 
+export type SituationWorkspaceTimeWindow = "all" | "2h" | "24h" | "7d";
+
+export const workspaceTimeWindowOptions: Array<{
+  value: SituationWorkspaceTimeWindow;
+  label: string;
+}> = [
+  { value: "all", label: "Alt" },
+  { value: "2h", label: "2 timer" },
+  { value: "24h", label: "24 timer" },
+  { value: "7d", label: "7 dager" },
+];
+
+export const workspaceTimeWindowLabels = Object.fromEntries(
+  workspaceTimeWindowOptions.map((option) => [option.value, option.label]),
+) as Record<SituationWorkspaceTimeWindow, string>;
+
 export interface SituationWorkspaceFilters {
   q: string;
   statuses: SituationLifecycle[];
@@ -70,6 +86,7 @@ export interface SituationWorkspaceFilters {
   sources: SourceId[];
   provenances: Provenance[];
   confidenceLevels: SourceConfidenceLevel[];
+  timeWindow: SituationWorkspaceTimeWindow;
   includePrivateAnnotations: boolean;
   selectedSituationId?: string;
 }
@@ -84,6 +101,7 @@ const provenanceSet = new Set<Provenance>(workspaceProvenanceOptions.map((option
 const confidenceSet = new Set<SourceConfidenceLevel>(
   workspaceConfidenceOptions.map((option) => option.value),
 );
+const timeWindowSet = new Set<string>(workspaceTimeWindowOptions.map((option) => option.value));
 
 function parseCsv<T extends string>(value: string | null, allowed: Set<T>): T[] {
   if (!value) return [];
@@ -118,6 +136,9 @@ export function parseSituationWorkspaceFilters(search: string): SituationWorkspa
     sources: parseCsv(parameters.get("sources"), sourceSet),
     provenances: parseCsv(parameters.get("provenance"), provenanceSet),
     confidenceLevels: parseCsv(parameters.get("confidence"), confidenceSet),
+    timeWindow: timeWindowSet.has(parameters.get("window") ?? "")
+      ? (parameters.get("window") as SituationWorkspaceTimeWindow)
+      : "all",
     includePrivateAnnotations: parameters.get("private") !== "false",
     selectedSituationId: parameters.get("s") ?? undefined,
   };
@@ -132,15 +153,27 @@ export function buildSituationWorkspaceSearch(filters: SituationWorkspaceFilters
   writeCsv(parameters, "sources", filters.sources);
   writeCsv(parameters, "provenance", filters.provenances);
   writeCsv(parameters, "confidence", filters.confidenceLevels);
+  if (filters.timeWindow !== "all") parameters.set("window", filters.timeWindow);
   if (!filters.includePrivateAnnotations) parameters.set("private", "false");
   if (filters.selectedSituationId) parameters.set("s", filters.selectedSituationId);
   const serialized = parameters.toString();
   return serialized ? `?${serialized}` : "";
 }
 
+export function workspaceTimeWindowFrom(
+  timeWindow: SituationWorkspaceTimeWindow,
+  now = new Date(),
+): string | undefined {
+  const hours = timeWindow === "2h" ? 2 : timeWindow === "24h" ? 24 : timeWindow === "7d" ? 168 : 0;
+  if (!hours) return undefined;
+  return new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
+}
+
 export function workspaceQueryFromFilters(
   filters: SituationWorkspaceFilters,
+  now = new Date(),
 ): WorkspaceMapQueryInput {
+  const from = workspaceTimeWindowFrom(filters.timeWindow, now);
   return {
     statuses: filters.statuses,
     publicVisibility: filters.publicVisibility.length ? filters.publicVisibility : undefined,
@@ -149,6 +182,7 @@ export function workspaceQueryFromFilters(
     confidenceLevels: filters.confidenceLevels.length ? filters.confidenceLevels : undefined,
     includePrivateAnnotations: filters.includePrivateAnnotations,
     q: filters.q || undefined,
+    ...(from ? { from } : {}),
   };
 }
 

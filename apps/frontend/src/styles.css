@@ -2367,7 +2367,7 @@ button {
 
 .situation-workspace-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
 }
 
@@ -2475,6 +2475,25 @@ button {
   color: var(--blue);
   font-size: 12px;
   font-weight: 700;
+}
+
+.workspace-time-filter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.situation-workspace-filter .workspace-time-filter button {
+  min-height: 36px;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--muted);
+}
+
+.situation-workspace-filter .workspace-time-filter button.selected {
+  border-color: var(--blue);
+  background: #eaf1fb;
+  color: var(--blue);
 }
 
 .situation-workspace-list header,

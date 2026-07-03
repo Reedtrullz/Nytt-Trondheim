@@ -277,6 +277,21 @@ test("situation overview keeps the selected map case actionable", async ({ page 
   );
 });
 
+test("situation overview recency presets update the workspace query", async ({ page }) => {
+  await page.goto("/situasjoner");
+
+  const requestPromise = page.waitForRequest((request) => {
+    if (!request.url().includes("/api/situations/workspace-map")) return false;
+    return new URL(request.url()).searchParams.has("from");
+  });
+  await page.getByRole("button", { name: "24 timer" }).click();
+  const request = await requestPromise;
+  const requestUrl = new URL(request.url());
+
+  expect(requestUrl.searchParams.get("from")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  await expect(page).toHaveURL(/window=24h/);
+});
+
 test("situation overview changes map selection without refetching workspace data", async ({
   page,
 }) => {
@@ -779,7 +794,9 @@ test("verified public story proof opens the linked situation room for viewers", 
       }),
     });
   });
+  let sourceItemsRequested = false;
   await page.route("**/api/situations/politiloggen-lade-vold/source-items", async (route) => {
+    sourceItemsRequested = true;
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
 
@@ -806,6 +823,8 @@ test("verified public story proof opens the linked situation room for viewers", 
     page.locator(".related").getByRole("link", { name: /Ung mann kritisk skadd på Lade/ }),
   ).toHaveAttribute("href", "https://example.test/lade-vold");
   await expect(page.getByText("Private analyser")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Kildegrunnlag" })).toHaveCount(0);
+  expect(sourceItemsRequested).toBe(false);
 });
 
 test("coverage bundle operations page renders persisted decisions and drawer detail", async ({
@@ -2315,6 +2334,18 @@ test("viewer shell keeps command center tools out of the public traffic map", as
     await expect(navigation.getByRole("link", { name: "Kommandosenter" })).toHaveCount(0);
     await expect(navigation.getByRole("link", { name: "Lagret" })).toHaveCount(0);
   }
+
+  await page.goto("/situasjoner");
+  await expect(
+    page.getByText("Offentlig kartvisning for pågående situasjoner, åpne kilder og siste nytt."),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Situasjonsdetaljer").getByRole("heading", { name: "Kilder" }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Situasjonsdetaljer").getByRole("link", { name: "Åpne situasjonsrom" }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Åpne arbeidsrom" })).toHaveCount(0);
 
   await page.goto("/trafikk");
   await openTrafficLayersIfHidden(page);

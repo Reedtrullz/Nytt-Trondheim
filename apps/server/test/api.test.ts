@@ -581,6 +581,7 @@ describe("private situation API", () => {
     await viewerAgent.get("/api/operations/status").expect(403);
     await viewerAgent.get("/api/saved/articles").expect(403);
     await viewerAgent.get("/api/source-items?limit=1").expect(403);
+    await viewerAgent.get("/api/situations/skogbrann-bymarka/source-items").expect(403);
     await viewerAgent
       .post("/api/situations/skogbrann-bymarka/exports")
       .set("X-CSRF-Token", session.body.csrfToken as string)
@@ -761,7 +762,7 @@ describe("private situation API", () => {
     await viewer.get("/api/situations/command-only-ras").expect(404);
     await viewer.get("/api/situations/command-only-ras/timeline").expect(404);
     await viewer.get("/api/situations/command-only-ras/articles").expect(404);
-    await viewer.get("/api/situations/command-only-ras/source-items").expect(404);
+    await viewer.get("/api/situations/command-only-ras/source-items").expect(403);
   });
 
   it("lets the owner publish a command-center-only situation to City Pulse", async () => {
@@ -976,6 +977,41 @@ describe("private situation API", () => {
     expect(response.body.explanation.sourceRoles).not.toContainEqual({
       provider: "vg",
       role: "evidence",
+    });
+  });
+
+  it("keeps source-item-only explanation roles out of viewer situation details", async () => {
+    const runtime = await testAppWithEmail(false);
+    const availableSourceItems = await runtime.store.listSourceItems(
+      {
+        provider: "vg",
+        kind: "article",
+        q: "Olavsfestdagene",
+        limit: 1,
+      },
+      "owner",
+    );
+    const contextSourceItem = availableSourceItems.items[0];
+    expect(contextSourceItem).toMatchObject({ provider: "vg", kind: "article" });
+    await runtime.store.linkSourceItem(
+      "skogbrann-bymarka",
+      contextSourceItem!.id,
+      "context",
+      "owner",
+    );
+
+    const viewer = await loginViewer(runtime);
+    const response = await viewer.get("/api/situations/skogbrann-bymarka").expect(200);
+
+    expect(response.body.explanation.sourceRoles).toEqual(
+      expect.arrayContaining([
+        { provider: "nrk", role: "evidence" },
+        { provider: "adressa", role: "evidence" },
+      ]),
+    );
+    expect(response.body.explanation.sourceRoles).not.toContainEqual({
+      provider: "vg",
+      role: "context",
     });
   });
 
@@ -1375,6 +1411,31 @@ describe("private situation API", () => {
         title: "Første melding om røyk",
       }),
     ]);
+  });
+
+  it("filters the workspace map and timeline by explicit time bounds", async () => {
+    const { agent } = await ownerAgent();
+
+    const recent = await agent
+      .get("/api/situations/workspace-map?from=2026-05-26T12:00:00.000Z")
+      .expect(200);
+    expect(recent.body.situations).toEqual([expect.objectContaining({ id: "skogbrann-bymarka" })]);
+    expect(recent.body.timeline).toEqual([
+      expect.objectContaining({ id: "t2", timestamp: "2026-05-26T12:18:00.000Z" }),
+    ]);
+
+    const afterLastUpdate = new Date(Date.parse(sampleSituation.updatedAt) + 1000).toISOString();
+    const stale = await agent
+      .get(`/api/situations/workspace-map?from=${encodeURIComponent(afterLastUpdate)}`)
+      .expect(200);
+    expect(stale.body.situations).toEqual([]);
+    expect(stale.body.timeline).toEqual([]);
+
+    await agent
+      .get(
+        "/api/situations/workspace-map?from=2026-05-26T13:00:00.000Z&to=2026-05-26T12:00:00.000Z",
+      )
+      .expect(400);
   });
 
   it("honors explicit situationIds in the workspace map", async () => {

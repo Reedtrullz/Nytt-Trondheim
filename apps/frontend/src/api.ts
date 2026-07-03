@@ -376,6 +376,8 @@ export const api = {
       confidenceLevels?: string[];
       includePrivateAnnotations?: boolean;
       q?: string;
+      from?: string;
+      to?: string;
     } = {},
   ) => {
     const parameters = new URLSearchParams();
@@ -392,6 +394,8 @@ export const api = {
       parameters.set("includePrivateAnnotations", String(query.includePrivateAnnotations));
     }
     if (query.q) parameters.set("q", query.q);
+    if (query.from) parameters.set("from", query.from);
+    if (query.to) parameters.set("to", query.to);
     const search = parameters.toString();
     return request<SituationMapWorkspace>(
       `/api/situations/workspace-map${search ? `?${search}` : ""}`,

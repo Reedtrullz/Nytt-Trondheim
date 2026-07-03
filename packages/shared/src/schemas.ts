@@ -837,12 +837,15 @@ export const workspaceMapQuerySchema = z
     includeTelemetry: booleanQueryParamSchema,
     includePrivateAnnotations: booleanQueryParamSchema,
     q: z.string().trim().max(160).optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
     north: coordinateParamSchema,
     south: coordinateParamSchema,
     east: coordinateParamSchema,
     west: coordinateParamSchema,
   })
-  .superRefine(validateOptionalBounds);
+  .superRefine(validateOptionalBounds)
+  .superRefine(validateDateRange);
 
 export type WorkspaceMapQueryInput = z.infer<typeof workspaceMapQuerySchema>;
 

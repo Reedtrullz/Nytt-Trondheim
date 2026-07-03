@@ -672,6 +672,9 @@ function timelineEntryMatchesWorkspaceQuery(
   }
   if (query.includePrivateAnnotations === false && provenance === "private_annotation")
     return false;
+  const timestamp = Date.parse(entry.timestamp);
+  if (query.from && Number.isFinite(timestamp) && timestamp < Date.parse(query.from)) return false;
+  if (query.to && Number.isFinite(timestamp) && timestamp > Date.parse(query.to)) return false;
   const search = query.q?.toLocaleLowerCase("nb");
   if (
     search &&
@@ -799,6 +802,18 @@ function situationMatchesWorkspaceQuery(
   }
   if (query.confidenceLevels && !query.confidenceLevels.includes(sourceConfidence.level))
     return false;
+  if (query.from || query.to) {
+    const fromTime = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
+    const toTime = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
+    const relevantTimes = [
+      Date.parse(situation.updatedAt),
+      Date.parse(situation.createdAt),
+      ...situation.timeline
+        .filter((entry) => timelineEntryMatchesWorkspaceQuery(entry, query))
+        .map((entry) => Date.parse(entry.timestamp)),
+    ].filter(Number.isFinite);
+    if (!relevantTimes.some((time) => time >= fromTime && time <= toTime)) return false;
+  }
   const search = query.q?.toLocaleLowerCase("nb");
   if (
     search &&
@@ -1465,7 +1480,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.get("/api/situations/:id", async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      const situationId = String(req.params.id);
+      const workspace = await store.getWorkspace(situationId, currentLogin(req));
       if (!workspace) {
         res.status(404).json({ error: "Situasjonen finnes ikke." });
         return;
@@ -1474,9 +1490,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         res.status(404).json({ error: "Situasjonen finnes ikke." });
         return;
       }
-      const sourceItems = await store.listSituationSourceItems(req.params.id, currentLogin(req));
-      const visibleWorkspace =
-        req.user?.role === "owner" ? workspace : viewerSafeWorkspace(workspace);
+      const isOwner = req.user?.role === "owner";
+      const sourceItems = isOwner
+        ? await store.listSituationSourceItems(situationId, currentLogin(req))
+        : [];
+      const visibleWorkspace = isOwner ? workspace : viewerSafeWorkspace(workspace);
       res.json({
         ...visibleWorkspace,
         explanation: buildSituationExplanation(visibleWorkspace.situation, sourceItems),
@@ -1514,14 +1532,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
-  app.get("/api/situations/:id/source-items", async (req, res, next) => {
+  app.get("/api/situations/:id/source-items", requireOwner, async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      const situationId = String(req.params.id);
+      const workspace = await store.getWorkspace(situationId, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
-      if (!canReadSituation(req, workspace.situation)) {
-        return void res.status(404).json({ error: "Situasjonen finnes ikke." });
-      }
-      res.json(await store.listSituationSourceItems(req.params.id, currentLogin(req)));
+      res.json(await store.listSituationSourceItems(situationId, currentLogin(req)));
     } catch (error) {
       next(error);
     }
