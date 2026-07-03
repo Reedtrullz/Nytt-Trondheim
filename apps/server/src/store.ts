@@ -867,13 +867,14 @@ function sourceLabelsForIds(sources: SourceId[]): string {
 function publicVerificationForSituation(
   situation: Situation,
 ): Article["publicVerification"] | undefined {
-  if (situation.officialSource !== "datex") return undefined;
+  const officialSource = situation.officialSource;
+  if (officialSource !== "datex" && officialSource !== "politiloggen") return undefined;
   if (situation.verificationStatus !== "Offentlig bekreftet") return undefined;
   if (situation.status !== "active" && situation.status !== "preliminary") return undefined;
-  const hasDatexEvidence = situation.evidence.some(
-    (item) => item.source === "datex" && item.provenance === "official",
+  const hasOfficialEvidence = situation.evidence.some(
+    (item) => item.source === officialSource && item.provenance === "official",
   );
-  if (!hasDatexEvidence) return undefined;
+  if (!hasOfficialEvidence) return undefined;
   const reportingSources = [
     ...new Set(
       situation.evidence
@@ -888,8 +889,8 @@ function publicVerificationForSituation(
   return {
     status: "verified",
     label: "Verifisert",
-    detail: `Bekreftet av ${sourceIdLabel("datex")} og ${sourceLabelsForIds(reportingSources)}.`,
-    officialSources: ["datex"],
+    detail: `Bekreftet av ${sourceIdLabel(officialSource)} og ${sourceLabelsForIds(reportingSources)}.`,
+    officialSources: [officialSource],
     reportingSources,
     situationId: situation.id,
   };

@@ -475,6 +475,11 @@ export function StoryVerificationProof({ verification }: { verification?: HomeSt
     <p className="story-verification-proof">
       <span>{verification.label}</span>
       <span>{verification.sourceSummary}</span>
+      {verification.situationId ? (
+        <Link to={`/situasjoner/${encodeURIComponent(verification.situationId)}`}>
+          Åpne situasjonsrom
+        </Link>
+      ) : null}
       <span className="sr-only">{verification.detail}</span>
     </p>
   );

@@ -206,18 +206,22 @@ describe("LocalFocusSummaryPanel", () => {
 describe("StoryVerificationProof", () => {
   it("renders visible verification sources with accessible detail", () => {
     const html = renderToStaticMarkup(
-      <StoryVerificationProof
-        verification={{
-          label: "Verifisert",
-          detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
-          sourceSummary: "Statens vegvesen DATEX + Adresseavisen",
-          situationId: "datex-e6",
-        }}
-      />,
+      <MemoryRouter>
+        <StoryVerificationProof
+          verification={{
+            label: "Verifisert",
+            detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+            sourceSummary: "Statens vegvesen DATEX + Adresseavisen",
+            situationId: "datex-e6",
+          }}
+        />
+      </MemoryRouter>,
     );
 
     expect(html).toContain("Verifisert");
     expect(html).toContain("Statens vegvesen DATEX + Adresseavisen");
+    expect(html).toContain("Åpne situasjonsrom");
+    expect(html).toContain("/situasjoner/datex-e6");
     expect(html).toContain("Bekreftet av Statens vegvesen DATEX og Adresseavisen.");
     expect(html).toContain("sr-only");
   });

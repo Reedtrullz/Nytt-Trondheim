@@ -230,6 +230,100 @@ describe("article store", () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
+  it("adds Politiloggen public verification and situation links to related production articles", async () => {
+    const article: Article = {
+      id: "article-lade-violence",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Ung mann kritisk skadd på Lade",
+      excerpt: "Politiet leter etter flere personer etter en voldshendelse på Lade.",
+      url: "https://example.test/lade-vold",
+      publishedAt: "2026-07-02T18:59:00.000Z",
+      scope: "trondheim",
+      category: "Krim",
+      places: ["Lade", "Trondheim"],
+    };
+    const situation: Situation = {
+      id: "politiloggen-lade-vold",
+      type: "other",
+      title: "Voldshendelse på Lade",
+      summary: "Politiloggen omtaler en voldshendelse på Lade.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      importance: "normal",
+      updatedAt: "2026-07-02T19:05:00.000Z",
+      createdAt: "2026-07-02T18:34:00.000Z",
+      locationLabel: "Lade",
+      officialSource: "politiloggen",
+      officialEventId: "lade-vold",
+      activationBasis: {
+        rule: "official_source",
+        sourceIds: ["politiloggen"],
+        articleIds: ["politiloggen-lade-vold"],
+        activatedAt: "2026-07-02T18:34:00.000Z",
+      },
+      relatedArticleIds: ["politiloggen-lade-vold", "article-lade-violence"],
+      evidence: [
+        {
+          id: "politiloggen-evidence",
+          situationId: "politiloggen-lade-vold",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          sourceUrl: "https://example.test/politiloggen/lade-vold",
+          supportingSnippet: "Voldshendelse: Trondheim, Lade",
+          claim: "Politiet undersøker voldshendelse på Lade",
+          claimType: "official_police_log",
+          provenance: "official",
+          confidence: 1,
+          extractedAt: "2026-07-02T19:05:00.000Z",
+          publishedAt: "2026-07-02T18:34:00.000Z",
+        },
+        {
+          id: "article-lade-evidence",
+          situationId: "politiloggen-lade-vold",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          sourceUrl: "https://example.test/lade-vold",
+          supportingSnippet: "Politiet leter etter flere personer etter en voldshendelse på Lade.",
+          claim: "Ung mann kritisk skadd på Lade",
+          claimType: "reporting_match",
+          provenance: "reporting_estimate",
+          confidence: 0.72,
+          extractedAt: "2026-07-02T19:05:00.000Z",
+          publishedAt: "2026-07-02T18:59:00.000Z",
+        },
+      ],
+      features: [],
+      timeline: [],
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (query.mock.calls.length > 1) {
+        expect(sql).toContain("FROM situations");
+        expect(params).toEqual([["article-lade-violence"]]);
+        return { rows: [{ payload: situation }] };
+      }
+      return { rows: [{ payload: article, saved: false }] };
+    });
+    const store = new PgStore({ query } as unknown as pg.Pool);
+
+    const page = await store.listArticles({ limit: 10 }, "Reedtrullz");
+
+    expect(page.items[0]).toMatchObject({
+      id: "article-lade-violence",
+      saved: false,
+      situationId: "politiloggen-lade-vold",
+      publicVerification: {
+        status: "verified",
+        label: "Verifisert",
+        detail: "Bekreftet av Politiloggen og Adresseavisen.",
+        officialSources: ["politiloggen"],
+        reportingSources: ["adressa"],
+        situationId: "politiloggen-lade-vold",
+      },
+    });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
   it("adds DATEX public verification to matching traffic articles without requiring a situation link", async () => {
     const article: Article = {
       id: "article-road-official-match",

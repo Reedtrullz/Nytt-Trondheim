@@ -1184,6 +1184,13 @@ button {
   text-transform: uppercase;
 }
 
+.story-verification-proof a {
+  color: var(--blue);
+  font-weight: 800;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
 .source-cluster {
   margin-top: 14px;
   display: grid;

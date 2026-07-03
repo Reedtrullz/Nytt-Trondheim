@@ -103,6 +103,41 @@ describe("home story cards", () => {
     });
   });
 
+  it("adds a public verification badge when Politiloggen and newsroom evidence back the story", () => {
+    const group = groupHomeArticles([
+      article({
+        id: "adressa-lade",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Ung mann kritisk skadd på Lade",
+        excerpt: "Politiet leter etter flere personer etter en voldshendelse på Lade.",
+        category: "Krim",
+        publicVerification: {
+          status: "verified",
+          label: "Verifisert",
+          detail: "Bekreftet av Politiloggen og Adresseavisen.",
+          officialSources: ["politiloggen"],
+          reportingSources: ["adressa"],
+          situationId: "politiloggen-lade-vold",
+        },
+      }),
+    ])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.verification).toEqual({
+      label: "Verifisert",
+      detail: "Bekreftet av Politiloggen og Adresseavisen.",
+      sourceSummary: "Politiloggen + Adresseavisen",
+      situationId: "politiloggen-lade-vold",
+    });
+    expect(card.sourceConfidence).toMatchObject({
+      level: "confirmed",
+      label: "Bekreftet",
+      sourceCount: 2,
+    });
+  });
+
   it("uses specific places before broad geography labels", () => {
     const [card] = homeStoryCardsForGroups(
       groupHomeArticles([
