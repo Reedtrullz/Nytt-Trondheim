@@ -1,7 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { z } from "zod";
-import type { AiProcessingRun, Article, EvidenceItem, Situation } from "@nytt/shared";
+import type {
+  AiAnalysisAttemptDiagnostics,
+  AiAnalysisProfile,
+  AiProcessingRun,
+  AiProcessingRunDiagnostics,
+  Article,
+  EvidenceItem,
+  Situation,
+} from "@nytt/shared";
 
 const citedClaimSchema = z.object({
   claim: z.string(),
@@ -18,7 +26,14 @@ const optionalCategoryTopicSchema = z.preprocess(
   z.enum(["rosenborg"]).optional(),
 );
 
+const aiAnalysisProfileSchema = z.enum(["standard", "compact_recovery", "brief_only_recovery"]);
+
 const resultSchema = z.object({
+  morningBrief: z
+    .object({
+      paragraphs: z.tuple([z.string(), z.string(), z.string()]),
+    })
+    .optional(),
   clusters: z.array(
     z.object({
       title: z.string(),
@@ -106,6 +121,21 @@ const resultSchema = z.object({
       }),
     )
     .default([]),
+  diagnostics: z
+    .object({
+      profile: aiAnalysisProfileSchema,
+      attempts: z.array(
+        z.object({
+          profile: aiAnalysisProfileSchema,
+          status: z.enum(["ok", "failed"]),
+          maxTokens: z.number(),
+          articleCount: z.number(),
+          situationCount: z.number(),
+          error: z.string().optional(),
+        }),
+      ),
+    })
+    .optional(),
 });
 
 type AnalysisResult = z.infer<typeof resultSchema>;
@@ -132,14 +162,90 @@ export interface SituationAnalyzer {
 
 const DEFAULT_DEEPSEEK_TIMEOUT_MS = 25_000;
 const DEFAULT_DEEPSEEK_MAX_RETRIES = 0;
-const MAX_DEEPSEEK_ARTICLES = 12;
-const MAX_DEEPSEEK_SITUATIONS = 12;
-const MAX_TITLE_LENGTH = 180;
-const MAX_EXCERPT_LENGTH = 900;
-const MAX_PLACE_LENGTH = 80;
-const MAX_SUMMARY_LENGTH = 700;
 const EMPTY_ANALYSIS_JSON =
   '{"clusters":[],"situationUpdates":[],"bundleHints":[],"categoryHints":[],"relevanceHints":[],"operationsNotes":[]}';
+
+interface DeepSeekAttemptProfile {
+  name: AiAnalysisProfile;
+  maxArticles: number;
+  maxSituations: number;
+  maxTitleLength: number;
+  maxExcerptLength: number;
+  maxPlaceLength: number;
+  maxSummaryLength: number;
+  maxTokens: number;
+  outputCaps: {
+    clusters: number;
+    situationUpdates: number;
+    bundleHints: number;
+    categoryHints: number;
+    relevanceHints: number;
+    operationsNotes: number;
+  };
+  morningBriefParagraphLength: number;
+  briefOnly?: boolean;
+}
+
+const deepSeekAttemptProfiles: DeepSeekAttemptProfile[] = [
+  {
+    name: "standard",
+    maxArticles: 12,
+    maxSituations: 12,
+    maxTitleLength: 180,
+    maxExcerptLength: 900,
+    maxPlaceLength: 80,
+    maxSummaryLength: 700,
+    maxTokens: 4096,
+    outputCaps: {
+      clusters: 5,
+      situationUpdates: 5,
+      bundleHints: 8,
+      categoryHints: 12,
+      relevanceHints: 12,
+      operationsNotes: 6,
+    },
+    morningBriefParagraphLength: 260,
+  },
+  {
+    name: "compact_recovery",
+    maxArticles: 8,
+    maxSituations: 6,
+    maxTitleLength: 140,
+    maxExcerptLength: 520,
+    maxPlaceLength: 60,
+    maxSummaryLength: 420,
+    maxTokens: 2048,
+    outputCaps: {
+      clusters: 2,
+      situationUpdates: 2,
+      bundleHints: 4,
+      categoryHints: 6,
+      relevanceHints: 6,
+      operationsNotes: 2,
+    },
+    morningBriefParagraphLength: 180,
+  },
+  {
+    name: "brief_only_recovery",
+    maxArticles: 6,
+    maxSituations: 3,
+    maxTitleLength: 120,
+    maxExcerptLength: 360,
+    maxPlaceLength: 50,
+    maxSummaryLength: 260,
+    maxTokens: 900,
+    outputCaps: {
+      clusters: 0,
+      situationUpdates: 0,
+      bundleHints: 0,
+      categoryHints: 0,
+      relevanceHints: 0,
+      operationsNotes: 0,
+    },
+    morningBriefParagraphLength: 150,
+    briefOnly: true,
+  },
+];
 
 function integerFromEnv(name: string, fallback: number, minimum: number): number {
   const raw = process.env[name];
@@ -171,6 +277,73 @@ function parseAnalysisContent(content: string): AnalysisResult {
   return resultSchema.parse(JSON.parse(normalized.slice(firstBrace, lastBrace + 1)));
 }
 
+function compactError(error: unknown): string {
+  return compactString(String(error), 240) ?? "Ukjent feil";
+}
+
+function publicArticleInputs(articles: Article[], profile: DeepSeekAttemptProfile) {
+  return articles
+    .slice(0, profile.maxArticles)
+    .map(({ id, title, excerpt, source, sourceLabel, publishedAt, places }) => ({
+      id,
+      title: compactString(title, profile.maxTitleLength),
+      excerpt: compactString(excerpt, profile.maxExcerptLength),
+      source,
+      sourceLabel,
+      publishedAt,
+      places: places.map((place) => compactString(place, profile.maxPlaceLength)).filter(Boolean),
+    }));
+}
+
+function activeSituationInputs(context: AnalysisContext, profile: DeepSeekAttemptProfile) {
+  return (context.situations ?? [])
+    .filter((situation) => situation.status === "preliminary" || situation.status === "active")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, profile.maxSituations)
+    .map(({ id, type, title, summary, status, updatedAt, locationLabel, relatedArticleIds }) => ({
+      id,
+      type,
+      title: compactString(title, profile.maxTitleLength),
+      summary: compactString(summary, profile.maxSummaryLength),
+      status,
+      updatedAt,
+      locationLabel: compactString(locationLabel, profile.maxPlaceLength),
+      relatedArticleIds,
+    }));
+}
+
+function analysisSystemPrompt(profile: DeepSeekAttemptProfile): string {
+  const caps = profile.outputCaps;
+  const recoveryPrefix =
+    profile.name === "brief_only_recovery"
+      ? "This is a final morning-brief recovery pass after structured incident analysis failed. Return only a tiny public morning brief plus empty analysis arrays. "
+      : profile.name === "compact_recovery"
+        ? "This is a compact recovery pass after invalid or truncated structured output. Prefer a tiny valid JSON object over broad coverage. "
+        : "";
+  if (profile.briefOnly) {
+    return `${recoveryPrefix}Return one compact JSON object only. Use only public article excerpts and supplied situation summaries. Include morningBrief.paragraphs with exactly 3 short public paragraphs for a citizen morning briefing; each paragraph must be under ${profile.morningBriefParagraphLength} characters and avoid private facts, identities, precise perimeters, responder activity and unsourced claims. Do not produce clusters, situation updates, bundle hints, category hints, relevance hints or operations notes in this pass. JSON shape: {"morningBrief":{"paragraphs":["string","string","string"]},"clusters":[],"situationUpdates":[],"bundleHints":[],"categoryHints":[],"relevanceHints":[],"operationsNotes":[]}. Use ${EMPTY_ANALYSIS_JSON} only if there is not enough public feed context for a safe brief.`;
+  }
+  return `${recoveryPrefix}Return one compact JSON object only. Use only public article excerpts and supplied situation summaries. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Situation update hints must only link supplied articles to supplied active/preliminary situations when article text is clearly progress or a direct update for the same incident. Bundle/category/relevance hints are suggestions only, not evidence. Return at most ${caps.clusters} clusters, ${caps.situationUpdates} situationUpdates, ${caps.bundleHints} bundleHints, ${caps.categoryHints} categoryHints, ${caps.relevanceHints} relevanceHints and ${caps.operationsNotes} operationsNotes. When there is enough public feed context, include morningBrief.paragraphs with exactly 3 short public paragraphs for a citizen morning briefing; each paragraph must be under ${profile.morningBriefParagraphLength} characters and avoid private facts, identities, and unsourced claims. Keep title, summary, reason, claim and supportingSnippet strings short; supportingSnippet must be a literal article excerpt substring no longer than 120 characters. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"morningBrief":{"paragraphs":["string","string","string"]},"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"situationUpdates":[{"situationId":"string","articleIds":["string"],"summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"bundleHints":[{"title":"string","articleIds":["string"],"reason":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"categoryHints":[{"articleId":"string","category":"Nyheter|Hendelser|Krim|Byutvikling|Kultur|Sport|Transport|Politikk|Vær","topic":"rosenborg","reason":"string","supportingSnippet":"string"}],"relevanceHints":[{"articleId":"string","scope":"trondheim|trondelag|ignore","reason":"string","supportingSnippet":"string"}],"operationsNotes":[{"kind":"situation_progress|bundle_candidate|category_relevance|source_quality|other","subjectId":"string","summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}. Use ${EMPTY_ANALYSIS_JSON} when uncertain.`;
+}
+
+function analysisDiagnostics(
+  profile: DeepSeekAttemptProfile,
+  attempts: AiAnalysisAttemptDiagnostics[],
+): AiProcessingRunDiagnostics {
+  return { profile: profile.name, attempts };
+}
+
+function withDiagnostics(
+  result: AnalysisResult,
+  profile: DeepSeekAttemptProfile,
+  attempts: AiAnalysisAttemptDiagnostics[],
+): AnalysisResult {
+  return {
+    ...result,
+    diagnostics: analysisDiagnostics(profile, attempts),
+  };
+}
+
 function run(
   provider: AiProcessingRun["provider"],
   model: string,
@@ -194,10 +367,15 @@ function run(
 }
 
 export class NoopAnalyzer implements SituationAnalyzer {
+  constructor(private readonly reason = "DeepSeek-analyse er ikke aktivert.") {}
+
   async cluster(articles: Article[]) {
     const startedAt = new Date().toISOString();
     const result = emptyAnalysisResult();
-    return { result, run: run("deterministic", "none", "disabled", startedAt, articles, result) };
+    return {
+      result,
+      run: run("deterministic", "none", "disabled", startedAt, articles, result, this.reason),
+    };
   }
 }
 
@@ -223,40 +401,18 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
 
   async cluster(articles: Article[], context: AnalysisContext = {}): Promise<AnalysisOutcome> {
     const startedAt = new Date().toISOString();
-    const publicInputs = articles
-      .slice(0, MAX_DEEPSEEK_ARTICLES)
-      .map(({ id, title, excerpt, source, sourceLabel, publishedAt, places }) => ({
-        id,
-        title: compactString(title, MAX_TITLE_LENGTH),
-        excerpt: compactString(excerpt, MAX_EXCERPT_LENGTH),
-        source,
-        sourceLabel,
-        publishedAt,
-        places: places.map((place) => compactString(place, MAX_PLACE_LENGTH)).filter(Boolean),
-      }));
-    const situationInputs = (context.situations ?? [])
-      .filter((situation) => situation.status === "preliminary" || situation.status === "active")
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .slice(0, MAX_DEEPSEEK_SITUATIONS)
-      .map(({ id, type, title, summary, status, updatedAt, locationLabel, relatedArticleIds }) => ({
-        id,
-        type,
-        title: compactString(title, MAX_TITLE_LENGTH),
-        summary: compactString(summary, MAX_SUMMARY_LENGTH),
-        status,
-        updatedAt,
-        locationLabel: compactString(locationLabel, MAX_PLACE_LENGTH),
-        relatedArticleIds,
-      }));
     let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const attempts: AiAnalysisAttemptDiagnostics[] = [];
+    for (const profile of deepSeekAttemptProfiles) {
+      const publicInputs = publicArticleInputs(articles, profile);
+      const situationInputs = activeSituationInputs(context, profile);
       try {
         const response = await this.client.chat.completions.create({
           model: this.model,
           messages: [
             {
               role: "system",
-              content: `Return one compact JSON object only. Use only public article excerpts and supplied situation summaries. Identify developing public incidents only. Group an incident only when at least two independent source labels discuss the same event type and place. Situation update hints must only link supplied articles to supplied active/preliminary situations when article text is clearly progress or a direct update for the same incident. Bundle/category/relevance hints are suggestions only, not evidence. Return at most 5 clusters, 5 situationUpdates, 8 bundleHints, 12 categoryHints, 12 relevanceHints and 6 operationsNotes. Keep title, summary, reason, claim and supportingSnippet strings short; supportingSnippet must be a literal article excerpt substring no longer than 160 characters. Do not infer locations, perimeters, responder activity, identities or private facts. JSON shape: {"clusters":[{"title":"string","summary":"string","type":"fire|missing_person|traffic|flood|landslide|weather|rescue|service_disruption|other","articleIds":["string"],"namedPlaces":["string"],"citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"situationUpdates":[{"situationId":"string","articleIds":["string"],"summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"bundleHints":[{"title":"string","articleIds":["string"],"reason":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}],"categoryHints":[{"articleId":"string","category":"Nyheter|Hendelser|Krim|Byutvikling|Kultur|Sport|Transport|Politikk|Vær","topic":"rosenborg","reason":"string","supportingSnippet":"string"}],"relevanceHints":[{"articleId":"string","scope":"trondheim|trondelag|ignore","reason":"string","supportingSnippet":"string"}],"operationsNotes":[{"kind":"situation_progress|bundle_candidate|category_relevance|source_quality|other","subjectId":"string","summary":"string","citedClaims":[{"claim":"string","articleId":"string","supportingSnippet":"string"}]}]}. Use ${EMPTY_ANALYSIS_JSON} when uncertain.`,
+              content: analysisSystemPrompt(profile),
             },
             {
               role: "user",
@@ -267,17 +423,9 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
                 },
               )}`,
             },
-            ...(attempt === 1
-              ? [
-                  {
-                    role: "system" as const,
-                    content: `The previous completion was not valid structured output. Return one compact, syntactically valid JSON object only. Use ${EMPTY_ANALYSIS_JSON} when uncertain.`,
-                  },
-                ]
-              : []),
           ],
           response_format: { type: "json_object" },
-          max_tokens: 4096,
+          max_tokens: profile.maxTokens,
         });
         const choice = response.choices[0];
         const content = choice?.message.content;
@@ -286,16 +434,37 @@ export class DeepSeekAnalyzer implements SituationAnalyzer {
         }
         if (!content) throw new Error("DeepSeek returned empty JSON content.");
         const parsed = parseAnalysisContent(content);
-        const validated = validateCitations(parsed, articles);
+        attempts.push({
+          profile: profile.name,
+          status: "ok",
+          maxTokens: profile.maxTokens,
+          articleCount: publicInputs.length,
+          situationCount: situationInputs.length,
+        });
+        const validated = withDiagnostics(validateCitations(parsed, articles), profile, attempts);
         return {
           result: validated,
           run: run("deepseek", this.model, "ok", startedAt, articles, validated),
         };
       } catch (error) {
+        attempts.push({
+          profile: profile.name,
+          status: "failed",
+          maxTokens: profile.maxTokens,
+          articleCount: publicInputs.length,
+          situationCount: situationInputs.length,
+          error: compactError(error),
+        });
         lastError = error;
       }
     }
-    const result: AnalysisResult = emptyAnalysisResult();
+    const result: AnalysisResult = {
+      ...emptyAnalysisResult(),
+      diagnostics: {
+        profile: attempts.at(-1)?.profile ?? "standard",
+        attempts,
+      },
+    };
     return {
       result,
       run: run("deepseek", this.model, "degraded", startedAt, articles, result, String(lastError)),
@@ -347,6 +516,8 @@ export function validateCitations(
   const completeResult = { ...emptyAnalysisResult(), ...result };
   const inputs = articleById(articles);
   return {
+    ...(completeResult.morningBrief ? { morningBrief: completeResult.morningBrief } : {}),
+    ...(completeResult.diagnostics ? { diagnostics: completeResult.diagnostics } : {}),
     clusters: completeResult.clusters.flatMap((cluster) => {
       const claims = supportedClaims(cluster.citedClaims, inputs);
       const articleIds = [...new Set(claims.map((claim) => claim.articleId))];
@@ -514,8 +685,21 @@ export function applySituationUpdateHints(
   });
 }
 
+function envFlagEnabled(value: string | undefined): boolean {
+  const normalized = value?.trim().toLocaleLowerCase("en") ?? "";
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+export function deepSeekAnalysisEnabled(): boolean {
+  return envFlagEnabled(process.env.DEEPSEEK_ANALYSIS_ENABLED);
+}
+
 export function createAnalyzer(): SituationAnalyzer {
-  return process.env.DEEPSEEK_API_KEY
-    ? new DeepSeekAnalyzer(process.env.DEEPSEEK_API_KEY)
-    : new NoopAnalyzer();
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (deepSeekAnalysisEnabled() && apiKey) return new DeepSeekAnalyzer(apiKey);
+  return new NoopAnalyzer(
+    deepSeekAnalysisEnabled()
+      ? "DEEPSEEK_ANALYSIS_ENABLED=true, men DEEPSEEK_API_KEY mangler."
+      : "DEEPSEEK_ANALYSIS_ENABLED er ikke satt til true; deterministisk analyse brukes.",
+  );
 }

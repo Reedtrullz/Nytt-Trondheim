@@ -1,9 +1,14 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import type {
   AiProcessingRun,
   Article,
   ArticleCoverageBundleDecision,
+  HomeSituationSummary,
+  MorningBrief,
+  NotificationTriggerCandidate,
+  NotificationTriggerKind,
+  NotificationTriggerSeverity,
   OfficialEvent,
   PersistedTrafficMapEvent,
   PersistedTrafficMapEventSource,
@@ -23,6 +28,16 @@ import type {
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
 
+function morningBriefStorageId(generatedAt: string): string {
+  const osloDate = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Oslo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(generatedAt));
+  return `morning:${osloDate}`;
+}
+
 export interface TrafficMapEventUpsertOptions {
   source: PersistedTrafficMapEventSource;
   fetchedAt: string;
@@ -38,6 +53,22 @@ export interface PublicTransportBounds {
   south: number;
   east: number;
   west: number;
+}
+
+export interface PushDeliveryTarget {
+  id: string;
+  userId: string;
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  minSeverity: NotificationTriggerSeverity;
+  kinds: NotificationTriggerKind[];
+}
+
+export interface PushDeliveryClaim {
+  id: string;
 }
 
 export class WorkerRepository {
@@ -139,6 +170,163 @@ export class WorkerRepository {
         ],
       );
     }
+  }
+
+  async upsertMorningBrief(brief: MorningBrief): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO morning_briefs
+        (id, generated_at, mode, title, source_line, paragraphs, highlights,
+         article_ids, situation_ids, ai_run_provider, ai_run_status, ai_run_completed_at, payload)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (id) DO UPDATE SET
+         generated_at=EXCLUDED.generated_at,
+         mode=EXCLUDED.mode,
+         title=EXCLUDED.title,
+         source_line=EXCLUDED.source_line,
+         paragraphs=EXCLUDED.paragraphs,
+         highlights=EXCLUDED.highlights,
+         article_ids=EXCLUDED.article_ids,
+         situation_ids=EXCLUDED.situation_ids,
+         ai_run_provider=EXCLUDED.ai_run_provider,
+         ai_run_status=EXCLUDED.ai_run_status,
+         ai_run_completed_at=EXCLUDED.ai_run_completed_at,
+         payload=EXCLUDED.payload,
+         updated_at=now()`,
+      [
+        morningBriefStorageId(brief.generatedAt),
+        brief.generatedAt,
+        brief.mode,
+        brief.title,
+        brief.sourceLine,
+        JSON.stringify(brief.paragraphs),
+        JSON.stringify(brief.highlights),
+        brief.articleIds,
+        brief.situationIds,
+        brief.aiRun?.provider ?? null,
+        brief.aiRun?.status ?? null,
+        brief.aiRun?.completedAt ?? null,
+        JSON.stringify(brief),
+      ],
+    );
+  }
+
+  async activePushSubscriptions(): Promise<PushDeliveryTarget[]> {
+    const result = await this.pool.query<{
+      id: string;
+      userId: string;
+      endpoint: string;
+      p256dh: string;
+      auth: string;
+      minSeverity: NotificationTriggerSeverity;
+      kinds: NotificationTriggerKind[];
+    }>(
+      `SELECT
+         ps.id,
+         ps.user_id AS "userId",
+         ps.endpoint,
+         ps.p256dh,
+         ps.auth,
+         ps.min_severity AS "minSeverity",
+         ps.kinds
+       FROM push_subscriptions ps
+       LEFT JOIN users u ON u.id=ps.user_id
+       WHERE ps.enabled=true AND ps.revoked_at IS NULL
+         AND COALESCE(u.status, 'active') = 'active'
+       ORDER BY ps.last_seen_at DESC, ps.id DESC`,
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      endpoint: row.endpoint,
+      keys: { p256dh: row.p256dh, auth: row.auth },
+      minSeverity: row.minSeverity,
+      kinds: row.kinds ?? [],
+    }));
+  }
+
+  async claimPushDelivery(
+    candidate: NotificationTriggerCandidate,
+    subscription: Pick<PushDeliveryTarget, "id" | "userId">,
+  ): Promise<PushDeliveryClaim | undefined> {
+    const id = randomUUID();
+    const targetUrl = candidate.links[0]?.href;
+    const result = await this.pool.query<{ id: string }>(
+      `INSERT INTO push_notification_deliveries
+        (id, trigger_id, subscription_id, user_id, status, kind, severity, title, body, target_url, payload)
+       VALUES ($1,$2,$3,$4,'claimed',$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (trigger_id, subscription_id) DO NOTHING
+       RETURNING id`,
+      [
+        id,
+        candidate.id,
+        subscription.id,
+        subscription.userId,
+        candidate.kind,
+        candidate.severity,
+        candidate.title,
+        candidate.body,
+        targetUrl ?? null,
+        JSON.stringify({
+          id: candidate.id,
+          kind: candidate.kind,
+          severity: candidate.severity,
+          title: candidate.title,
+          body: candidate.body,
+          score: candidate.score,
+          confidence: candidate.confidence,
+          eventUpdatedAt: candidate.eventUpdatedAt,
+          situationId: candidate.situationId,
+          articleIds: candidate.articleIds,
+          sourceIds: candidate.sourceIds,
+          sourceLabels: candidate.sourceLabels,
+          matchedKeywords: candidate.matchedKeywords,
+          reasons: candidate.reasons,
+          links: candidate.links,
+        }),
+      ],
+    );
+    const row = result.rows[0];
+    return row ? { id: row.id } : undefined;
+  }
+
+  async markPushDeliverySent(claimId: string, subscriptionId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE push_notification_deliveries
+       SET status='sent', sent_at=now(), error_message=NULL
+       WHERE id=$1`,
+      [claimId],
+    );
+    await this.pool.query(
+      `UPDATE push_subscriptions
+       SET last_success_at=now(), last_failure_at=NULL, failure_count=0, updated_at=now()
+       WHERE id=$1`,
+      [subscriptionId],
+    );
+  }
+
+  async markPushDeliveryFailed(
+    claimId: string,
+    subscriptionId: string,
+    errorMessage: string,
+    disableSubscription = false,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE push_notification_deliveries
+       SET status='failed', error_message=$2
+       WHERE id=$1`,
+      [claimId, errorMessage.slice(0, 1000)],
+    );
+    await this.pool.query(
+      `UPDATE push_subscriptions
+       SET
+         enabled=CASE WHEN $2 THEN false ELSE enabled END,
+         revoked_at=CASE WHEN $2 THEN now() ELSE revoked_at END,
+         last_failure_at=now(),
+         failure_count=failure_count + 1,
+         updated_at=now()
+       WHERE id=$1`,
+      [subscriptionId, disableSubscription],
+    );
   }
 
   private async upsertSourceItem(
@@ -318,6 +506,53 @@ export class WorkerRepository {
       [hours],
     );
     return result.rows.map((row) => row.payload);
+  }
+
+  async sourceHealth(): Promise<SourceHealth[]> {
+    const result = await this.pool.query<SourceHealth>(
+      `SELECT source, label, state, last_checked_at AS "lastCheckedAt",
+       last_failure_at AS "lastFailureAt", next_poll_at AS "nextPollAt", detail
+       FROM source_health ORDER BY label`,
+    );
+    return result.rows;
+  }
+
+  async homeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
+    const result = await this.pool.query<{
+      id: string;
+      title: string;
+      summary: string;
+      status: HomeSituationSummary["status"];
+      verificationStatus: HomeSituationSummary["verificationStatus"];
+      updatedAt: Date | string;
+      createdAt: string;
+      locationLabel: string;
+    }>(
+      `SELECT
+         id,
+         payload->>'title' AS "title",
+         payload->>'summary' AS "summary",
+         status,
+         payload->>'verificationStatus' AS "verificationStatus",
+         updated_at AS "updatedAt",
+         payload->>'createdAt' AS "createdAt",
+         payload->>'locationLabel' AS "locationLabel"
+       FROM situations
+       WHERE status IN ('preliminary', 'active')
+       ORDER BY updated_at DESC, id DESC
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      summary: row.summary,
+      status: row.status,
+      verificationStatus: row.verificationStatus,
+      updatedAt: new Date(row.updatedAt).toISOString(),
+      createdAt: row.createdAt,
+      locationLabel: row.locationLabel,
+    }));
   }
 
   async trackedSituations(): Promise<Situation[]> {
@@ -800,6 +1035,29 @@ export class WorkerRepository {
            geometry=EXCLUDED.geometry`,
         [counter.pointId, counter, counter.updatedAt, JSON.stringify(counter.geometry)],
       );
+      await this.pool.query(
+        `INSERT INTO traffic_counter_snapshot_history
+         (point_id, observed_at, payload, volume_last_hour, baseline_volume_last_hour,
+          anomaly_ratio, coverage_percent, geometry)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,ST_SetSRID(ST_GeomFromGeoJSON($8),4326))
+         ON CONFLICT (point_id, observed_at) DO UPDATE SET
+           payload=EXCLUDED.payload,
+           volume_last_hour=EXCLUDED.volume_last_hour,
+           baseline_volume_last_hour=EXCLUDED.baseline_volume_last_hour,
+           anomaly_ratio=EXCLUDED.anomaly_ratio,
+           coverage_percent=EXCLUDED.coverage_percent,
+           geometry=EXCLUDED.geometry`,
+        [
+          counter.pointId,
+          counter.updatedAt,
+          counter,
+          counter.volumeLastHour ?? null,
+          counter.baselineVolumeLastHour ?? null,
+          counter.anomalyRatio ?? null,
+          counter.coveragePercent ?? null,
+          JSON.stringify(counter.geometry),
+        ],
+      );
     }
   }
 
@@ -866,6 +1124,7 @@ export class WorkerRepository {
 
   async upsertDatexTravelTimes(corridors: TrafficPulseCorridor[]): Promise<void> {
     for (const corridor of corridors) {
+      const observedAt = corridor.measurementTo ?? corridor.updatedAt;
       await this.pool.query(
         `INSERT INTO datex_travel_times
          (id, name, state, travel_time_seconds, free_flow_seconds, delay_seconds, delay_ratio,
@@ -884,6 +1143,39 @@ export class WorkerRepository {
            updated_at=now()`,
         [
           corridor.id,
+          corridor.name,
+          corridor.state,
+          corridor.travelTimeSeconds ?? null,
+          corridor.freeFlowSeconds ?? null,
+          corridor.delaySeconds ?? null,
+          corridor.delayRatio ?? null,
+          corridor.trend ?? null,
+          corridor.measurementFrom ?? null,
+          corridor.measurementTo ?? null,
+          corridor.sourceUrl,
+          corridor,
+        ],
+      );
+      await this.pool.query(
+        `INSERT INTO datex_travel_time_history
+         (corridor_id, observed_at, name, state, travel_time_seconds, free_flow_seconds,
+          delay_seconds, delay_ratio, trend, measurement_from, measurement_to, source_url, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         ON CONFLICT (corridor_id, observed_at) DO UPDATE SET
+           name=EXCLUDED.name,
+           state=EXCLUDED.state,
+           travel_time_seconds=EXCLUDED.travel_time_seconds,
+           free_flow_seconds=EXCLUDED.free_flow_seconds,
+           delay_seconds=EXCLUDED.delay_seconds,
+           delay_ratio=EXCLUDED.delay_ratio,
+           trend=EXCLUDED.trend,
+           measurement_from=EXCLUDED.measurement_from,
+           measurement_to=EXCLUDED.measurement_to,
+           source_url=EXCLUDED.source_url,
+           payload=EXCLUDED.payload`,
+        [
+          corridor.id,
+          observedAt,
           corridor.name,
           corridor.state,
           corridor.travelTimeSeconds ?? null,

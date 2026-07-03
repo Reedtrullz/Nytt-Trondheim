@@ -10,6 +10,8 @@ Restricted-beta auth is administrative application data, not upstream evidence. 
 
 GitHub remains the owner/admin login. Approved non-GitHub accounts are `viewer` users: they can read the main dashboard, situation, traffic and weather surfaces, but the Command Center, saved items, source audit/source linking, private workspace mutations, notes, drawings, attachments and exports require owner role.
 
+The public City Pulse surface is rooted at `/`. The private Command Center surface is rooted at `/command`; older `/drift` owner URLs are compatibility redirects that preserve query strings and should not be used for new navigation, documentation or tests except redirect coverage.
+
 Normalized incident records are authoritative: situation/article associations, evidence, timeline entries, official events, AI processing runs, saved situations and export manifests are stored separately from the summary payload returned for the dashboard.
 
 The World Cup sport dashboard is authenticated read-only context. `/api/sport/world-cup` fetches ESPN scoreboard/standings JSON through a short server-side cache, normalizes compact match/table fields into `WorldCupDashboardPayload`, and returns a shared curated fallback when the live feed is unavailable. It does not persist raw sports payloads, create `source_items`, write source health, or participate in situation activation.
@@ -29,6 +31,8 @@ Inbound public records enter the `source_items` ledger before editorial linking 
 
 Article coverage grouping is derived analysis, not upstream evidence. The worker writes the latest observable grouping decisions to `coverage_bundles` after article geocoding and article upsert. Those rows keep bundle kind, confidence, reason, member article ids, source labels, matched signals and near-miss diagnostics for `/command/dekning`; they must never create a `source_items` provider/kind or act as causal situation evidence.
 
+The public City Pulse story feed is exposed through `/api/city-pulse/stories`. It reuses the same article filters as `/api/articles`, but returns grouped story cards with member article ids, source labels, bundle metadata and public verification so public pagination and counts can become story-native without duplicating coverage logic in every frontend surface.
+
 Source contracts define what each upstream may write before adapter code is enabled. Bane NOR RSS is a phase-1 rail/mobility context source: it may write `source_items` provider `bane_nor`, kind `official_event`, and `source_health` source `bane_nor`, but it must not create `official_events`, `traffic_map_events` or `situations` without a separate promotion plan.
 
 The deterministic situation-activation contract lives in `docs/situation-activation-framework.md`.
@@ -38,7 +42,7 @@ enrich after those rules pass, but it must not replace the deterministic evidenc
 
 ## AI Boundary
 
-The worker defines a provider interface and initially implements DeepSeek-based structured clustering only when `DEEPSEEK_API_KEY` is configured. Only bounded public feed excerpts, public official data and compact summaries of open (`preliminary`/`active`) situations may enter that process. Private annotations, attachments, tasks and notes are excluded. DeepSeek calls are optional derived analysis with a short timeout; malformed, empty or truncated model output degrades only the AI enrichment path while deterministic grouping continues.
+The worker defines a provider interface and implements deterministic analysis by default. Production deploys force `DEEPSEEK_ANALYSIS_ENABLED=false` and leave `DEEPSEEK_API_KEY` blank, so live clustering, situation detection, morning briefs and coverage bundles do not depend on an LLM provider. DeepSeek-based structured clustering remains local/experimental code only when `DEEPSEEK_ANALYSIS_ENABLED=true` and `DEEPSEEK_API_KEY` are configured outside the production playbook. Only bounded public feed excerpts, public official data and compact summaries of open (`preliminary`/`active`) situations may enter that process. Private annotations, attachments, tasks and notes are excluded. Malformed, empty or truncated model output degrades only the optional AI enrichment path while deterministic grouping continues.
 
 AI clusters are accepted only after each cited snippet matches an input excerpt and at least two independent sources remain. Deterministic multi-source detection remains available when AI is disabled or degraded.
 
@@ -52,7 +56,7 @@ Automatic Situation Room activation requires an explicit incident type and a sha
 
 High-impact official DATEX traffic records and active Trondheim Politiloggen threads are explicit exceptions to the two-independent-source activation rule. They may create active official situations with `activationBasis.rule="official_source"`; DATEX uses `sourceIds=["datex"]`, `officialSource="datex"`, and its official event id, while Politiloggen uses `sourceIds=["politiloggen"]`, `officialSource="politiloggen"`, and the Politiloggen thread id. DATEX situation reuse is limited to existing DATEX-owned situations so official traffic evidence cannot accidentally attach to a news-created case. Low-impact/planned roadworks remain `official_events` only and do not activate the main situation feed.
 
-DATEX TravelTime is intentionally outside situation activation. Current corridor rows are persisted in `datex_travel_times` for source health and Command Center traffic-pulse display, separate from `official_events` and `situations`. TravelTime values describe measured or estimated travel time, free-flow comparison and delay only; the worker must not infer incident cause, create `OfficialEvent` rows, promote official traffic events, or create/update `Situation` rows from TravelTime alone.
+DATEX TravelTime is intentionally outside situation activation. Current corridor rows are persisted in `datex_travel_times` for source health and Command Center traffic-pulse display, separate from `official_events` and `situations`. TravelTime values describe measured or estimated travel time, free-flow comparison and delay only; the worker must not infer incident cause, create `OfficialEvent` rows, promote official traffic events, or create/update `Situation` rows from TravelTime alone. Significant TravelTime delays may create owner-only Web Push candidates and `/command/varsler` rows as spatial analysis, but those candidates remain private operator signals rather than public evidence.
 
 Traffic map overlays are operational map state. `traffic_map_events` is the persisted map-ready table for TrafficInfo rows; `source_items` is the provenance ledger; `situations` remains the incident feed. Derived DATEX and news traffic map objects are composed at API read time from `official_events` and articles rather than written to `traffic_map_events`. TrafficInfo roadworks can be shown richly on `/trafikk` without activating the Situation Room. DATEX TravelTime, DATEX Weather, DATEX CCTV and Trafikkdata counters are context overlays/telemetry and must not create `source_items`, `official_events`, or `situations` without a future explicit promotion rule.
 

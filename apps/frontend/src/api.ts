@@ -9,15 +9,33 @@ import type {
   ArticlePage,
   ArticleTopic,
   BootstrapPayload,
+  CityPulseStoryPage,
+  CommandCenterBriefingPayload,
+  CommandCenterSpatialAnalyticsPayload,
+  CommandCenterSpatialAnalyticsQueryInput,
   CoverageBundlePage,
   CoverageBundleQueryInput,
   EmailLoginRequestInput,
   MapFeature,
+  NotificationTriggerPage,
+  NotificationTriggerQueryInput,
   OperationsTimelineQuery,
   OperationsTimelineResponse,
   OperationsStatus,
   PrivateAnnotationUpdateRequest,
   PrivateMapFeatureInput,
+  PushDeliveryPage,
+  PushNotificationSettings,
+  PushSubscriptionInput,
+  PushSubscriptionSummary,
+  RawInspectorAiRunDetail,
+  RawInspectorAiRunFilters,
+  RawInspectorAiRunPage,
+  RawInspectorSourceItemDetail,
+  RawInspectorTelemetryDetail,
+  RawInspectorTelemetryFilters,
+  RawInspectorTelemetryPage,
+  RawInspectorTelemetrySource,
   SessionPayload,
   Situation,
   SituationMapWorkspace,
@@ -186,6 +204,24 @@ export const api = {
     }
     return request<ArticlePage>(`/api/articles?${parameters.toString()}`);
   },
+  cityPulseStories: (
+    query: {
+      scope?: string;
+      category?: string;
+      topic?: ArticleTopic;
+      q?: string;
+      from?: string;
+      to?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+  ) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value && value !== "Alle") parameters.set(key, String(value));
+    }
+    return request<CityPulseStoryPage>(`/api/city-pulse/stories?${parameters.toString()}`);
+  },
   worldCupDashboard: () => request<WorldCupDashboardPayload>("/api/sport/world-cup"),
   sourceItems: (query: SourceItemFilters = {}) => {
     const parameters = new URLSearchParams();
@@ -224,6 +260,88 @@ export const api = {
       `/api/operations/coverage-bundles${search ? `?${search}` : ""}`,
     );
   },
+  notificationTriggers: (query: NotificationTriggerQueryInput = { limit: 30 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (Array.isArray(value) && value.length > 0) {
+        parameters.set(key, value.join(","));
+      } else if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<NotificationTriggerPage>(
+      `/api/operations/notification-triggers${search ? `?${search}` : ""}`,
+    );
+  },
+  notificationSettings: () => request<PushNotificationSettings>("/api/notifications/settings"),
+  subscribeToNotifications: (input: PushSubscriptionInput) =>
+    request<PushSubscriptionSummary>("/api/notifications/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  unsubscribeFromNotifications: (id: string) =>
+    request<void>(`/api/notifications/subscriptions/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  notificationDeliveries: (limit = 50) =>
+    request<PushDeliveryPage>(`/api/operations/notification-deliveries?limit=${limit}`),
+  spatialAnalytics: (
+    query: CommandCenterSpatialAnalyticsQueryInput = { minDelaySeconds: 180, limit: 80 },
+  ) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<CommandCenterSpatialAnalyticsPayload>(
+      `/api/operations/spatial-analytics${search ? `?${search}` : ""}`,
+    );
+  },
+  rawSourceItem: (id: string) =>
+    request<RawInspectorSourceItemDetail>(
+      `/api/operations/raw/source-items/${encodeURIComponent(id)}`,
+    ),
+  rawTelemetry: (source: RawInspectorTelemetrySource, id: string) =>
+    request<RawInspectorTelemetryDetail>(
+      `/api/operations/raw/telemetry/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
+    ),
+  rawTelemetryPage: (query: RawInspectorTelemetryFilters = { limit: 20 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<RawInspectorTelemetryPage>(
+      `/api/operations/raw/telemetry${search ? `?${search}` : ""}`,
+    );
+  },
+  rawAiRuns: (query: RawInspectorAiRunFilters = { limit: 20 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<RawInspectorAiRunPage>(
+      `/api/operations/raw/ai-runs${search ? `?${search}` : ""}`,
+    );
+  },
+  rawAiRun: (id: string) =>
+    request<RawInspectorAiRunDetail>(`/api/operations/raw/ai-runs/${encodeURIComponent(id)}`),
   operationsTimeline: (query: OperationsTimelineQuery = {}) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
@@ -271,15 +389,21 @@ export const api = {
   situationMapWorkspace: (
     query: {
       statuses?: Situation["status"][];
+      publicVisibility?: NonNullable<Situation["publicVisibility"]>[];
       sources?: string[];
       provenances?: string[];
       confidenceLevels?: string[];
       includePrivateAnnotations?: boolean;
       q?: string;
+      from?: string;
+      to?: string;
     } = {},
   ) => {
     const parameters = new URLSearchParams();
     if (query.statuses?.length) parameters.set("statuses", query.statuses.join(","));
+    if (query.publicVisibility?.length) {
+      parameters.set("publicVisibility", query.publicVisibility.join(","));
+    }
     if (query.sources?.length) parameters.set("sources", query.sources.join(","));
     if (query.provenances?.length) parameters.set("provenances", query.provenances.join(","));
     if (query.confidenceLevels?.length) {
@@ -289,6 +413,8 @@ export const api = {
       parameters.set("includePrivateAnnotations", String(query.includePrivateAnnotations));
     }
     if (query.q) parameters.set("q", query.q);
+    if (query.from) parameters.set("from", query.from);
+    if (query.to) parameters.set("to", query.to);
     const search = parameters.toString();
     return request<SituationMapWorkspace>(
       `/api/situations/workspace-map${search ? `?${search}` : ""}`,
@@ -296,6 +422,7 @@ export const api = {
   },
   savedArticles: () => request<ArticlePage["items"]>("/api/saved/articles"),
   operations: () => request<OperationsStatus>("/api/operations/status"),
+  commandBriefing: () => request<CommandCenterBriefingPayload>("/api/operations/briefing"),
   workspace: (id: string) => request<SituationWorkspace>(situationPath(id)),
   saveArticle: (id: string, saved: boolean) =>
     request<void>(`/api/saved/articles/${id}`, { method: saved ? "PUT" : "DELETE" }),
@@ -309,6 +436,14 @@ export const api = {
     request<SituationWorkspace["situation"]>(`${situationPath(id)}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status, dismissalReason }),
+    }),
+  setSituationPublication: (
+    id: string,
+    publicVisibility: NonNullable<Situation["publicVisibility"]>,
+  ) =>
+    request<SituationWorkspace["situation"]>(`${situationPath(id)}/publication`, {
+      method: "PATCH",
+      body: JSON.stringify({ publicVisibility }),
     }),
   addFeature: (id: string, feature: PrivateMapFeatureInput) =>
     request<MapFeature>(`${situationPath(id)}/features`, {

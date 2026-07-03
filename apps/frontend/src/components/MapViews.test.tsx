@@ -1,7 +1,8 @@
 import { sampleSituation, type Article } from "@nytt/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { nearbyStoryItems } from "../homeNearby.js";
+import { groupHomeArticles } from "../homeArticleGroups.js";
+import { nearbyStoryItems, nearbyStoryItemsForGroups } from "../homeNearby.js";
 
 vi.mock("leaflet", () => ({
   default: {
@@ -10,6 +11,9 @@ vi.mock("leaflet", () => ({
 }));
 
 vi.mock("react-leaflet", () => ({
+  Circle: ({ center, radius }: { center: [number, number]; radius: number }) => (
+    <div data-layer="circle-radius" data-position={center.join(",")} data-radius={radius} />
+  ),
   CircleMarker: ({
     center,
     children,
@@ -126,6 +130,77 @@ describe("NewsMap", () => {
     expect(html).toContain("story-marker-selected");
     expect(html).toContain("story-marker-municipal");
     expect(html).toContain('title="1. Kommunalt varsel ved Lade (Lade)"');
+  });
+
+  it("renders close nearby stories as a cluster count marker", () => {
+    const second = {
+      ...article,
+      id: "article-2",
+      title: "Oppdatering ved Sluppen",
+      location: { lat: 63.4005, lng: 10.4003, label: "Sluppen" },
+    };
+    const far = {
+      ...article,
+      id: "article-3",
+      title: "Sak ved Lade",
+      location: { lat: 63.44, lng: 10.43, label: "Lade" },
+    };
+    const items = nearbyStoryItems([article, second, far], { limit: 3 });
+    const html = renderToStaticMarkup(<NewsMap items={items} selectedId="article-2" />);
+
+    expect(html).toContain("story-marker-cluster");
+    expect(html).toContain("story-marker-selected");
+    expect(html).toContain("&lt;span&gt;2&lt;/span&gt;");
+    expect(html).toContain("2 saker nær Sluppen");
+    expect(html).toContain("Kartmarkører");
+    expect(html).toContain("Kartet har 2 markører.");
+    expect(html).toContain("2 saker ved Sluppen: Hendelse ved Sluppen, Oppdatering ved Sluppen.");
+    expect(html).toContain('data-layer="popup"');
+    expect(html).toContain("Kartfestet sak");
+    expect(html).toContain("Påvirker ferdsel");
+    expect(html).toContain("Oppdatering ved Sluppen");
+    expect(html).toContain('data-position="63.44,10.43"');
+  });
+
+  it("shows verification and confidence context in story marker popups", () => {
+    const html = renderToStaticMarkup(
+      <NewsMap
+        items={nearbyStoryItems([
+          {
+            ...article,
+            source: "adressa",
+            sourceLabel: "Adresseavisen",
+            title: "Kollisjon stenger E6",
+            publicVerification: {
+              status: "verified",
+              label: "Verifisert",
+              detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+              officialSources: ["datex"],
+              reportingSources: ["adressa"],
+              situationId: "datex-e6",
+            },
+          },
+        ])}
+      />,
+    );
+
+    expect(html).toContain("Verifisert · Statens vegvesen DATEX + Adresseavisen");
+    expect(html).toContain("Kildetillit: Bekreftet");
+  });
+
+  it("renders the active local-focus radius on the nearby map", () => {
+    const localFocus = { lat: 63.4, lng: 10.4, radiusKm: 3 };
+    const html = renderToStaticMarkup(
+      <NewsMap
+        items={nearbyStoryItemsForGroups(groupHomeArticles([article]), { localFocus })}
+        localFocus={localFocus}
+      />,
+    );
+
+    expect(html).toContain('data-layer="circle-radius"');
+    expect(html).toContain('data-position="63.4,10.4"');
+    expect(html).toContain('data-radius="3000"');
+    expect(html).toContain("under 1 km unna");
   });
 });
 

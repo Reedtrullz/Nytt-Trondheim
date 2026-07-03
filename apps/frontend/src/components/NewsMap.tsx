@@ -1,14 +1,17 @@
 import { useEffect, useMemo } from "react";
 import L, { type LatLngTuple } from "leaflet";
-import { MapContainer, Marker, TileLayer, useMap } from "react-leaflet";
+import { Circle, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import type { NearbyStoryItem } from "../homeNearby.js";
+import { homeLocalFocusDefaultRadiusKm, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
+import { nearbyDistanceLabel, type NearbyStoryItem } from "../homeNearby.js";
 import { boundsFromLatLngs } from "../mapCoordinates.js";
+import { clusterNearbyStoryItems, type NewsMapCluster } from "../newsMapClusters.js";
 import { MapAccessibility } from "./map/MapAccessibility.js";
 
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
+type MapPosition = [number, number];
 
-function FitMapToPositions({ positions }: { positions: Array<[number, number]> }) {
+function FitMapToPositions({ positions }: { positions: MapPosition[] }) {
   const map = useMap();
   const focusKey = useMemo(
     () => positions.map((position) => position.join(",")).join("|"),
@@ -36,18 +39,164 @@ function FitMapToPositions({ positions }: { positions: Array<[number, number]> }
   return null;
 }
 
+function validMapPosition(point: HomeLocalFocusPoint | undefined): point is HomeLocalFocusPoint {
+  return (
+    typeof point?.lat === "number" &&
+    typeof point.lng === "number" &&
+    Number.isFinite(point.lat) &&
+    Number.isFinite(point.lng) &&
+    point.lat >= -90 &&
+    point.lat <= 90 &&
+    point.lng >= -180 &&
+    point.lng <= 180
+  );
+}
+
+function localFocusPosition(localFocus: HomeLocalFocusPoint | undefined): MapPosition | undefined {
+  return validMapPosition(localFocus) ? [localFocus.lat, localFocus.lng] : undefined;
+}
+
+function formatMapTime(value: string) {
+  return new Intl.DateTimeFormat("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Oslo",
+  }).format(new Date(value));
+}
+
+function clusterPlaceLabel(cluster: NewsMapCluster): string {
+  const labels = [...new Set(cluster.items.map((item) => item.locationLabel).filter(Boolean))];
+  if (labels.length === 0) return "Kartfestede saker";
+  if (labels.length === 1) return labels[0]!;
+  return `${labels[0]} + ${labels.length - 1} område${labels.length === 2 ? "" : "r"}`;
+}
+
+function confidenceLabel(item: NearbyStoryItem): string {
+  const score = item.sourceConfidence.score;
+  const scoreLabel =
+    typeof score === "number" && Number.isFinite(score) && score > 0
+      ? ` · ${Math.round(score * 100)} %`
+      : "";
+  return `Kildetillit: ${item.sourceConfidence.label}${scoreLabel}`;
+}
+
+function clusterAccessibleSummary(cluster: NewsMapCluster): string {
+  if (cluster.items.length === 1) {
+    const item = cluster.items[0]!;
+    return `${item.markerLabel}. ${item.title}. ${item.locationLabel}. ${item.relevanceLabel}.`;
+  }
+  const titles = cluster.items
+    .slice(0, 3)
+    .map((item) => item.title)
+    .join(", ");
+  const hiddenCount = Math.max(0, cluster.items.length - 3);
+  const suffix = hiddenCount > 0 ? ` og ${hiddenCount} til` : "";
+  return `${cluster.items.length} saker ved ${clusterPlaceLabel(cluster)}: ${titles}${suffix}.`;
+}
+
+function NewsMapScreenReaderSummary({ clusters }: { clusters: NewsMapCluster[] }) {
+  if (clusters.length === 0) return null;
+  return (
+    <div className="sr-only" aria-label="Kartmarkører">
+      <p>
+        Kartet har {clusters.length} {clusters.length === 1 ? "markør" : "markører"}.
+      </p>
+      <ol>
+        {clusters.map((cluster) => (
+          <li key={cluster.id}>{clusterAccessibleSummary(cluster)}</li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function NewsMapPopup({
+  cluster,
+  onSelect,
+  selectedId,
+}: {
+  cluster: NewsMapCluster;
+  onSelect?: (id: string) => void;
+  selectedId?: string;
+}) {
+  const clustered = cluster.items.length > 1;
+  const visibleItems = cluster.items.slice(0, 5);
+  const hiddenCount = Math.max(0, cluster.items.length - visibleItems.length);
+
+  return (
+    <Popup>
+      <div className="story-marker-popup">
+        <div className="story-marker-popup-heading">
+          <span>{clustered ? `${cluster.items.length} saker` : "Kartfestet sak"}</span>
+          <strong>{clusterPlaceLabel(cluster)}</strong>
+        </div>
+        <div className="story-marker-popup-list">
+          {visibleItems.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              className={selectedId === item.id ? "selected" : undefined}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect?.(item.id);
+              }}
+            >
+              <span>{item.markerLabel}</span>
+              <span>
+                <b>{item.title}</b>
+                <small>
+                  {item.sourceLabel} · {formatMapTime(item.publishedAt)} · {item.relevanceLabel}
+                  {item.distanceKm !== undefined
+                    ? ` · ${nearbyDistanceLabel(item.distanceKm) ?? "uten avstand"}`
+                    : ""}
+                </small>
+                <em className="story-marker-popup-trust">
+                  {item.verification ? (
+                    <span title={item.verification.detail}>
+                      {item.verification.label} · {item.verification.sourceSummary}
+                    </span>
+                  ) : null}
+                  <span title={item.sourceConfidence.rationale}>{confidenceLabel(item)}</span>
+                </em>
+              </span>
+            </button>
+          ))}
+        </div>
+        {hiddenCount ? (
+          <p className="story-marker-popup-more">+ {hiddenCount} flere saker i samme område</p>
+        ) : null}
+      </div>
+    </Popup>
+  );
+}
+
 export function NewsMap({
   items,
+  localFocus,
   selectedId,
   onSelect,
 }: {
   items: NearbyStoryItem[];
+  localFocus?: HomeLocalFocusPoint;
   selectedId?: string;
   onSelect?: (id: string) => void;
 }) {
   const selected = items.find((item) => item.id === selectedId);
+  const focusPosition = localFocusPosition(localFocus);
+  const focusRadiusMeters =
+    focusPosition && (localFocus?.radiusKm ?? homeLocalFocusDefaultRadiusKm) * 1000;
   const activeId = selected?.id ?? items[0]?.id;
-  const center: LatLngTuple = selected?.position ?? items[0]?.position ?? [63.421, 10.395];
+  const center: LatLngTuple = selected?.position ??
+    focusPosition ??
+    items[0]?.position ?? [63.421, 10.395];
+  const clusters = useMemo(
+    () => clusterNearbyStoryItems(items, { selectedId: activeId }),
+    [activeId, items],
+  );
+  const fitPositions = useMemo<MapPosition[]>(
+    () => [...(focusPosition ? [focusPosition] : []), ...clusters.map(({ position }) => position)],
+    [clusters, focusPosition],
+  );
   return (
     <MapContainer
       id="map"
@@ -59,22 +208,41 @@ export function NewsMap({
     >
       <TileLayer url={tiles} attribution="© Kartverket" />
       <MapAccessibility label="Kart over nærliggende nyhetssaker" />
-      <FitMapToPositions positions={items.map(({ position }) => position)} />
-      {items.map((item) => (
-        <Marker
-          key={item.id}
-          position={item.position}
-          title={`${item.markerLabel}. ${item.title} (${item.locationLabel})`}
-          eventHandlers={{ click: () => onSelect?.(item.id) }}
-          icon={L.divIcon({
-            className: `story-marker story-marker-${item.kind}${
-              activeId === item.id ? " story-marker-selected" : ""
-            }`,
-            html: `<span>${item.markerLabel}</span>`,
-            iconSize: [30, 30],
-          })}
+      <FitMapToPositions positions={fitPositions} />
+      <NewsMapScreenReaderSummary clusters={clusters} />
+      {focusPosition && focusRadiusMeters ? (
+        <Circle
+          center={focusPosition}
+          radius={focusRadiusMeters}
+          pathOptions={{
+            color: "#14684b",
+            fillColor: "#14684b",
+            fillOpacity: 0.08,
+            opacity: 0.42,
+            weight: 2,
+          }}
         />
-      ))}
+      ) : null}
+      {clusters.map((cluster) => {
+        const clustered = cluster.items.length > 1;
+        return (
+          <Marker
+            key={cluster.id}
+            position={cluster.position}
+            title={cluster.title}
+            eventHandlers={{ click: () => onSelect?.(cluster.items[0]?.id ?? cluster.id) }}
+            icon={L.divIcon({
+              className: `story-marker story-marker-${cluster.kind}${
+                clustered ? " story-marker-cluster" : ""
+              }${cluster.selected ? " story-marker-selected" : ""}`,
+              html: `<span>${cluster.markerLabel}</span>`,
+              iconSize: clustered ? [36, 36] : [30, 30],
+            })}
+          >
+            <NewsMapPopup cluster={cluster} onSelect={onSelect} selectedId={activeId} />
+          </Marker>
+        );
+      })}
     </MapContainer>
   );
 }

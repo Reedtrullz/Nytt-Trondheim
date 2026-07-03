@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ArticleCategoryIcon } from "./components/Icons.js";
 import {
   articleCategories,
   articleCategoryLabels,
@@ -66,6 +69,7 @@ describe("home filter query params", () => {
       "Hendelser",
       "Krim",
       "Transport",
+      "Vær",
       "Sport",
       "Politikk",
       "Byutvikling",
@@ -103,12 +107,12 @@ describe("home filter query params", () => {
     });
   });
 
-  it("keeps Vær out of article category filters because it has its own page", () => {
-    expect(articleCategories).not.toContain("Vær");
+  it("accepts Vær as a thematic City Pulse category", () => {
+    expect(articleCategories).toContain("Vær");
     expect(parseHomeFilters("?q=bru&scope=trondelag&category=V%C3%A6r")).toEqual({
       q: "bru",
       scope: "trondelag",
-      category: "Alle",
+      category: "Vær",
       timeWindow: "all",
     });
   });
@@ -120,6 +124,9 @@ describe("home filter query params", () => {
     expect(
       searchSummary({ q: "", scope: "trondelag", category: "Transport", timeWindow: "24h" }),
     ).toBe("Trafikk siste 24 timer i Trøndelag");
+    expect(searchSummary({ q: "", scope: "trondheim", category: "Vær", timeWindow: "all" })).toBe(
+      "Vær i Trondheim",
+    );
     expect(searchSummary({ q: "", scope: "trondheim", category: "Krim", timeWindow: "all" })).toBe(
       "Krim i Trondheim",
     );
@@ -144,5 +151,16 @@ describe("home filter query params", () => {
     expect(homeTimeWindowFrom("2h", now)).toBe("2026-07-02T08:00:00.000Z");
     expect(homeTimeWindowFrom("24h", now)).toBe("2026-07-01T10:00:00.000Z");
     expect(homeTimeWindowFrom("7d", now)).toBe("2026-06-25T10:00:00.000Z");
+  });
+
+  it("renders semantic channel icons without changing filter labels", () => {
+    const emergency = renderToStaticMarkup(
+      createElement(ArticleCategoryIcon, { name: "Hendelser" }),
+    );
+    const traffic = renderToStaticMarkup(createElement(ArticleCategoryIcon, { name: "Transport" }));
+
+    expect(emergency).toContain("channel-icon");
+    expect(emergency).toContain("M12 4.5 21 19H3z");
+    expect(traffic).toContain("M4 16h16");
   });
 });

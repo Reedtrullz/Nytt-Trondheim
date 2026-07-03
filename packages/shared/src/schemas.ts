@@ -22,6 +22,8 @@ export const situationTypeSchema = z.enum([
 
 export const situationLifecycleSchema = z.enum(["preliminary", "active", "resolved", "dismissed"]);
 
+export const situationPublicVisibilitySchema = z.enum(["public", "command_center"]);
+
 export const sourceConfidenceLevelSchema = z.enum([
   "confirmed",
   "likely",
@@ -233,6 +235,7 @@ export const sourceIdSchema = z.enum([
   "internal",
   "private_annotations",
   "deepseek",
+  "web_push",
 ]);
 
 export const sourceAuditSourceIdSchema = sourceIdSchema;
@@ -665,6 +668,25 @@ export const sourceItemLinkInputSchema = z.object({
   relationship: sourceItemRelationshipSchema.default("supports"),
 });
 
+export const rawInspectorAiRunQuerySchema = z.object({
+  provider: z.enum(["deepseek", "deterministic"]).optional(),
+  status: z.enum(["ok", "degraded", "disabled"]).optional(),
+  q: z.string().trim().max(160).optional(),
+  cursor: z.string().trim().max(250).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export type RawInspectorAiRunQueryInput = z.infer<typeof rawInspectorAiRunQuerySchema>;
+
+export const rawInspectorTelemetrySourceSchema = z.enum(["datex_travel_time", "trafikkdata"]);
+
+export const rawInspectorTelemetryQuerySchema = z.object({
+  source: rawInspectorTelemetrySourceSchema.optional(),
+  q: z.string().trim().max(160).optional(),
+  cursor: z.string().trim().max(250).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
 export const trafficEventCategorySchema = z.enum([
   "roadworks",
   "accident",
@@ -806,6 +828,7 @@ export const workspaceMapQuerySchema = z
   .object({
     situationIds: csvListSchema(z.string().trim().min(1).max(200)),
     statuses: csvListSchema(situationLifecycleSchema),
+    publicVisibility: csvListSchema(situationPublicVisibilitySchema),
     types: csvListSchema(situationTypeSchema),
     layers: csvListSchema(situationMapLayerSchema),
     sources: csvListSchema(sourceIdSchema),
@@ -814,12 +837,15 @@ export const workspaceMapQuerySchema = z
     includeTelemetry: booleanQueryParamSchema,
     includePrivateAnnotations: booleanQueryParamSchema,
     q: z.string().trim().max(160).optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
     north: coordinateParamSchema,
     south: coordinateParamSchema,
     east: coordinateParamSchema,
     west: coordinateParamSchema,
   })
-  .superRefine(validateOptionalBounds);
+  .superRefine(validateOptionalBounds)
+  .superRefine(validateDateRange);
 
 export type WorkspaceMapQueryInput = z.infer<typeof workspaceMapQuerySchema>;
 
@@ -957,6 +983,211 @@ export const operationsTimelineResponseSchema = z
   })
   .strict();
 
+export const notificationTriggerKindSchema = z.enum([
+  "public_safety",
+  "traffic_disruption",
+  "weather_hazard",
+  "service_disruption",
+]);
+
+export const notificationTriggerSeveritySchema = z.enum(["critical", "warning", "watch"]);
+export const notificationTriggerDeliveryStateSchema = z.enum([
+  "candidate_only",
+  "not_configured",
+  "no_subscribers",
+  "ready",
+  "sent",
+  "failed",
+  "suppressed",
+]);
+export const notificationTriggerTraceStateSchema = z.enum([
+  "raw_evidence",
+  "source_audit",
+  "external_only",
+  "missing",
+]);
+
+export const notificationTriggerQuerySchema = z.object({
+  kinds: csvListSchema(notificationTriggerKindSchema),
+  severities: csvListSchema(notificationTriggerSeveritySchema),
+  deliveryStates: csvListSchema(notificationTriggerDeliveryStateSchema),
+  traceStates: csvListSchema(notificationTriggerTraceStateSchema),
+  q: z.string().trim().max(160).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+export type NotificationTriggerQueryInput = z.infer<typeof notificationTriggerQuerySchema>;
+
+export const notificationTriggerPublicSurfaceSchema = z
+  .object({
+    state: z.enum(["visible", "hidden"]),
+    label: z.string().trim().min(1).max(140),
+    detail: z.string().trim().min(1).max(500),
+    reason: z.string().trim().min(1).max(500),
+    attention: z
+      .object({
+        label: z.string().trim().min(1).max(140),
+        detail: z.string().trim().min(1).max(500),
+        tone: z.enum(["urgent", "watch", "observe"]),
+      })
+      .strict()
+      .optional(),
+    recencyLabel: z.string().trim().min(1).max(80).optional(),
+    link: operationsTimelineEventLinkSchema.optional(),
+  })
+  .strict();
+
+export const notificationTriggerCandidateSchema = z
+  .object({
+    id: z.string().trim().min(1).max(260),
+    kind: notificationTriggerKindSchema,
+    severity: notificationTriggerSeveritySchema,
+    deliveryState: notificationTriggerDeliveryStateSchema,
+    title: z.string().trim().min(1).max(220),
+    body: z.string().trim().min(1).max(1000),
+    detail: z.string().trim().min(1).max(1000),
+    score: z.number().min(0).max(1),
+    confidence: sourceConfidenceSummarySchema,
+    generatedAt: z.string().datetime(),
+    eventUpdatedAt: z.string().datetime(),
+    situationId: z.string().trim().min(1).max(200).optional(),
+    articleIds: z.array(z.string().trim().min(1).max(200)).max(100),
+    sourceIds: z.array(sourceIdSchema).max(40),
+    sourceLabels: z.array(z.string().trim().min(1).max(160)).max(40),
+    matchedKeywords: z.array(z.string().trim().min(1).max(80)).max(40),
+    reasons: z.array(z.string().trim().min(1).max(300)).max(20),
+    links: z.array(operationsTimelineEventLinkSchema).max(20),
+    publicSurface: notificationTriggerPublicSurfaceSchema,
+  })
+  .strict();
+
+export const notificationTriggerSummarySchema = z
+  .object({
+    total: z.number().int().nonnegative().max(100_000),
+    critical: z.number().int().nonnegative().max(100_000),
+    warning: z.number().int().nonnegative().max(100_000),
+    watch: z.number().int().nonnegative().max(100_000),
+    officialBacked: z.number().int().nonnegative().max(100_000),
+    highConfidence: z.number().int().nonnegative().max(100_000),
+  })
+  .strict();
+
+export const notificationPushStatusSchema = z
+  .object({
+    configured: z.boolean(),
+    label: z.string().trim().min(1).max(120),
+    detail: z.string().trim().min(1).max(1000),
+    health: sourceHealthSchema.optional(),
+    activeSubscriptions: z.number().int().nonnegative().max(100_000),
+    matchingCandidates: z.number().int().nonnegative().max(100_000),
+    readyCandidates: z.number().int().nonnegative().max(100_000),
+    blockedCandidates: z.number().int().nonnegative().max(100_000),
+    deliveryCounts: z
+      .object({
+        total: z.number().int().nonnegative().max(100_000),
+        sent: z.number().int().nonnegative().max(100_000),
+        failed: z.number().int().nonnegative().max(100_000),
+        claimed: z.number().int().nonnegative().max(100_000),
+        skipped: z.number().int().nonnegative().max(100_000),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const notificationTriggerPageSchema = z
+  .object({
+    generatedAt: z.string().datetime(),
+    filters: notificationTriggerQuerySchema,
+    items: z.array(notificationTriggerCandidateSchema).max(100),
+    summary: notificationTriggerSummarySchema,
+    pushStatus: notificationPushStatusSchema.optional(),
+  })
+  .strict();
+
+export const pushSubscriptionInputSchema = z
+  .object({
+    endpoint: z.string().trim().url().max(2048),
+    expirationTime: z.number().int().nonnegative().nullable().optional(),
+    keys: z
+      .object({
+        p256dh: z.string().trim().min(20).max(512),
+        auth: z.string().trim().min(8).max(256),
+      })
+      .strict(),
+    userAgent: z.string().trim().max(500).optional(),
+    minSeverity: notificationTriggerSeveritySchema.default("warning"),
+    kinds: z.array(notificationTriggerKindSchema).max(8).default([]),
+  })
+  .strict();
+
+export type PushSubscriptionInputSchema = z.infer<typeof pushSubscriptionInputSchema>;
+
+export const pushSubscriptionSummarySchema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    endpointHash: z.string().trim().min(16).max(128),
+    enabled: z.boolean(),
+    minSeverity: notificationTriggerSeveritySchema,
+    kinds: z.array(notificationTriggerKindSchema).max(8),
+    userAgent: z.string().trim().max(500).optional(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    lastSeenAt: z.string().datetime(),
+    lastSuccessAt: z.string().datetime().optional(),
+    lastFailureAt: z.string().datetime().optional(),
+    failureCount: z.number().int().nonnegative().max(100_000),
+  })
+  .strict();
+
+export const pushNotificationSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    publicKey: z.string().trim().min(20).max(512).optional(),
+    subscriptions: z.array(pushSubscriptionSummarySchema).max(50),
+  })
+  .strict();
+
+export const pushDeliveryStatusSchema = z.enum(["claimed", "sent", "failed", "skipped"]);
+
+export const pushDeliveryListItemSchema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    triggerId: z.string().trim().min(1).max(260),
+    subscriptionId: z.string().trim().min(1).max(200),
+    userId: z.string().trim().min(1).max(200),
+    status: pushDeliveryStatusSchema,
+    kind: notificationTriggerKindSchema,
+    severity: notificationTriggerSeveritySchema,
+    title: z.string().trim().min(1).max(220),
+    body: z.string().trim().min(1).max(1000),
+    targetUrl: z.string().trim().max(2048).optional(),
+    errorMessage: z.string().trim().max(1000).optional(),
+    score: z.number().min(0).max(1).optional(),
+    confidence: sourceConfidenceSummarySchema.optional(),
+    sourceLabels: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
+    matchedKeywords: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+    reasons: z.array(z.string().trim().min(1).max(260)).max(20).optional(),
+    createdAt: z.string().datetime(),
+    sentAt: z.string().datetime().optional(),
+  })
+  .strict();
+
+export const pushDeliveryPageSchema = z
+  .object({
+    generatedAt: z.string().datetime(),
+    items: z.array(pushDeliveryListItemSchema).max(100),
+    summary: z
+      .object({
+        total: z.number().int().nonnegative().max(100_000),
+        sent: z.number().int().nonnegative().max(100_000),
+        failed: z.number().int().nonnegative().max(100_000),
+        claimed: z.number().int().nonnegative().max(100_000),
+        skipped: z.number().int().nonnegative().max(100_000),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const privateAnnotationQuerySchema = z.object({
   scenario: privateMapScenarioSchema.optional(),
   confidence: privateMapConfidenceSchema.optional(),
@@ -1078,6 +1309,17 @@ export const trafficMapQuerySchema = z
 
 export type TrafficMapQueryInput = z.infer<typeof trafficMapQuerySchema>;
 
+export const commandCenterSpatialAnalyticsQuerySchema = z.object({
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  minDelaySeconds: z.coerce.number().int().min(0).max(7200).default(180),
+  limit: z.coerce.number().int().min(1).max(200).default(80),
+});
+
+export type CommandCenterSpatialAnalyticsQueryInput = z.infer<
+  typeof commandCenterSpatialAnalyticsQuerySchema
+>;
+
 export const situationQuerySchema = z.object({
   status: situationLifecycleSchema.optional(),
   saved: z
@@ -1126,3 +1368,9 @@ export const lifecycleInputSchema = z
     message: "Avviste situasjoner krever en begrunnelse.",
     path: ["dismissalReason"],
   });
+
+export const situationPublicationInputSchema = z
+  .object({
+    publicVisibility: situationPublicVisibilitySchema,
+  })
+  .strict();

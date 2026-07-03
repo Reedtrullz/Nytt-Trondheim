@@ -5,6 +5,7 @@ export const articleCategories = [
   "Hendelser",
   "Krim",
   "Transport",
+  "Vær",
   "Sport",
   "Politikk",
   "Byutvikling",
@@ -25,6 +26,19 @@ export const articleCategoryLabels = {
   Transport: "Trafikk",
   Politikk: "Politikk",
   Vær: "Vær",
+} as const satisfies Record<ArticleCategory | "Alle", string>;
+
+export const articleCategoryDescriptions = {
+  Alle: "Samlet bypuls fra alle tematiske kanaler i den valgte visningen.",
+  Nyheter: "Generelle nyheter og lokale oppdateringer uten en mer presis beredskapskanal.",
+  Hendelser: "Pågående og stedsfestede hendelser som kan være nyttige å følge tett.",
+  Krim: "Politi, kriminalitet og ro-og-orden-saker med lokal betydning.",
+  Byutvikling: "Planer, bygging, veiarbeid og endringer i byrom og nærmiljø.",
+  Kultur: "Kultur, arrangementer og opplevelser i byen og regionen.",
+  Sport: "Sportssaker med lokal relevans, inkludert Rosenborg som eget underfilter.",
+  Transport: "Trafikk, kollektiv, vegmeldinger og framkommelighet.",
+  Politikk: "Politiske beslutninger, debatter og offentlige prioriteringer.",
+  Vær: "Vær, føre og naturfare med mulig konsekvens for hverdagen.",
 } as const satisfies Record<ArticleCategory | "Alle", string>;
 
 export const articleTopicLabels = {

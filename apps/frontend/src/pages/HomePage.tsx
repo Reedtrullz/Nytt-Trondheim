@@ -1,10 +1,35 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { Article, BootstrapPayload } from "@nytt/shared";
+import {
+  buildPublicNotificationSignalHighlights,
+  buildMorningBrief,
+  publicNotificationTriggerGuidance,
+  type Article,
+  type BootstrapPayload,
+  type CityPulseStory,
+  type CityPulseStoryPage,
+  type HomeSituationSummary,
+  type MorningBrief,
+  type PublicNotificationSignalHighlight,
+  type NotificationTriggerSeverity,
+  type SourceConfidenceSummary,
+  type SourceHealth,
+} from "@nytt/shared";
 import { api } from "../api.js";
-import { ArrowIcon, BookmarkIcon } from "../components/Icons.js";
+import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
+import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
 import {
   articleCategories,
+  articleCategoryDescriptions,
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
@@ -15,19 +40,40 @@ import {
   searchSummary,
   type ArticleCategoryFilter,
   type HomeFilters,
+  type HomeTimeWindow,
 } from "../homeFilters.js";
 import { groupHomeArticles, type HomeArticleGroup } from "../homeArticleGroups.js";
 import {
-  nearbyStoryItemsForGroups,
+  nearbyDistanceLabel,
+  nearbyStoryItemsForGroupsAndSituations,
   nearbyStorySummary,
   type NearbyStoryItem,
 } from "../homeNearby.js";
-import { rankHomeStoryCardsByLocalFocus, type HomeLocalFocusPoint } from "../homeLocalFocus.js";
+import {
+  homeNeighborhoodFocusOption,
+  homeNeighborhoodFocusOptions,
+  homeNeighborhoodFocusOptionForQuery,
+  homeNeighborhoodFocusStorageKey,
+} from "../homeNeighborhoodFocus.js";
+import {
+  homeLocalFocusDefaultRadiusKm,
+  homeLocalFocusRadiusOptions,
+  homeLocalFocusRadiusStorageKey,
+  rankHomeStoryCardsByLocalFocus,
+  parseHomeLocalFocusRadius,
+  summarizeHomeStoryCardsByLocalFocus,
+  type HomeLocalFocusPoint,
+  type HomeLocalFocusSummary,
+} from "../homeLocalFocus.js";
 import {
   homeStoryCardsForGroups,
+  homeStoryCardsForStories,
   sourceClusterLabelForGroup,
   type HomeStoryCard,
+  type HomeStoryVerification,
 } from "../homeStoryCards.js";
+import { publicSourceHealthSummary } from "../freshness.js";
+import { newsMapClusterSummary, type NewsMapClusterSummary } from "../newsMapClusters.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
@@ -35,12 +81,11 @@ const NewsMap = lazy(() =>
   import("../components/NewsMap.js").then((module) => ({ default: module.NewsMap })),
 );
 const defaultHomeFeedKey = "trondheim\u0000Alle\u0000\u0000\u0000all";
-const localFocusRadiusKm = 10;
 
 type LocalFocusState =
   | { status: "idle" }
   | { status: "locating" }
-  | { status: "active"; point: HomeLocalFocusPoint }
+  | { status: "active"; point: HomeLocalFocusPoint; label: string; persistent: boolean }
   | { status: "error"; message: string };
 
 function formatTime(date: string) {
@@ -49,6 +94,115 @@ function formatTime(date: string) {
     minute: "2-digit",
     timeZone: "Europe/Oslo",
   }).format(new Date(date));
+}
+
+const osloDatePartsFormatter = new Intl.DateTimeFormat("en-CA", {
+  day: "2-digit",
+  month: "2-digit",
+  timeZone: "Europe/Oslo",
+  year: "numeric",
+});
+
+const osloDateLabelFormatter = new Intl.DateTimeFormat("nb-NO", {
+  day: "numeric",
+  month: "long",
+  timeZone: "Europe/Oslo",
+});
+
+function osloDateKey(date: Date): string | undefined {
+  if (!Number.isFinite(date.getTime())) return undefined;
+  const parts = new Map(
+    osloDatePartsFormatter.formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  const year = parts.get("year");
+  const month = parts.get("month");
+  const day = parts.get("day");
+  return year && month && day ? `${year}-${month}-${day}` : undefined;
+}
+
+function daysBetweenOsloDates(left: string, right: string): number {
+  const [leftYear, leftMonth, leftDay] = left.split("-").map(Number);
+  const [rightYear, rightMonth, rightDay] = right.split("-").map(Number);
+  if (!leftYear || !leftMonth || !leftDay || !rightYear || !rightMonth || !rightDay) {
+    return 0;
+  }
+  const leftMs = Date.UTC(leftYear, leftMonth - 1, leftDay);
+  const rightMs = Date.UTC(rightYear, rightMonth - 1, rightDay);
+  return Math.round((rightMs - leftMs) / 86_400_000);
+}
+
+export function morningBriefFreshness(
+  generatedAt: string,
+  now: Date = new Date(),
+): { label: string; detail?: string; tone: "fresh" | "watch" | "stale" } {
+  const generatedDate = new Date(generatedAt);
+  const generatedKey = osloDateKey(generatedDate);
+  const nowKey = osloDateKey(now);
+  if (!generatedKey || !nowKey) {
+    return {
+      label: "Ukjent alder",
+      detail: "Tidspunktet kunne ikke leses",
+      tone: "watch",
+    };
+  }
+
+  const ageDays = daysBetweenOsloDates(generatedKey, nowKey);
+  if (ageDays <= 0) {
+    return { label: "Oppdatert i dag", tone: "fresh" };
+  }
+  if (ageDays === 1) {
+    return {
+      label: "Oppdatert i går",
+      detail: osloDateLabelFormatter.format(generatedDate),
+      tone: "watch",
+    };
+  }
+  return {
+    label: "Eldre brief",
+    detail: `Oppdatert ${osloDateLabelFormatter.format(generatedDate)}`,
+    tone: "stale",
+  };
+}
+
+function notificationSeverityLabel(severity: NotificationTriggerSeverity) {
+  switch (severity) {
+    case "critical":
+      return "Kritisk";
+    case "warning":
+      return "Varsel";
+    case "watch":
+      return "Følg med";
+  }
+}
+
+function notificationKindLabel(kind: PublicNotificationSignalHighlight["kind"]) {
+  switch (kind) {
+    case "public_safety":
+      return "Liv og helse";
+    case "traffic_disruption":
+      return "Trafikk";
+    case "weather_hazard":
+      return "Vær";
+    case "service_disruption":
+      return "Driftsbrudd";
+  }
+}
+
+function morningBriefModeLabel(mode: MorningBrief["mode"]): string {
+  return mode === "ai_assisted" ? "Analysert brief" : "Reservebrief";
+}
+
+function publicAnalysisRunLabel(brief: MorningBrief): string | undefined {
+  if (!brief.aiRun) return undefined;
+  const providerLabel =
+    brief.aiRun.provider === "deterministic" ? "Deterministisk analyse" : "Automatisk analyse";
+  return `${providerLabel} · ${brief.aiRun.status.toUpperCase()} · ${formatTime(
+    brief.aiRun.completedAt,
+  )}`;
+}
+
+function publicBriefSourceLine(line: string): string {
+  return line.replaceAll("AI-assistert", "Automatisk analyse").replaceAll("DeepSeek", "Analyse");
 }
 
 function SaveButton({
@@ -96,6 +250,11 @@ function SituationBanner({
         <p className="status-time">
           {situationTimeMeta(situation)} · {situation.verificationStatus}
         </p>
+        {situation.sourceConfidence ? (
+          <div className="situation-confidence">
+            <StoryConfidenceBadge confidence={situation.sourceConfidence} />
+          </div>
+        ) : null}
         <ul>
           <li>{situation.summary}</li>
           <li>Farevarsel og kartgrunnlag vises med tydelig kildeangivelse.</li>
@@ -120,6 +279,297 @@ function SituationBanner({
         <small>Ingen presis hendelsesavgrensning uten publisert geometri</small>
       </div>
     </article>
+  );
+}
+
+export function MorningBriefPanel({
+  brief,
+  articles = [],
+  situations = [],
+  now = new Date(),
+}: {
+  brief?: BootstrapPayload["morningBrief"];
+  articles?: Article[];
+  situations?: BootstrapPayload["situations"];
+  now?: Date;
+}) {
+  if (!brief) return null;
+  const modeLabel = morningBriefModeLabel(brief.mode);
+  const freshness = morningBriefFreshness(brief.generatedAt, now);
+  const analysisRunLabel = publicAnalysisRunLabel(brief);
+  const articlesById = new Map(articles.map((article) => [article.id, article]));
+  const situationsById = new Map(situations.map((situation) => [situation.id, situation]));
+  const linkedArticles = brief.articleIds
+    .flatMap((id) => {
+      const article = articlesById.get(id);
+      const href = article ? safeExternalUrl(article.url) : undefined;
+      return article && href ? [{ article, href }] : [];
+    })
+    .slice(0, 3);
+  const linkedSituations = brief.situationIds
+    .flatMap((id) => {
+      const situation = situationsById.get(id);
+      return situation ? [situation] : [];
+    })
+    .slice(0, 2);
+  const hasSourceLinks = linkedArticles.length > 0 || linkedSituations.length > 0;
+  return (
+    <section
+      className={`morning-brief morning-brief-${brief.mode}`}
+      aria-labelledby="morning-brief-heading"
+    >
+      <div className="morning-brief-copy">
+        <p className="label">{modeLabel}</p>
+        <div className="morning-brief-heading">
+          <h2 id="morning-brief-heading">{brief.title}</h2>
+          <div
+            className={`morning-brief-freshness morning-brief-freshness-${freshness.tone}`}
+            aria-label="Morgenbrief-ferskhet"
+          >
+            <span>{formatTime(brief.generatedAt)}</span>
+            <strong>{freshness.label}</strong>
+            {freshness.detail ? <small>{freshness.detail}</small> : null}
+          </div>
+        </div>
+        <div className="morning-brief-paragraphs">
+          {brief.paragraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
+        <small>{publicBriefSourceLine(brief.sourceLine)}</small>
+        {analysisRunLabel ? (
+          <p className="morning-brief-ai-trace">
+            <span>Analysespor</span>
+            <span>{analysisRunLabel}</span>
+          </p>
+        ) : null}
+        {hasSourceLinks ? (
+          <div className="morning-brief-sources" aria-label="Morgenbrief-grunnlag">
+            <span>Grunnlag</span>
+            <div>
+              {linkedArticles.map(({ article, href }) => (
+                <a href={href} key={article.id} rel="noreferrer noopener" target="_blank">
+                  {article.title}
+                </a>
+              ))}
+              {linkedSituations.map((situation) => (
+                <a href={`/situasjoner/${situation.id}`} key={situation.id}>
+                  {situation.title}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <dl className="morning-brief-highlights" aria-label="Morgenbrief-nøkkeltall">
+        {brief.highlights.map((highlight) => (
+          <div key={highlight.label}>
+            <dt>{highlight.label}</dt>
+            <dd>
+              <strong>{highlight.value}</strong>
+              <span>{highlight.detail}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+export function CityPulseSignalPanel({
+  articles = [],
+  brief,
+  now = new Date(),
+  situations = [],
+}: {
+  articles?: Article[];
+  brief?: BootstrapPayload["morningBrief"];
+  now?: Date;
+  situations?: HomeSituationSummary[];
+}) {
+  const freshness = brief ? morningBriefFreshness(brief.generatedAt, now) : undefined;
+  const signalHighlights = useMemo(
+    () =>
+      buildPublicNotificationSignalHighlights({
+        articles,
+        generatedAt: brief?.generatedAt ?? now.toISOString(),
+        limit: 3,
+        situations,
+      }),
+    [articles, brief?.generatedAt, now, situations],
+  );
+  return (
+    <section className="city-pulse-signal-panel" aria-labelledby="city-pulse-signal-heading">
+      <div className="section-heading-row">
+        <div>
+          <p className="label">Varsel og analysespor</p>
+          <h2 id="city-pulse-signal-heading">Slik vurderes høyeffekt-signaler</h2>
+        </div>
+        <Link to="/varsler">
+          Åpne varsler <ArrowIcon />
+        </Link>
+      </div>
+      <div className="city-pulse-signal-status">
+        <div>
+          <span>Morgenbrief</span>
+          <strong>{brief ? morningBriefModeLabel(brief.mode) : "Ikke lagret"}</strong>
+        </div>
+        <div>
+          <span>Siste analyse</span>
+          <strong>{brief?.aiRun ? formatTime(brief.aiRun.completedAt) : "Ikke lagret"}</strong>
+        </div>
+        <div>
+          <span>Brief-ferskhet</span>
+          <strong className={freshness ? `freshness-tone-${freshness.tone}` : undefined}>
+            {freshness?.label ?? "Ikke lagret"}
+          </strong>
+          {freshness?.detail ? <small>{freshness.detail}</small> : null}
+        </div>
+        <div>
+          <span>Varselregler</span>
+          <strong>{publicNotificationTriggerGuidance.length} offentlige kategorier</strong>
+        </div>
+      </div>
+      <section className="city-pulse-signal-live" aria-labelledby="city-pulse-live-heading">
+        <div className="city-pulse-signal-live-heading">
+          <div>
+            <p className="label">Akkurat nå</p>
+            <h3 id="city-pulse-live-heading">Høyeffektsaker fanget av varselreglene</h3>
+          </div>
+          <span>{signalHighlights.length ? `${signalHighlights.length} aktive` : "Rolig"}</span>
+        </div>
+        {signalHighlights.length ? (
+          <ol>
+            {signalHighlights.map((item) => {
+              const href =
+                item.link?.kind === "external" ? safeExternalUrl(item.link.href) : item.link?.href;
+              const action =
+                href && item.link ? (
+                  item.link.kind === "external" ? (
+                    <a href={href} target="_blank" rel="noreferrer noopener">
+                      {item.link.label} <ArrowIcon />
+                    </a>
+                  ) : (
+                    <Link to={href}>
+                      {item.link.label} <ArrowIcon />
+                    </Link>
+                  )
+                ) : null;
+              return (
+                <li className={`city-pulse-signal-live-item ${item.severity}`} key={item.id}>
+                  <div>
+                    <span>
+                      {notificationKindLabel(item.kind)} ·{" "}
+                      {notificationSeverityLabel(item.severity)} · {item.recencyLabel}
+                    </span>
+                    <strong>{item.title}</strong>
+                    <p>{item.body}</p>
+                  </div>
+                  <div className="city-pulse-signal-live-meta">
+                    <div className={`city-pulse-signal-attention ${item.attention.tone}`}>
+                      <strong>{item.attention.label}</strong>
+                      <small>{item.attention.detail}</small>
+                    </div>
+                    <StoryConfidenceBadge confidence={item.confidence} />
+                    {item.sourceLabels.length ? <em>{item.sourceLabels.join(" + ")}</em> : null}
+                    {item.reasons.slice(0, 2).map((reason) => (
+                      <small key={reason}>{reason}</small>
+                    ))}
+                    {item.matchedKeywords.length ? (
+                      <small>Treff: {item.matchedKeywords.slice(0, 3).join(", ")}</small>
+                    ) : null}
+                    {action}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <p className="city-pulse-signal-empty">
+            Ingen åpne saker i gjeldende bypulsdata krysser varselterskelen akkurat nå.
+          </p>
+        )}
+      </section>
+      <div className="city-pulse-signal-guidance">
+        {publicNotificationTriggerGuidance.map((item) => (
+          <article key={item.kind}>
+            <span>{notificationSeverityLabel(item.severity)}</span>
+            <strong>{item.title}</strong>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
+  const morningBrief = useMemo(
+    () =>
+      data.morningBrief ??
+      buildMorningBrief({
+        articles: data.articles,
+        situations: data.situations,
+        sourceHealth: data.sourceHealth,
+      }),
+    [data.articles, data.morningBrief, data.situations, data.sourceHealth],
+  );
+  const widgets = useMemo(() => {
+    const nextWidgets: DashboardWidgetDefinition[] = [];
+    nextWidgets.push({
+      id: "morning-brief",
+      title: "Morgenbrief",
+      description: "Dagens prioriterte bypuls.",
+      defaultSize: "full",
+      resizable: false,
+      children: (
+        <MorningBriefPanel
+          articles={data.articles}
+          brief={morningBrief}
+          situations={data.situations}
+        />
+      ),
+    });
+    nextWidgets.push({
+      id: "signal-trace",
+      title: "Varsel og analysespor",
+      description: "Offentlig forklaring på høyeffekt-signaler.",
+      defaultSize: "full",
+      children: (
+        <CityPulseSignalPanel
+          articles={data.articles}
+          brief={morningBrief}
+          situations={data.situations}
+        />
+      ),
+    });
+    if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
+      nextWidgets.push({
+        id: "situation-banner",
+        title: "Situasjon",
+        description: "Pågående eller foreløpig offentlig hendelse.",
+        defaultSize: "full",
+        resizable: false,
+        children: <SituationBanner situations={data.situations} />,
+      });
+    }
+    return nextWidgets;
+  }, [data.articles, data.situations, morningBrief]);
+
+  if (widgets.length === 0) return null;
+
+  return (
+    <DashboardGrid
+      ariaLabel="Bypulsmoduler"
+      label="City Pulse"
+      title="Dagens oversikt"
+      storageKey="nytt-city-pulse-dashboard-v1"
+      configMode="toggle"
+      showWidgetHeaders={false}
+      variant="city-pulse"
+      widgetChrome="bare"
+      widgets={widgets}
+    />
   );
 }
 
@@ -187,6 +637,7 @@ function LeadStory({
           {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
         </div>
         {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
+        <StoryEventBundleSummary card={card} />
         <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
         <div className="story-card-tags lead-story-tags">
@@ -194,12 +645,19 @@ function LeadStory({
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
+          {card.verification ? (
+            <span className="story-badge story-badge-verified" title={card.verification.detail}>
+              {card.verification.label}
+            </span>
+          ) : null}
+          <StoryConfidenceBadge confidence={card.sourceConfidence} />
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
             </span>
           ))}
         </div>
+        <StoryVerificationProof verification={card.verification} />
         <SourceCluster group={group} />
         <div className="lead-footer">
           <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
@@ -229,6 +687,145 @@ function storyKindLabel(kind: HomeStoryCard["cardKind"]): string {
   }
 }
 
+export function StoryVerificationProof({ verification }: { verification?: HomeStoryVerification }) {
+  if (!verification) return null;
+  return (
+    <p className="story-verification-proof">
+      <span>{verification.label}</span>
+      <span>{verification.sourceSummary}</span>
+      {verification.situationId ? (
+        <Link to={`/situasjoner/${encodeURIComponent(verification.situationId)}`}>
+          Åpne situasjonsrom
+        </Link>
+      ) : null}
+      <span className="sr-only">{verification.detail}</span>
+    </p>
+  );
+}
+
+export function StoryConfidenceBadge({ confidence }: { confidence: SourceConfidenceSummary }) {
+  const score = confidence.score;
+  const scoreLabel =
+    typeof score === "number" && Number.isFinite(score) && score > 0
+      ? ` · ${Math.round(score * 100)} %`
+      : "";
+  return (
+    <span
+      className={`story-badge story-confidence story-confidence-${confidence.level}`}
+      title={confidence.rationale}
+      aria-label={`Kildetillit: ${confidence.label}${scoreLabel}`}
+    >
+      Kildetillit: {confidence.label}
+      {scoreLabel}
+    </span>
+  );
+}
+
+function storyBundleLabel(kind: HomeStoryCard["cardKind"]): string {
+  switch (kind) {
+    case "situasjon":
+      return "Samlet situasjon";
+    case "hendelse":
+      return "Samlet hendelse";
+    case "tema":
+      return "Samlet tema";
+    case "oppdatering":
+      return "Samlet oppdatering";
+    case "sak":
+      return "Samlet sak";
+  }
+}
+
+export function StoryEventBundleSummary({ card }: { card: HomeStoryCard }) {
+  if (!card.isClustered) return null;
+  const summary = card.clusterLabel ?? card.sourceSummary;
+  return (
+    <div
+      className={`story-event-summary story-event-summary-${card.cardKind}`}
+      aria-label={`Samlet bypulskort: ${summary}`}
+    >
+      <span>{storyBundleLabel(card.cardKind)}</span>
+      <strong>{summary}</strong>
+    </div>
+  );
+}
+
+export function storyFeedSummary(cards: HomeStoryCard[]): string {
+  if (cards.length === 0) return "Ingen bypulssaker i denne visningen.";
+  const articleCount = cards.reduce((sum, card) => sum + card.updateCount, 0);
+  const sourceCount = new Set(
+    cards.flatMap((card) =>
+      card.group.articles.map((article) => article.sourceLabel || article.source),
+    ),
+  ).size;
+  const clusteredCount = cards.filter((card) => card.isClustered).length;
+  const storyLabel = cards.length === 1 ? "bypulssak" : "bypulssaker";
+  const articleLabel = articleCount === 1 ? "artikkel" : "artikler";
+  const sourceLabel = sourceCount === 1 ? "kilde" : "kilder";
+  const base = `Viser ${cards.length} ${storyLabel} samlet fra ${articleCount} ${articleLabel} og ${sourceCount} ${sourceLabel}.`;
+  if (clusteredCount === 0) return base;
+  const clusterLabel = clusteredCount === 1 ? "kort samler" : "kort samler";
+  return `${base} ${clusteredCount} ${clusterLabel} flere kilder eller oppdateringer.`;
+}
+
+type ChannelStoryCounts = Record<ArticleCategoryFilter, number>;
+
+function emptyChannelStoryCounts(): ChannelStoryCounts {
+  return Object.fromEntries(articleCategories.map((item) => [item, 0])) as ChannelStoryCounts;
+}
+
+export function channelStoryCountsForCards(cards: HomeStoryCard[]): ChannelStoryCounts {
+  const counts = emptyChannelStoryCounts();
+  counts.Alle = cards.length;
+  for (const card of cards) counts[card.category] += 1;
+  return counts;
+}
+
+function channelCountText(count: number): string {
+  return count === 1
+    ? "1 bypulssak i gjeldende visning"
+    : `${count} bypulssaker i gjeldende visning`;
+}
+
+export function ChannelContextPanel({
+  category,
+  count,
+  onClear,
+  scope,
+  timeWindow,
+}: {
+  category: ArticleCategoryFilter;
+  count: number;
+  onClear?: () => void;
+  scope: HomeFilters["scope"];
+  timeWindow: HomeTimeWindow;
+}) {
+  const place = scope === "trondheim" ? "Trondheim" : "Trøndelag";
+  const windowLabel =
+    timeWindow === "all" ? "hele tidslinjen" : `siste ${homeTimeWindowLabels[timeWindow]}`;
+
+  return (
+    <section className="channel-context" aria-label="Valgt tematisk kanal">
+      <span className="channel-context-icon" aria-hidden="true">
+        <ArticleCategoryIcon name={category} />
+      </span>
+      <div>
+        <p className="label">Tematisk kanal</p>
+        <h2>{articleCategoryLabels[category]}</h2>
+      </div>
+      <p>{articleCategoryDescriptions[category]}</p>
+      <strong>
+        {channelCountText(count)} · {place} · {windowLabel}
+      </strong>
+      {category !== "Alle" && onClear ? (
+        <button type="button" className="channel-context-clear" onClick={onClear}>
+          Vis alle kanaler
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 function StoryCard({
   card,
   saving,
@@ -253,6 +850,7 @@ function StoryCard({
           </p>
           {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
         </div>
+        <StoryEventBundleSummary card={card} />
         {articleUrl ? (
           <a
             className="headline story-title"
@@ -271,12 +869,19 @@ function StoryCard({
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
+          {card.verification ? (
+            <span className="story-badge story-badge-verified" title={card.verification.detail}>
+              {card.verification.label}
+            </span>
+          ) : null}
+          <StoryConfidenceBadge confidence={card.sourceConfidence} />
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
             </span>
           ))}
         </div>
+        <StoryVerificationProof verification={card.verification} />
         <SourceCluster group={card.group} />
       </div>
       <div className="story-card-side">
@@ -309,29 +914,86 @@ function geolocationErrorMessage(error?: GeolocationPositionError): string {
   return "Kunne ikke hente posisjon.";
 }
 
+export function LocalFocusSummaryPanel({
+  label,
+  radiusKm,
+  summary,
+}: {
+  label: string;
+  radiusKm: number;
+  summary: HomeLocalFocusSummary;
+}) {
+  const radiusLabel = `${radiusKm} km`;
+  return (
+    <section className="local-focus-summary" aria-label="Lokalt fokus">
+      <div>
+        <p className="label">Lokalt fokus</p>
+        <h2>Nær {label}</h2>
+        <p>
+          {summary.locatedCount > 0
+            ? `${summary.withinRadiusCount} av ${summary.locatedCount} stedsfestede saker er innen ${radiusLabel}.`
+            : `Ingen stedsfestede saker i utvalget kan måles mot ${label} ennå.`}
+        </p>
+      </div>
+      {summary.closestItems.length > 0 ? (
+        <ol>
+          {summary.closestItems.map((item) => (
+            <li key={item.id}>
+              <span>
+                <b>{item.title}</b>
+                {item.locationLabel ? <small>{item.locationLabel}</small> : null}
+              </span>
+              <em className={item.withinRadius ? "near" : undefined}>
+                {nearbyDistanceLabel(item.distanceKm)}
+              </em>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
 function NearbyRail({
   articles,
   data,
   groups,
   localFocus,
+  onTimeWindowChange,
+  timeWindow,
+  timeWindowLabel,
+  timeWindowFrom,
 }: {
   articles: Article[];
   data: BootstrapPayload;
   groups: HomeArticleGroup[];
   localFocus?: HomeLocalFocusPoint;
+  onTimeWindowChange: (timeWindow: HomeTimeWindow) => void;
+  timeWindow: HomeTimeWindow;
+  timeWindowFrom?: string;
+  timeWindowLabel?: string;
 }) {
   const allNearby = useMemo(
-    () => nearbyStoryItemsForGroups(groups, { limit: Number.MAX_SAFE_INTEGER, localFocus }),
-    [groups, localFocus],
+    () =>
+      nearbyStoryItemsForGroupsAndSituations(groups, data.situations, {
+        limit: Number.MAX_SAFE_INTEGER,
+        localFocus,
+        from: timeWindowFrom,
+      }),
+    [data.situations, groups, localFocus, timeWindowFrom],
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
+  const mapNearby = useMemo(() => allNearby.slice(0, 24), [allNearby]);
+  const clusterSummary = useMemo(() => newsMapClusterSummary(mapNearby), [mapNearby]);
   const [selectedNearbyId, setSelectedNearbyId] = useState<string>();
   const nearbyIds = nearby.map((item) => item.id).join("|");
-  const selectedNearby = nearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
+  const mapNearbyIds = mapNearby.map((item) => item.id).join("|");
+  const selectedNearby = mapNearby.find((item) => item.id === selectedNearbyId) ?? nearby[0];
   const selectedTarget = nearbyMapTarget(selectedNearby);
   const selectedArticleUrl = selectedNearby
-    ? safeExternalUrl(selectedNearby.article.url)
+    ? safeExternalUrl(selectedNearby.article?.url)
     : undefined;
+  const selectedDistance = localFocus ? nearbyDistanceLabel(selectedNearby?.distanceKm) : undefined;
   const municipalityArchiveUrl = safeExternalUrl(
     "https://www.trondheim.kommune.no/aktuelt/nyheter/",
   );
@@ -339,9 +1001,9 @@ function NearbyRail({
 
   useEffect(() => {
     setSelectedNearbyId((current) =>
-      current && nearby.some((item) => item.id === current) ? current : nearby[0]?.id,
+      current && mapNearby.some((item) => item.id === current) ? current : nearby[0]?.id,
     );
-  }, [nearby, nearbyIds]);
+  }, [mapNearby, mapNearbyIds, nearby, nearbyIds]);
 
   return (
     <aside className="home-rail">
@@ -349,14 +1011,24 @@ function NearbyRail({
         <div className="rail-title">
           <div>
             <h2 id="nearby-heading">I nærheten</h2>
-            <p>{nearbyStorySummary(nearby, allNearby.length)}</p>
+            <p>
+              {nearbyStorySummary(nearby, allNearby.length)}
+              {timeWindowLabel ? ` Kartet følger ${timeWindowLabel.toLocaleLowerCase("nb")}.` : ""}
+            </p>
           </div>
           <Link to="/situasjoner">
             Åpne situasjonskart <ArrowIcon />
           </Link>
         </div>
+        <MapTimeSlider value={timeWindow} onChange={onTimeWindowChange} />
+        <MapClusterSummary summary={clusterSummary} />
         <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
-          <NewsMap items={nearby} selectedId={selectedNearby?.id} onSelect={setSelectedNearbyId} />
+          <NewsMap
+            items={mapNearby}
+            localFocus={localFocus}
+            selectedId={selectedNearby?.id}
+            onSelect={setSelectedNearbyId}
+          />
         </Suspense>
         {nearby.length > 0 ? (
           <>
@@ -376,6 +1048,9 @@ function NearbyRail({
                       <b>{item.title}</b>
                       <small>
                         {item.locationLabel} · {item.sourceLabel}
+                        {localFocus
+                          ? ` · ${nearbyDistanceLabel(item.distanceKm) ?? "uten avstand"}`
+                          : ""}
                       </small>
                     </span>
                     <em className={`nearby-kind nearby-kind-${item.kind}`}>
@@ -392,6 +1067,7 @@ function NearbyRail({
               </p>
               <h3>{selectedNearby?.title}</h3>
               <p>{selectedNearby?.relevanceDetail}</p>
+              {selectedDistance ? <p className="nearby-distance">{selectedDistance}</p> : null}
               <div className="nearby-detail-actions">
                 <Link to={selectedTarget.to}>
                   {selectedTarget.label} <ArrowIcon />
@@ -450,22 +1126,364 @@ function NearbyRail({
           );
         })}
       </section>
-      <section className="source-status">
-        <h2>Kilder</h2>
-        <div className="health-grid">
-          {data.sourceHealth.slice(0, 5).map((source) => (
+      <PublicSourceStatusPanel sources={data.sourceHealth} />
+    </aside>
+  );
+}
+
+export function PublicSourceStatusPanel({ sources }: { sources: SourceHealth[] }) {
+  const summary = publicSourceHealthSummary(sources);
+  return (
+    <section className={`source-status source-status-${summary.tone}`}>
+      <h2>Kilder</h2>
+      <div className="source-status-summary">
+        <span>{summary.freshnessLabel}</span>
+        <strong>{summary.label}</strong>
+        <p>{summary.detail}</p>
+      </div>
+      {summary.sources.length ? (
+        <div className="health-grid" aria-label="Åpne kilder">
+          {summary.sources.map((source) => (
             <span key={source.source} className={source.state}>
-              {source.label}
+              <b>{source.label}</b>
+              <small>{source.stateLabel}</small>
             </span>
           ))}
         </div>
-      </section>
-    </aside>
+      ) : (
+        <p className="source-status-empty">Venter på første åpne kildekontroll.</p>
+      )}
+      {summary.hiddenSourceCount > 0 ? (
+        <p className="source-status-private">
+          {summary.hiddenSourceCount} interne kontroller vises bare i Command Center.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+export function MapClusterSummary({ summary }: { summary: NewsMapClusterSummary }) {
+  if (summary.storyCount === 0) return null;
+  const markerLabel = summary.markerCount === 1 ? "markør" : "markører";
+  const storyLabel = summary.storyCount === 1 ? "stedsfestet sak" : "stedsfestede saker";
+  const clusterLabel = summary.clusterCount === 1 ? "klynge" : "klynger";
+  const compressedLabel = summary.compressedStoryCount === 1 ? "ekstra sak" : "ekstra saker";
+
+  return (
+    <p className="nearby-map-density" aria-live="polite">
+      Kartet viser {summary.storyCount} {storyLabel} som {summary.markerCount} {markerLabel}.
+      {summary.compressedStoryCount > 0
+        ? ` ${summary.clusterCount} ${clusterLabel} samler ${summary.compressedStoryCount} ${compressedLabel}.`
+        : " Ingen punkter er slått sammen."}
+    </p>
+  );
+}
+
+export function MapTimeSlider({
+  value,
+  onChange,
+}: {
+  value: HomeTimeWindow;
+  onChange?: (timeWindow: HomeTimeWindow) => void;
+}) {
+  const selectedIndex = Math.max(0, homeTimeWindows.indexOf(value));
+  const selectedValue = homeTimeWindows[selectedIndex] ?? "all";
+  const selectedLabel = homeTimeWindowLabels[selectedValue];
+
+  return (
+    <div className="nearby-time-slider" aria-label="Kartperiode">
+      <div>
+        <span>Kartperiode</span>
+        <strong>{selectedLabel}</strong>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={homeTimeWindows.length - 1}
+        step={1}
+        value={selectedIndex}
+        aria-label="Filtrer kart etter alder"
+        aria-valuetext={selectedLabel}
+        onChange={(event) => {
+          const next = homeTimeWindows[Number(event.currentTarget.value)] ?? "all";
+          onChange?.(next);
+        }}
+      />
+      <div className="nearby-time-slider-labels" aria-hidden="true">
+        {homeTimeWindows.map((window) => (
+          <span className={window === selectedValue ? "selected" : ""} key={window}>
+            {homeTimeWindowLabels[window]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function LocalFocusRadiusControl({
+  disabled = false,
+  onChange,
+  value,
+}: {
+  disabled?: boolean;
+  onChange?: (radiusKm: number) => void;
+  value: number;
+}) {
+  const selectedIndex = Math.max(
+    0,
+    homeLocalFocusRadiusOptions.findIndex((option) => option === value),
+  );
+  const selectedValue = homeLocalFocusRadiusOptions[selectedIndex] ?? homeLocalFocusDefaultRadiusKm;
+
+  return (
+    <label className="local-focus-radius">
+      <span>Radius</span>
+      <strong>{selectedValue} km</strong>
+      <input
+        type="range"
+        min={0}
+        max={homeLocalFocusRadiusOptions.length - 1}
+        step={1}
+        value={selectedIndex}
+        aria-label="Velg lokal radius"
+        aria-valuetext={`${selectedValue} km`}
+        disabled={disabled}
+        onChange={(event) => {
+          const next =
+            homeLocalFocusRadiusOptions[Number(event.currentTarget.value)] ??
+            homeLocalFocusDefaultRadiusKm;
+          onChange?.(next);
+        }}
+      />
+    </label>
   );
 }
 
 function searchParamsFor(filters: HomeFilters) {
   return buildHomeSearch(filters).replace(/^\?/, "");
+}
+
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function situationLatestMs(situation: HomeSituationSummary): number | undefined {
+  const updatedAt = timestampMs(situation.updatedAt);
+  const createdAt = timestampMs(situation.createdAt);
+  if (updatedAt === undefined) return createdAt;
+  if (createdAt === undefined) return updatedAt;
+  return Math.max(updatedAt, createdAt);
+}
+
+function situationMatchesWindow(
+  situation: HomeSituationSummary,
+  timeWindowFrom: string | undefined,
+): boolean {
+  const lowerBound = timestampMs(timeWindowFrom);
+  if (lowerBound === undefined) return true;
+  const latest = situationLatestMs(situation);
+  return latest !== undefined && latest >= lowerBound;
+}
+
+export function cityPulseLatestTimestamp(data: BootstrapPayload): string | undefined {
+  const candidates = [
+    data.morningBrief?.generatedAt,
+    ...(data.stories ?? []).map((story) => story.latestAt),
+    ...data.articles.map((article) => article.publishedAt),
+    ...data.situations.flatMap((situation) => [situation.updatedAt, situation.createdAt]),
+    ...data.sourceHealth.map((source) => source.lastCheckedAt),
+  ].flatMap((value) => {
+    if (!value) return [];
+    const timestamp = timestampMs(value);
+    return timestamp === undefined ? [] : [{ value, timestamp }];
+  });
+  return candidates.sort((left, right) => right.timestamp - left.timestamp)[0]?.value;
+}
+
+export function articlesFromCityPulseStoryPage(page: CityPulseStoryPage): Article[] {
+  return articlesFromCityPulseStories(page.items);
+}
+
+export function articlesFromCityPulseStories(stories: CityPulseStory[]): Article[] {
+  const seenArticleIds = new Set<string>();
+  return stories
+    .flatMap((story) => {
+      const articles = story.articles.length > 0 ? story.articles : [story.primary];
+      return articles.map((article) => ({
+        ...article,
+        ...(story.coverageBundle && !article.coverageBundle
+          ? { coverageBundle: story.coverageBundle }
+          : {}),
+        ...(story.publicVerification && !article.publicVerification
+          ? { publicVerification: story.publicVerification }
+          : {}),
+      }));
+    })
+    .filter((article) => {
+      if (seenArticleIds.has(article.id)) return false;
+      seenArticleIds.add(article.id);
+      return true;
+    });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+function newerTimestamp(left: string, right: string): string {
+  const leftMs = timestampMs(left) ?? 0;
+  const rightMs = timestampMs(right) ?? 0;
+  return rightMs > leftMs ? right : left;
+}
+
+function mergeCityPulseStory(existing: CityPulseStory, incoming: CityPulseStory): CityPulseStory {
+  const articlesById = new Map<string, Article>();
+  const sourceLabels = uniqueStrings([...existing.sourceLabels, ...incoming.sourceLabels]);
+  for (const article of [
+    ...(existing.articles.length > 0 ? existing.articles : [existing.primary]),
+    ...(incoming.articles.length > 0 ? incoming.articles : [incoming.primary]),
+  ]) {
+    articlesById.set(article.id, article);
+  }
+  const articles = [...articlesById.values()].sort(
+    (left, right) => (timestampMs(right.publishedAt) ?? 0) - (timestampMs(left.publishedAt) ?? 0),
+  );
+  const articleIds = uniqueStrings([
+    ...existing.articleIds,
+    ...incoming.articleIds,
+    ...articles.map((article) => article.id),
+  ]);
+  return {
+    ...existing,
+    articleIds,
+    articles,
+    sourceLabels,
+    sourceCount: sourceLabels.length,
+    updateCount: Math.max(existing.updateCount, incoming.updateCount, articles.length),
+    latestAt: newerTimestamp(existing.latestAt, incoming.latestAt),
+    coverageBundle: existing.coverageBundle ?? incoming.coverageBundle,
+    publicVerification: existing.publicVerification ?? incoming.publicVerification,
+  };
+}
+
+export function mergeCityPulseStoryLists(
+  current: CityPulseStory[],
+  incoming: CityPulseStory[],
+): CityPulseStory[] {
+  const storiesById = new Map(current.map((story) => [story.id, story]));
+  for (const story of incoming) {
+    const existing = storiesById.get(story.id);
+    storiesById.set(story.id, existing ? mergeCityPulseStory(existing, story) : story);
+  }
+  return [...storiesById.values()].sort(
+    (left, right) => (timestampMs(right.latestAt) ?? 0) - (timestampMs(left.latestAt) ?? 0),
+  );
+}
+
+function cityPulseStoryWithArticle(
+  story: CityPulseStory,
+  articleId: string,
+  update: (article: Article) => Article,
+): CityPulseStory {
+  const primary = story.primary.id === articleId ? update(story.primary) : story.primary;
+  const articles = story.articles.map((article) =>
+    article.id === articleId ? update(article) : article,
+  );
+  if (
+    primary === story.primary &&
+    articles.every((article, index) => article === story.articles[index])
+  ) {
+    return story;
+  }
+  return { ...story, primary, articles };
+}
+
+function cityPulseStoriesWithSavedState(
+  stories: CityPulseStory[],
+  articleId: string,
+  saved: boolean,
+): CityPulseStory[] {
+  return stories.map((story) =>
+    cityPulseStoryWithArticle(story, articleId, (article) => ({ ...article, saved })),
+  );
+}
+
+export function CityPulseRefreshStatus({
+  error,
+  lastUpdatedAt,
+  onRefresh,
+  refreshing,
+}: {
+  error?: string;
+  lastUpdatedAt?: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+}) {
+  return (
+    <section className={`city-pulse-refresh${error ? " has-error" : ""}`} aria-live="polite">
+      <div>
+        <span>Bypuls</span>
+        <strong>{lastUpdatedAt ? formatTime(lastUpdatedAt) : "Ikke oppdatert"}</strong>
+      </div>
+      <button type="button" disabled={refreshing} onClick={onRefresh}>
+        {refreshing ? "Oppdaterer" : "Oppdater bypuls"}
+      </button>
+      {error ? <small role="status">{error}</small> : null}
+    </section>
+  );
+}
+
+function isDefaultHomeFeed(filters: HomeFilters): boolean {
+  return (
+    filters.scope === "trondheim" &&
+    filters.category === "Alle" &&
+    !filters.topic &&
+    filters.q.trim().length === 0 &&
+    filters.timeWindow === "all"
+  );
+}
+
+export function cityPulseDataForCurrentFeed({
+  articles,
+  filters,
+  initialData,
+  timeWindowFrom,
+}: {
+  articles: Article[];
+  filters: HomeFilters;
+  initialData: BootstrapPayload;
+  timeWindowFrom?: string;
+}): BootstrapPayload {
+  const defaultFeed = isDefaultHomeFeed(filters);
+  const linkedSituationIds = new Set(
+    articles.flatMap((article) => (article.situationId ? [article.situationId] : [])),
+  );
+  const includeStandaloneSituations =
+    filters.category === "Alle" && filters.q.trim().length === 0 && !filters.topic;
+  const situations = initialData.situations.filter((situation) => {
+    if (!situationMatchesWindow(situation, timeWindowFrom)) return false;
+    return includeStandaloneSituations || linkedSituationIds.has(situation.id);
+  });
+
+  return {
+    ...initialData,
+    articles,
+    stories: defaultFeed ? initialData.stories : undefined,
+    storyNextCursor: defaultFeed ? initialData.storyNextCursor : undefined,
+    situations,
+    morningBrief: defaultFeed ? initialData.morningBrief : undefined,
+  };
+}
+
+function defaultStoryNextCursor(data: BootstrapPayload): string | undefined {
+  return data.storyNextCursor;
 }
 
 interface SavedOverride {
@@ -485,14 +1503,29 @@ export function HomePage({
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
   const { scope, category, topic, timeWindow, q: query } = filters;
-  const [articles, setArticles] = useState(initialData.articles);
-  const [nextCursor, setNextCursor] = useState<string | undefined>(initialData.articleNextCursor);
+  const initialFeedIsDefault = isDefaultHomeFeed(filters);
+  const [liveData, setLiveData] = useState(initialData);
+  const [articles, setArticles] = useState(() =>
+    initialFeedIsDefault ? initialData.articles : [],
+  );
+  const [stories, setStories] = useState<CityPulseStory[]>(() =>
+    initialFeedIsDefault ? (initialData.stories ?? []) : [],
+  );
+  const [nextCursor, setNextCursor] = useState<string | undefined>(() =>
+    initialFeedIsDefault ? defaultStoryNextCursor(initialData) : undefined,
+  );
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
+  const [refreshingCityPulse, setRefreshingCityPulse] = useState(false);
+  const [cityPulseRefreshError, setCityPulseRefreshError] = useState<string>();
+  const [cityPulseRefreshedAt, setCityPulseRefreshedAt] = useState(() =>
+    cityPulseLatestTimestamp(initialData),
+  );
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
   const articleSavedOverridesRef = useRef<Map<string, SavedOverride>>(new Map());
+  const cityPulseRefreshRunningRef = useRef(false);
   const feedKey = `${scope}\u0000${category}\u0000${topic ?? ""}\u0000${query}\u0000${timeWindow}`;
   const feedKeyRef = useRef(feedKey);
   const loadMoreRequestIdRef = useRef(0);
@@ -500,31 +1533,259 @@ export function HomePage({
   const [saveError, setSaveError] = useState<string>();
   const timeWindowFrom = useMemo(() => homeTimeWindowFrom(timeWindow), [timeWindow]);
   const [localFocus, setLocalFocus] = useState<LocalFocusState>({ status: "idle" });
+  const [neighborhoodFocusId, setNeighborhoodFocusId] = useState("");
+  const [neighborhoodFocusQuery, setNeighborhoodFocusQuery] = useState("");
+  const [focusRadiusKm, setFocusRadiusKm] = useState(homeLocalFocusDefaultRadiusKm);
+  const focusRadiusCustomizedRef = useRef(false);
   const activeLocalFocus = localFocus.status === "active" ? localFocus.point : undefined;
+  const activeLocalFocusRadiusKm = activeLocalFocus?.radiusKm ?? focusRadiusKm;
+
+  useEffect(() => {
+    setLiveData(initialData);
+    setCityPulseRefreshedAt(cityPulseLatestTimestamp(initialData));
+  }, [initialData]);
+
+  const applySavedOverrides = useCallback((items: Article[]) => {
+    const savedOverrides = articleSavedOverridesRef.current;
+    if (savedOverrides.size === 0) return items;
+    const now = Date.now();
+    const nextOverrides = new Map(savedOverrides);
+    const nextItems = items.map((item) => {
+      const override = nextOverrides.get(item.id);
+      if (!override) return item;
+      if (override.expiresAt <= now || item.saved === override.saved) {
+        nextOverrides.delete(item.id);
+        return item;
+      }
+      return { ...item, saved: override.saved };
+    });
+    articleSavedOverridesRef.current = nextOverrides;
+    return nextItems;
+  }, []);
+
+  const applySavedOverridesToStories = useCallback(
+    (items: CityPulseStory[]) => {
+      const updatedArticles = new Map(
+        applySavedOverrides(articlesFromCityPulseStories(items)).map((article) => [
+          article.id,
+          article,
+        ]),
+      );
+      return items.map((story) => {
+        const primary = updatedArticles.get(story.primary.id) ?? story.primary;
+        const articles =
+          story.articles.length > 0
+            ? story.articles.map((article) => updatedArticles.get(article.id) ?? article)
+            : story.articles;
+        return primary === story.primary && articles === story.articles
+          ? story
+          : { ...story, primary, articles };
+      });
+    },
+    [applySavedOverrides],
+  );
+
+  const refreshCityPulse = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      if (cityPulseRefreshRunningRef.current) return;
+      cityPulseRefreshRunningRef.current = true;
+      if (!options.silent) setRefreshingCityPulse(true);
+      try {
+        const nextData = await api.bootstrap();
+        setLiveData(nextData);
+        setCityPulseRefreshedAt(cityPulseLatestTimestamp(nextData) ?? new Date().toISOString());
+        setCityPulseRefreshError(undefined);
+        if (feedKeyRef.current === defaultHomeFeedKey) {
+          const nextStories = applySavedOverridesToStories(nextData.stories ?? []);
+          setStories(nextStories);
+          setArticles(
+            nextStories.length > 0
+              ? articlesFromCityPulseStories(nextStories)
+              : applySavedOverrides(nextData.articles),
+          );
+          setNextCursor(defaultStoryNextCursor(nextData));
+        }
+      } catch (reason) {
+        if (!options.silent) {
+          setCityPulseRefreshError(
+            reason instanceof Error ? reason.message : "Kunne ikke oppdatere bypulsen",
+          );
+        }
+      } finally {
+        cityPulseRefreshRunningRef.current = false;
+        if (!options.silent) setRefreshingCityPulse(false);
+      }
+    },
+    [applySavedOverrides, applySavedOverridesToStories],
+  );
+
+  useEffect(() => {
+    if (feedKey !== defaultHomeFeedKey) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      if (savingArticleIdsRef.current.size > 0) return;
+      void refreshCityPulse({ silent: true });
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [feedKey, refreshCityPulse]);
+
+  useEffect(() => {
+    try {
+      const storedRadius = parseHomeLocalFocusRadius(
+        window.localStorage.getItem(homeLocalFocusRadiusStorageKey),
+      );
+      const option = homeNeighborhoodFocusOption(
+        window.localStorage.getItem(homeNeighborhoodFocusStorageKey),
+      );
+      if (!option) return;
+      const radiusKm = storedRadius ?? option.point.radiusKm ?? homeLocalFocusDefaultRadiusKm;
+      focusRadiusCustomizedRef.current = storedRadius !== undefined;
+      setFocusRadiusKm(radiusKm);
+      setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
+      setLocalFocus({
+        status: "active",
+        point: { ...option.point, radiusKm },
+        label: option.label,
+        persistent: true,
+      });
+    } catch {
+      // Local focus is a convenience hint. Storage failures should not block the feed.
+    }
+  }, []);
+
+  const clearStoredNeighborhoodFocus = useCallback(() => {
+    try {
+      window.localStorage.removeItem(homeNeighborhoodFocusStorageKey);
+      window.localStorage.removeItem(homeLocalFocusRadiusStorageKey);
+    } catch {
+      // Ignore storage failures; the UI state is still cleared for this session.
+    }
+  }, []);
+
+  const persistFocusRadius = useCallback((radiusKm: number) => {
+    try {
+      window.localStorage.setItem(homeLocalFocusRadiusStorageKey, String(radiusKm));
+    } catch {
+      // Radius is a convenience hint. Storage failures should not block local focus.
+    }
+  }, []);
+
+  const updateLocalFocusRadius = useCallback(
+    (radiusKm: number) => {
+      const parsed = parseHomeLocalFocusRadius(radiusKm);
+      if (!parsed) return;
+      focusRadiusCustomizedRef.current = true;
+      setFocusRadiusKm(parsed);
+      persistFocusRadius(parsed);
+      setLocalFocus((current) =>
+        current.status === "active"
+          ? { ...current, point: { ...current.point, radiusKm: parsed } }
+          : current,
+      );
+    },
+    [persistFocusRadius],
+  );
 
   const requestLocalFocus = useCallback(() => {
     if (!navigator.geolocation) {
       setLocalFocus({ status: "error", message: "Nettleseren støtter ikke posisjon her." });
       return;
     }
+    setNeighborhoodFocusId("");
+    setNeighborhoodFocusQuery("");
+    clearStoredNeighborhoodFocus();
     setLocalFocus({ status: "locating" });
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocalFocus({
           status: "active",
+          label: "din posisjon",
+          persistent: false,
           point: {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-            radiusKm: localFocusRadiusKm,
+            radiusKm: focusRadiusKm,
           },
         });
       },
       (error) => setLocalFocus({ status: "error", message: geolocationErrorMessage(error) }),
       { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 8000 },
     );
-  }, []);
+  }, [clearStoredNeighborhoodFocus, focusRadiusKm]);
 
-  const clearLocalFocus = useCallback(() => setLocalFocus({ status: "idle" }), []);
+  const clearLocalFocus = useCallback(() => {
+    setNeighborhoodFocusId("");
+    setNeighborhoodFocusQuery("");
+    focusRadiusCustomizedRef.current = false;
+    setFocusRadiusKm(homeLocalFocusDefaultRadiusKm);
+    clearStoredNeighborhoodFocus();
+    setLocalFocus({ status: "idle" });
+  }, [clearStoredNeighborhoodFocus]);
+
+  const selectNeighborhoodFocus = useCallback(
+    (value: string) => {
+      const option = homeNeighborhoodFocusOption(value);
+      if (!option) {
+        clearLocalFocus();
+        return;
+      }
+      const radiusKm = focusRadiusCustomizedRef.current
+        ? focusRadiusKm
+        : (option.point.radiusKm ?? focusRadiusKm);
+      setFocusRadiusKm(radiusKm);
+      setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
+      try {
+        window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+        window.localStorage.setItem(homeLocalFocusRadiusStorageKey, String(radiusKm));
+      } catch {
+        // The chosen focus still works for this session even when persistence is unavailable.
+      }
+      setLocalFocus({
+        status: "active",
+        point: { ...option.point, radiusKm },
+        label: option.label,
+        persistent: true,
+      });
+    },
+    [clearLocalFocus, focusRadiusKm],
+  );
+
+  const applyNeighborhoodFocusQuery = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const option = homeNeighborhoodFocusOptionForQuery(neighborhoodFocusQuery);
+      if (!option) {
+        setNeighborhoodFocusId("");
+        clearStoredNeighborhoodFocus();
+        setLocalFocus({
+          status: "error",
+          message: "Fant ikke nærområdet. Prøv postnummer eller stedsnavn i Trondheim.",
+        });
+        return;
+      }
+      const radiusKm = focusRadiusCustomizedRef.current
+        ? focusRadiusKm
+        : (option.point.radiusKm ?? focusRadiusKm);
+      setFocusRadiusKm(radiusKm);
+      setNeighborhoodFocusId(option.id);
+      setNeighborhoodFocusQuery(option.label);
+      try {
+        window.localStorage.setItem(homeNeighborhoodFocusStorageKey, option.id);
+        window.localStorage.setItem(homeLocalFocusRadiusStorageKey, String(radiusKm));
+      } catch {
+        // The chosen focus still works for this session even when persistence is unavailable.
+      }
+      setLocalFocus({
+        status: "active",
+        point: { ...option.point, radiusKm },
+        label: option.label,
+        persistent: true,
+      });
+    },
+    [clearStoredNeighborhoodFocus, focusRadiusKm, neighborhoodFocusQuery],
+  );
 
   function updateFilters(next: Partial<HomeFilters>) {
     const merged: HomeFilters = { ...filters, ...next };
@@ -538,8 +1799,14 @@ export function HomePage({
       setLoading(false);
       setLoadingMore(false);
       setFeedError(undefined);
-      setArticles(initialData.articles);
-      setNextCursor(initialData.articleNextCursor);
+      const nextStories = applySavedOverridesToStories(liveData.stories ?? []);
+      setStories(nextStories);
+      setArticles(
+        nextStories.length > 0
+          ? articlesFromCityPulseStories(nextStories)
+          : applySavedOverrides(liveData.articles),
+      );
+      setNextCursor(defaultStoryNextCursor(liveData));
       return;
     }
     let cancelled = false;
@@ -547,30 +1814,18 @@ export function HomePage({
     setLoadingMore(false);
     loadMoreRequestIdRef.current += 1;
     setNextCursor(undefined);
+    setStories([]);
+    setArticles([]);
     setFeedError(undefined);
     const timeout = window.setTimeout(
       () => {
         void api
-          .articles({ scope, category, topic, q: query, from: timeWindowFrom })
+          .cityPulseStories({ scope, category, topic, q: query, from: timeWindowFrom })
           .then((page) => {
             if (!cancelled) {
-              setArticles(() => {
-                const savedOverrides = articleSavedOverridesRef.current;
-                if (savedOverrides.size === 0) return page.items;
-                const now = Date.now();
-                const nextOverrides = new Map(savedOverrides);
-                const nextItems = page.items.map((item) => {
-                  const override = nextOverrides.get(item.id);
-                  if (!override) return item;
-                  if (override.expiresAt <= now || item.saved === override.saved) {
-                    nextOverrides.delete(item.id);
-                    return item;
-                  }
-                  return { ...item, saved: override.saved };
-                });
-                articleSavedOverridesRef.current = nextOverrides;
-                return nextItems;
-              });
+              const nextStories = applySavedOverridesToStories(page.items);
+              setStories(nextStories);
+              setArticles(articlesFromCityPulseStories(nextStories));
               setNextCursor(page.nextCursor);
             }
           })
@@ -589,9 +1844,12 @@ export function HomePage({
     };
   }, [
     category,
+    applySavedOverrides,
+    applySavedOverridesToStories,
     feedKey,
-    initialData.articleNextCursor,
-    initialData.articles,
+    liveData.articles,
+    liveData.stories,
+    liveData.storyNextCursor,
     query,
     scope,
     timeWindowFrom,
@@ -600,9 +1858,26 @@ export function HomePage({
 
   const filtered = useMemo(() => articles, [articles]);
   const isTextSearch = query.trim().length > 0;
+  const cityPulseData = useMemo(
+    () =>
+      cityPulseDataForCurrentFeed({
+        articles: filtered,
+        filters,
+        initialData: liveData,
+        timeWindowFrom,
+      }),
+    [filtered, filters, liveData, timeWindowFrom],
+  );
 
   const groupedArticles = useMemo(() => groupHomeArticles(filtered), [filtered]);
-  const storyCards = useMemo(() => homeStoryCardsForGroups(groupedArticles), [groupedArticles]);
+  const storyCards = useMemo(
+    () =>
+      stories.length > 0
+        ? homeStoryCardsForStories(stories)
+        : homeStoryCardsForGroups(groupedArticles),
+    [groupedArticles, stories],
+  );
+  const channelStoryCounts = useMemo(() => channelStoryCountsForCards(storyCards), [storyCards]);
   const displayedStoryCards = useMemo(
     () => rankHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus),
     [activeLocalFocus, storyCards],
@@ -610,6 +1885,13 @@ export function HomePage({
   const displayedGroups = useMemo(
     () => displayedStoryCards.map((card) => card.group),
     [displayedStoryCards],
+  );
+  const localFocusSummary = useMemo(
+    () =>
+      activeLocalFocus
+        ? summarizeHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus, 3)
+        : undefined,
+    [activeLocalFocus, storyCards],
   );
   const leadCard = displayedStoryCards[0];
   const secondaryCards = displayedStoryCards.slice(1);
@@ -626,6 +1908,7 @@ export function HomePage({
     });
     setSavingArticleIds(pending);
     setArticles((items) => items.map((item) => (item.id === id ? { ...item, saved } : item)));
+    setStories((items) => cityPulseStoriesWithSavedState(items, id, saved));
     try {
       await api.saveArticle(id, saved);
       articleSavedOverridesRef.current = new Map(articleSavedOverridesRef.current).set(id, {
@@ -640,6 +1923,7 @@ export function HomePage({
       setArticles((items) =>
         items.map((item) => (item.id === id ? { ...item, saved: previous } : item)),
       );
+      setStories((items) => cityPulseStoriesWithSavedState(items, id, previous));
       setSaveError(reason instanceof Error ? reason.message : "Kunne ikke lagre saken");
     } finally {
       const next = new Set(savingArticleIdsRef.current);
@@ -658,22 +1942,27 @@ export function HomePage({
     setLoadingMore(true);
     setFeedError(undefined);
     try {
-      const page = await api.articles({
+      const requestQuery = {
         scope,
         category,
         topic,
         q: query,
         from: timeWindowFrom,
         cursor: requestCursor,
-      });
+      };
+      const page = await api.cityPulseStories(requestQuery);
+      const pageStories = applySavedOverridesToStories(page.items);
+      const pageNextCursor = page.nextCursor;
       if (loadMoreRequestIdRef.current !== requestId || feedKeyRef.current !== requestFeedKey) {
         return;
       }
+      const nextArticles = articlesFromCityPulseStories(pageStories);
+      setStories((current) => mergeCityPulseStoryLists(current, pageStories));
       setArticles((current) => [
         ...current,
-        ...page.items.filter((item) => !current.some((existing) => existing.id === item.id)),
+        ...nextArticles.filter((item) => !current.some((existing) => existing.id === item.id)),
       ]);
-      setNextCursor(page.nextCursor);
+      setNextCursor(pageNextCursor);
     } catch (reason) {
       if (loadMoreRequestIdRef.current === requestId) {
         setFeedError(reason instanceof Error ? reason.message : "Kunne ikke hente flere saker");
@@ -706,18 +1995,30 @@ export function HomePage({
             Trøndelag
           </button>
         </div>
-        <div className="filters" aria-label="Filtrer saker">
-          {articleCategories.map((item: ArticleCategoryFilter) => (
-            <button
-              type="button"
-              aria-pressed={category === item}
-              className={category === item ? "selected" : ""}
-              key={item}
-              onClick={() => updateFilters({ category: item })}
-            >
-              {articleCategoryLabels[item]}
-            </button>
-          ))}
+        <div className="filters" aria-label="Tematiske kanaler">
+          {articleCategories.map((item: ArticleCategoryFilter) => {
+            const count = channelStoryCounts[item] ?? 0;
+            return (
+              <button
+                type="button"
+                aria-pressed={category === item}
+                className={`channel-filter channel-filter-${item.toLocaleLowerCase("nb")}${
+                  category === item ? " selected" : ""
+                }`}
+                key={item}
+                onClick={() => updateFilters({ category: item })}
+                title={`${articleCategoryLabels[item]}: ${channelCountText(count)}`}
+              >
+                <span className="channel-filter-icon" aria-hidden="true">
+                  <ArticleCategoryIcon name={item} />
+                </span>
+                <span className="channel-filter-label">{articleCategoryLabels[item]}</span>
+                <span className="channel-filter-count" aria-label={channelCountText(count)}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
         {category === "Sport" ? (
           <div className="topic-filters" aria-label="Sportskategorier">
@@ -746,6 +2047,14 @@ export function HomePage({
             </button>
           ))}
         </div>
+        {feedKey === defaultHomeFeedKey ? (
+          <CityPulseRefreshStatus
+            error={cityPulseRefreshError}
+            lastUpdatedAt={cityPulseRefreshedAt}
+            onRefresh={() => void refreshCityPulse()}
+            refreshing={refreshingCityPulse}
+          />
+        ) : null}
         <div className={`local-focus local-focus-${localFocus.status}`} aria-live="polite">
           <button
             type="button"
@@ -757,20 +2066,70 @@ export function HomePage({
             {localFocus.status === "locating"
               ? "Finner posisjon"
               : localFocus.status === "active"
-                ? "Nær meg aktiv"
+                ? "Lokalt fokus aktivt"
                 : "Nær meg"}
           </button>
+          <select
+            aria-label="Velg nærområde"
+            value={neighborhoodFocusId}
+            onChange={(event) => selectNeighborhoodFocus(event.target.value)}
+          >
+            <option value="">Velg område</option>
+            {homeNeighborhoodFocusOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <form className="local-focus-search" onSubmit={applyNeighborhoodFocusQuery}>
+            <input
+              aria-label="Postnummer eller sted"
+              inputMode="search"
+              placeholder="Postnummer/sted"
+              value={neighborhoodFocusQuery}
+              onChange={(event) => setNeighborhoodFocusQuery(event.target.value)}
+            />
+            <button type="submit">Bruk</button>
+          </form>
           {localFocus.status === "active" ? (
-            <span>Innen {localFocusRadiusKm} km</span>
+            <LocalFocusRadiusControl
+              value={activeLocalFocusRadiusKm}
+              onChange={updateLocalFocusRadius}
+            />
+          ) : null}
+          {localFocus.status === "active" ? (
+            <span>
+              Nær {localFocus.label} · innen {activeLocalFocusRadiusKm} km
+              {localFocus.persistent ? " · huskes her" : ""}
+            </span>
           ) : localFocus.status === "error" ? (
             <span role="status">{localFocus.message}</span>
           ) : null}
         </div>
       </div>
-      {!isTextSearch ? <SituationBanner situations={initialData.situations} /> : null}
+      <ChannelContextPanel
+        category={category}
+        count={channelStoryCounts[category] ?? 0}
+        onClear={category === "Alle" ? undefined : () => updateFilters({ category: "Alle" })}
+        scope={scope}
+        timeWindow={timeWindow}
+      />
+      {localFocus.status === "active" && localFocusSummary ? (
+        <LocalFocusSummaryPanel
+          label={localFocus.label}
+          radiusKm={activeLocalFocusRadiusKm}
+          summary={localFocusSummary}
+        />
+      ) : null}
+      {!isTextSearch ? <CityPulseDashboard data={cityPulseData} /> : null}
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
+          {displayedStoryCards.length > 0 ? (
+            <p className="story-feed-summary" aria-label="Sammendrag av bypulssaker">
+              {storyFeedSummary(displayedStoryCards)}
+            </p>
+          ) : null}
           {feedError ? (
             <p className="feed-state error">Kunne ikke hente saker: {feedError}</p>
           ) : null}
@@ -812,7 +2171,11 @@ export function HomePage({
           articles={articles}
           groups={displayedGroups}
           localFocus={activeLocalFocus}
-          data={initialData}
+          onTimeWindowChange={(nextWindow) => updateFilters({ timeWindow: nextWindow })}
+          timeWindow={timeWindow}
+          timeWindowFrom={timeWindowFrom}
+          timeWindowLabel={timeWindow === "all" ? undefined : homeTimeWindowLabels[timeWindow]}
+          data={cityPulseData}
         />
       </div>
     </main>

@@ -8,7 +8,7 @@ The repository follows the RFMC release pattern:
 4. GitHub Actions connects to the VPS as `deploy` and runs `ansible-playbook.yml`; the VPS uses its own repository-scoped read-only deploy key at `~/.ssh/nytt_github_deploy` to clone this private repository.
 5. Ansible checks out the exact CI-verified commit, installs/configures backup tooling, pulls/builds fresh Docker images, verifies an encrypted pre-migration backup, applies locked transactional migrations, health-checks a canary API container on a separate localhost port, promotes API/worker only after the canary is healthy, validates and reloads Caddy, then runs production health, worker, source-health and source-item sanity checks. The current production API/worker stay up through backup and canary, but migrations run before canary against the production database, so application migrations must be expand/contract-compatible with the previous release; destructive schema changes must be split into a later deploy or paired with an explicit restore/rollback procedure.
 
-The deploy workflow fails before SSH/Ansible if any required SSH, application, GitHub authentication, SMTP, AI, DATEX or backup secret is absent; the playbook repeats the required-value check before writing runtime secrets. Automatic deploys set `NYTT_DEPLOY_REF` from the successful CI workflow run SHA so the VPS checkout matches the commit CI verified; manual dispatch falls back to the dispatch SHA. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
+The deploy workflow fails before SSH/Ansible if any required SSH, application, GitHub authentication, SMTP, DATEX or backup secret is absent; the playbook repeats the required-value check before writing runtime secrets. DeepSeek is not a required production secret because production deploys force deterministic analysis. Automatic deploys set `NYTT_DEPLOY_REF` from the successful CI workflow run SHA so the VPS checkout matches the commit CI verified; manual dispatch falls back to the dispatch SHA. Origin TLS is provisioned before the first application release because the new Caddy hostname must exist before Cloudflare can reach it.
 
 ## Production Services
 
@@ -19,7 +19,7 @@ The deploy workflow fails before SSH/Ansible if any required SSH, application, G
 - `app`: authenticated API and built web interface, exposed only on VPS localhost for Caddy.
 - `worker`: scheduled ingestion and analysis process.
 
-PostgreSQL runs only on the internal `nytt_database` network. The playbook provisions the external `nytt_outbound` egress network before canary startup; `app` and `worker` join it so GitHub authorization, RSS, Kartverket, MET/NVE, DeepSeek, Nominatim/OpenStreetMap and OSRM requests can reach external services. The API remains bound only to VPS localhost for Caddy.
+PostgreSQL runs only on the internal `nytt_database` network. The playbook provisions the external `nytt_outbound` egress network before canary startup; `app` and `worker` join it so GitHub authorization, RSS, Kartverket, MET/NVE, Nominatim/OpenStreetMap and OSRM requests can reach external services. Optional local DeepSeek experiments also use outbound access, but production deploys do not configure provider calls. The API remains bound only to VPS localhost for Caddy.
 
 The playbook also normalizes persisted upload-volume ownership for the non-root API container before promotion, so private attachments and protected ZIP exports remain writable after initial volume creation or restore.
 
@@ -64,6 +64,12 @@ gh secret set NYTT_SMTP_USER --repo Reedtrullz/Nytt-Trondheim
 ```
 
 `NYTT_SMTP_PORT` defaults to `465`. Set `NYTT_SMTP_SECURE=false` when using STARTTLS on port `587`. `NYTT_SMTP_API_KEY` is written to the runtime `SMTP_PASSWORD` environment variable. If `NYTT_SMTP_USER` is configured, `NYTT_SMTP_API_KEY` must also be configured. Local development may omit SMTP; the server logs email links to the console instead.
+
+## DeepSeek Analysis
+
+Production deploys intentionally force DeepSeek off. The GitHub Actions deploy job no longer forwards a DeepSeek API key or enablement variable, and Ansible writes `DEEPSEEK_ANALYSIS_ENABLED=false` plus an empty `DEEPSEEK_API_KEY` into `.env.production`. The worker records a deterministic disabled analysis run and keeps coverage grouping, situation detection and morning briefs running without provider calls.
+
+The DeepSeek analyzer remains in the codebase for local experiments only. To test it locally, set `DEEPSEEK_ANALYSIS_ENABLED=true` and `DEEPSEEK_API_KEY` in a local environment, then verify that malformed, empty or truncated responses degrade only the optional AI enrichment path.
 
 ## DATEX Credentials
 
@@ -347,7 +353,7 @@ The application is live at `https://nytt.reidar.tech`; `/health` returns healthy
 - The incident-correctness release was manually verified and `NYTT_DEPLOY_ENABLED=true`; successful `main` CI runs now trigger production promotion.
 - The `Provision Origin` workflow succeeded; the repository-scoped read-only checkout key is installed and verified on the VPS, and GitHub Actions now connects using its dedicated deployment key.
 - `NYTT_POSTGRES_PASSWORD` and `NYTT_SESSION_SECRET` are configured in GitHub Actions.
-- The `nytt-trondheim` GitHub App credentials, DeepSeek API credential and restricted Google Drive/rclone backup target are configured.
+- The `nytt-trondheim` GitHub App credentials and restricted Google Drive/rclone backup target are configured. DeepSeek is not part of the production deploy path; local experiments must configure `DEEPSEEK_ANALYSIS_ENABLED=true` outside the playbook.
 - Caddy serves the application from localhost port `8090` with valid TLS at `https://nytt.reidar.tech`.
 - The Nytt canary uses localhost port `8092`, avoiding the existing Hermes proposals service on `8091`.
 - Encrypted Google Drive/restic backups and restore verification are active. Runtime status files expose only successful completion timestamps to the owner-only operations view.

@@ -3,6 +3,8 @@ import type pg from "pg";
 import type {
   AiProcessingRun,
   Article,
+  MorningBrief,
+  NotificationTriggerCandidate,
   OfficialEvent,
   PersistedTrafficMapEvent,
   PublicTransportServiceAlert,
@@ -213,6 +215,164 @@ describe("WorkerRepository", () => {
       JSON.stringify(bundle.nearMisses),
       JSON.stringify(bundle),
     ]);
+  });
+
+  it("stores generated morning briefs outside the source item ledger", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const brief: MorningBrief = {
+      generatedAt: "2026-07-02T07:30:00.000Z",
+      title: "Morgenbrief",
+      mode: "ai_assisted",
+      sourceLine: "Automatisk analyse · 5/6 kilder OK",
+      paragraphs: [
+        "Trondheim starter dagen med trafikk og noen få hendelser.",
+        "E6 ved Sluppen peker seg ut som den mest praktiske saken å følge.",
+        "Situasjonsrommet for steinsprang er fortsatt øverst i bildet.",
+      ],
+      highlights: [
+        { label: "Saker", value: "12", detail: "Transport leder bildet" },
+        { label: "Situasjoner", value: "1", detail: "Aktive eller til vurdering" },
+        { label: "Kilder", value: "5/6", detail: "Rapporterer OK" },
+      ],
+      articleIds: ["article-one", "article-two"],
+      situationIds: ["situation-one"],
+      aiRun: {
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+        status: "ok",
+        completedAt: "2026-07-02T07:25:00.000Z",
+      },
+    };
+
+    await repository.upsertMorningBrief(brief);
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("INSERT INTO morning_briefs");
+    expect(sql).not.toContain("source_items");
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      "morning:2026-07-02",
+      brief.generatedAt,
+      brief.mode,
+      brief.title,
+      brief.sourceLine,
+      JSON.stringify(brief.paragraphs),
+      JSON.stringify(brief.highlights),
+      brief.articleIds,
+      brief.situationIds,
+      brief.aiRun?.provider,
+      brief.aiRun?.status,
+      brief.aiRun?.completedAt,
+      JSON.stringify(brief),
+    ]);
+  });
+
+  it("claims Web Push deliveries outside the source item ledger", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ id: "claim-one" }] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const candidate: NotificationTriggerCandidate = {
+      id: "notification:situation:road-one",
+      kind: "traffic_disruption",
+      severity: "critical",
+      deliveryState: "candidate_only",
+      title: "Steinsprang, vegen er stengt",
+      body: "Gangåsvegen: Vegen er stengt.",
+      detail: "Kandidat for systemvarsel.",
+      score: 0.91,
+      confidence: {
+        level: "confirmed",
+        score: 0.91,
+        sourceCount: 2,
+        updatedAt: "2026-07-02T09:45:00.000Z",
+      },
+      generatedAt: "2026-07-02T09:45:00.000Z",
+      eventUpdatedAt: "2026-07-02T09:40:00.000Z",
+      situationId: "road-one",
+      articleIds: ["article-one"],
+      sourceIds: ["datex", "adressa"],
+      sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+      matchedKeywords: ["stengt"],
+      reasons: ["Har offentlig kildegrunnlag."],
+      links: [
+        {
+          kind: "situation",
+          label: "Åpne situasjon",
+          href: "/situasjoner/road-one",
+          situationId: "road-one",
+        },
+      ],
+    };
+
+    await expect(
+      repository.claimPushDelivery(candidate, {
+        id: "subscription-one",
+        userId: "viewer-one",
+      }),
+    ).resolves.toEqual({ id: "claim-one" });
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("INSERT INTO push_notification_deliveries");
+    expect(sql).toContain("ON CONFLICT (trigger_id, subscription_id) DO NOTHING");
+    expect(sql).not.toContain("source_items");
+    expect(query.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining([
+        candidate.id,
+        "subscription-one",
+        "viewer-one",
+        "traffic_disruption",
+        "critical",
+      ]),
+    );
+    const payload = JSON.parse(String((query.mock.calls[0]?.[1] as unknown[])[9])) as {
+      score?: number;
+      confidence?: { level?: string; score?: number };
+      sourceLabels?: string[];
+      matchedKeywords?: string[];
+      reasons?: string[];
+    };
+    expect(payload).toMatchObject({
+      score: 0.91,
+      confidence: { level: "confirmed", score: 0.91 },
+      sourceLabels: ["Vegvesen DATEX", "Adresseavisen"],
+      matchedKeywords: ["stengt"],
+      reasons: ["Har offentlig kildegrunnlag."],
+    });
+  });
+
+  it("loads active Web Push subscriptions without revoked users", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: "subscription-one",
+          userId: "viewer-one",
+          endpoint: "https://push.example.test/send/secret",
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+          minSeverity: "warning",
+          kinds: ["traffic_disruption"],
+        },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(repository.activePushSubscriptions()).resolves.toEqual([
+      {
+        id: "subscription-one",
+        userId: "viewer-one",
+        endpoint: "https://push.example.test/send/secret",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        minSeverity: "warning",
+        kinds: ["traffic_disruption"],
+      },
+    ]);
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("LEFT JOIN users u ON u.id=ps.user_id");
+    expect(sql).toContain("COALESCE(u.status, 'active') = 'active'");
+    expect(sql).not.toContain("source_items");
   });
 
   it("expires DATEX official events missing from a successful snapshot", async () => {
@@ -453,15 +613,35 @@ describe("WorkerRepository", () => {
 
     await repository.upsertDatexTravelTimes([corridor]);
 
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
     const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("INSERT INTO datex_travel_times");
     expect(sql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(sql).toContain("updated_at=now()");
     expect(sql).not.toContain("source_items");
     expect(sql).not.toContain("situation_source_items");
+    const [historySql, historyParameters] = query.mock.calls[1] as [string, unknown[]];
+    expect(historySql).toContain("INSERT INTO datex_travel_time_history");
+    expect(historySql).toContain("ON CONFLICT (corridor_id, observed_at) DO UPDATE");
+    expect(historySql).not.toContain("source_items");
+    expect(historySql).not.toContain("situation_source_items");
     expect(parameters).toEqual([
       corridor.id,
+      corridor.name,
+      corridor.state,
+      corridor.travelTimeSeconds,
+      corridor.freeFlowSeconds,
+      corridor.delaySeconds,
+      corridor.delayRatio,
+      corridor.trend,
+      corridor.measurementFrom,
+      corridor.measurementTo,
+      corridor.sourceUrl,
+      corridor,
+    ]);
+    expect(historyParameters).toEqual([
+      corridor.id,
+      corridor.measurementTo,
       corridor.name,
       corridor.state,
       corridor.travelTimeSeconds,
@@ -751,13 +931,18 @@ describe("WorkerRepository", () => {
 
     await repository.upsertTrafficCounterSnapshots([first, latest]);
 
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(4);
     const [sql, firstParams] = query.mock.calls[0] as [string, unknown[]];
-    const [, latestParams] = query.mock.calls[1] as [string, unknown[]];
+    const [historySql, firstHistoryParams] = query.mock.calls[1] as [string, unknown[]];
+    const [, latestParams] = query.mock.calls[2] as [string, unknown[]];
+    const [, latestHistoryParams] = query.mock.calls[3] as [string, unknown[]];
     expect(sql).toContain("INSERT INTO traffic_counter_snapshots");
     expect(sql).toContain("ON CONFLICT (point_id) DO UPDATE");
     expect(sql).toContain("updated_at=EXCLUDED.updated_at");
     expect(sql).toContain("ST_SetSRID(ST_GeomFromGeoJSON($4),4326)");
+    expect(historySql).toContain("INSERT INTO traffic_counter_snapshot_history");
+    expect(historySql).toContain("ON CONFLICT (point_id, observed_at) DO UPDATE");
+    expect(historySql).toContain("ST_SetSRID(ST_GeomFromGeoJSON($8),4326)");
     expect(firstParams).toEqual([
       "06970V72811",
       first,
@@ -768,6 +953,26 @@ describe("WorkerRepository", () => {
       "06970V72811",
       latest,
       latest.updatedAt,
+      JSON.stringify(latest.geometry),
+    ]);
+    expect(firstHistoryParams).toEqual([
+      "06970V72811",
+      first.updatedAt,
+      first,
+      first.volumeLastHour,
+      first.baselineVolumeLastHour ?? null,
+      first.anomalyRatio ?? null,
+      first.coveragePercent ?? null,
+      JSON.stringify(first.geometry),
+    ]);
+    expect(latestHistoryParams).toEqual([
+      "06970V72811",
+      latest.updatedAt,
+      latest,
+      latest.volumeLastHour,
+      latest.baselineVolumeLastHour ?? null,
+      latest.anomalyRatio ?? null,
+      latest.coveragePercent ?? null,
       JSON.stringify(latest.geometry),
     ]);
     const sqlCalls = query.mock.calls.map(([statement]) => String(statement));

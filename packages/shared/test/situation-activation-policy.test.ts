@@ -58,6 +58,12 @@ describe("situation activation policy", () => {
       canCreateSourceItems: false,
       canCreateSituations: false,
     });
+    expect(activationPolicyForSource("web_push")).toMatchObject({
+      role: "ignored",
+      canCreateSourceItems: false,
+      canCreateSituations: false,
+      allowedRelationships: ["context"],
+    });
   });
 
   it("keeps the context and telemetry source lists aligned with source policies", () => {

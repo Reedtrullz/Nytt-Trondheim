@@ -27,6 +27,7 @@ describe("source item API", () => {
   it("rejects source item listing without an authenticated owner", async () => {
     const { app } = await testApp(false);
     await request(app).get("/api/source-items").expect(401);
+    await request(app).get("/api/situations/skogbrann-bymarka/source-items").expect(401);
   });
 
   it("lists source items for the owner with validated filters", async () => {

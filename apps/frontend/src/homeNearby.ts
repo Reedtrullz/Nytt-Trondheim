@@ -1,4 +1,10 @@
-import type { Article } from "@nytt/shared";
+import {
+  sourceIdLabel,
+  sourceMixConfidenceSummary,
+  type Article,
+  type HomeSituationSummary,
+  type SourceConfidenceSummary,
+} from "@nytt/shared";
 import { distanceKmBetween, type HomeLocalFocusPoint } from "./homeLocalFocus.js";
 import { latLngFromLonLat } from "./mapCoordinates.js";
 
@@ -13,7 +19,7 @@ export type NearbyStoryKind =
 
 export interface NearbyStoryItem {
   id: string;
-  article: Article;
+  article?: Article;
   situationId?: string;
   position: [number, number];
   markerLabel: string;
@@ -25,9 +31,18 @@ export interface NearbyStoryItem {
   kind: NearbyStoryKind;
   relevanceLabel: string;
   relevanceDetail: string;
+  sourceConfidence: SourceConfidenceSummary;
+  verification?: NearbyStoryVerification;
   score: number;
   distanceKm?: number;
   withinLocalRadius?: boolean;
+}
+
+export interface NearbyStoryVerification {
+  label: string;
+  detail: string;
+  sourceSummary: string;
+  situationId?: string;
 }
 
 interface NearbyArticleGroup {
@@ -35,6 +50,12 @@ interface NearbyArticleGroup {
   primary: Article;
   articles: Article[];
   sourceLabels: string[];
+}
+
+interface NearbyStoryOptions {
+  limit?: number;
+  localFocus?: HomeLocalFocusPoint;
+  from?: string;
 }
 
 const categoryPriority = {
@@ -123,6 +144,45 @@ function locatedArticle(group: NearbyArticleGroup): Article | undefined {
   return located[0];
 }
 
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : undefined;
+}
+
+function lowerBoundMs(from: string | undefined): number | undefined {
+  return timestampMs(from);
+}
+
+function groupLatestTimestampMs(group: NearbyArticleGroup): number | undefined {
+  const timestamps = group.articles
+    .map((article) => timestampMs(article.publishedAt))
+    .filter((value): value is number => value !== undefined);
+  return timestamps.length > 0 ? Math.max(...timestamps) : undefined;
+}
+
+function groupWithinWindow(group: NearbyArticleGroup, from: string | undefined): boolean {
+  const lowerBound = lowerBoundMs(from);
+  if (lowerBound === undefined) return true;
+  const latest = groupLatestTimestampMs(group);
+  return latest !== undefined && latest >= lowerBound;
+}
+
+function situationTimestampMs(situation: HomeSituationSummary): number | undefined {
+  const updatedAt = timestampMs(situation.updatedAt);
+  const createdAt = timestampMs(situation.createdAt);
+  if (updatedAt === undefined) return createdAt;
+  if (createdAt === undefined) return updatedAt;
+  return Math.max(updatedAt, createdAt);
+}
+
+function situationWithinWindow(situation: HomeSituationSummary, from: string | undefined): boolean {
+  const lowerBound = lowerBoundMs(from);
+  if (lowerBound === undefined) return true;
+  const timestamp = situationTimestampMs(situation);
+  return timestamp !== undefined && timestamp >= lowerBound;
+}
+
 function sourceLabelFor(group: NearbyArticleGroup): string {
   if (group.sourceLabels.length < 2) return group.primary.sourceLabel;
   return `${group.sourceLabels.length} kilder`;
@@ -132,11 +192,135 @@ function situationIdFor(group: NearbyArticleGroup): string | undefined {
   return group.articles.find((article) => article.situationId)?.situationId;
 }
 
+function verificationForGroup(group: NearbyArticleGroup): NearbyStoryVerification | undefined {
+  const verification =
+    group.primary.publicVerification ??
+    group.articles.find((article) => article.publicVerification)?.publicVerification;
+  if (!verification) return undefined;
+  return {
+    label: verification.label,
+    detail: verification.detail,
+    sourceSummary: [
+      ...verification.officialSources.map((source) => sourceIdLabel(source)),
+      ...verification.reportingSources.map((source) => sourceIdLabel(source)),
+    ].join(" + "),
+    ...(verification.situationId ? { situationId: verification.situationId } : {}),
+  };
+}
+
+function sourceConfidenceForGroup(group: NearbyArticleGroup): SourceConfidenceSummary {
+  const sources = new Set<string>();
+  for (const article of group.articles) {
+    sources.add(article.source);
+    const verification = article.publicVerification;
+    if (!verification) continue;
+    for (const source of verification.officialSources) sources.add(source);
+    for (const source of verification.reportingSources) sources.add(source);
+  }
+  return sourceMixConfidenceSummary([...sources], { updatedAt: group.primary.publishedAt });
+}
+
+function sourceConfidenceForSituation(situation: HomeSituationSummary): SourceConfidenceSummary {
+  if (situation.verificationStatus === "Offentlig bekreftet") {
+    return {
+      level: "confirmed",
+      label: "Bekreftet",
+      score: 0.86,
+      rationale:
+        "Situasjonsrommet er offentlig bekreftet, men kartpunktet er en offentlig visning.",
+      updatedAt: situation.updatedAt,
+    };
+  }
+  return {
+    level: "likely",
+    label: "Sannsynlig",
+    score: 0.68,
+    rationale: "Situasjonsrommet er foreløpig og vises med kilde- og kartkontekst.",
+    updatedAt: situation.updatedAt,
+  };
+}
+
+function situationItem(
+  situation: HomeSituationSummary,
+  localFocus?: HomeLocalFocusPoint,
+): NearbyStoryItem | undefined {
+  const location = situation.primaryLocation;
+  const position = latLngFromLonLat(location?.lng, location?.lat);
+  if (!location || !position) return undefined;
+  const copy = relevanceCopy("situation");
+  const distanceKm = localFocus
+    ? distanceKmBetween(localFocus, {
+        lat: location.lat,
+        lng: location.lng,
+      })
+    : undefined;
+  return {
+    id: `situation:${situation.id}`,
+    situationId: situation.id,
+    position,
+    markerLabel: "",
+    title: situation.title,
+    locationLabel: location.label || situation.locationLabel,
+    sourceLabel:
+      situation.verificationStatus === "Offentlig bekreftet"
+        ? "Offentlig bekreftet"
+        : "Situasjonsrom",
+    category: "Hendelser",
+    publishedAt: situation.updatedAt,
+    kind: "situation",
+    score: 92,
+    sourceConfidence: sourceConfidenceForSituation(situation),
+    ...(situation.verificationStatus === "Offentlig bekreftet"
+      ? {
+          verification: {
+            label: "Bekreftet",
+            detail: "Situasjonsrommet er offentlig bekreftet.",
+            sourceSummary: "Offentlig bekreftet situasjon",
+            situationId: situation.id,
+          },
+        }
+      : {}),
+    ...(distanceKm !== undefined
+      ? {
+          distanceKm,
+          withinLocalRadius: distanceKm <= (localFocus?.radiusKm ?? 10),
+        }
+      : {}),
+    ...copy,
+  };
+}
+
+function rankNearbyItems(
+  items: NearbyStoryItem[],
+  { limit, localFocus }: { limit: number; localFocus?: HomeLocalFocusPoint },
+): NearbyStoryItem[] {
+  return items
+    .sort((left, right) => {
+      if (localFocus) {
+        const leftRank = left.distanceKm === undefined ? 2 : left.withinLocalRadius ? 0 : 1;
+        const rightRank = right.distanceKm === undefined ? 2 : right.withinLocalRadius ? 0 : 1;
+        const localResult =
+          leftRank - rightRank ||
+          (left.distanceKm ?? Number.POSITIVE_INFINITY) -
+            (right.distanceKm ?? Number.POSITIVE_INFINITY);
+        if (localResult !== 0) return localResult;
+      }
+      return (
+        right.score - left.score ||
+        right.publishedAt.localeCompare(left.publishedAt) ||
+        left.title.localeCompare(right.title, "nb")
+      );
+    })
+    .slice(0, limit)
+    .map((item, index) => ({ ...item, markerLabel: String(index + 1) }));
+}
+
 export function nearbyStoryItemsForGroups(
   groups: NearbyArticleGroup[],
-  { limit = 4, localFocus }: { limit?: number; localFocus?: HomeLocalFocusPoint } = {},
+  { limit = 4, localFocus, from }: NearbyStoryOptions = {},
 ): NearbyStoryItem[] {
-  return groups
+  const items = groups
+    .filter((group) => groupWithinWindow(group, from))
     .flatMap((group) => {
       const locationArticle = locatedArticle(group);
       const position = latLngFromLonLat(
@@ -147,6 +331,8 @@ export function nearbyStoryItemsForGroups(
       const representative = group.articles.find((article) => article.situationId) ?? group.primary;
       const kind = nearbyKind(representative);
       const copy = relevanceCopy(kind);
+      const sourceConfidence = sourceConfidenceForGroup(group);
+      const verification = verificationForGroup(group);
       const distanceKm = localFocus
         ? distanceKmBetween(localFocus, {
             lat: locationArticle.location.lat,
@@ -169,6 +355,8 @@ export function nearbyStoryItemsForGroups(
           score: Math.max(
             ...group.articles.map((article) => nearbyScore(article, nearbyKind(article))),
           ),
+          sourceConfidence,
+          ...(verification ? { verification } : {}),
           ...(distanceKm !== undefined
             ? {
                 distanceKm,
@@ -178,25 +366,31 @@ export function nearbyStoryItemsForGroups(
           ...copy,
         },
       ];
-    })
-    .sort((left, right) => {
-      if (localFocus) {
-        const leftRank = left.distanceKm === undefined ? 2 : left.withinLocalRadius ? 0 : 1;
-        const rightRank = right.distanceKm === undefined ? 2 : right.withinLocalRadius ? 0 : 1;
-        const localResult =
-          leftRank - rightRank ||
-          (left.distanceKm ?? Number.POSITIVE_INFINITY) -
-            (right.distanceKm ?? Number.POSITIVE_INFINITY);
-        if (localResult !== 0) return localResult;
-      }
-      return (
-        right.score - left.score ||
-        right.publishedAt.localeCompare(left.publishedAt) ||
-        left.title.localeCompare(right.title, "nb")
-      );
-    })
-    .slice(0, limit)
-    .map((item, index) => ({ ...item, markerLabel: String(index + 1) }));
+    });
+  return rankNearbyItems(items, { limit, localFocus });
+}
+
+export function nearbyStoryItemsForGroupsAndSituations(
+  groups: NearbyArticleGroup[],
+  situations: HomeSituationSummary[] = [],
+  { limit = 4, localFocus, from }: NearbyStoryOptions = {},
+): NearbyStoryItem[] {
+  const articleItems = nearbyStoryItemsForGroups(groups, {
+    limit: Number.MAX_SAFE_INTEGER,
+    localFocus,
+    from,
+  });
+  const coveredSituationIds = new Set(
+    articleItems.flatMap((item) => (item.situationId ? [item.situationId] : [])),
+  );
+  const situationItems = situations.flatMap((situation) => {
+    if (situation.status !== "preliminary" && situation.status !== "active") return [];
+    if (coveredSituationIds.has(situation.id)) return [];
+    if (!situationWithinWindow(situation, from)) return [];
+    const item = situationItem(situation, localFocus);
+    return item ? [item] : [];
+  });
+  return rankNearbyItems([...articleItems, ...situationItems], { limit, localFocus });
 }
 
 export function nearbyStoryItems(
@@ -218,5 +412,14 @@ export function nearbyStorySummary(items: NearbyStoryItem[], locatedCount: numbe
   if (locatedCount === 0) return "Ingen stedsfestede saker i denne visningen.";
   const shown = items.length;
   const suffix = locatedCount > shown ? ` av ${locatedCount}` : "";
-  return `${shown}${suffix} stedsfestede saker fra nyhetslisten.`;
+  return `${shown}${suffix} stedsfestede saker og situasjoner.`;
+}
+
+export function nearbyDistanceLabel(distanceKm: number | undefined): string | undefined {
+  if (distanceKm === undefined || !Number.isFinite(distanceKm)) return undefined;
+  if (distanceKm < 1) return "under 1 km unna";
+  if (distanceKm < 10) {
+    return `${distanceKm.toFixed(1).replace(".", ",")} km unna`;
+  }
+  return `${Math.round(distanceKm)} km unna`;
 }

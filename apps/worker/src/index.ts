@@ -7,13 +7,21 @@ import type {
   ArticleCoverageAnalysis,
   OfficialEvent,
   PublicTransportServiceAlert,
+  NotificationTriggerPage,
   SourceCollectorRun,
   SourceHealth,
   SourceItemInput,
+  SpatialInvestigationQueueItem,
+  Situation,
   TrafficCounterSnapshot,
+  TrafficPulseCorridor,
   WorkerCycleMetrics,
 } from "@nytt/shared";
-import { analyzeArticleCoverage } from "@nytt/shared";
+import {
+  analyzeArticleCoverage,
+  buildMorningBrief,
+  buildNotificationTriggerPage,
+} from "@nytt/shared";
 import {
   collectFrontpage,
   collectMunicipality,
@@ -70,6 +78,7 @@ import { geocodeArticles } from "./geocode.js";
 import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 import { WorkerRepository } from "./repository.js";
+import { deliverPushNotifications, type PushDeliveryMetrics } from "./push-notifications.js";
 import {
   collectTrafficInfoMessages,
   defaultTrafficInfoEndpoint,
@@ -225,6 +234,27 @@ export function isSoftDeepSeekOutputFailure(error: string | undefined): boolean 
   return softDeepSeekOutputFailureMarkers.some((marker) => normalized.includes(marker));
 }
 
+function softDeepSeekOutputFailureDetail(error: string | undefined): string {
+  const normalized = error?.toLocaleLowerCase("en") ?? "";
+  if (normalized.includes("truncated by token limit")) {
+    return "Siste AI-respons traff token-grensen og ble forkastet før lagring.";
+  }
+  if (
+    normalized.includes("returned empty json content") ||
+    normalized.includes("returned no json object")
+  ) {
+    return "Siste AI-respons manglet et komplett JSON-objekt.";
+  }
+  if (
+    normalized.includes("unexpected end of json input") ||
+    normalized.includes("unexpected token") ||
+    normalized.includes("syntaxerror")
+  ) {
+    return "Siste AI-respons var ikke gyldig JSON.";
+  }
+  return "Siste AI-respons passet ikke den forventede trygge strukturen.";
+}
+
 function deepSeekOkHealthDetail(result: DeepSeekAnalysisResult): string {
   return [
     `${result.clusters.length} validerte kandidatgrupper`,
@@ -239,6 +269,19 @@ export function sourceHealthFromDeepSeekAnalysis(
   analysis: { result: DeepSeekAnalysisResult; run: AiProcessingRun },
   nextPollAt: string,
 ): SourceHealth {
+  if (analysis.run.provider === "deterministic" && analysis.run.status === "disabled") {
+    return {
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "disabled",
+      lastCheckedAt: analysis.run.completedAt,
+      nextPollAt,
+      detail:
+        analysis.run.error ??
+        "DeepSeek-analyse er slått av; deterministisk gruppering og reservebrief brukes.",
+    };
+  }
+
   if (analysis.run.status === "ok") {
     return {
       source: "deepseek",
@@ -270,13 +313,200 @@ export function sourceHealthFromDeepSeekAnalysis(
     nextPollAt,
     detail: [
       softOutputFailure
-        ? "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering brukes fortsatt."
+        ? "AI-analyse ga ikke brukbar strukturert respons; deterministisk gruppering og reservebrief brukes fortsatt."
         : "AI-analyse feilet, men deterministisk gruppering brukes fortsatt.",
-      analysis.run.error,
+      softOutputFailure ? softDeepSeekOutputFailureDetail(analysis.run.error) : analysis.run.error,
     ]
       .filter(Boolean)
       .join(" "),
   };
+}
+
+export function sourceHealthFromPushDelivery(
+  metrics: PushDeliveryMetrics,
+  checkedAt: string,
+  nextPollAt: string,
+): SourceHealth {
+  if (!metrics.configured) {
+    return {
+      source: "web_push",
+      label: "Web Push",
+      state: "disabled",
+      lastCheckedAt: checkedAt,
+      nextPollAt,
+      detail: "WEB_PUSH_VAPID_PUBLIC_KEY og WEB_PUSH_VAPID_PRIVATE_KEY er ikke konfigurert.",
+    };
+  }
+
+  const failed = metrics.failed > 0;
+  return {
+    source: "web_push",
+    label: "Web Push",
+    state: failed ? "degraded" : "ok",
+    lastCheckedAt: checkedAt,
+    ...(failed ? { lastFailureAt: checkedAt } : {}),
+    nextPollAt,
+    detail: [
+      `${metrics.candidates} kandidater vurdert`,
+      `${metrics.subscriptions} aktive abonnementer`,
+      `${metrics.claimed} levering${metrics.claimed === 1 ? "" : "er"} reservert`,
+      `${metrics.sent} sendt`,
+      `${metrics.failed} feilet`,
+      `${metrics.skipped} hoppet over`,
+    ].join(", "),
+  };
+}
+
+export interface BuildWorkerNotificationTriggersInput {
+  situations: Situation[];
+  articles: Article[];
+  trafficPulse?: TrafficPulseCorridor[];
+  generatedAt: string;
+}
+
+const workerTrafficKeywordPattern =
+  /\b(?:bilk[øo]|forsink\w*|kork\w*|k[øo]\w*|omkj[øo]ring\w*|sakte|sperr\w*|steng\w*|trafikk\w*)\b/iu;
+
+function workerArticleTrafficText(article: Article): string {
+  return `${article.title} ${article.excerpt} ${article.places.join(" ")} ${article.location?.label ?? ""}`
+    .normalize("NFC")
+    .toLocaleLowerCase("nb");
+}
+
+function workerCorridorTokens(corridorName: string): string[] {
+  const normalized = corridorName.normalize("NFC").toLocaleLowerCase("nb");
+  const tokens = new Set<string>();
+  for (const match of normalized.matchAll(/\b(?:e|rv|fv)\s*\d+[a-z]?\b/giu)) {
+    tokens.add(match[0].replace(/\s+/gu, ""));
+  }
+  for (const match of normalized.matchAll(/[\p{L}\p{N}]+/gu)) {
+    const token = match[0];
+    if (token.length >= 4) tokens.add(token);
+  }
+  return [...tokens];
+}
+
+function workerArticleMatchesCorridor(article: Article, corridorName: string): boolean {
+  const text = workerArticleTrafficText(article);
+  if (!workerTrafficKeywordPattern.test(text)) return false;
+  const tokens = workerCorridorTokens(corridorName);
+  return tokens.length === 0 || tokens.some((token) => text.includes(token));
+}
+
+function workerDelayMinutes(delaySeconds: number | undefined): number | undefined {
+  if (delaySeconds === undefined) return undefined;
+  return Math.max(1, Math.round(delaySeconds / 60));
+}
+
+function workerSpatialDelayPriority(
+  corridor: TrafficPulseCorridor,
+): SpatialInvestigationQueueItem["priority"] {
+  if (corridor.state === "congested" || (corridor.delaySeconds ?? 0) >= 600) return "critical";
+  return "high";
+}
+
+function workerSpatialDelayConfidence(
+  corridor: TrafficPulseCorridor,
+  matchedArticleCount: number,
+): SpatialInvestigationQueueItem["sourceConfidence"] {
+  const delaySeconds = corridor.delaySeconds ?? 0;
+  const score = Math.min(
+    0.88,
+    0.66 + Math.min(delaySeconds, 900) / 9000 + matchedArticleCount * 0.08,
+  );
+  return {
+    level: score >= 0.82 ? "confirmed" : "likely",
+    label: score >= 0.82 ? "Bekreftet" : "Sannsynlig",
+    score: Number(score.toFixed(2)),
+    sourceCount: 1 + Math.min(1, matchedArticleCount),
+    updatedAt: corridor.measurementTo ?? corridor.updatedAt,
+    rationale:
+      matchedArticleCount > 0
+        ? "DATEX reisetid samsvarer med fersk trafikkdekning i samme korridor."
+        : "DATEX reisetid viser tydelig forsinkelse som bør vurderes av operatør.",
+  };
+}
+
+export function buildWorkerSpatialNotificationItems({
+  articles,
+  trafficPulse = [],
+}: {
+  articles: Article[];
+  trafficPulse?: TrafficPulseCorridor[];
+}): SpatialInvestigationQueueItem[] {
+  return trafficPulse
+    .flatMap((corridor): SpatialInvestigationQueueItem[] => {
+      if (corridor.state === "stale" || corridor.state === "free_flow") return [];
+      const delaySeconds = corridor.delaySeconds ?? 0;
+      const matchedArticles = articles
+        .filter((article) => article.category === "Transport")
+        .filter((article) => workerArticleMatchesCorridor(article, corridor.name))
+        .slice(0, 6);
+      if (delaySeconds < 300 && !(delaySeconds >= 180 && matchedArticles.length > 0)) return [];
+
+      const observedAt = corridor.measurementTo ?? corridor.updatedAt;
+      const delayMinutes = workerDelayMinutes(delaySeconds);
+      const articleIds = matchedArticles.map((article) => article.id);
+      const evidence = [
+        delayMinutes ? `${delayMinutes} min forsinkelse` : "Forsinkelse uten kjent varighet",
+        matchedArticles.length > 0
+          ? `${matchedArticles.length} mulig koblet trafikkartikkel`
+          : "Ingen tydelig koblet nyhetsforklaring i worker-vinduet",
+        corridor.delayRatio ? `${corridor.delayRatio.toFixed(1)}x fri flyt` : undefined,
+      ].filter((item): item is string => Boolean(item));
+
+      return [
+        {
+          id: `datex-delay:${corridor.id}`,
+          kind: "unexplained_delay",
+          priority: workerSpatialDelayPriority(corridor),
+          title: corridor.name,
+          summary: `${delayMinutes ?? "Ukjent"} min forsinkelse uten kjent årsak`,
+          reason:
+            matchedArticles.length > 0
+              ? "DATEX reisetid og trafikkdekning peker mot samme korridor."
+              : "DATEX reisetid viser betydelig forsinkelse uten koblet offentlig hendelse i worker-vinduet.",
+          updatedAt: observedAt,
+          evidence,
+          articleIds,
+          sourceItemIds: [],
+          rawRefs: [
+            {
+              type: "telemetry",
+              source: "datex_travel_time",
+              id: corridor.id,
+              label: "DATEX reisetid",
+              observedAt,
+            },
+          ],
+          sourceConfidence: workerSpatialDelayConfidence(corridor, matchedArticles.length),
+          targetUrl: corridor.sourceUrl,
+        },
+      ];
+    })
+    .sort((left, right) => {
+      const priorityRank = { critical: 3, high: 2, watch: 1 };
+      return (
+        priorityRank[right.priority] - priorityRank[left.priority] ||
+        right.updatedAt.localeCompare(left.updatedAt)
+      );
+    })
+    .slice(0, 8);
+}
+
+export function buildWorkerNotificationTriggerPage(
+  input: BuildWorkerNotificationTriggersInput,
+): NotificationTriggerPage {
+  return buildNotificationTriggerPage({
+    situations: input.situations,
+    articles: input.articles,
+    spatialInvestigationItems: buildWorkerSpatialNotificationItems({
+      articles: input.articles,
+      trafficPulse: input.trafficPulse,
+    }),
+    generatedAt: input.generatedAt,
+    filters: { severities: ["critical", "warning"], limit: 10 },
+  });
 }
 
 export function createCollectionGuard(
@@ -1294,8 +1524,32 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     ...resolvedDatexSituations,
   ];
   await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
+  const briefArticles = await repository.recentArticles(24);
+  const briefSituations = await repository.homeSituationSummaries(3);
+  const morningBrief = buildMorningBrief({
+    articles: briefArticles,
+    situations: briefSituations,
+    sourceHealth: await repository.sourceHealth(),
+    latestAiRun: analysis.run,
+    generatedAt: analysis.run.completedAt,
+  });
+  await repository.upsertMorningBrief(morningBrief);
+  const notificationSituations = await repository.trackedSituations();
+  const notificationTrafficPulse = await repository.datexTravelTimes(
+    new Date(analysis.run.completedAt),
+  );
+  const notificationTriggers = buildWorkerNotificationTriggerPage({
+    situations: notificationSituations,
+    articles: briefArticles,
+    trafficPulse: notificationTrafficPulse,
+    generatedAt: analysis.run.completedAt,
+  });
+  const pushMetrics = await deliverPushNotifications(notificationTriggers.items, repository);
+  await repository.setHealth(
+    sourceHealthFromPushDelivery(pushMetrics, analysis.run.completedAt, nextPollAt),
+  );
   console.log(
-    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); AI identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints`,
+    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); derived analysis identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief; push ${pushMetrics.configured ? "configured" : "disabled"} ${pushMetrics.sent} sent / ${pushMetrics.failed} failed / ${pushMetrics.skipped} skipped`,
   );
   const workerMetrics = buildWorkerCycleMetrics({
     cycleStartedAt,

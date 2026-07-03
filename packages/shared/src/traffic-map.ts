@@ -1,5 +1,11 @@
 import type { Geometry, LineString, Point } from "geojson";
-import type { TrafficPulseCorridor } from "./types.js";
+import type {
+  RawInspectorTelemetrySource,
+  SourceConfidenceLevel,
+  SourceConfidenceSummary,
+  SourceId,
+  TrafficPulseCorridor,
+} from "./types.js";
 
 export type TrafficEventCategory =
   | "roadworks"
@@ -219,4 +225,135 @@ export interface TravelPlanPayload {
   publicTransportSuggestions: TravelPlanTransitSuggestion[];
   sources: TrafficMapSourceStatus[];
   generatedAt: string;
+}
+
+export interface SpatialHeatmapTimeBucket {
+  bucketStart: string;
+  count: number;
+  sourceItemCount: number;
+  articleCount: number;
+  trafficEventCount: number;
+}
+
+export interface SpatialHeatmapCell {
+  id: string;
+  center: {
+    lat: number;
+    lng: number;
+  };
+  radiusMeters: number;
+  count: number;
+  sourceItemCount: number;
+  sourceItemIds?: string[];
+  articleCount: number;
+  trafficEventCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  activeDayCount: number;
+  timeBuckets?: SpatialHeatmapTimeBucket[];
+  sourceIds: Array<SourceId | TrafficMapEventSource>;
+  maxSeverity?: TrafficEventSeverity;
+  sourceConfidence?: SourceConfidenceSummary;
+}
+
+export interface SpatialRawDataRef {
+  type: "telemetry";
+  source: RawInspectorTelemetrySource;
+  id: string;
+  label: string;
+  observedAt?: string;
+}
+
+export interface UnexplainedDelayCandidate {
+  id: string;
+  corridorId: string;
+  corridorName: string;
+  geometry: LineString;
+  state: TrafficPulseCorridor["state"];
+  delaySeconds?: number;
+  delayRatio?: number;
+  updatedAt: string;
+  sourceUrl: string;
+  explanationStatus: "no_news_match" | "unlinked_news_match";
+  matchedArticleIds: string[];
+  affectedEventIds: string[];
+  confidence: "watch" | "warning" | "critical";
+  reason: string;
+  sourceConfidence?: SourceConfidenceSummary;
+  rawRefs?: SpatialRawDataRef[];
+}
+
+export interface SpatialInvestigationQueueItem {
+  id: string;
+  kind: "unexplained_delay" | "hotspot" | "traffic_counter_anomaly";
+  priority: "critical" | "high" | "watch";
+  title: string;
+  summary: string;
+  reason: string;
+  updatedAt: string;
+  evidence: string[];
+  articleIds: string[];
+  sourceItemIds: string[];
+  rawRefs?: SpatialRawDataRef[];
+  sourceConfidence?: SourceConfidenceSummary;
+  targetUrl?: string;
+}
+
+export interface TelemetryHistorySourceSummary {
+  observations: number;
+  trackedEntities: number;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  activeDayCount: number;
+  notableObservations: number;
+}
+
+export interface CommandCenterTelemetryHistorySummary {
+  datexTravelTime: TelemetryHistorySourceSummary;
+  trafficCounters: TelemetryHistorySourceSummary;
+}
+
+export interface TelemetryHistoryPattern {
+  id: string;
+  source: "datex_travel_time" | "trafikkdata";
+  title: string;
+  description: string;
+  observationCount: number;
+  notableObservationCount: number;
+  activeDayCount: number;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  maxDelaySeconds?: number;
+  maxAnomalyRatio?: number;
+  geometry?: Point;
+  sourceConfidence?: SourceConfidenceSummary;
+}
+
+export interface CommandCenterSpatialAnalyticsPayload {
+  generatedAt: string;
+  live: {
+    status: "live" | "stale" | "empty";
+    refreshIntervalSeconds: number;
+    nextRefreshAt: string;
+    staleAfterSeconds: number;
+    dataUpdatedAt?: string;
+    dataAgeSeconds?: number;
+    detail: string;
+  };
+  window: {
+    from?: string;
+    to?: string;
+  };
+  summary: {
+    heatmapCells: number;
+    observations: number;
+    unexplainedDelays: number;
+    criticalDelays: number;
+    bySourceConfidence: Record<SourceConfidenceLevel, number>;
+  };
+  telemetryHistory: CommandCenterTelemetryHistorySummary;
+  telemetryPatterns: TelemetryHistoryPattern[];
+  investigationQueue: SpatialInvestigationQueueItem[];
+  heatmapCells: SpatialHeatmapCell[];
+  unexplainedDelays: UnexplainedDelayCandidate[];
 }

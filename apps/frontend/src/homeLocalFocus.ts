@@ -11,8 +11,29 @@ export interface HomeLocalFocusMeta {
   withinRadius: boolean;
 }
 
-const defaultRadiusKm = 10;
+export interface HomeLocalFocusSummaryItem {
+  id: string;
+  title: string;
+  locationLabel?: string;
+  distanceKm: number;
+  withinRadius: boolean;
+}
+
+export interface HomeLocalFocusSummary {
+  locatedCount: number;
+  withinRadiusCount: number;
+  closestItems: HomeLocalFocusSummaryItem[];
+}
+
+export const homeLocalFocusDefaultRadiusKm = 10;
+export const homeLocalFocusRadiusOptions = [3, 4, 5, 6, 10, 20] as const;
+export const homeLocalFocusRadiusStorageKey = "nytt.home.localFocusRadius.v1";
 const earthRadiusKm = 6371;
+
+export function parseHomeLocalFocusRadius(value: string | number | null | undefined) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return homeLocalFocusRadiusOptions.find((option) => option === numeric);
+}
 
 function radians(value: number): number {
   return (value * Math.PI) / 180;
@@ -62,7 +83,7 @@ export function localFocusMetaForCard(
   const distanceKm = distanceKmBetween(focus, point);
   return {
     distanceKm,
-    withinRadius: distanceKm <= (focus.radiusKm ?? defaultRadiusKm),
+    withinRadius: distanceKm <= (focus.radiusKm ?? homeLocalFocusDefaultRadiusKm),
   };
 }
 
@@ -84,4 +105,37 @@ export function rankHomeStoryCardsByLocalFocus(
       );
     })
     .map((item) => item.card);
+}
+
+export function summarizeHomeStoryCardsByLocalFocus(
+  cards: HomeStoryCard[],
+  focus: HomeLocalFocusPoint,
+  limit = 3,
+): HomeLocalFocusSummary {
+  const located = cards.flatMap((card) => {
+    const point = cardPoint(card);
+    if (!point) return [];
+    const meta = localFocusMetaForCard(card, focus);
+    if (meta.distanceKm === undefined) return [];
+    return [
+      {
+        id: card.id,
+        title: card.title,
+        locationLabel: card.locationLabel,
+        distanceKm: meta.distanceKm,
+        withinRadius: meta.withinRadius,
+      },
+    ];
+  });
+  located.sort(
+    (left, right) =>
+      Number(right.withinRadius) - Number(left.withinRadius) ||
+      left.distanceKm - right.distanceKm ||
+      left.title.localeCompare(right.title, "nb"),
+  );
+  return {
+    locatedCount: located.length,
+    withinRadiusCount: located.filter((item) => item.withinRadius).length,
+    closestItems: located.slice(0, limit),
+  };
 }

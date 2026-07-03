@@ -52,12 +52,6 @@ const layerControls: Array<{
   { key: "publicTransportVehicles", label: "Kjøretøyposisjoner" },
   { key: "weatherRisk", label: "Vær, kamera og tellepunkter" },
   { key: "estimatedNews", label: "Estimerte nyhetssteder" },
-  {
-    key: "privateNotes",
-    label: "Private notater/tegninger",
-    disabled: true,
-    helper: "Ikke aktivt på /trafikk ennå",
-  },
   { key: "showAll", label: "Vis alle mindre eller utdaterte meldinger" },
 ];
 

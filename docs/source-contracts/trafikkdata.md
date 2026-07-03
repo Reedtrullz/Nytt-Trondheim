@@ -8,7 +8,7 @@
 
 ## Boundaries
 
-- May write `traffic_counter_snapshots` and source health only.
+- May write latest-state rows in `traffic_counter_snapshots`, append/update observation rows in `traffic_counter_snapshot_history`, and source health only.
 - Must not create `source_items`, `official_events`, `traffic_map_events` or situations.
 - Must not infer an incident from missing, delayed or anomalous counter values alone.
 
@@ -20,4 +20,4 @@
 
 ## Verification
 
-- Tests must cover poll throttling, stale/failure source health and non-promotion into incident evidence.
+- Tests must cover poll throttling, stale/failure source health, additive counter history writes and non-promotion into incident evidence.

@@ -60,6 +60,10 @@ describe("Trondheim relevance classification", () => {
     expect(categorize("Han kan bli RBK-trener")).toBe("Sport");
     expect(categorize("Kolstad håndball møter europeisk motstand")).toBe("Sport");
     expect(categorize("Rosenborg møter Brann på Lerkendal")).toBe("Sport");
+    expect(
+      categorize("Ranheim tapte 0-3 borte mot Åsane i 1. divisjon. Kampen var målløs til pause."),
+    ).toBe("Sport");
+    expect(categorize("Ny bortesmell. Ranheims bortekompleks fortsetter.")).toBe("Sport");
     expect(categorize("Brann i Bymarka")).toBe("Hendelser");
     expect(articleTopics("Freyr Alexandersson blir ny hovedtrener i Rosenborg")).toEqual([
       "rosenborg",
@@ -98,6 +102,11 @@ describe("Trondheim relevance classification", () => {
   it("requires planning context before classifying byutvikling", () => {
     expect(categorize("Planen bak treneransettelsen er umulig")).toBe("Nyheter");
     expect(categorize("Ny reguleringsplan for Sluppen")).toBe("Byutvikling");
+  });
+
+  it("does not classify local club names as sport without match context", () => {
+    expect(categorize("Ranheim vant pris for ny møteplass")).toBe("Nyheter");
+    expect(categorize("Rosenborg skole får nytt uteområde")).toBe("Nyheter");
   });
 
   it("does not classify Rosenborg district incidents or ordinary bruker text as sport or transport", () => {

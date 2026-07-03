@@ -1,4 +1,11 @@
-import type { Article } from "@nytt/shared";
+import {
+  sourceIdLabel,
+  sourceMixConfidenceSummary,
+  derivePublicVerificationForArticleGroup,
+  type Article,
+  type CityPulseStory,
+  type SourceConfidenceSummary,
+} from "@nytt/shared";
 import { articleCategoryLabels } from "./homeFilters.js";
 import type { HomeArticleGroup } from "./homeArticleGroups.js";
 
@@ -19,6 +26,15 @@ export interface HomeStoryCard {
   latestAt: string;
   isClustered: boolean;
   cardKind: "situasjon" | "hendelse" | "tema" | "oppdatering" | "sak";
+  sourceConfidence: SourceConfidenceSummary;
+  verification?: HomeStoryVerification;
+}
+
+export interface HomeStoryVerification {
+  label: string;
+  detail: string;
+  sourceSummary: string;
+  situationId?: string;
 }
 
 const genericPlaces = new Set(["norge", "trondheim", "trondelag", "trøndelag"]);
@@ -77,6 +93,75 @@ function cardKindFor(group: HomeArticleGroup): HomeStoryCard["cardKind"] {
   return "sak";
 }
 
+function derivedGroupVerification(group: HomeArticleGroup): HomeStoryVerification | undefined {
+  const verification = derivePublicVerificationForArticleGroup(group);
+  if (!verification) return undefined;
+  return {
+    label: verification.label,
+    detail: verification.detail,
+    sourceSummary: [
+      ...verification.officialSources.map((source) => sourceIdLabel(source)),
+      ...verification.reportingSources.map((source) => sourceIdLabel(source)),
+    ].join(" + "),
+    ...(verification.situationId ? { situationId: verification.situationId } : {}),
+  };
+}
+
+function storyVerification(group: HomeArticleGroup): HomeStoryVerification | undefined {
+  const verification =
+    group.primary.publicVerification ??
+    group.articles.find((article) => article.publicVerification)?.publicVerification;
+  if (!verification) return derivedGroupVerification(group);
+  return {
+    label: verification.label,
+    detail: verification.detail,
+    sourceSummary: [
+      ...verification.officialSources.map((source) => sourceIdLabel(source)),
+      ...verification.reportingSources.map((source) => sourceIdLabel(source)),
+    ].join(" + "),
+    situationId: verification.situationId,
+  };
+}
+
+function storySourceConfidence(group: HomeArticleGroup): SourceConfidenceSummary {
+  const sources = new Set<string>();
+  for (const article of group.articles) {
+    sources.add(article.source);
+    const verification = article.publicVerification;
+    if (!verification) continue;
+    for (const source of verification.officialSources) sources.add(source);
+    for (const source of verification.reportingSources) sources.add(source);
+  }
+  return sourceMixConfidenceSummary([...sources], { updatedAt: group.primary.publishedAt });
+}
+
+function articleWithStoryMetadata(article: Article, story: CityPulseStory): Article {
+  return {
+    ...article,
+    ...(story.coverageBundle && !article.coverageBundle
+      ? { coverageBundle: story.coverageBundle }
+      : {}),
+    ...(story.publicVerification && !article.publicVerification
+      ? { publicVerification: story.publicVerification }
+      : {}),
+  };
+}
+
+export function homeArticleGroupForStory(story: CityPulseStory): HomeArticleGroup {
+  const storyArticles = story.articles.length > 0 ? story.articles : [story.primary];
+  const articles = storyArticles.map((article) => articleWithStoryMetadata(article, story));
+  const fallbackPrimary = articleWithStoryMetadata(story.primary, story);
+  const primary =
+    articles.find((article) => article.id === story.primaryArticleId) ?? fallbackPrimary;
+  return {
+    id: story.id,
+    primary,
+    articles,
+    sourceLabels: story.sourceLabels,
+    bundle: story.coverageBundle ?? primary.coverageBundle,
+  };
+}
+
 export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
   const places = storyPlaces(group);
   return {
@@ -96,9 +181,28 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     latestAt: group.primary.publishedAt,
     isClustered: group.articles.length > 1,
     cardKind: cardKindFor(group),
+    sourceConfidence: storySourceConfidence(group),
+    verification: storyVerification(group),
+  };
+}
+
+export function homeStoryCardForStory(story: CityPulseStory): HomeStoryCard {
+  const card = homeStoryCardForGroup(homeArticleGroupForStory(story));
+  return {
+    ...card,
+    category: story.category,
+    channelLabel: articleCategoryLabels[story.category],
+    sourceCount: story.sourceCount,
+    updateCount: story.updateCount,
+    latestAt: story.latestAt,
+    isClustered: story.updateCount > 1,
   };
 }
 
 export function homeStoryCardsForGroups(groups: HomeArticleGroup[]): HomeStoryCard[] {
   return groups.map(homeStoryCardForGroup);
+}
+
+export function homeStoryCardsForStories(stories: CityPulseStory[]): HomeStoryCard[] {
+  return stories.map(homeStoryCardForStory);
 }

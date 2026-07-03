@@ -8,6 +8,8 @@ import type {
   WorkspaceNote,
   WorkspaceTask,
 } from "./types.js";
+import { buildCityPulseStories } from "./article-bundles.js";
+import { buildMorningBrief } from "./morning-brief.js";
 
 const now = "2026-05-26T12:26:00.000Z";
 
@@ -240,6 +242,7 @@ export const sampleSourceHealth: SourceHealth[] = [
 
 export const sampleBootstrap: BootstrapPayload = {
   articles: sampleArticles,
+  stories: buildCityPulseStories(sampleArticles),
   situations: [
     {
       id: sampleSituation.id,
@@ -254,6 +257,13 @@ export const sampleBootstrap: BootstrapPayload = {
   ],
   sourceHealth: sampleSourceHealth,
 };
+
+sampleBootstrap.morningBrief = buildMorningBrief({
+  articles: sampleBootstrap.articles,
+  situations: sampleBootstrap.situations,
+  sourceHealth: sampleBootstrap.sourceHealth,
+  generatedAt: now,
+});
 
 export const sampleWorkspace: SituationWorkspace = {
   situation: sampleSituation,

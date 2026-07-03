@@ -463,6 +463,15 @@ export const sourceActivationPolicies = [
     rule: "AI kan oppsummere etter at deterministiske regler kvalifiserer; AI aktiverer aldri.",
   },
   {
+    source: "web_push",
+    label: "Web Push-varsler",
+    role: "ignored",
+    canCreateSourceItems: false,
+    canCreateSituations: false,
+    allowedRelationships: ["context"],
+    rule: "Varslingskanal og leveringshelse; aldri offentlig kildebevis.",
+  },
+  {
     source: "coverage_bundles",
     label: "Dekningsbunter",
     role: "ignored",

@@ -1,4 +1,9 @@
-import type { ArticleCategory, ArticleTopic, GeographicScope } from "@nytt/shared";
+import {
+  isLocalSportsCoverageText,
+  type ArticleCategory,
+  type ArticleTopic,
+  type GeographicScope,
+} from "@nytt/shared";
 
 const trondheimTerms = [
   "kroppanbrua",
@@ -252,6 +257,7 @@ export function detectScope(text: string): GeographicScope | undefined {
 
 export function categorize(text: string): ArticleCategory {
   const normalized = text.toLocaleLowerCase("nb");
+  if (isLocalSportsCoverageText(normalized)) return "Sport";
   return (
     categoryRules.find(([, terms]) =>
       terms.some((term) =>

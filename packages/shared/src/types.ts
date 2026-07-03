@@ -38,7 +38,8 @@ export type SourceId =
   | "politiloggen"
   | "internal"
   | "private_annotations"
-  | "deepseek";
+  | "deepseek"
+  | "web_push";
 
 export type GeographicScope = "trondheim" | "trondelag";
 export type ArticleCategory =
@@ -127,6 +128,16 @@ export interface Article {
   situationId?: string;
   imageUrl?: string;
   coverageBundle?: ArticleCoverageBundle;
+  publicVerification?: ArticlePublicVerification;
+}
+
+export interface ArticlePublicVerification {
+  status: "verified";
+  label: string;
+  detail: string;
+  officialSources: SourceId[];
+  reportingSources: SourceId[];
+  situationId?: string;
 }
 
 export type ArticleCoverageBundleKind = "incident" | "topic" | "update";
@@ -344,6 +355,118 @@ export interface SourceItemFilters {
   q?: string;
   cursor?: string;
   limit?: number;
+}
+
+export interface RawInspectorSourceItemDetail {
+  item: SourceItem;
+  rawPayload: unknown;
+  normalizedPayload: unknown;
+  payloadBytes: {
+    raw: number;
+    normalized: number;
+  };
+  redacted: boolean;
+  truncated: boolean;
+}
+
+export type RawInspectorTelemetrySource = "datex_travel_time" | "trafikkdata";
+
+export interface RawInspectorTelemetryDetail {
+  record: {
+    id: string;
+    source: RawInspectorTelemetrySource;
+    title: string;
+    updatedAt: string;
+    observedAt?: string;
+    sourceUrl?: string;
+    summary?: string;
+    geometry?: Point;
+  };
+  payload: unknown;
+  payloadBytes: number;
+  redacted: boolean;
+  truncated: boolean;
+}
+
+export interface RawInspectorTelemetrySummary {
+  id: string;
+  source: RawInspectorTelemetrySource;
+  title: string;
+  updatedAt: string;
+  observedAt?: string;
+  sourceUrl?: string;
+  summary?: string;
+}
+
+export interface RawInspectorTelemetryPage {
+  items: RawInspectorTelemetrySummary[];
+  nextCursor?: string;
+}
+
+export interface RawInspectorTelemetryFilters {
+  source?: RawInspectorTelemetrySource;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export type AiAnalysisProfile = "standard" | "compact_recovery" | "brief_only_recovery";
+
+export interface AiAnalysisAttemptDiagnostics {
+  profile: AiAnalysisProfile;
+  status: "ok" | "failed";
+  maxTokens: number;
+  articleCount: number;
+  situationCount: number;
+  error?: string;
+}
+
+export interface AiProcessingRunDiagnostics {
+  profile: AiAnalysisProfile;
+  attempts: AiAnalysisAttemptDiagnostics[];
+}
+
+export interface RawInspectorAiRunSummary {
+  id: string;
+  provider: AiProcessingRun["provider"];
+  model: string;
+  status: AiProcessingRun["status"];
+  startedAt: string;
+  completedAt: string;
+  articleCount: number;
+  diagnostics?: AiProcessingRunDiagnostics;
+  error?: string;
+}
+
+export interface RawInspectorAiRunDetail extends RawInspectorAiRunSummary {
+  articleIds: string[];
+  result: unknown;
+  resultBytes: number;
+  redacted: boolean;
+  truncated: boolean;
+}
+
+export interface RawInspectorAiRunPage {
+  items: RawInspectorAiRunSummary[];
+  nextCursor?: string;
+}
+
+export interface RawInspectorAiRunFilters {
+  provider?: AiProcessingRun["provider"];
+  status?: AiProcessingRun["status"];
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface CommandCenterBriefingArticleSummary {
+  id: string;
+  title: string;
+  sourceLabel: string;
+  publishedAt: string;
+  category: Article["category"];
+  excerpt: string;
+  url?: string;
 }
 
 export interface SourceFilterQueryState {
@@ -712,6 +835,197 @@ export interface OperationsTimelineResponse {
   nextCursor?: string;
 }
 
+export type NotificationTriggerKind =
+  | "public_safety"
+  | "traffic_disruption"
+  | "weather_hazard"
+  | "service_disruption";
+export type NotificationTriggerSeverity = "critical" | "warning" | "watch";
+export type NotificationTriggerDeliveryState =
+  | "candidate_only"
+  | "not_configured"
+  | "no_subscribers"
+  | "ready"
+  | "sent"
+  | "failed"
+  | "suppressed";
+export type NotificationTriggerTraceState =
+  | "raw_evidence"
+  | "source_audit"
+  | "external_only"
+  | "missing";
+
+export const notificationTriggerTraceStateLabels = {
+  raw_evidence: "Rådata",
+  source_audit: "Kildeaudit",
+  external_only: "Ekstern",
+  missing: "Mangler spor",
+} as const satisfies Record<NotificationTriggerTraceState, string>;
+
+export interface NotificationTriggerPublicSurface {
+  state: "visible" | "hidden";
+  label: string;
+  detail: string;
+  reason: string;
+  attention?: PublicNotificationSignalHighlight["attention"];
+  recencyLabel?: string;
+  link?: OperationsTimelineEventLink;
+}
+
+export interface NotificationTriggerCandidate {
+  id: string;
+  kind: NotificationTriggerKind;
+  severity: NotificationTriggerSeverity;
+  deliveryState: NotificationTriggerDeliveryState;
+  title: string;
+  body: string;
+  detail: string;
+  score: number;
+  confidence: SourceConfidenceSummary;
+  generatedAt: string;
+  eventUpdatedAt: string;
+  situationId?: string;
+  articleIds: string[];
+  sourceIds: SourceId[];
+  sourceLabels: string[];
+  matchedKeywords: string[];
+  reasons: string[];
+  links: OperationsTimelineEventLink[];
+  publicSurface: NotificationTriggerPublicSurface;
+}
+
+export interface NotificationTriggerSummary {
+  total: number;
+  critical: number;
+  warning: number;
+  watch: number;
+  officialBacked: number;
+  highConfidence: number;
+}
+
+export interface PublicNotificationSignalHighlight {
+  id: string;
+  kind: NotificationTriggerKind;
+  severity: NotificationTriggerSeverity;
+  title: string;
+  body: string;
+  attention: {
+    label: string;
+    detail: string;
+    tone: "urgent" | "watch" | "observe";
+  };
+  confidence: SourceConfidenceSummary;
+  eventUpdatedAt: string;
+  recencyLabel: string;
+  sourceLabels: string[];
+  matchedKeywords: string[];
+  reasons: string[];
+  link?: OperationsTimelineEventLink;
+}
+
+export interface NotificationPushStatus {
+  configured: boolean;
+  label: string;
+  detail: string;
+  health?: SourceHealth;
+  activeSubscriptions: number;
+  matchingCandidates: number;
+  readyCandidates: number;
+  blockedCandidates: number;
+  deliveryCounts: {
+    total: number;
+    sent: number;
+    failed: number;
+    claimed: number;
+    skipped: number;
+  };
+}
+
+export interface NotificationTriggerQuery {
+  kinds?: NotificationTriggerKind[];
+  severities?: NotificationTriggerSeverity[];
+  deliveryStates?: NotificationTriggerDeliveryState[];
+  traceStates?: NotificationTriggerTraceState[];
+  q?: string;
+  limit?: number;
+}
+
+export interface NotificationTriggerPage {
+  generatedAt: string;
+  filters: NotificationTriggerQuery;
+  items: NotificationTriggerCandidate[];
+  summary: NotificationTriggerSummary;
+  pushStatus?: NotificationPushStatus;
+}
+
+export interface PushSubscriptionInput {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  userAgent?: string;
+  minSeverity?: NotificationTriggerSeverity;
+  kinds?: NotificationTriggerKind[];
+}
+
+export interface PushSubscriptionSummary {
+  id: string;
+  endpointHash: string;
+  enabled: boolean;
+  minSeverity: NotificationTriggerSeverity;
+  kinds: NotificationTriggerKind[];
+  userAgent?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  failureCount: number;
+}
+
+export interface PushNotificationSettings {
+  configured: boolean;
+  publicKey?: string;
+  subscriptions: PushSubscriptionSummary[];
+}
+
+export type PushDeliveryStatus = "claimed" | "sent" | "failed" | "skipped";
+
+export interface PushDeliveryListItem {
+  id: string;
+  triggerId: string;
+  subscriptionId: string;
+  userId: string;
+  status: PushDeliveryStatus;
+  kind: NotificationTriggerKind;
+  severity: NotificationTriggerSeverity;
+  title: string;
+  body: string;
+  targetUrl?: string;
+  errorMessage?: string;
+  score?: number;
+  confidence?: SourceConfidenceSummary;
+  sourceLabels?: string[];
+  matchedKeywords?: string[];
+  reasons?: string[];
+  createdAt: string;
+  sentAt?: string;
+}
+
+export interface PushDeliveryPage {
+  generatedAt: string;
+  items: PushDeliveryListItem[];
+  summary: {
+    total: number;
+    sent: number;
+    failed: number;
+    claimed: number;
+    skipped: number;
+  };
+}
+
 export interface SituationSourceItemLink {
   situationId: string;
   sourceItemId: string;
@@ -727,6 +1041,7 @@ export interface Situation {
   title: string;
   summary: string;
   status: SituationLifecycle;
+  publicVisibility?: "public" | "command_center";
   verificationStatus: "Foreløpig fra rapportering" | "Offentlig bekreftet";
   importance: "high" | "normal";
   updatedAt: string;
@@ -763,7 +1078,14 @@ export type HomeSituationSummary = Pick<
   | "updatedAt"
   | "createdAt"
   | "locationLabel"
->;
+> & {
+  sourceConfidence?: SourceConfidenceSummary;
+  primaryLocation?: {
+    lat: number;
+    lng: number;
+    label: string;
+  };
+};
 
 export interface MapViewport {
   north: number;
@@ -806,6 +1128,7 @@ export interface MapFirstSituation {
   title: string;
   summary: string;
   status: SituationLifecycle;
+  publicVisibility: NonNullable<Situation["publicVisibility"]>;
   importance: Situation["importance"];
   updatedAt: string;
   locationLabel: string;
@@ -865,6 +1188,22 @@ export interface AiProcessingRun {
   articleIds: string[];
   result: unknown;
   error?: string;
+}
+
+export interface MorningBrief {
+  generatedAt: string;
+  title: string;
+  mode: "ai_assisted" | "deterministic";
+  sourceLine: string;
+  paragraphs: [string, string, string];
+  highlights: Array<{
+    label: string;
+    value: string;
+    detail: string;
+  }>;
+  articleIds: string[];
+  situationIds: string[];
+  aiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt">;
 }
 
 export interface WorkspaceTask {
@@ -935,13 +1274,35 @@ export interface SituationWorkspace {
 
 export interface BootstrapPayload {
   articles: Article[];
-  articleNextCursor?: string;
+  stories?: CityPulseStory[];
+  storyNextCursor?: string;
   situations: HomeSituationSummary[];
   sourceHealth: SourceHealth[];
+  morningBrief?: MorningBrief;
 }
 
 export interface ArticlePage {
   items: Article[];
+  nextCursor?: string;
+}
+
+export interface CityPulseStory {
+  id: string;
+  primaryArticleId: string;
+  articleIds: string[];
+  primary: Article;
+  articles: Article[];
+  sourceLabels: string[];
+  sourceCount: number;
+  updateCount: number;
+  latestAt: string;
+  category: ArticleCategory;
+  coverageBundle?: ArticleCoverageBundle;
+  publicVerification?: ArticlePublicVerification;
+}
+
+export interface CityPulseStoryPage {
+  items: CityPulseStory[];
   nextCursor?: string;
 }
 
@@ -973,10 +1334,47 @@ export interface RuntimeFreshness {
   durationSeconds?: number;
 }
 
+export type CommandCenterOperationsNoteKind =
+  | "situation_progress"
+  | "bundle_candidate"
+  | "category_relevance"
+  | "source_quality"
+  | "other";
+
+export interface CommandCenterOperationsNote {
+  kind: CommandCenterOperationsNoteKind;
+  subjectId: string;
+  summary: string;
+  citedClaims: Array<{
+    claim: string;
+    articleId: string;
+    supportingSnippet: string;
+  }>;
+}
+
+export interface CommandCenterBriefingPayload {
+  generatedAt: string;
+  morningBrief?: MorningBrief;
+  latestAiRun?: RawInspectorAiRunSummary;
+  operationsNotes: CommandCenterOperationsNote[];
+  supportingArticles: CommandCenterBriefingArticleSummary[];
+  supportingSituations: HomeSituationSummary[];
+  sourceHealthSummary: {
+    total: number;
+    ok: number;
+    attention: number;
+    degraded: number;
+    disabled: number;
+    staleAlerts: number;
+  };
+  attentionSources: SourceHealth[];
+}
+
 export interface OperationsStatus {
   sources: SourceHealth[];
   articleCount: number;
   situationCounts: Record<SituationLifecycle, number>;
+  situationPublicationCounts: Record<NonNullable<Situation["publicVisibility"]>, number>;
   latestAiRun?: Pick<AiProcessingRun, "provider" | "model" | "status" | "completedAt" | "error">;
   latestCollectionAt?: string;
   trafficPulse?: TrafficPulseCorridor[];

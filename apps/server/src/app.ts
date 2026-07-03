@@ -11,21 +11,34 @@ import {
   accessRequestInputSchema,
   accessRequestDecisionSchema,
   accessRequestQuerySchema,
+  applyNotificationDeliveryStates,
   articleQuerySchema,
+  commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
   emailLoginRequestSchema,
+  filterNotificationTriggerPageByDeliveryStates,
+  isPublicSituation,
   lifecycleInputSchema,
   noteInputSchema,
+  notificationTriggerQuerySchema,
   operationsTimelineQuerySchema,
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
   publicTransportMapQuerySchema,
+  pushSubscriptionInputSchema,
+  rawInspectorAiRunQuerySchema,
+  rawInspectorTelemetryQuerySchema,
+  rawInspectorTelemetrySourceSchema,
+  situationPublicationInputSchema,
   sourceItemLinkInputSchema,
   sourceItemQuerySchema,
   sourceAuditFilterQuerySchema,
   provenanceLabels,
   situationQuerySchema,
+  sourceConfidenceLevelFromScore,
   sourceConfidenceLabels,
+  sourceMixConfidenceSummary,
+  situationPublicVisibility,
   taskInputSchema,
   trafficMapQuerySchema,
   travelPlanQuerySchema,
@@ -42,16 +55,18 @@ import {
   type SituationExplanation,
   type SituationMapWorkspace,
   type SituationWorkspace,
-  type SourceConfidenceLevel,
+  type CommandCenterSpatialAnalyticsPayload,
   type SourceConfidenceSummary,
   type SourceHealth,
   type SourceId,
   type SourceItem,
+  type SpatialHeatmapCell,
   type RuntimeFreshness,
   type TimelineEntry,
   type TrafficEventState,
   type TrafficMapEvent,
   type TrafficMapSourceStatus,
+  type UnexplainedDelayCandidate,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
 import {
@@ -71,6 +86,10 @@ import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
+import {
+  buildSpatialInvestigationQueue,
+  buildUnexplainedDelayCandidates,
+} from "./traffic/spatial-analytics.js";
 import {
   buildTravelPlanPayload,
   resolveTravelPlanPlacesAndRoute,
@@ -99,6 +118,8 @@ const defaultWeatherBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.
 const workerStaleAfterSeconds = 2 * 60 * 60;
 const backupStaleAfterSeconds = 36 * 60 * 60;
 const restoreCheckStaleAfterSeconds = 8 * 24 * 60 * 60;
+const spatialAnalyticsRefreshIntervalSeconds = 60;
+const spatialAnalyticsStaleAfterSeconds = 15 * 60;
 const telemetrySourceIds = new Set<SourceId>([
   "datex_travel_time",
   "datex_weather",
@@ -460,14 +481,6 @@ function filterTrafficMapEvents(
   });
 }
 
-function confidenceLevelFromScore(score?: number): SourceConfidenceLevel {
-  if (score === undefined || !Number.isFinite(score)) return "uncertain";
-  if (score >= 0.85) return "confirmed";
-  if (score >= 0.65) return "likely";
-  if (score >= 0.35) return "uncertain";
-  return "speculative";
-}
-
 function sourceConfidenceForSituation(
   situation: Situation,
   sourceItems: SourceItem[],
@@ -485,7 +498,7 @@ function sourceConfidenceForSituation(
     sourceItems.some(
       (item) => item.reliabilityTier === "official" && item.relationship === "supports",
     );
-  const level = hasOfficialSignal ? "confirmed" : confidenceLevelFromScore(score);
+  const level = hasOfficialSignal ? "confirmed" : sourceConfidenceLevelFromScore(score);
   const sourceIds = new Set<SourceId>([
     ...situation.evidence.map((evidence) => evidence.source),
     ...situation.timeline.flatMap((entry) => (entry.source ? [entry.source] : [])),
@@ -500,6 +513,94 @@ function sourceConfidenceForSituation(
     rationale: hasOfficialSignal
       ? "Offentlig eller offisielt kildegrunnlag er koblet til situasjonen."
       : "Bygget fra tilgjengelige kilde- og tidslinjesignaler.",
+  };
+}
+
+function sourceConfidenceForHeatmapCell(cell: SpatialHeatmapCell): SourceConfidenceSummary {
+  const sources = new Set(cell.sourceIds);
+  if (cell.articleCount > 0) sources.add("news_article");
+  if (cell.trafficEventCount > 0) sources.add("vegvesen_traffic_info");
+  return sourceMixConfidenceSummary([...sources], { updatedAt: cell.lastSeenAt });
+}
+
+function sourceConfidenceForDelayCandidate(
+  candidate: UnexplainedDelayCandidate,
+): SourceConfidenceSummary {
+  const sources = new Set<string>(["datex_travel_time"]);
+  if (candidate.matchedArticleIds.length > 0) sources.add("news_article");
+  if (candidate.affectedEventIds.length > 0) sources.add("vegvesen_traffic_info");
+  return sourceMixConfidenceSummary([...sources], { updatedAt: candidate.updatedAt });
+}
+
+function sourceConfidenceCounts(
+  items: Array<{ sourceConfidence?: SourceConfidenceSummary }>,
+): Record<SourceConfidenceSummary["level"], number> {
+  return items.reduce<Record<SourceConfidenceSummary["level"], number>>(
+    (counts, item) => {
+      counts[item.sourceConfidence?.level ?? "uncertain"] += 1;
+      return counts;
+    },
+    { confirmed: 0, likely: 0, uncertain: 0, speculative: 0 },
+  );
+}
+
+function latestSpatialDataUpdatedAt(input: {
+  heatmapCells: SpatialHeatmapCell[];
+  unexplainedDelays: UnexplainedDelayCandidate[];
+  telemetryHistory: CommandCenterSpatialAnalyticsPayload["telemetryHistory"];
+  telemetryPatterns: CommandCenterSpatialAnalyticsPayload["telemetryPatterns"];
+}): string | undefined {
+  const timestamps = [
+    ...input.heatmapCells.map((cell) => cell.lastSeenAt),
+    ...input.unexplainedDelays.map((candidate) => candidate.updatedAt),
+    input.telemetryHistory.datexTravelTime.lastObservedAt,
+    input.telemetryHistory.trafficCounters.lastObservedAt,
+    ...input.telemetryPatterns.map((pattern) => pattern.lastObservedAt),
+  ];
+  const latest = Math.max(
+    ...timestamps
+      .map((value) => (value ? Date.parse(value) : Number.NaN))
+      .filter((value) => Number.isFinite(value)),
+  );
+  return Number.isFinite(latest) ? new Date(latest).toISOString() : undefined;
+}
+
+function spatialLiveStatus(input: {
+  generatedAt: Date;
+  dataUpdatedAt?: string;
+}): CommandCenterSpatialAnalyticsPayload["live"] {
+  const nextRefreshAt = new Date(
+    input.generatedAt.getTime() + spatialAnalyticsRefreshIntervalSeconds * 1000,
+  ).toISOString();
+  const parsedDataUpdatedAt = input.dataUpdatedAt ? Date.parse(input.dataUpdatedAt) : Number.NaN;
+  if (!Number.isFinite(parsedDataUpdatedAt)) {
+    return {
+      status: "empty",
+      refreshIntervalSeconds: spatialAnalyticsRefreshIntervalSeconds,
+      nextRefreshAt,
+      staleAfterSeconds: spatialAnalyticsStaleAfterSeconds,
+      detail: "Ingen tidsstemplet romlig analyse er tilgjengelig i dette vinduet.",
+    };
+  }
+
+  const dataAgeSeconds = Math.max(
+    0,
+    Math.round((input.generatedAt.getTime() - parsedDataUpdatedAt) / 1000),
+  );
+  const status = dataAgeSeconds > spatialAnalyticsStaleAfterSeconds ? "stale" : "live";
+  return {
+    status,
+    refreshIntervalSeconds: spatialAnalyticsRefreshIntervalSeconds,
+    nextRefreshAt,
+    staleAfterSeconds: spatialAnalyticsStaleAfterSeconds,
+    dataUpdatedAt: new Date(parsedDataUpdatedAt).toISOString(),
+    dataAgeSeconds,
+    detail:
+      status === "live"
+        ? `Siste romlige signal ${formatRuntimeAge(dataAgeSeconds)}.`
+        : `Siste romlige signal ${formatRuntimeAge(
+            dataAgeSeconds,
+          )}; undersøk worker og kildehelse.`,
   };
 }
 
@@ -581,7 +682,8 @@ function provenanceSummaryForSituation(
       bucket.scores.length > 0
         ? bucket.scores.reduce((total, value) => total + value, 0) / bucket.scores.length
         : undefined;
-    const level = provenance === "official" ? "confirmed" : confidenceLevelFromScore(averageScore);
+    const level =
+      provenance === "official" ? "confirmed" : sourceConfidenceLevelFromScore(averageScore);
     return {
       provenance,
       label: provenanceLabels[provenance],
@@ -604,6 +706,18 @@ function inferredTimelineProvenance(entry: TimelineEntry): Provenance {
   return entry.official ? "official" : "reporting_estimate";
 }
 
+function isPrivateTimelineEntry(entry: TimelineEntry): boolean {
+  return (
+    entry.kind === "private_annotation" ||
+    entry.privateAnnotationId !== undefined ||
+    inferredTimelineProvenance(entry) === "private_annotation"
+  );
+}
+
+function viewerSafeTimeline(timeline: TimelineEntry[]): TimelineEntry[] {
+  return timeline.filter((entry) => !isPrivateTimelineEntry(entry));
+}
+
 function timelineEntryMatchesWorkspaceQuery(
   entry: TimelineEntry,
   query: ReturnType<typeof workspaceMapQuerySchema.parse>,
@@ -621,6 +735,9 @@ function timelineEntryMatchesWorkspaceQuery(
   }
   if (query.includePrivateAnnotations === false && provenance === "private_annotation")
     return false;
+  const timestamp = Date.parse(entry.timestamp);
+  if (query.from && Number.isFinite(timestamp) && timestamp < Date.parse(query.from)) return false;
+  if (query.to && Number.isFinite(timestamp) && timestamp > Date.parse(query.to)) return false;
   const search = query.q?.toLocaleLowerCase("nb");
   if (
     search &&
@@ -684,12 +801,17 @@ function viewerSafeWorkspace(workspace: SituationWorkspace): SituationWorkspace 
       features: workspace.situation.features.filter(
         (feature) => !isPrivateAnnotationFeature(feature),
       ),
+      timeline: viewerSafeTimeline(workspace.situation.timeline),
       saved: false,
     },
     tasks: [],
     notes: [],
     attachments: [],
   };
+}
+
+function canReadSituation(req: express.Request, situation: Situation): boolean {
+  return req.user?.role === "owner" || isPublicSituation(situation);
 }
 
 function sourceIdsForSituation(situation: Situation, sourceItems: SourceItem[]): Set<SourceId> {
@@ -713,6 +835,12 @@ function situationMatchesWorkspaceQuery(
 ): boolean {
   if (query.situationIds && !query.situationIds.includes(situation.id)) return false;
   if (query.statuses && !query.statuses.includes(situation.status)) return false;
+  if (
+    query.publicVisibility &&
+    !query.publicVisibility.includes(situationPublicVisibility(situation))
+  ) {
+    return false;
+  }
   if (query.types && !query.types.includes(situation.type)) return false;
   if (query.sources) {
     const sources = sourceIdsForSituation(situation, sourceItems);
@@ -737,6 +865,18 @@ function situationMatchesWorkspaceQuery(
   }
   if (query.confidenceLevels && !query.confidenceLevels.includes(sourceConfidence.level))
     return false;
+  if (query.from || query.to) {
+    const fromTime = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
+    const toTime = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
+    const relevantTimes = [
+      Date.parse(situation.updatedAt),
+      Date.parse(situation.createdAt),
+      ...situation.timeline
+        .filter((entry) => timelineEntryMatchesWorkspaceQuery(entry, query))
+        .map((entry) => Date.parse(entry.timestamp)),
+    ].filter(Number.isFinite);
+    if (!relevantTimes.some((time) => time >= fromTime && time <= toTime)) return false;
+  }
   const search = query.q?.toLocaleLowerCase("nb");
   if (
     search &&
@@ -779,6 +919,7 @@ function mapFirstSituationFromWorkspace(
     title: situation.title,
     summary: situation.summary,
     status: situation.status,
+    publicVisibility: situationPublicVisibility(situation),
     importance: situation.importance,
     updatedAt: situation.updatedAt,
     locationLabel: situation.locationLabel,
@@ -927,6 +1068,45 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.use("/api/source-items", requireOwner);
   app.use("/api/users", requireOwner);
 
+  app.get("/api/notifications/settings", async (req, res, next) => {
+    try {
+      res.json(
+        await store.getPushSettings(
+          req.user?.id ?? currentLogin(req),
+          config.webPushConfigured ? config.webPushPublicKey : undefined,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/notifications/subscriptions", async (req, res, next) => {
+    try {
+      if (!config.webPushConfigured || !config.webPushPublicKey) {
+        res.status(503).json({ error: "Web Push er ikke konfigurert ennå." });
+        return;
+      }
+      const input = pushSubscriptionInputSchema.parse(req.body);
+      const subscription = await store.upsertPushSubscription(
+        req.user?.id ?? currentLogin(req),
+        input,
+      );
+      res.status(201).json(subscription);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/notifications/subscriptions/:id", async (req, res, next) => {
+    try {
+      await store.deletePushSubscription(req.user?.id ?? currentLogin(req), String(req.params.id));
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/access-requests", requireOwner, async (req, res, next) => {
     try {
       const query = accessRequestQuerySchema.parse(req.query);
@@ -1000,6 +1180,15 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = articleQuerySchema.parse(req.query);
       res.json(await store.listArticles(query, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/city-pulse/stories", async (req, res, next) => {
+    try {
+      const query = articleQuerySchema.parse(req.query);
+      res.json(await store.listCityPulseStories(query, currentLogin(req)));
     } catch (error) {
       next(error);
     }
@@ -1256,7 +1445,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/situations", async (req, res, next) => {
     try {
       const query = situationQuerySchema.parse(req.query);
-      res.json(await store.listSituations(query, currentLogin(req)));
+      res.json(
+        await store.listSituations(
+          { ...query, publicOnly: req.user?.role !== "owner" },
+          currentLogin(req),
+        ),
+      );
     } catch (error) {
       next(error);
     }
@@ -1275,7 +1469,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
             };
       const login = currentLogin(req);
       const includeDismissed = effectiveQuery.statuses?.includes("dismissed") ?? false;
-      const situations = await store.listSituations({ includeDismissed, limit: 100 }, login);
+      const situations = await store.listSituations(
+        { includeDismissed, limit: 100, publicOnly: req.user?.role !== "owner" },
+        login,
+      );
       const workspaceRows = await Promise.all(
         situations.items.map(async (situation) => {
           const [workspace, sourceItems] = await Promise.all([
@@ -1355,14 +1552,21 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.get("/api/situations/:id", async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      const situationId = String(req.params.id);
+      const workspace = await store.getWorkspace(situationId, currentLogin(req));
       if (!workspace) {
         res.status(404).json({ error: "Situasjonen finnes ikke." });
         return;
       }
-      const sourceItems = await store.listSituationSourceItems(req.params.id, currentLogin(req));
-      const visibleWorkspace =
-        req.user?.role === "owner" ? workspace : viewerSafeWorkspace(workspace);
+      if (!canReadSituation(req, workspace.situation)) {
+        res.status(404).json({ error: "Situasjonen finnes ikke." });
+        return;
+      }
+      const isOwner = req.user?.role === "owner";
+      const sourceItems = isOwner
+        ? await store.listSituationSourceItems(situationId, currentLogin(req))
+        : [];
+      const visibleWorkspace = isOwner ? workspace : viewerSafeWorkspace(workspace);
       res.json({
         ...visibleWorkspace,
         explanation: buildSituationExplanation(visibleWorkspace.situation, sourceItems),
@@ -1376,7 +1580,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
-      res.json(workspace.situation.timeline);
+      if (!canReadSituation(req, workspace.situation)) {
+        return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      }
+      const visibleWorkspace =
+        req.user?.role === "owner" ? workspace : viewerSafeWorkspace(workspace);
+      res.json(visibleWorkspace.situation.timeline);
     } catch (error) {
       next(error);
     }
@@ -1386,17 +1595,21 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      if (!canReadSituation(req, workspace.situation)) {
+        return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      }
       res.json(workspace.relatedArticles);
     } catch (error) {
       next(error);
     }
   });
 
-  app.get("/api/situations/:id/source-items", async (req, res, next) => {
+  app.get("/api/situations/:id/source-items", requireOwner, async (req, res, next) => {
     try {
-      const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
+      const situationId = String(req.params.id);
+      const workspace = await store.getWorkspace(situationId, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
-      res.json(await store.listSituationSourceItems(req.params.id, currentLogin(req)));
+      res.json(await store.listSituationSourceItems(situationId, currentLogin(req)));
     } catch (error) {
       next(error);
     }
@@ -1479,6 +1692,20 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         String(req.params.id),
         status,
         dismissalReason,
+      );
+      if (!situation) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      res.json(situation);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/situations/:id/publication", requireOwner, async (req, res, next) => {
+    try {
+      const { publicVisibility } = situationPublicationInputSchema.parse(req.body);
+      const situation = await store.setSituationPublicVisibility(
+        String(req.params.id),
+        publicVisibility,
       );
       if (!situation) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
       res.json(situation);
@@ -1851,6 +2078,237 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const filters = coverageBundleQuerySchema.parse(req.query);
       res.json(await store.listCoverageBundles(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/briefing", async (req, res, next) => {
+    try {
+      res.json(await store.getCommandCenterBriefing(currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/notification-triggers", async (req, res, next) => {
+    try {
+      const filters = notificationTriggerQuerySchema.parse(req.query);
+      const { deliveryStates, ...candidateFilters } = filters;
+      const [page, deliveries, subscriptions, sourceHealth] = await Promise.all([
+        store.listNotificationTriggers(candidateFilters, currentLogin(req)),
+        store.listPushDeliveries(100, currentLogin(req)),
+        store.listPushSubscriptionPreferences(currentLogin(req)),
+        store.listSourceHealth(),
+      ]);
+      const pageWithDeliveryState = applyNotificationDeliveryStates(page, {
+        configured: Boolean(config.webPushConfigured),
+        deliveries: deliveries.items,
+        subscriptions,
+        sourceHealth,
+      });
+      res.json(
+        filterNotificationTriggerPageByDeliveryStates(pageWithDeliveryState, deliveryStates),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/notification-deliveries", async (req, res, next) => {
+    try {
+      const limit = Math.min(
+        100,
+        Math.max(1, Number.parseInt(String(req.query.limit ?? "50"), 10) || 50),
+      );
+      res.json(await store.listPushDeliveries(limit, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/spatial-analytics", async (req, res, next) => {
+    try {
+      const query = commandCenterSpatialAnalyticsQuerySchema.parse(req.query);
+      const login = currentLogin(req);
+      const [
+        heatmapCells,
+        trafficInfoEvents,
+        officialEvents,
+        articlesPage,
+        trafficPulse,
+        trafficCounters,
+        telemetryHistory,
+        telemetryPatterns,
+      ] = await Promise.all([
+        store.listSpatialHeatmapCells(query, login),
+        store.listTrafficMapEvents(
+          {
+            sources: ["vegvesen_traffic_info"],
+            states: ["active", "planned"],
+            from: query.from,
+            to: query.to,
+            limit: null,
+          },
+          login,
+        ),
+        store.listOfficialEvents({ source: "datex" }, login),
+        store.listArticles(
+          {
+            limit: 500,
+            ...(query.from ? { from: query.from } : {}),
+            ...(query.to ? { to: query.to } : {}),
+          },
+          login,
+        ),
+        store.listTrafficPulseCorridors(50),
+        store.listTrafficCounterSnapshots(),
+        store.getTrafficTelemetryHistorySummary({
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+        }),
+        store.listTrafficTelemetryPatterns({
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+          limit: 12,
+        }),
+      ]);
+      const eventsBySourceKey = new Map<string, TrafficMapEvent>();
+      const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
+
+      for (const event of trafficInfoEvents) {
+        eventsBySourceKey.set(sourceKey(event), event);
+      }
+      for (const event of officialEvents) {
+        const trafficEvent = officialEventToTrafficMapEvent(event);
+        if (trafficEvent && (trafficEvent.state === "active" || trafficEvent.state === "planned")) {
+          eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
+        }
+      }
+
+      const estimatedEvents = roadClosingArticleTrafficEvents(articlesPage.items, {
+        officialEvents: [...eventsBySourceKey.values()],
+      });
+      for (const event of estimatedEvents) {
+        eventsBySourceKey.set(sourceKey(event), event);
+      }
+
+      const events = [...eventsBySourceKey.values()].filter((event) =>
+        eventIntersectsTimeRange(event, query.from, query.to),
+      );
+      const corridorImpacts = buildCorridorImpacts(events, trafficPulse);
+      const enrichedHeatmapCells = heatmapCells.map((cell) => ({
+        ...cell,
+        sourceConfidence: cell.sourceConfidence ?? sourceConfidenceForHeatmapCell(cell),
+      }));
+      const unexplainedDelays = buildUnexplainedDelayCandidates(
+        corridorImpacts,
+        articlesPage.items,
+        {
+          minDelaySeconds: query.minDelaySeconds,
+        },
+      )
+        .slice(0, 20)
+        .map((candidate) => ({
+          ...candidate,
+          sourceConfidence:
+            candidate.sourceConfidence ?? sourceConfidenceForDelayCandidate(candidate),
+        }));
+      const investigationQueue = buildSpatialInvestigationQueue(
+        unexplainedDelays,
+        enrichedHeatmapCells,
+        articlesPage.items,
+        trafficCounters,
+        {
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+        },
+      );
+      const confidenceItems = [...enrichedHeatmapCells, ...unexplainedDelays];
+      const generatedAt = new Date();
+      const dataUpdatedAt = latestSpatialDataUpdatedAt({
+        heatmapCells: enrichedHeatmapCells,
+        unexplainedDelays,
+        telemetryHistory,
+        telemetryPatterns,
+      });
+
+      res.json({
+        generatedAt: generatedAt.toISOString(),
+        live: spatialLiveStatus({ generatedAt, dataUpdatedAt }),
+        window: {
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+        },
+        summary: {
+          heatmapCells: enrichedHeatmapCells.length,
+          observations: enrichedHeatmapCells.reduce((sum, cell) => sum + cell.count, 0),
+          unexplainedDelays: unexplainedDelays.length,
+          criticalDelays: unexplainedDelays.filter(
+            (candidate) => candidate.confidence === "critical",
+          ).length,
+          bySourceConfidence: sourceConfidenceCounts(confidenceItems),
+        },
+        telemetryHistory,
+        telemetryPatterns,
+        investigationQueue,
+        heatmapCells: enrichedHeatmapCells,
+        unexplainedDelays,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/source-items/:id", async (req, res, next) => {
+    try {
+      const item = await store.getRawSourceItem(String(req.params.id), currentLogin(req));
+      if (!item) return void res.status(404).json({ error: "Kildeelementet finnes ikke." });
+      res.json(item);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/telemetry", async (req, res, next) => {
+    try {
+      const filters = rawInspectorTelemetryQuerySchema.parse(req.query);
+      res.json(await store.listRawTelemetry(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/telemetry/:source/:id", async (req, res, next) => {
+    try {
+      const source = rawInspectorTelemetrySourceSchema.parse(req.params.source);
+      const record = await store.getRawTelemetryRecord(
+        source,
+        String(req.params.id),
+        currentLogin(req),
+      );
+      if (!record)
+        return void res.status(404).json({ error: "Telemetriobservasjonen finnes ikke." });
+      res.json(record);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/ai-runs", async (req, res, next) => {
+    try {
+      const filters = rawInspectorAiRunQuerySchema.parse(req.query);
+      res.json(await store.listRawAiRuns(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/ai-runs/:id", async (req, res, next) => {
+    try {
+      const run = await store.getRawAiRun(String(req.params.id), currentLogin(req));
+      if (!run) return void res.status(404).json({ error: "AI-kjøringen finnes ikke." });
+      res.json(run);
     } catch (error) {
       next(error);
     }

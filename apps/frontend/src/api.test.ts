@@ -44,6 +44,26 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("requests City Pulse story pages with the same public feed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ items: [], nextCursor: undefined }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.cityPulseStories({
+      scope: "trondheim",
+      category: "Krim",
+      topic: "rosenborg",
+      q: "Lade",
+      from: "2026-07-02T08:00:00.000Z",
+      cursor: "story-cursor",
+      limit: 12,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/city-pulse/stories?scope=trondheim&category=Krim&topic=rosenborg&q=Lade&from=2026-07-02T08%3A00%3A00.000Z&cursor=story-cursor&limit=12",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("requests the map-first situation workspace with typed filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       okResponse({
@@ -57,15 +77,18 @@ describe("frontend source item API helpers", () => {
 
     await api.situationMapWorkspace({
       statuses: ["preliminary", "active"],
+      publicVisibility: ["public"],
       sources: ["nrk", "adressa"],
       provenances: ["official", "reporting_estimate"],
       confidenceLevels: ["confirmed"],
       includePrivateAnnotations: false,
       q: "Bymarka",
+      from: "2026-07-03T08:00:00.000Z",
+      to: "2026-07-03T10:00:00.000Z",
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/situations/workspace-map?statuses=preliminary%2Cactive&sources=nrk%2Cadressa&provenances=official%2Creporting_estimate&confidenceLevels=confirmed&includePrivateAnnotations=false&q=Bymarka",
+      "/api/situations/workspace-map?statuses=preliminary%2Cactive&publicVisibility=public&sources=nrk%2Cadressa&provenances=official%2Creporting_estimate&confidenceLevels=confirmed&includePrivateAnnotations=false&q=Bymarka&from=2026-07-03T08%3A00%3A00.000Z&to=2026-07-03T10%3A00%3A00.000Z",
       expect.objectContaining({ credentials: "include" }),
     );
   });
@@ -160,6 +183,202 @@ describe("frontend source item API helpers", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/operations/coverage-bundles?kind=incident&confidence=high&q=Flat%C3%A5sen&cursor=cursor%3Aone&limit=25",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests notification trigger candidates with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        generatedAt: "2026-07-02T09:45:00.000Z",
+        filters: {},
+        items: [],
+        summary: {
+          total: 0,
+          critical: 0,
+          warning: 0,
+          watch: 0,
+          officialBacked: 0,
+          highConfidence: 0,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.notificationTriggers({
+      kinds: ["public_safety", "traffic_disruption"],
+      severities: ["critical", "warning"],
+      traceStates: ["raw_evidence", "source_audit"],
+      q: "røyk",
+      limit: 20,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/notification-triggers?kinds=public_safety%2Ctraffic_disruption&severities=critical%2Cwarning&traceStates=raw_evidence%2Csource_audit&q=r%C3%B8yk&limit=20",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests notification settings and delivery history", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        okResponse({
+          configured: false,
+          subscriptions: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        okResponse({
+          generatedAt: "2026-07-02T09:45:00.000Z",
+          items: [],
+          summary: { total: 0, sent: 0, failed: 0, claimed: 0, skipped: 0 },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.notificationSettings();
+    await api.notificationDeliveries(10);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/notifications/settings",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/operations/notification-deliveries?limit=10",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests command center spatial analytics with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        generatedAt: "2026-07-02T09:45:00.000Z",
+        live: {
+          status: "empty",
+          refreshIntervalSeconds: 60,
+          nextRefreshAt: "2026-07-02T09:46:00.000Z",
+          staleAfterSeconds: 900,
+          detail: "Ingen tidsstemplet romlig analyse er tilgjengelig i dette vinduet.",
+        },
+        window: {},
+        summary: {
+          heatmapCells: 0,
+          observations: 0,
+          unexplainedDelays: 0,
+          criticalDelays: 0,
+          bySourceConfidence: {
+            confirmed: 0,
+            likely: 0,
+            uncertain: 0,
+            speculative: 0,
+          },
+        },
+        telemetryHistory: {
+          datexTravelTime: {
+            observations: 0,
+            trackedEntities: 0,
+            activeDayCount: 0,
+            notableObservations: 0,
+          },
+          trafficCounters: {
+            observations: 0,
+            trackedEntities: 0,
+            activeDayCount: 0,
+            notableObservations: 0,
+          },
+        },
+        telemetryPatterns: [],
+        investigationQueue: [],
+        heatmapCells: [],
+        unexplainedDelays: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.spatialAnalytics({
+      from: "2026-07-02T08:00:00.000Z",
+      to: "2026-07-02T10:00:00.000Z",
+      minDelaySeconds: 300,
+      limit: 40,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/spatial-analytics?from=2026-07-02T08%3A00%3A00.000Z&to=2026-07-02T10%3A00%3A00.000Z&minDelaySeconds=300&limit=40",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests raw operations inspector data with typed filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ items: [], nextCursor: undefined }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.rawAiRuns({
+      provider: "deepseek",
+      status: "degraded",
+      q: "truncated",
+      cursor: "cursor:ai",
+      limit: 10,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/raw/ai-runs?provider=deepseek&status=degraded&q=truncated&cursor=cursor%3Aai&limit=10",
+      expect.objectContaining({ credentials: "include" }),
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      okResponse({
+        item: { id: "source:one" },
+        rawPayload: {},
+        normalizedPayload: {},
+        payloadBytes: { raw: 2, normalized: 2 },
+        redacted: false,
+        truncated: false,
+      }),
+    );
+
+    await api.rawSourceItem("source:one/two");
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/operations/raw/source-items/source%3Aone%2Ftwo",
+      expect.objectContaining({ credentials: "include" }),
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      okResponse({
+        record: {
+          id: "06970V72811",
+          source: "trafikkdata",
+          title: "E6 Sluppen",
+          updatedAt: "2026-07-02T09:40:00.000Z",
+        },
+        payload: {},
+        payloadBytes: 2,
+        redacted: false,
+        truncated: false,
+      }),
+    );
+
+    await api.rawTelemetry("trafikkdata", "06970V72811");
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/operations/raw/telemetry/trafikkdata/06970V72811",
+      expect.objectContaining({ credentials: "include" }),
+    );
+
+    fetchMock.mockResolvedValueOnce(okResponse({ items: [], nextCursor: "cursor:telemetry" }));
+
+    await api.rawTelemetryPage({
+      source: "datex_travel_time",
+      q: "Sluppen",
+      cursor: "cursor:telemetry",
+      limit: 12,
+    });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/operations/raw/telemetry?source=datex_travel_time&q=Sluppen&cursor=cursor%3Atelemetry&limit=12",
       expect.objectContaining({ credentials: "include" }),
     );
   });
@@ -282,6 +501,30 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("updates situation publication through the owner API helper", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(
+        okResponse({ id: "situation-one", publicVisibility: "command_center" }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.setSituationPublication("situation one", "command_center");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/situations/situation%20one/publication",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify({ publicVisibility: "command_center" }),
+      }),
+    );
+  });
+
   it("grants users through the owner API helper", async () => {
     vi.resetModules();
     const { api: freshApi } = await import("./api.js");
@@ -306,6 +549,54 @@ describe("frontend source item API helpers", () => {
           displayName: "Ine Viewer",
           email: "ine@example.test",
         }),
+      }),
+    );
+  });
+
+  it("manages push subscriptions with CSRF protection", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(okResponse({ id: "subscription-one", endpointHash: "hash" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.subscribeToNotifications({
+      endpoint: "https://push.example.test/send/secret",
+      keys: {
+        p256dh: "p256dh-key-material-that-is-long-enough",
+        auth: "auth-key-long-enough",
+      },
+      minSeverity: "critical",
+      kinds: ["traffic_disruption"],
+    });
+    await freshApi.unsubscribeFromNotifications("subscription one");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/notifications/subscriptions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify({
+          endpoint: "https://push.example.test/send/secret",
+          keys: {
+            p256dh: "p256dh-key-material-that-is-long-enough",
+            auth: "auth-key-long-enough",
+          },
+          minSeverity: "critical",
+          kinds: ["traffic_disruption"],
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/notifications/subscriptions/subscription%20one",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
       }),
     );
   });
@@ -350,6 +641,7 @@ describe("frontend source item API helpers", () => {
       "/api/situations/incident%2Fwith%20spaces%3F%23fragment/source-items/nrk%3Aitem%2Fwith%20spaces%3F%23fragment",
       expect.objectContaining({
         method: "POST",
+        body: JSON.stringify({ relationship: "supports" }),
         credentials: "include",
         headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
       }),

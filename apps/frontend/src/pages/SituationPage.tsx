@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  sourceIdLabel,
-  sourceItemKindLabel,
-  sourceItemRelationshipLabel,
-  sourceReliabilityTierLabel,
   type PrivateMapFeatureInput,
   type SituationWorkspace,
   type SourceItem,
+  type SourceItemRelationship,
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon } from "../components/Icons.js";
 import { SituationMap } from "../components/MapViews.js";
 import { SituationExplanationPanel } from "../components/situations/SituationExplanation.js";
+import {
+  SituationPublicationControls,
+  type SituationPublicVisibility,
+} from "../components/situations/SituationPublicationControls.js";
+import { SituationSourceItemsPanel } from "../components/situations/SituationSourceItemsPanel.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { formatSituationTimestamp } from "../situationTime.js";
 
@@ -26,17 +28,6 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
-function sourceItemMeta(item: SourceItem): string {
-  return [
-    sourceIdLabel(item.provider),
-    sourceItemKindLabel(item.kind),
-    sourceReliabilityTierLabel(item.reliabilityTier),
-    item.relationship ? sourceItemRelationshipLabel(item.relationship) : undefined,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 export function SituationPage({ canManage = true }: { canManage?: boolean }) {
   const { id = "" } = useParams();
   const [workspace, setWorkspace] = useState<SituationWorkspace>();
@@ -44,10 +35,18 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
   const [sourceItemsLoading, setSourceItemsLoading] = useState(false);
   const [sourceItemsError, setSourceItemsError] = useState<string>();
   const [sourceItemsRetry, setSourceItemsRetry] = useState(0);
+  const [sourceItemSearch, setSourceItemSearch] = useState("");
+  const [sourceItemRelationship, setSourceItemRelationship] =
+    useState<SourceItemRelationship>("supports");
+  const [sourceItemCandidates, setSourceItemCandidates] = useState<SourceItem[]>([]);
+  const [sourceItemCandidatesLoading, setSourceItemCandidatesLoading] = useState(false);
+  const [sourceItemCandidatesError, setSourceItemCandidatesError] = useState<string>();
+  const [linkingSourceItemId, setLinkingSourceItemId] = useState<string>();
   const [taskText, setTaskText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [savingSituation, setSavingSituation] = useState(false);
+  const [savingPublication, setSavingPublication] = useState(false);
   const [error, setError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
   const [actionMessage, setActionMessage] = useState<string>();
@@ -77,6 +76,10 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
 
     setSourceItems([]);
     setSourceItemsError(undefined);
+    if (!canManage) {
+      setSourceItemsLoading(false);
+      return;
+    }
     setSourceItemsLoading(true);
 
     void api
@@ -94,10 +97,31 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
     return () => {
       ignore = true;
     };
-  }, [id, sourceItemsRetry]);
+  }, [canManage, id, sourceItemsRetry]);
 
   function retrySourceItems() {
     setSourceItemsRetry((attempt) => attempt + 1);
+  }
+
+  async function loadSourceItemCandidates() {
+    if (!canManage) return;
+    setSourceItemCandidatesLoading(true);
+    setSourceItemCandidatesError(undefined);
+    try {
+      const linkedIds = new Set(sourceItems.map((item) => item.id));
+      const page = await api.sourceItems({
+        q: sourceItemSearch.trim() || undefined,
+        unlinked: true,
+        limit: 10,
+      });
+      setSourceItemCandidates(page.items.filter((item) => !linkedIds.has(item.id)));
+    } catch (reason) {
+      setSourceItemCandidatesError(
+        reason instanceof Error ? reason.message : "Kunne ikke søke kildeelementer",
+      );
+    } finally {
+      setSourceItemCandidatesLoading(false);
+    }
   }
 
   if (error) return <main className="loading">Kunne ikke åpne situasjonsrom: {error}</main>;
@@ -111,6 +135,7 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
         : situation.status === "dismissed"
           ? "Avvist som feilkobling"
           : "Pågår";
+  const publicVisibility = situation.publicVisibility ?? "public";
 
   async function performAction<T>(
     request: () => Promise<T>,
@@ -285,6 +310,32 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
     }
   }
 
+  async function linkSourceItemToSituation(sourceItemId: string) {
+    if (!canManage || linkingSourceItemId) return;
+    setLinkingSourceItemId(sourceItemId);
+    try {
+      await performAction(
+        () => api.linkSourceItem(id, sourceItemId, sourceItemRelationship),
+        (linked) => {
+          setSourceItems((current) => [linked, ...current.filter((item) => item.id !== linked.id)]);
+          setSourceItemCandidates((current) => current.filter((item) => item.id !== linked.id));
+        },
+        "Kildeelementet er koblet til situasjonen.",
+      );
+    } finally {
+      setLinkingSourceItemId(undefined);
+    }
+  }
+
+  async function unlinkSourceItemFromSituation(sourceItemId: string) {
+    if (!canManage) return;
+    await performAction(
+      () => api.unlinkSourceItem(id, sourceItemId),
+      () => setSourceItems((current) => current.filter((item) => item.id !== sourceItemId)),
+      "Kildeelementet er koblet fra situasjonen.",
+    );
+  }
+
   async function resolveSituation() {
     await performAction(
       () => api.setSituationStatus(id, "resolved"),
@@ -301,6 +352,23 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
         setWorkspace((current) => (current ? { ...current, situation: updated } : current)),
       "Situasjonen er avvist som feilkobling.",
     );
+  }
+
+  async function setPublication(nextVisibility: SituationPublicVisibility) {
+    if (!canManage || savingPublication || nextVisibility === publicVisibility) return;
+    setSavingPublication(true);
+    try {
+      await performAction(
+        () => api.setSituationPublication(id, nextVisibility),
+        (updated) =>
+          setWorkspace((current) => (current ? { ...current, situation: updated } : current)),
+        nextVisibility === "public"
+          ? "Situasjonen er synlig i City Pulse."
+          : "Situasjonen er skjult fra City Pulse.",
+      );
+    } finally {
+      setSavingPublication(false);
+    }
   }
 
   async function deleteTask(taskId: string) {
@@ -404,6 +472,11 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
                   Avvis feilkobling
                 </button>
               ) : null}
+              <SituationPublicationControls
+                publicVisibility={publicVisibility}
+                saving={savingPublication}
+                onChange={(nextVisibility) => void setPublication(nextVisibility)}
+              />
             </>
           ) : null}
           {situation.dismissalReason ? (
@@ -450,39 +523,26 @@ export function SituationPage({ canManage = true }: { canManage?: boolean }) {
               </article>
             ))}
           </section>
-          <section className="source-items-panel">
-            <h2>Kildegrunnlag</h2>
-            {sourceItemsLoading ? (
-              <p aria-live="polite">Henter kildegrunnlag...</p>
-            ) : sourceItemsError ? (
-              <div className="source-items-error" role="alert" aria-live="assertive">
-                <p>Kunne ikke hente kildegrunnlag: {sourceItemsError}</p>
-                <button type="button" onClick={retrySourceItems}>
-                  Prøv igjen
-                </button>
-              </div>
-            ) : sourceItems.length === 0 ? (
-              <p>Ingen kildeelementer er koblet ennå.</p>
-            ) : (
-              <ul>
-                {sourceItems.map((item) => {
-                  const originalUrl = safeExternalUrl(item.originalUrl);
-                  return (
-                    <li key={item.id}>
-                      <strong>{item.title ?? item.externalId ?? item.id}</strong>
-                      <span>{sourceItemMeta(item)}</span>
-                      {item.summary ? <p>{item.summary}</p> : null}
-                      {originalUrl ? (
-                        <a href={originalUrl} target="_blank" rel="noreferrer noopener">
-                          Åpne kilde
-                        </a>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+          {canManage ? (
+            <SituationSourceItemsPanel
+              sourceItems={sourceItems}
+              loading={sourceItemsLoading}
+              error={sourceItemsError}
+              canManage={canManage}
+              search={sourceItemSearch}
+              relationship={sourceItemRelationship}
+              candidates={sourceItemCandidates}
+              candidatesLoading={sourceItemCandidatesLoading}
+              candidatesError={sourceItemCandidatesError}
+              linkingSourceItemId={linkingSourceItemId}
+              onRetry={retrySourceItems}
+              onSearchChange={setSourceItemSearch}
+              onRelationshipChange={setSourceItemRelationship}
+              onLoadCandidates={() => void loadSourceItemCandidates()}
+              onLink={(sourceItemId) => void linkSourceItemToSituation(sourceItemId)}
+              onUnlink={(sourceItemId) => void unlinkSourceItemFromSituation(sourceItemId)}
+            />
+          ) : null}
           <section className="related">
             <h2>Relaterte saker</h2>
             {workspace.relatedArticles.map((article) => {

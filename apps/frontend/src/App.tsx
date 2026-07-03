@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import type { BootstrapPayload, SessionPayload } from "@nytt/shared";
 import { ApiError, api } from "./api.js";
 import { headerFreshnessLabel } from "./freshness.js";
@@ -25,6 +25,11 @@ const CoverageBundlesPage = lazy(() =>
     default: module.CoverageBundlesPage,
   })),
 );
+const CommandBriefingPage = lazy(() =>
+  import("./pages/CommandBriefingPage.js").then((module) => ({
+    default: module.CommandBriefingPage,
+  })),
+);
 const OperationsPage = lazy(() =>
   import("./pages/OperationsPage.js").then((module) => ({ default: module.OperationsPage })),
 );
@@ -33,11 +38,31 @@ const OperationsTimelinePage = lazy(() =>
     default: module.OperationsTimelinePage,
   })),
 );
+const NotificationTriggerCandidatesPage = lazy(() =>
+  import("./pages/NotificationTriggerCandidatesPage.js").then((module) => ({
+    default: module.NotificationTriggerCandidatesPage,
+  })),
+);
+const NotificationSettingsPage = lazy(() =>
+  import("./pages/NotificationSettingsPage.js").then((module) => ({
+    default: module.NotificationSettingsPage,
+  })),
+);
+const RawDataInspectorPage = lazy(() =>
+  import("./pages/RawDataInspectorPage.js").then((module) => ({
+    default: module.RawDataInspectorPage,
+  })),
+);
 const SavedPage = lazy(() =>
   import("./pages/SavedPage.js").then((module) => ({ default: module.SavedPage })),
 );
 const SourceAuditPage = lazy(() =>
   import("./pages/SourceAuditPage.js").then((module) => ({ default: module.SourceAuditPage })),
+);
+const SpatialAnalyticsPage = lazy(() =>
+  import("./pages/SpatialAnalyticsPage.js").then((module) => ({
+    default: module.SpatialAnalyticsPage,
+  })),
 );
 const SportPage = lazy(() =>
   import("./pages/SportPage.js").then((module) => ({ default: module.SportPage })),
@@ -105,6 +130,7 @@ function Header({
           <NavLink to="/trafikk">Trafikkart</NavLink>
           <NavLink to="/vaer">Vær</NavLink>
           <NavLink to="/sport">Sport</NavLink>
+          <NavLink to="/varsler">Varsler</NavLink>
           {isOwner ? <NavLink to="/lagret">Lagret</NavLink> : null}
           {isOwner ? <NavLink to="/command">Kommandosenter</NavLink> : null}
         </nav>
@@ -166,6 +192,21 @@ function LoadingPage({ message }: { message: string }) {
   );
 }
 
+export type AuthenticatedShellApi = Pick<typeof api, "bootstrap" | "session">;
+
+export async function loadAuthenticatedShellData(client: AuthenticatedShellApi = api) {
+  const [sessionPayload, bootstrapPayload] = await Promise.all([
+    client.session(),
+    client.bootstrap(),
+  ]);
+  return { sessionPayload, bootstrapPayload };
+}
+
+function LegacyCommandRedirect({ to }: { to: string }) {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}${location.hash}`} replace />;
+}
+
 function AuthenticatedApp() {
   const [data, setData] = useState<BootstrapPayload>();
   const [session, setSession] = useState<SessionPayload>();
@@ -177,11 +218,7 @@ function AuthenticatedApp() {
     let ignore = false;
     setLoading(true);
     setError(undefined);
-    api
-      .session()
-      .then((sessionPayload) =>
-        api.bootstrap().then((bootstrapPayload) => ({ sessionPayload, bootstrapPayload })),
-      )
+    loadAuthenticatedShellData()
       .then(({ sessionPayload, bootstrapPayload }) => {
         if (!ignore) {
           setSession(sessionPayload);
@@ -232,17 +269,41 @@ function AuthenticatedApp() {
             <Route path="/trafikk" element={<TrafficMapPage />} />
             <Route path="/vaer" element={<WeatherPage />} />
             <Route path="/sport" element={<SportPage initialArticles={data.articles} />} />
+            <Route path="/varsler" element={<NotificationSettingsPage />} />
             <Route path="/lagret" element={ownerOnly(<SavedPage />)} />
             <Route path="/command" element={ownerOnly(<OperationsPage />)} />
+            <Route path="/command/brief" element={ownerOnly(<CommandBriefingPage />)} />
             <Route path="/command/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
             <Route path="/command/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
             <Route path="/command/kilder" element={ownerOnly(<SourceAuditPage />)} />
+            <Route
+              path="/command/varsler"
+              element={ownerOnly(<NotificationTriggerCandidatesPage />)}
+            />
+            <Route path="/command/romlig" element={ownerOnly(<SpatialAnalyticsPage />)} />
+            <Route path="/command/radata" element={ownerOnly(<RawDataInspectorPage />)} />
             <Route path="/command/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
-            <Route path="/drift" element={ownerOnly(<OperationsPage />)} />
-            <Route path="/drift/tilgang" element={ownerOnly(<AccessRequestsPage />)} />
-            <Route path="/drift/dekning" element={ownerOnly(<CoverageBundlesPage />)} />
-            <Route path="/drift/kilder" element={ownerOnly(<SourceAuditPage />)} />
-            <Route path="/drift/tidslinje" element={ownerOnly(<OperationsTimelinePage />)} />
+            <Route path="/drift" element={<LegacyCommandRedirect to="/command" />} />
+            <Route path="/drift/brief" element={<LegacyCommandRedirect to="/command/brief" />} />
+            <Route
+              path="/drift/tilgang"
+              element={<LegacyCommandRedirect to="/command/tilgang" />}
+            />
+            <Route
+              path="/drift/dekning"
+              element={<LegacyCommandRedirect to="/command/dekning" />}
+            />
+            <Route path="/drift/kilder" element={<LegacyCommandRedirect to="/command/kilder" />} />
+            <Route
+              path="/drift/varsler"
+              element={<LegacyCommandRedirect to="/command/varsler" />}
+            />
+            <Route path="/drift/romlig" element={<LegacyCommandRedirect to="/command/romlig" />} />
+            <Route path="/drift/radata" element={<LegacyCommandRedirect to="/command/radata" />} />
+            <Route
+              path="/drift/tidslinje"
+              element={<LegacyCommandRedirect to="/command/tidslinje" />}
+            />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Suspense>

@@ -40,6 +40,7 @@ const situation: MapFirstSituation = {
   title: "Brann: Trondheim",
   summary: "Nødetatene rykker ut.",
   status: "active",
+  publicVisibility: "public",
   importance: "normal",
   updatedAt: "2026-06-18T12:00:00.000Z",
   locationLabel: "Flatåsen",
