@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   cycleDashboardWidgetSize,
+  dashboardWidgetSizes,
   moveDashboardWidget,
   normalizeDashboardLayout,
   parseDashboardLayout,
@@ -46,6 +47,16 @@ const sizeNames: Record<DashboardWidgetSize, string> = {
   large: "Stor",
   full: "Full bredde",
 };
+
+function getNextWidgetSize(size: DashboardWidgetSize): DashboardWidgetSize {
+  const currentIndex = dashboardWidgetSizes.indexOf(size);
+  return dashboardWidgetSizes[(currentIndex + 1) % dashboardWidgetSizes.length] ?? "standard";
+}
+
+function getSizeCycleHint(size: DashboardWidgetSize): string {
+  const nextSize = getNextWidgetSize(size);
+  return `Nå: ${sizeNames[size]}. Neste: ${sizeNames[nextSize]}.`;
+}
 
 function layoutFromStorage(storageKey: string | undefined): Partial<DashboardLayoutState> {
   if (typeof window === "undefined" || !storageKey) return {};
@@ -190,6 +201,7 @@ export function DashboardGrid({
           <ol>
             {orderedWidgets.map((widget, index) => {
               const size = layout.sizes[widget.id] ?? widget.defaultSize ?? "standard";
+              const nextSize = getNextWidgetSize(size);
               const resizable = widget.resizable ?? true;
               return (
                 <li key={widget.id}>
@@ -218,6 +230,9 @@ export function DashboardGrid({
                       <button
                         type="button"
                         aria-label={`Bytt modulstørrelse for ${widget.title}`}
+                        data-next-size={nextSize}
+                        data-size={size}
+                        title={getSizeCycleHint(size)}
                         onClick={() =>
                           setLayout((current) => cycleDashboardWidgetSize(current, widget.id))
                         }
@@ -235,6 +250,7 @@ export function DashboardGrid({
       <div className="dashboard-widget-grid">
         {orderedWidgets.map((widget, index) => {
           const size = layout.sizes[widget.id] ?? widget.defaultSize ?? "standard";
+          const nextSize = getNextWidgetSize(size);
           const resizable = widget.resizable ?? true;
           return (
             <article
@@ -277,6 +293,9 @@ export function DashboardGrid({
                         <button
                           type="button"
                           aria-label={`Endre størrelse på ${widget.title}`}
+                          data-next-size={nextSize}
+                          data-size={size}
+                          title={getSizeCycleHint(size)}
                           onClick={() =>
                             setLayout((current) => cycleDashboardWidgetSize(current, widget.id))
                           }

@@ -152,6 +152,9 @@ describe("NewsMap", () => {
     expect(html).toContain("story-marker-selected");
     expect(html).toContain("&lt;span&gt;2&lt;/span&gt;");
     expect(html).toContain("2 saker nær Sluppen");
+    expect(html).toContain("Kartmarkører");
+    expect(html).toContain("Kartet har 2 markører.");
+    expect(html).toContain("2 saker ved Sluppen: Hendelse ved Sluppen, Oppdatering ved Sluppen.");
     expect(html).toContain('data-layer="popup"');
     expect(html).toContain("Kartfestet sak");
     expect(html).toContain("Påvirker ferdsel");

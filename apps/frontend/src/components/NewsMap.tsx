@@ -80,6 +80,36 @@ function confidenceLabel(item: NearbyStoryItem): string {
   return `Kildetillit: ${item.sourceConfidence.label}${scoreLabel}`;
 }
 
+function clusterAccessibleSummary(cluster: NewsMapCluster): string {
+  if (cluster.items.length === 1) {
+    const item = cluster.items[0]!;
+    return `${item.markerLabel}. ${item.title}. ${item.locationLabel}. ${item.relevanceLabel}.`;
+  }
+  const titles = cluster.items
+    .slice(0, 3)
+    .map((item) => item.title)
+    .join(", ");
+  const hiddenCount = Math.max(0, cluster.items.length - 3);
+  const suffix = hiddenCount > 0 ? ` og ${hiddenCount} til` : "";
+  return `${cluster.items.length} saker ved ${clusterPlaceLabel(cluster)}: ${titles}${suffix}.`;
+}
+
+function NewsMapScreenReaderSummary({ clusters }: { clusters: NewsMapCluster[] }) {
+  if (clusters.length === 0) return null;
+  return (
+    <div className="sr-only" aria-label="Kartmarkører">
+      <p>
+        Kartet har {clusters.length} {clusters.length === 1 ? "markør" : "markører"}.
+      </p>
+      <ol>
+        {clusters.map((cluster) => (
+          <li key={cluster.id}>{clusterAccessibleSummary(cluster)}</li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function NewsMapPopup({
   cluster,
   onSelect,
@@ -179,6 +209,7 @@ export function NewsMap({
       <TileLayer url={tiles} attribution="© Kartverket" />
       <MapAccessibility label="Kart over nærliggende nyhetssaker" />
       <FitMapToPositions positions={fitPositions} />
+      <NewsMapScreenReaderSummary clusters={clusters} />
       {focusPosition && focusRadiusMeters ? (
         <Circle
           center={focusPosition}

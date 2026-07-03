@@ -11,6 +11,13 @@ export interface NewsMapCluster {
   selected: boolean;
 }
 
+export interface NewsMapClusterSummary {
+  storyCount: number;
+  markerCount: number;
+  clusterCount: number;
+  compressedStoryCount: number;
+}
+
 const defaultClusterRadiusMeters = 260;
 
 function averagePosition(items: NearbyStoryItem[]): [number, number] {
@@ -85,4 +92,20 @@ export function clusterNearbyStoryItems(
     title: clusterTitle(bucket),
     selected: selectedId ? bucket.some((item) => item.id === selectedId) : false,
   }));
+}
+
+export function newsMapClusterSummary(
+  items: NearbyStoryItem[],
+  options: { radiusMeters?: number } = {},
+): NewsMapClusterSummary {
+  const clusters = clusterNearbyStoryItems(items, options);
+  return {
+    storyCount: items.length,
+    markerCount: clusters.length,
+    clusterCount: clusters.filter((cluster) => cluster.items.length > 1).length,
+    compressedStoryCount: clusters.reduce(
+      (sum, cluster) => sum + Math.max(0, cluster.items.length - 1),
+      0,
+    ),
+  };
 }

@@ -403,6 +403,26 @@ button {
   padding-inline: 0;
 }
 
+.channel-filter-label {
+  min-width: 0;
+}
+
+.channel-filter-count {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper) 88%, var(--blue-soft));
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+}
+
 .channel-filter-icon {
   display: inline-flex;
   align-items: center;
@@ -430,6 +450,12 @@ button {
   color: var(--blue);
 }
 
+.channel-filter.selected .channel-filter-count {
+  border-color: currentColor;
+  background: var(--blue);
+  color: #fff;
+}
+
 .scope-switch button.selected {
   color: var(--ink);
   font-weight: 600;
@@ -452,6 +478,72 @@ button {
 
 .time-filters {
   margin-left: auto;
+}
+
+.channel-context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.channel-context-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--blue);
+}
+
+.channel-context-icon .channel-icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+
+.channel-context .label {
+  margin: 0 0 2px;
+  font-size: 10px;
+}
+
+.channel-context h2 {
+  margin: 0;
+  font: 22px/1.05 var(--serif);
+}
+
+.channel-context p:not(.label) {
+  flex: 1 1 280px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.channel-context strong {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.channel-context-clear {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  color: var(--blue);
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.channel-context-clear:hover,
+.channel-context-clear:focus-visible {
+  border-color: var(--blue);
 }
 
 .local-focus {
@@ -1608,6 +1700,14 @@ button {
 
 .nearby-time-slider-labels span.selected {
   color: var(--blue);
+}
+
+.nearby-map-density {
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .nearby-map {

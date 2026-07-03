@@ -1,7 +1,7 @@
 import type { Article } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
 import { nearbyStoryItems } from "./homeNearby.js";
-import { clusterNearbyStoryItems } from "./newsMapClusters.js";
+import { clusterNearbyStoryItems, newsMapClusterSummary } from "./newsMapClusters.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -96,5 +96,32 @@ describe("news map marker clustering", () => {
     const clusters = clusterNearbyStoryItems(items, { radiusMeters: 500 });
 
     expect(clusters.map((cluster) => cluster.id)).toEqual(["sentrum", "tiller"]);
+  });
+
+  it("summarizes how many stories are compressed into map markers", () => {
+    const items = nearbyStoryItems(
+      [
+        article({
+          id: "torvet-1",
+          location: { lat: 63.4, lng: 10.4, label: "Torvet" },
+        }),
+        article({
+          id: "torvet-2",
+          location: { lat: 63.4007, lng: 10.4005, label: "Torvet" },
+        }),
+        article({
+          id: "lade",
+          location: { lat: 63.444, lng: 10.44, label: "Lade" },
+        }),
+      ],
+      { limit: 3 },
+    );
+
+    expect(newsMapClusterSummary(items, { radiusMeters: 180 })).toEqual({
+      storyCount: 3,
+      markerCount: 2,
+      clusterCount: 1,
+      compressedStoryCount: 1,
+    });
   });
 });

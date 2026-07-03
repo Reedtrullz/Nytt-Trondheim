@@ -40,6 +40,9 @@ describe("DashboardGrid", () => {
     expect(html).toContain("Bytt modulstørrelse for Kilder");
     expect(html).toContain("Flytt Situasjonsbilde senere");
     expect(html).toContain("Endre størrelse på Kilder");
+    expect(html).toContain('data-size="compact"');
+    expect(html).toContain('data-next-size="standard"');
+    expect(html).toContain('title="Nå: Kompakt. Neste: Normal."');
     expect(html).toContain("Tilbakestill");
   });
 

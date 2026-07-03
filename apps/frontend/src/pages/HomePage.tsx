@@ -23,6 +23,7 @@ import { DashboardGrid, type DashboardWidgetDefinition } from "../components/Das
 import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
 import {
   articleCategories,
+  articleCategoryDescriptions,
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
@@ -64,6 +65,7 @@ import {
   type HomeStoryCard,
   type HomeStoryVerification,
 } from "../homeStoryCards.js";
+import { newsMapClusterSummary, type NewsMapClusterSummary } from "../newsMapClusters.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
 
@@ -621,6 +623,64 @@ export function storyFeedSummary(cards: HomeStoryCard[]): string {
   return `${base} ${clusteredCount} ${clusterLabel} flere kilder eller oppdateringer.`;
 }
 
+type ChannelStoryCounts = Record<ArticleCategoryFilter, number>;
+
+function emptyChannelStoryCounts(): ChannelStoryCounts {
+  return Object.fromEntries(articleCategories.map((item) => [item, 0])) as ChannelStoryCounts;
+}
+
+export function channelStoryCountsForCards(cards: HomeStoryCard[]): ChannelStoryCounts {
+  const counts = emptyChannelStoryCounts();
+  counts.Alle = cards.length;
+  for (const card of cards) counts[card.category] += 1;
+  return counts;
+}
+
+function channelCountText(count: number): string {
+  return count === 1
+    ? "1 bypulssak i gjeldende visning"
+    : `${count} bypulssaker i gjeldende visning`;
+}
+
+export function ChannelContextPanel({
+  category,
+  count,
+  onClear,
+  scope,
+  timeWindow,
+}: {
+  category: ArticleCategoryFilter;
+  count: number;
+  onClear?: () => void;
+  scope: HomeFilters["scope"];
+  timeWindow: HomeTimeWindow;
+}) {
+  const place = scope === "trondheim" ? "Trondheim" : "Trøndelag";
+  const windowLabel =
+    timeWindow === "all" ? "hele tidslinjen" : `siste ${homeTimeWindowLabels[timeWindow]}`;
+
+  return (
+    <section className="channel-context" aria-label="Valgt tematisk kanal">
+      <span className="channel-context-icon" aria-hidden="true">
+        <ArticleCategoryIcon name={category} />
+      </span>
+      <div>
+        <p className="label">Tematisk kanal</p>
+        <h2>{articleCategoryLabels[category]}</h2>
+      </div>
+      <p>{articleCategoryDescriptions[category]}</p>
+      <strong>
+        {channelCountText(count)} · {place} · {windowLabel}
+      </strong>
+      {category !== "Alle" && onClear ? (
+        <button type="button" className="channel-context-clear" onClick={onClear}>
+          Vis alle kanaler
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 function StoryCard({
   card,
   saving,
@@ -778,6 +838,7 @@ function NearbyRail({
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
   const mapNearby = useMemo(() => allNearby.slice(0, 24), [allNearby]);
+  const clusterSummary = useMemo(() => newsMapClusterSummary(mapNearby), [mapNearby]);
   const [selectedNearbyId, setSelectedNearbyId] = useState<string>();
   const nearbyIds = nearby.map((item) => item.id).join("|");
   const mapNearbyIds = mapNearby.map((item) => item.id).join("|");
@@ -814,6 +875,7 @@ function NearbyRail({
           </Link>
         </div>
         <MapTimeSlider value={timeWindow} onChange={onTimeWindowChange} />
+        <MapClusterSummary summary={clusterSummary} />
         <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
           <NewsMap
             items={mapNearby}
@@ -929,6 +991,23 @@ function NearbyRail({
         </div>
       </section>
     </aside>
+  );
+}
+
+export function MapClusterSummary({ summary }: { summary: NewsMapClusterSummary }) {
+  if (summary.storyCount === 0) return null;
+  const markerLabel = summary.markerCount === 1 ? "markør" : "markører";
+  const storyLabel = summary.storyCount === 1 ? "stedsfestet sak" : "stedsfestede saker";
+  const clusterLabel = summary.clusterCount === 1 ? "klynge" : "klynger";
+  const compressedLabel = summary.compressedStoryCount === 1 ? "ekstra sak" : "ekstra saker";
+
+  return (
+    <p className="nearby-map-density" aria-live="polite">
+      Kartet viser {summary.storyCount} {storyLabel} som {summary.markerCount} {markerLabel}.
+      {summary.compressedStoryCount > 0
+        ? ` ${summary.clusterCount} ${clusterLabel} samler ${summary.compressedStoryCount} ${compressedLabel}.`
+        : " Ingen punkter er slått sammen."}
+    </p>
   );
 }
 
@@ -1371,6 +1450,7 @@ export function HomePage({
 
   const groupedArticles = useMemo(() => groupHomeArticles(filtered), [filtered]);
   const storyCards = useMemo(() => homeStoryCardsForGroups(groupedArticles), [groupedArticles]);
+  const channelStoryCounts = useMemo(() => channelStoryCountsForCards(storyCards), [storyCards]);
   const displayedStoryCards = useMemo(
     () => rankHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus),
     [activeLocalFocus, storyCards],
@@ -1481,23 +1561,30 @@ export function HomePage({
             Trøndelag
           </button>
         </div>
-        <div className="filters" aria-label="Filtrer saker">
-          {articleCategories.map((item: ArticleCategoryFilter) => (
-            <button
-              type="button"
-              aria-pressed={category === item}
-              className={`channel-filter channel-filter-${item.toLocaleLowerCase("nb")}${
-                category === item ? " selected" : ""
-              }`}
-              key={item}
-              onClick={() => updateFilters({ category: item })}
-            >
-              <span className="channel-filter-icon" aria-hidden="true">
-                <ArticleCategoryIcon name={item} />
-              </span>
-              <span>{articleCategoryLabels[item]}</span>
-            </button>
-          ))}
+        <div className="filters" aria-label="Tematiske kanaler">
+          {articleCategories.map((item: ArticleCategoryFilter) => {
+            const count = channelStoryCounts[item] ?? 0;
+            return (
+              <button
+                type="button"
+                aria-pressed={category === item}
+                className={`channel-filter channel-filter-${item.toLocaleLowerCase("nb")}${
+                  category === item ? " selected" : ""
+                }`}
+                key={item}
+                onClick={() => updateFilters({ category: item })}
+                title={`${articleCategoryLabels[item]}: ${channelCountText(count)}`}
+              >
+                <span className="channel-filter-icon" aria-hidden="true">
+                  <ArticleCategoryIcon name={item} />
+                </span>
+                <span className="channel-filter-label">{articleCategoryLabels[item]}</span>
+                <span className="channel-filter-count" aria-label={channelCountText(count)}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
         {category === "Sport" ? (
           <div className="topic-filters" aria-label="Sportskategorier">
@@ -1578,6 +1665,13 @@ export function HomePage({
           ) : null}
         </div>
       </div>
+      <ChannelContextPanel
+        category={category}
+        count={channelStoryCounts[category] ?? 0}
+        onClear={category === "Alle" ? undefined : () => updateFilters({ category: "Alle" })}
+        scope={scope}
+        timeWindow={timeWindow}
+      />
       {localFocus.status === "active" && localFocusSummary ? (
         <LocalFocusSummaryPanel
           label={localFocus.label}

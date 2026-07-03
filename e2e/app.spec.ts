@@ -595,6 +595,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
     },
   ];
   let timeWindowRequest: URL | undefined;
+  let categoryRequest: URL | undefined;
 
   await page.route("**/api/bootstrap", async (route) => {
     await route.fulfill({
@@ -610,6 +611,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await page.route("**/api/articles?**", async (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("from")) timeWindowRequest = url;
+    if (url.searchParams.get("category")) categoryRequest = url;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -628,6 +630,24 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await context.setGeolocation({ latitude: 63.4305, longitude: 10.3951 });
 
   await page.goto("/");
+
+  const channels = page.getByLabel("Tematiske kanaler");
+  await expect(channels.getByRole("button", { name: /Alle/ })).toContainText("2");
+  await expect(channels.getByRole("button", { name: /Hendelser/ })).toContainText("2");
+  const channelContext = page.locator(".channel-context");
+  await expect(channelContext).toContainText("Alle");
+  await expect(channelContext).toContainText("2 bypulssaker i gjeldende visning");
+  await channels.getByRole("button", { name: /Hendelser/ }).click();
+  await expect(page).toHaveURL(/category=Hendelser/);
+  await expect(channelContext).toContainText("Hendelser");
+  await expect(channelContext).toContainText("Pågående og stedsfestede hendelser");
+  await expect(channelContext.getByRole("button", { name: "Vis alle kanaler" })).toBeVisible();
+  await expect.poll(() => categoryRequest?.searchParams.get("category") ?? "").toBe("Hendelser");
+  await channelContext.getByRole("button", { name: "Vis alle kanaler" }).click();
+  await expect(page).not.toHaveURL(/category=Hendelser/);
+  await expect(channelContext).toContainText("Alle");
+  await expect(channelContext.getByRole("button", { name: "Vis alle kanaler" })).toHaveCount(0);
+  await expectNoHorizontalPageOverflow(page);
 
   const cityPulseModules = page.getByLabel("Bypulsmoduler");
   await expect(cityPulseModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();

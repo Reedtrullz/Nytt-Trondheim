@@ -4,13 +4,16 @@ import { describe, expect, it } from "vitest";
 import type { Article, BootstrapPayload, MorningBrief } from "@nytt/shared";
 import {
   CityPulseDashboard,
+  ChannelContextPanel,
   CityPulseSignalPanel,
   LocalFocusRadiusControl,
   LocalFocusSummaryPanel,
+  MapClusterSummary,
   MapTimeSlider,
   MorningBriefPanel,
   StoryConfidenceBadge,
   StoryVerificationProof,
+  channelStoryCountsForCards,
   cityPulseDataForCurrentFeed,
   morningBriefFreshness,
   storyFeedSummary,
@@ -303,6 +306,31 @@ describe("MapTimeSlider", () => {
   });
 });
 
+describe("MapClusterSummary", () => {
+  it("explains when the public map has compressed stories into fewer markers", () => {
+    const html = renderToStaticMarkup(
+      <MapClusterSummary
+        summary={{ storyCount: 8, markerCount: 5, clusterCount: 2, compressedStoryCount: 3 }}
+      />,
+    );
+
+    expect(html).toContain("Kartet viser 8 stedsfestede saker som 5 markører.");
+    expect(html).toContain("2 klynger samler 3 ekstra saker.");
+    expect(html).toContain('aria-live="polite"');
+  });
+
+  it("keeps unclustered map summaries honest", () => {
+    const html = renderToStaticMarkup(
+      <MapClusterSummary
+        summary={{ storyCount: 1, markerCount: 1, clusterCount: 0, compressedStoryCount: 0 }}
+      />,
+    );
+
+    expect(html).toContain("Kartet viser 1 stedsfestet sak som 1 markør.");
+    expect(html).toContain("Ingen punkter er slått sammen.");
+  });
+});
+
 describe("LocalFocusSummaryPanel", () => {
   it("explains how many located stories are inside the chosen neighborhood radius", () => {
     const html = renderToStaticMarkup(
@@ -449,5 +477,86 @@ describe("storyFeedSummary", () => {
 
   it("keeps empty feed summaries honest", () => {
     expect(storyFeedSummary([])).toBe("Ingen bypulssaker i denne visningen.");
+  });
+});
+
+describe("channelStoryCountsForCards", () => {
+  it("counts clustered story cards per public channel instead of raw articles", () => {
+    const storyArticle = (overrides: Partial<Article> = {}) =>
+      ({
+        ...article,
+        ...overrides,
+      }) satisfies Article;
+    const cards = homeStoryCardsForGroups(
+      groupHomeArticles([
+        storyArticle({
+          id: "nrk-traffic",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          coverageBundle: {
+            id: "coverage:traffic:sluppen",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme hendelse på tvers av kilder",
+            generatedAt: "2026-07-02T07:30:00.000Z",
+          },
+        }),
+        storyArticle({
+          id: "adressa-traffic",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          coverageBundle: {
+            id: "coverage:traffic:sluppen",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme hendelse på tvers av kilder",
+            generatedAt: "2026-07-02T07:30:00.000Z",
+          },
+        }),
+        storyArticle({
+          id: "culture",
+          title: "Konsert på Byscenen",
+          category: "Kultur",
+        }),
+      ]),
+    );
+
+    expect(channelStoryCountsForCards(cards)).toMatchObject({
+      Alle: 2,
+      Transport: 1,
+      Kultur: 1,
+      Krim: 0,
+    });
+  });
+});
+
+describe("ChannelContextPanel", () => {
+  it("explains the selected public thematic channel and current view count", () => {
+    const html = renderToStaticMarkup(
+      <ChannelContextPanel
+        category="Transport"
+        count={3}
+        onClear={() => undefined}
+        scope="trondheim"
+        timeWindow="24h"
+      />,
+    );
+
+    expect(html).toContain("Tematisk kanal");
+    expect(html).toContain("Trafikk");
+    expect(html).toContain("Trafikk, kollektiv, vegmeldinger og framkommelighet.");
+    expect(html).toContain("3 bypulssaker i gjeldende visning · Trondheim · siste 24 timer");
+    expect(html).toContain("Vis alle kanaler");
+    expect(html).toContain('aria-label="Valgt tematisk kanal"');
+  });
+
+  it("does not offer a redundant clear action on the all-channel view", () => {
+    const html = renderToStaticMarkup(
+      <ChannelContextPanel category="Alle" count={7} scope="trondelag" timeWindow="all" />,
+    );
+
+    expect(html).toContain("Alle");
+    expect(html).toContain("7 bypulssaker i gjeldende visning · Trøndelag · hele tidslinjen");
+    expect(html).not.toContain("Vis alle kanaler");
   });
 });
