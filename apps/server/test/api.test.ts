@@ -1566,6 +1566,88 @@ describe("private situation API", () => {
     await agent.get("/api/operations/raw/source-items/source:missing").expect(404);
   });
 
+  it("keeps raw telemetry payloads behind the owner-only raw inspector", async () => {
+    await request((await testAppWithEmail(false)).app)
+      .get("/api/operations/raw/telemetry")
+      .expect(401);
+    await request((await testAppWithEmail(false)).app)
+      .get("/api/operations/raw/telemetry/datex_travel_time/100141")
+      .expect(401);
+
+    const { app, store } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    vi.spyOn(store, "listRawTelemetry").mockResolvedValue({
+      items: [
+        {
+          id: "100141",
+          source: "datex_travel_time",
+          title: "E6 Okstadbakken - E6 Sluppenrampene",
+          updatedAt: "2026-07-02T09:40:20.000Z",
+          observedAt: "2026-07-02T09:40:00.000Z",
+          summary: "Sakte trafikk · 6 min forsinkelse",
+        },
+      ],
+      nextCursor: "cursor:telemetry",
+    });
+    vi.spyOn(store, "getRawTelemetryRecord").mockResolvedValue({
+      record: {
+        id: "100141",
+        source: "datex_travel_time",
+        title: "E6 Okstadbakken - E6 Sluppenrampene",
+        updatedAt: "2026-07-02T09:40:20.000Z",
+        observedAt: "2026-07-02T09:40:00.000Z",
+        sourceUrl: "https://example.test/datex-travel-time",
+        summary: "Sakte trafikk · 6 min forsinkelse",
+      },
+      payload: { id: "100141", token: "[redacted]" },
+      payloadBytes: 512,
+      redacted: true,
+      truncated: false,
+    });
+
+    const list = await agent
+      .get("/api/operations/raw/telemetry?source=datex_travel_time&q=Sluppen&limit=12")
+      .expect(200);
+    expect(list.body).toMatchObject({
+      items: [
+        {
+          id: "100141",
+          source: "datex_travel_time",
+          title: "E6 Okstadbakken - E6 Sluppenrampene",
+        },
+      ],
+      nextCursor: "cursor:telemetry",
+    });
+    expect(JSON.stringify(list.body)).not.toContain("rawPayload");
+    expect(store.listRawTelemetry).toHaveBeenCalledWith(
+      { source: "datex_travel_time", q: "Sluppen", limit: 12 },
+      "Reedtrullz",
+    );
+
+    const response = await agent
+      .get("/api/operations/raw/telemetry/datex_travel_time/100141")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      record: {
+        id: "100141",
+        source: "datex_travel_time",
+        title: "E6 Okstadbakken - E6 Sluppenrampene",
+      },
+      payload: { id: "100141", token: "[redacted]" },
+      payloadBytes: 512,
+      redacted: true,
+    });
+    expect(store.getRawTelemetryRecord).toHaveBeenCalledWith(
+      "datex_travel_time",
+      "100141",
+      "Reedtrullz",
+    );
+
+    await agent.get("/api/operations/raw/telemetry/datex_weather/weather-1").expect(400);
+  });
+
   it("returns an owner-only AI raw inspector page shape", async () => {
     const { agent } = await ownerAgent();
     const response = await agent
@@ -3163,6 +3245,15 @@ describe("private situation API", () => {
           evidence: expect.arrayContaining(["2.8x normal trafikk"]),
           sourceItemIds: [],
           articleIds: [],
+          rawRefs: [
+            {
+              type: "telemetry",
+              source: "trafikkdata",
+              id: "06970V72811",
+              label: "Trafikkdata teller",
+              observedAt: "2026-07-02T09:40:00.000Z",
+            },
+          ],
         }),
         expect.objectContaining({
           kind: expect.stringMatching(/^(hotspot|unexplained_delay)$/u),
@@ -3204,6 +3295,161 @@ describe("private situation API", () => {
       .expect(201);
     expect(response.body.filename).toBe("notat.txt");
     expect(response.body.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+  });
+
+  it("PgStore returns sanitized raw telemetry details for DATEX and Trafikkdata rows", async () => {
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const fakePool = {
+      async query(sql: string, params: unknown[]) {
+        queries.push({ sql: sql.replace(/\s+/g, " ").trim(), params });
+        if (sql.includes("FROM datex_travel_times")) {
+          return {
+            rows: [
+              {
+                id: "100141",
+                name: "E6 Okstadbakken - E6 Sluppenrampene",
+                state: "slow",
+                delay_seconds: 360,
+                measurement_to: "2026-07-02T09:40:00.000Z",
+                source_url: "https://example.test/datex-travel-time",
+                payload: { id: "100141", token: "secret-token" },
+                updated_at: "2026-07-02T09:40:20.000Z",
+              },
+            ],
+          };
+        }
+        return {
+          rows: [
+            {
+              point_id: "06970V72811",
+              payload: {
+                name: "E6 Sluppen",
+                updatedAt: "2026-07-02T09:40:00.000Z",
+                volumeLastHour: 2200,
+                anomalyRatio: 2.75,
+                coveragePercent: 94,
+                apiKey: "secret-key",
+              },
+              updated_at: "2026-07-02T09:40:05.000Z",
+              geometry: { type: "Point", coordinates: [10.39, 63.39] },
+            },
+          ],
+        };
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    const datex = await store.getRawTelemetryRecord("datex_travel_time", "100141", "owner");
+    const counter = await store.getRawTelemetryRecord("trafikkdata", "06970V72811", "owner");
+
+    expect(queries[0]).toMatchObject({
+      params: ["100141"],
+    });
+    expect(queries[0]?.sql).toContain("FROM datex_travel_times");
+    expect(queries[1]).toMatchObject({
+      params: ["06970V72811"],
+    });
+    expect(queries[1]?.sql).toContain("FROM traffic_counter_snapshots");
+    expect(datex).toMatchObject({
+      record: {
+        id: "100141",
+        source: "datex_travel_time",
+        title: "E6 Okstadbakken - E6 Sluppenrampene",
+        observedAt: "2026-07-02T09:40:00.000Z",
+        summary: "Sakte trafikk · 6 min forsinkelse",
+      },
+      payload: { id: "100141", token: "[redacted]" },
+      redacted: true,
+    });
+    expect(counter).toMatchObject({
+      record: {
+        id: "06970V72811",
+        source: "trafikkdata",
+        title: "E6 Sluppen",
+        observedAt: "2026-07-02T09:40:00.000Z",
+        summary: "2200 kjøretøy siste time · 2.8x normal trafikk · 94 % dekning",
+        geometry: { type: "Point", coordinates: [10.39, 63.39] },
+      },
+      payload: {
+        name: "E6 Sluppen",
+        apiKey: "[redacted]",
+      },
+      redacted: true,
+    });
+  });
+
+  it("PgStore lists recent raw telemetry rows with source filters and opaque cursors", async () => {
+    let capturedSql = "";
+    let capturedParams: unknown[] = [];
+    const fakePool = {
+      async query(sql: string, params: unknown[]) {
+        capturedSql = sql.replace(/\s+/g, " ").trim();
+        capturedParams = params;
+        return {
+          rows: [
+            {
+              point_id: "06970V72811",
+              payload: {
+                name: "E6 Sluppen",
+                updatedAt: "2026-07-02T09:40:00.000Z",
+                volumeLastHour: 2200,
+                anomalyRatio: 2.75,
+                coveragePercent: 94,
+              },
+              updated_at: "2026-07-02T09:40:05.000Z",
+              updated_at_cursor: "2026-07-02T09:40:05.000000Z",
+              geometry: { type: "Point", coordinates: [10.39, 63.39] },
+            },
+            {
+              point_id: "06970V72810",
+              payload: {
+                name: "E6 Kroppanbrua",
+                updatedAt: "2026-07-02T09:38:00.000Z",
+                volumeLastHour: 1800,
+              },
+              updated_at: "2026-07-02T09:38:05.000Z",
+              updated_at_cursor: "2026-07-02T09:38:05.000000Z",
+              geometry: { type: "Point", coordinates: [10.38, 63.38] },
+            },
+          ],
+        };
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    const cursor = Buffer.from(
+      JSON.stringify(["2026-07-02T09:45:00.000Z", "trafikkdata:cursor"]),
+      "utf8",
+    ).toString("base64url");
+    const page = await store.listRawTelemetry(
+      {
+        source: "trafikkdata",
+        q: "Sluppen",
+        cursor,
+        limit: 1,
+      },
+      "owner",
+    );
+
+    expect(capturedSql).toContain("FROM traffic_counter_snapshots");
+    expect(capturedSql).toContain("point_id ILIKE $1");
+    expect(capturedSql).toContain("payload::text ILIKE $1");
+    expect(capturedSql).toContain("('trafikkdata:' || point_id) < $3");
+    expect(capturedParams).toEqual([
+      "%Sluppen%",
+      "2026-07-02T09:45:00.000Z",
+      "trafikkdata:cursor",
+      2,
+    ]);
+    expect(page.items).toEqual([
+      expect.objectContaining({
+        id: "06970V72811",
+        source: "trafikkdata",
+        title: "E6 Sluppen",
+        summary: "2200 kjøretøy siste time · 2.8x normal trafikk · 94 % dekning",
+      }),
+    ]);
+    expect(page.nextCursor).toBeTruthy();
   });
 
   it("PgStore lists traffic map events with SQL filters and overlays row state", async () => {

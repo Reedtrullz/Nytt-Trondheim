@@ -26,6 +26,8 @@ import {
   publicTransportMapQuerySchema,
   pushSubscriptionInputSchema,
   rawInspectorAiRunQuerySchema,
+  rawInspectorTelemetryQuerySchema,
+  rawInspectorTelemetrySourceSchema,
   situationPublicationInputSchema,
   sourceItemLinkInputSchema,
   sourceItemQuerySchema,
@@ -2164,6 +2166,31 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const item = await store.getRawSourceItem(String(req.params.id), currentLogin(req));
       if (!item) return void res.status(404).json({ error: "Kildeelementet finnes ikke." });
       res.json(item);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/telemetry", async (req, res, next) => {
+    try {
+      const filters = rawInspectorTelemetryQuerySchema.parse(req.query);
+      res.json(await store.listRawTelemetry(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/raw/telemetry/:source/:id", async (req, res, next) => {
+    try {
+      const source = rawInspectorTelemetrySourceSchema.parse(req.params.source);
+      const record = await store.getRawTelemetryRecord(
+        source,
+        String(req.params.id),
+        currentLogin(req),
+      );
+      if (!record)
+        return void res.status(404).json({ error: "Telemetriobservasjonen finnes ikke." });
+      res.json(record);
     } catch (error) {
       next(error);
     }

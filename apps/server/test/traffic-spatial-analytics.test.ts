@@ -67,6 +67,15 @@ describe("spatial analytics unexplained delay candidates", () => {
       delaySeconds: 360,
       matchedArticleIds: ["article-e6-delay"],
       affectedEventIds: [],
+      rawRefs: [
+        {
+          type: "telemetry",
+          source: "datex_travel_time",
+          id: "100141",
+          label: "DATEX reisetid",
+          observedAt: "2026-07-02T09:30:00.000Z",
+        },
+      ],
     });
   });
 
@@ -138,6 +147,15 @@ describe("spatial analytics unexplained delay candidates", () => {
         title: "E6 Okstadbakken - E6 Sluppenrampene",
         articleIds: ["article-e6-delay"],
         sourceItemIds: [],
+        rawRefs: [
+          {
+            type: "telemetry",
+            source: "datex_travel_time",
+            id: "100141",
+            label: "DATEX reisetid",
+            observedAt: "2026-07-02T09:30:00.000Z",
+          },
+        ],
         evidence: expect.arrayContaining([
           "DATEX reisetid: 6 min",
           "Mulige saker: Kø på E6 ved Sluppen",
@@ -201,6 +219,15 @@ describe("spatial analytics unexplained delay candidates", () => {
         summary: "Trafikkdata viser 2.8x normal trafikk",
         articleIds: [],
         sourceItemIds: [],
+        rawRefs: [
+          {
+            type: "telemetry",
+            source: "trafikkdata",
+            id: "06970V72811",
+            label: "Trafikkdata teller",
+            observedAt: "2026-07-02T09:40:00.000Z",
+          },
+        ],
         evidence: expect.arrayContaining([
           "2200 kjøretøy siste time",
           "Normalnivå: 800",

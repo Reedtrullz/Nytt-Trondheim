@@ -1,5 +1,6 @@
 import type { Geometry, LineString, Point } from "geojson";
 import type {
+  RawInspectorTelemetrySource,
   SourceConfidenceLevel,
   SourceConfidenceSummary,
   SourceId,
@@ -246,6 +247,14 @@ export interface SpatialHeatmapCell {
   sourceConfidence?: SourceConfidenceSummary;
 }
 
+export interface SpatialRawDataRef {
+  type: "telemetry";
+  source: RawInspectorTelemetrySource;
+  id: string;
+  label: string;
+  observedAt?: string;
+}
+
 export interface UnexplainedDelayCandidate {
   id: string;
   corridorId: string;
@@ -261,6 +270,7 @@ export interface UnexplainedDelayCandidate {
   confidence: "watch" | "warning" | "critical";
   reason: string;
   sourceConfidence?: SourceConfidenceSummary;
+  rawRefs?: SpatialRawDataRef[];
 }
 
 export interface SpatialInvestigationQueueItem {
@@ -274,6 +284,7 @@ export interface SpatialInvestigationQueueItem {
   evidence: string[];
   articleIds: string[];
   sourceItemIds: string[];
+  rawRefs?: SpatialRawDataRef[];
   sourceConfidence?: SourceConfidenceSummary;
   targetUrl?: string;
 }

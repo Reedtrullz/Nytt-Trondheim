@@ -315,6 +315,42 @@ describe("frontend source item API helpers", () => {
       "/api/operations/raw/source-items/source%3Aone%2Ftwo",
       expect.objectContaining({ credentials: "include" }),
     );
+
+    fetchMock.mockResolvedValueOnce(
+      okResponse({
+        record: {
+          id: "06970V72811",
+          source: "trafikkdata",
+          title: "E6 Sluppen",
+          updatedAt: "2026-07-02T09:40:00.000Z",
+        },
+        payload: {},
+        payloadBytes: 2,
+        redacted: false,
+        truncated: false,
+      }),
+    );
+
+    await api.rawTelemetry("trafikkdata", "06970V72811");
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/operations/raw/telemetry/trafikkdata/06970V72811",
+      expect.objectContaining({ credentials: "include" }),
+    );
+
+    fetchMock.mockResolvedValueOnce(okResponse({ items: [], nextCursor: "cursor:telemetry" }));
+
+    await api.rawTelemetryPage({
+      source: "datex_travel_time",
+      q: "Sluppen",
+      cursor: "cursor:telemetry",
+      limit: 12,
+    });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/operations/raw/telemetry?source=datex_travel_time&q=Sluppen&cursor=cursor%3Atelemetry&limit=12",
+      expect.objectContaining({ credentials: "include" }),
+    );
   });
 
   it("submits public access requests without an authenticated CSRF lookup", async () => {

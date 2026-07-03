@@ -7,6 +7,9 @@ import type {
   RawInspectorAiRunFilters,
   RawInspectorAiRunPage,
   RawInspectorSourceItemDetail,
+  RawInspectorTelemetryDetail,
+  RawInspectorTelemetryPage,
+  RawInspectorTelemetrySource,
   SourceItemFilters,
   SourceItemPage,
 } from "@nytt/shared";
@@ -18,6 +21,11 @@ interface RawInspectorViewFilters extends RawInspectorAiRunFilters {
   sourceQ?: string;
   sourceCursor?: string;
   run?: string;
+  telemetrySource?: RawInspectorTelemetrySource;
+  telemetryId?: string;
+  telemetryListSource?: RawInspectorTelemetrySource;
+  telemetryQ?: string;
+  telemetryCursor?: string;
 }
 
 const providerLabels: Record<NonNullable<RawInspectorAiRunFilters["provider"]>, string> = {
@@ -29,6 +37,11 @@ const statusLabels: Record<NonNullable<RawInspectorAiRunFilters["status"]>, stri
   ok: "OK",
   degraded: "Degradert",
   disabled: "Avslått",
+};
+
+const telemetrySourceLabels: Record<RawInspectorTelemetrySource, string> = {
+  datex_travel_time: "DATEX reisetid",
+  trafikkdata: "Trafikkdata teller",
 };
 
 const aiProfileLabels: Record<AiAnalysisProfile, string> = {
@@ -57,6 +70,11 @@ function parseRawInspectorFilters(search: string): RawInspectorViewFilters {
   const sourceCursor = parameters.get("sourceCursor") || undefined;
   const sourceItem = parameters.get("sourceItem")?.trim() || undefined;
   const run = parameters.get("run")?.trim() || undefined;
+  const telemetrySource = parameters.get("telemetrySource");
+  const telemetryId = parameters.get("telemetryId")?.trim() || undefined;
+  const telemetryListSource = parameters.get("telemetryListSource");
+  const telemetryQ = parameters.get("telemetryQ")?.trim() || undefined;
+  const telemetryCursor = parameters.get("telemetryCursor") || undefined;
   return {
     limit: 20,
     ...(provider === "deepseek" || provider === "deterministic" ? { provider } : {}),
@@ -70,6 +88,15 @@ function parseRawInspectorFilters(search: string): RawInspectorViewFilters {
     ...(sourceCursor ? { sourceCursor } : {}),
     ...(sourceItem ? { sourceItem } : {}),
     ...(run ? { run } : {}),
+    ...(telemetrySource === "datex_travel_time" || telemetrySource === "trafikkdata"
+      ? { telemetrySource }
+      : {}),
+    ...(telemetryId ? { telemetryId } : {}),
+    ...(telemetryListSource === "datex_travel_time" || telemetryListSource === "trafikkdata"
+      ? { telemetryListSource }
+      : {}),
+    ...(telemetryQ ? { telemetryQ } : {}),
+    ...(telemetryCursor ? { telemetryCursor } : {}),
   };
 }
 
@@ -84,6 +111,12 @@ function buildRawInspectorSearch(filters: RawInspectorViewFilters) {
   if (filters.sourceCursor) parameters.set("sourceCursor", filters.sourceCursor);
   if (filters.sourceItem) parameters.set("sourceItem", filters.sourceItem);
   if (filters.run) parameters.set("run", filters.run);
+  if (filters.telemetrySource) parameters.set("telemetrySource", filters.telemetrySource);
+  if (filters.telemetryId) parameters.set("telemetryId", filters.telemetryId);
+  if (filters.telemetryListSource)
+    parameters.set("telemetryListSource", filters.telemetryListSource);
+  if (filters.telemetryQ) parameters.set("telemetryQ", filters.telemetryQ);
+  if (filters.telemetryCursor) parameters.set("telemetryCursor", filters.telemetryCursor);
   return parameters;
 }
 
@@ -103,6 +136,15 @@ function sourceItemQuery(filters: RawInspectorViewFilters): SourceItemFilters {
     ...(filters.sourceKind ? { kind: filters.sourceKind } : {}),
     ...(filters.sourceQ ? { q: filters.sourceQ } : {}),
     ...(filters.sourceCursor ? { cursor: filters.sourceCursor } : {}),
+  };
+}
+
+function telemetryQuery(filters: RawInspectorViewFilters) {
+  return {
+    limit: 12,
+    ...(filters.telemetryListSource ? { source: filters.telemetryListSource } : {}),
+    ...(filters.telemetryQ ? { q: filters.telemetryQ } : {}),
+    ...(filters.telemetryCursor ? { cursor: filters.telemetryCursor } : {}),
   };
 }
 
@@ -140,28 +182,45 @@ export function RawDataInspectorDashboard({
   filters,
   aiRuns,
   sourceItems = { items: [] },
+  telemetryPage = { items: [] },
   sourceItem,
+  telemetryDetail,
   selectedAiRun,
   sourceError,
   sourceItemsError,
+  telemetryItemsError,
+  telemetryError,
   aiError,
   onFiltersChange,
 }: {
   filters: RawInspectorViewFilters;
   aiRuns: RawInspectorAiRunPage;
   sourceItems?: SourceItemPage;
+  telemetryPage?: RawInspectorTelemetryPage;
   sourceItem?: RawInspectorSourceItemDetail;
+  telemetryDetail?: RawInspectorTelemetryDetail;
   selectedAiRun?: RawInspectorAiRunDetail;
   sourceError?: string;
   sourceItemsError?: string;
+  telemetryItemsError?: string;
+  telemetryError?: string;
   aiError?: string;
   onFiltersChange?: (filters: RawInspectorViewFilters) => void;
 }) {
   const [sourceInput, setSourceInput] = useState(filters.sourceItem ?? "");
+  const [telemetrySourceInput, setTelemetrySourceInput] = useState<RawInspectorTelemetrySource>(
+    filters.telemetrySource ?? "datex_travel_time",
+  );
+  const [telemetryIdInput, setTelemetryIdInput] = useState(filters.telemetryId ?? "");
 
   useEffect(() => {
     setSourceInput(filters.sourceItem ?? "");
   }, [filters.sourceItem]);
+
+  useEffect(() => {
+    setTelemetrySourceInput(filters.telemetrySource ?? "datex_travel_time");
+    setTelemetryIdInput(filters.telemetryId ?? "");
+  }, [filters.telemetryId, filters.telemetrySource]);
 
   function update(next: Partial<RawInspectorViewFilters>) {
     onFiltersChange?.({ ...filters, cursor: undefined, ...next });
@@ -170,6 +229,14 @@ export function RawDataInspectorDashboard({
   function submitSourceItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     update({ sourceItem: sourceInput.trim() || undefined });
+  }
+
+  function submitTelemetry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    update({
+      telemetrySource: telemetrySourceInput,
+      telemetryId: telemetryIdInput.trim() || undefined,
+    });
   }
 
   return (
@@ -199,6 +266,73 @@ export function RawDataInspectorDashboard({
             </label>
             <button type="submit">Hent kildeelement</button>
           </form>
+          <form onSubmit={submitTelemetry}>
+            <label>
+              Telemetrikilde
+              <select
+                value={telemetrySourceInput}
+                onChange={(event) =>
+                  setTelemetrySourceInput(event.target.value as RawInspectorTelemetrySource)
+                }
+              >
+                {Object.entries(telemetrySourceLabels).map(([value, label]) => (
+                  <option value={value} key={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Telemetri-ID
+              <input
+                value={telemetryIdInput}
+                onChange={(event) => setTelemetryIdInput(event.target.value)}
+                placeholder="100141 / 06970V72811"
+              />
+            </label>
+            <button type="submit">Hent telemetri</button>
+          </form>
+          <label>
+            Telemetrisøk
+            <input
+              value={filters.telemetryQ ?? ""}
+              onChange={(event) =>
+                update({
+                  telemetryQ: event.target.value || undefined,
+                  telemetryCursor: undefined,
+                })
+              }
+              placeholder="Søk i korridor, teller eller ID"
+            />
+          </label>
+          <label>
+            Telemetriliste
+            <select
+              value={filters.telemetryListSource ?? ""}
+              onChange={(event) =>
+                update({
+                  telemetryListSource: (event.target.value ||
+                    undefined) as RawInspectorViewFilters["telemetryListSource"],
+                  telemetryCursor: undefined,
+                })
+              }
+            >
+              <option value="">Alle</option>
+              {Object.entries(telemetrySourceLabels).map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {telemetryPage.nextCursor ? (
+            <button
+              type="button"
+              onClick={() => update({ telemetryCursor: telemetryPage.nextCursor })}
+            >
+              Neste telemetriside
+            </button>
+          ) : null}
           <label>
             Kildesøk
             <input
@@ -280,7 +414,44 @@ export function RawDataInspectorDashboard({
             </button>
           ) : null}
         </aside>
-        <section className="raw-inspector-list" aria-label="Kildeelementer og AI-kjøringer">
+        <section
+          className="raw-inspector-list"
+          aria-label="Telemetri, kildeelementer og AI-kjøringer"
+        >
+          <div className="raw-inspector-section-heading">
+            <h2>Telemetri</h2>
+            <span>{telemetryPage.items.length} vist</span>
+          </div>
+          {telemetryItemsError ? (
+            <p className="raw-inspector-error">{telemetryItemsError}</p>
+          ) : null}
+          {telemetryPage.items.length === 0 ? (
+            <p className="raw-inspector-empty">Ingen telemetri matcher filtrene.</p>
+          ) : (
+            telemetryPage.items.map((item) => (
+              <button
+                className={
+                  item.id === filters.telemetryId && item.source === filters.telemetrySource
+                    ? "raw-inspector-run selected"
+                    : "raw-inspector-run"
+                }
+                key={`${item.source}:${item.id}`}
+                type="button"
+                onClick={() =>
+                  update({
+                    telemetrySource: item.source,
+                    telemetryId: item.id,
+                  })
+                }
+              >
+                <span>{telemetrySourceLabels[item.source]}</span>
+                <strong>{item.title}</strong>
+                <small>
+                  {item.summary || item.id} · oppdatert {time(item.updatedAt)}
+                </small>
+              </button>
+            ))
+          )}
           <div className="raw-inspector-section-heading">
             <h2>Kildeelementer</h2>
             <span>{sourceItems.items.length} vist</span>
@@ -339,6 +510,52 @@ export function RawDataInspectorDashboard({
           )}
         </section>
         <aside className="raw-inspector-detail" aria-label="Rådatadetalj">
+          <section>
+            <p className="label">Telemetri</p>
+            {telemetryError ? <p className="raw-inspector-error">{telemetryError}</p> : null}
+            {telemetryDetail ? (
+              <>
+                <h2>{telemetryDetail.record.title}</h2>
+                <dl>
+                  <div>
+                    <dt>Kilde</dt>
+                    <dd>{telemetrySourceLabels[telemetryDetail.record.source]}</dd>
+                  </div>
+                  <div>
+                    <dt>ID</dt>
+                    <dd>{telemetryDetail.record.id}</dd>
+                  </div>
+                  <div>
+                    <dt>Observert</dt>
+                    <dd>
+                      {time(telemetryDetail.record.observedAt ?? telemetryDetail.record.updatedAt)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Payload</dt>
+                    <dd>{Math.round(telemetryDetail.payloadBytes / 1024)} kB etter sanitering</dd>
+                  </div>
+                </dl>
+                {telemetryDetail.record.summary ? <p>{telemetryDetail.record.summary}</p> : null}
+                {telemetryDetail.record.sourceUrl ? (
+                  <a href={telemetryDetail.record.sourceUrl} rel="noreferrer" target="_blank">
+                    Åpne kilde
+                  </a>
+                ) : null}
+                {telemetryDetail.redacted || telemetryDetail.truncated ? (
+                  <p className="raw-inspector-warning">
+                    Payload er {telemetryDetail.redacted ? "redigert" : "ikke redigert"}
+                    {telemetryDetail.truncated ? " og forkortet" : ""}.
+                  </p>
+                ) : null}
+                <PayloadPanel title="Telemetripayload" value={telemetryDetail.payload} />
+              </>
+            ) : (
+              <p className="raw-inspector-empty">
+                Velg telemetri fra romlig analyse eller oppgi kilde og ID.
+              </p>
+            )}
+          </section>
           <section>
             <p className="label">Kildeelement</p>
             {sourceError ? <p className="raw-inspector-error">{sourceError}</p> : null}
@@ -437,10 +654,14 @@ export function RawDataInspectorPage() {
   const filters = useMemo(() => parseRawInspectorFilters(searchParams.toString()), [searchParams]);
   const [aiRuns, setAiRuns] = useState<RawInspectorAiRunPage>({ items: [] });
   const [sourceItems, setSourceItems] = useState<SourceItemPage>({ items: [] });
+  const [telemetryPage, setTelemetryPage] = useState<RawInspectorTelemetryPage>({ items: [] });
   const [sourceItem, setSourceItem] = useState<RawInspectorSourceItemDetail>();
+  const [telemetryDetail, setTelemetryDetail] = useState<RawInspectorTelemetryDetail>();
   const [selectedAiRun, setSelectedAiRun] = useState<RawInspectorAiRunDetail>();
   const [sourceError, setSourceError] = useState<string>();
   const [sourceItemsError, setSourceItemsError] = useState<string>();
+  const [telemetryItemsError, setTelemetryItemsError] = useState<string>();
+  const [telemetryError, setTelemetryError] = useState<string>();
   const [aiError, setAiError] = useState<string>();
 
   useEffect(() => {
@@ -450,6 +671,14 @@ export function RawDataInspectorPage() {
       .then(setSourceItems)
       .catch((reason: Error) => setSourceItemsError(reason.message));
   }, [filters.sourceKind, filters.sourceQ, filters.sourceCursor]);
+
+  useEffect(() => {
+    setTelemetryItemsError(undefined);
+    void api
+      .rawTelemetryPage(telemetryQuery(filters))
+      .then(setTelemetryPage)
+      .catch((reason: Error) => setTelemetryItemsError(reason.message));
+  }, [filters.telemetryCursor, filters.telemetryListSource, filters.telemetryQ]);
 
   useEffect(() => {
     setAiError(undefined);
@@ -468,6 +697,16 @@ export function RawDataInspectorPage() {
       .then(setSourceItem)
       .catch((reason: Error) => setSourceError(reason.message));
   }, [filters.sourceItem]);
+
+  useEffect(() => {
+    setTelemetryError(undefined);
+    setTelemetryDetail(undefined);
+    if (!filters.telemetrySource || !filters.telemetryId) return;
+    void api
+      .rawTelemetry(filters.telemetrySource, filters.telemetryId)
+      .then(setTelemetryDetail)
+      .catch((reason: Error) => setTelemetryError(reason.message));
+  }, [filters.telemetryId, filters.telemetrySource]);
 
   useEffect(() => {
     setSelectedAiRun(undefined);
@@ -492,6 +731,10 @@ export function RawDataInspectorPage() {
       sourceItem={sourceItem}
       sourceItems={sourceItems}
       sourceItemsError={sourceItemsError}
+      telemetryDetail={telemetryDetail}
+      telemetryItemsError={telemetryItemsError}
+      telemetryPage={telemetryPage}
+      telemetryError={telemetryError}
       onFiltersChange={setFilters}
     />
   );

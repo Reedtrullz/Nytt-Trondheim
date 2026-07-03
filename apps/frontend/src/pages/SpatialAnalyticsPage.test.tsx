@@ -107,6 +107,15 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       ],
       articleIds: ["article-one"],
       sourceItemIds: [],
+      rawRefs: [
+        {
+          type: "telemetry",
+          source: "datex_travel_time",
+          id: "100141",
+          label: "DATEX reisetid",
+          observedAt: "2026-07-02T09:40:00.000Z",
+        },
+      ],
       sourceConfidence: {
         level: "likely",
         label: "Sannsynlig",
@@ -139,6 +148,15 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       evidence: ["2200 kjøretøy siste time", "Normalnivå: 800", "2.8x normal trafikk"],
       articleIds: [],
       sourceItemIds: [],
+      rawRefs: [
+        {
+          type: "telemetry",
+          source: "trafikkdata",
+          id: "06970V72811",
+          label: "Trafikkdata teller",
+          observedAt: "2026-07-02T09:40:00.000Z",
+        },
+      ],
       sourceConfidence: {
         level: "uncertain",
         label: "Usikker",
@@ -199,6 +217,15 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       affectedEventIds: [],
       confidence: "watch",
       reason: "Kort DATEX-forsinkelse uten koblede saker.",
+      rawRefs: [
+        {
+          type: "telemetry",
+          source: "datex_travel_time",
+          id: "weak",
+          label: "DATEX reisetid",
+          observedAt: "2026-07-02T09:44:00.000Z",
+        },
+      ],
       sourceConfidence: {
         level: "likely",
         label: "Sannsynlig",
@@ -226,6 +253,15 @@ const payload: CommandCenterSpatialAnalyticsPayload = {
       affectedEventIds: [],
       confidence: "warning",
       reason: "DATEX viser ca. 6 min forsinkelse uten koblet trafikkhendelse.",
+      rawRefs: [
+        {
+          type: "telemetry",
+          source: "datex_travel_time",
+          id: "100141",
+          label: "DATEX reisetid",
+          observedAt: "2026-07-02T09:40:00.000Z",
+        },
+      ],
     },
   ],
 };
@@ -289,6 +325,12 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("DATEX reisetid: 6 min");
     expect(html).toContain("Mulige saker: Kø på E6 ved Sluppen");
     expect(html).toContain("1 mulige saker");
+    expect(html).toContain(
+      "/command/radata?telemetrySource=datex_travel_time&amp;telemetryId=100141",
+    );
+    expect(html).toContain(
+      "/command/radata?telemetrySource=trafikkdata&amp;telemetryId=06970V72811",
+    );
     expect(html).toContain("Uforklarte forsinkelser");
     expect(html).toContain("Bekreftet/sannsynlig");
     expect(html).toContain("E6 Okstadbakken");

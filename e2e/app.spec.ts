@@ -988,6 +988,33 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
               rationale: "Offisielt trafikkgrunnlag støttes av redaksjonell dekning.",
             },
           },
+          {
+            id: "investigation:delay:e6-sluppen",
+            kind: "unexplained_delay",
+            priority: "high",
+            title: "E6 Okstadbakken - Sluppen",
+            summary: "6 min forsinkelse uten kjent årsak",
+            reason: "DATEX viser ca. 6 min forsinkelse uten koblet trafikkhendelse.",
+            updatedAt: "2026-07-02T09:40:00.000Z",
+            evidence: ["DATEX reisetid: 6 min", "Ingen romlig koblet trafikkhendelse"],
+            articleIds: ["article:one"],
+            sourceItemIds: [],
+            rawRefs: [
+              {
+                type: "telemetry",
+                source: "datex_travel_time",
+                id: "e6-sluppen",
+                label: "DATEX reisetid",
+                observedAt: "2026-07-02T09:40:00.000Z",
+              },
+            ],
+            sourceConfidence: {
+              level: "likely",
+              label: "Sannsynlig",
+              score: 0.72,
+              rationale: "DATEX-reisetid støttes av en mulig nyhetssak.",
+            },
+          },
         ],
         heatmapCells: [
           {
@@ -1033,6 +1060,15 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
             affectedEventIds: [],
             confidence: "warning",
             reason: "DATEX viser ca. 6 min forsinkelse uten koblet trafikkhendelse.",
+            rawRefs: [
+              {
+                type: "telemetry",
+                source: "datex_travel_time",
+                id: "e6-sluppen",
+                label: "DATEX reisetid",
+                observedAt: "2026-07-02T09:40:00.000Z",
+              },
+            ],
           },
         ],
       }),
@@ -1092,6 +1128,49 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
       }),
     });
   });
+  await page.route("**/api/operations/raw/telemetry?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "e6-sluppen",
+            source: "datex_travel_time",
+            title: "E6 Okstadbakken - Sluppen",
+            updatedAt: "2026-07-02T09:40:20.000Z",
+            observedAt: "2026-07-02T09:40:00.000Z",
+            summary: "Sakte trafikk · 6 min forsinkelse",
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/operations/raw/telemetry/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        record: {
+          id: "e6-sluppen",
+          source: "datex_travel_time",
+          title: "E6 Okstadbakken - Sluppen",
+          updatedAt: "2026-07-02T09:40:20.000Z",
+          observedAt: "2026-07-02T09:40:00.000Z",
+          sourceUrl: "https://example.test/datex",
+          summary: "Sakte trafikk · 6 min forsinkelse",
+        },
+        payload: {
+          corridorId: "e6-sluppen",
+          delaySeconds: 360,
+          secret: "[redacted]",
+        },
+        payloadBytes: 1536,
+        redacted: true,
+        truncated: false,
+      }),
+    });
+  });
   await page.route("**/api/operations/raw/ai-runs**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -1113,6 +1192,18 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
   await expect(page.getByRole("heading", { name: "Normalisert payload" })).toBeVisible();
   await expect(page.getByText('"location": "Sluppen"')).toBeVisible();
   await expect(page.getByText('"delaySeconds": 360')).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+
+  await page.goto("/command/romlig");
+  await page.getByRole("link", { name: "DATEX reisetid" }).first().click();
+
+  await expect(page).toHaveURL(
+    /\/command\/radata\?telemetrySource=datex_travel_time&telemetryId=e6-sluppen/,
+  );
+  await expect(page.getByRole("heading", { name: "E6 Okstadbakken - Sluppen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Telemetripayload" })).toBeVisible();
+  await expect(page.getByText('"corridorId": "e6-sluppen"')).toBeVisible();
+  await expect(page.getByText('"secret": "[redacted]"')).toBeVisible();
   await expectNoHorizontalPageOverflow(page);
 });
 

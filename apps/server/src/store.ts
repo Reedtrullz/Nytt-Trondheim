@@ -55,6 +55,11 @@ import type {
   RawInspectorAiRunPage,
   RawInspectorAiRunSummary,
   RawInspectorSourceItemDetail,
+  RawInspectorTelemetryDetail,
+  RawInspectorTelemetryFilters,
+  RawInspectorTelemetryPage,
+  RawInspectorTelemetrySummary,
+  RawInspectorTelemetrySource,
   RoadCamera,
   RoadWeatherObservation,
   Situation,
@@ -252,6 +257,15 @@ export interface Store {
   listPushDeliveries(limit: number, login: string): Promise<PushDeliveryPage>;
   listSourceItems(filters: SourceItemFilters, login: string): Promise<SourceItemPage>;
   getRawSourceItem(id: string, login: string): Promise<RawInspectorSourceItemDetail | undefined>;
+  listRawTelemetry(
+    filters: RawInspectorTelemetryFilters,
+    login: string,
+  ): Promise<RawInspectorTelemetryPage>;
+  getRawTelemetryRecord(
+    source: RawInspectorTelemetrySource,
+    id: string,
+    login: string,
+  ): Promise<RawInspectorTelemetryDetail | undefined>;
   listRawAiRuns(filters: RawInspectorAiRunFilters, login: string): Promise<RawInspectorAiRunPage>;
   getRawAiRun(id: string, login: string): Promise<RawInspectorAiRunDetail | undefined>;
   listSpatialHeatmapCells(
@@ -599,6 +613,32 @@ type TelemetryHistoryPatternRow = {
   geometry: GeoJsonPoint | null;
 };
 
+type RawDatexTravelTimeRow = {
+  id: string;
+  name: string;
+  state: TrafficPulseCorridor["state"];
+  delay_seconds: number | string | null;
+  measurement_to: Date | string | null;
+  source_url: string;
+  payload: unknown;
+  updated_at: Date | string;
+};
+
+type RawDatexTravelTimeSummaryRow = Omit<RawDatexTravelTimeRow, "payload"> & {
+  updated_at_cursor: string;
+};
+
+type RawTrafficCounterSnapshotRow = {
+  point_id: string;
+  payload: unknown;
+  updated_at: Date | string;
+  geometry: GeoJsonPoint | null;
+};
+
+type RawTrafficCounterSummaryRow = RawTrafficCounterSnapshotRow & {
+  updated_at_cursor: string;
+};
+
 function telemetryHistorySummaryFromRow(
   row: TelemetryHistorySummaryRow | undefined,
 ): CommandCenterTelemetryHistorySummary["datexTravelTime"] {
@@ -616,6 +656,119 @@ function optionalNumber(value: number | string | null | undefined): number | und
   if (value === null || value === undefined) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+const datexTravelTimeStateLabels: Record<TrafficPulseCorridor["state"], string> = {
+  congested: "Kø",
+  free_flow: "Fri flyt",
+  slow: "Sakte trafikk",
+  stale: "Foreldet",
+};
+
+function telemetryPayloadString(payload: unknown, key: string): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function telemetryPayloadNumber(payload: unknown, key: string): number | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function datexTravelTimeSummary(row: Pick<RawDatexTravelTimeRow, "delay_seconds" | "state">) {
+  const delaySeconds = optionalNumber(row.delay_seconds);
+  const delayMinutes =
+    delaySeconds === undefined ? undefined : Math.max(1, Math.round(delaySeconds / 60));
+  return [
+    datexTravelTimeStateLabels[row.state] ?? row.state,
+    delayMinutes !== undefined ? `${delayMinutes} min forsinkelse` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function rawDatexTravelTimeSummaryFromRow(
+  row: RawDatexTravelTimeSummaryRow,
+): RawInspectorTelemetrySummary {
+  return {
+    id: row.id,
+    source: "datex_travel_time",
+    title: row.name,
+    updatedAt: isoString(row.updated_at),
+    ...(row.measurement_to ? { observedAt: isoString(row.measurement_to) } : {}),
+    sourceUrl: row.source_url,
+    summary: datexTravelTimeSummary(row),
+  };
+}
+
+function rawDatexTravelTimeDetailFromRow(row: RawDatexTravelTimeRow): RawInspectorTelemetryDetail {
+  const payload = sanitizeRawPayload(row.payload);
+  return {
+    record: {
+      id: row.id,
+      source: "datex_travel_time",
+      title: row.name,
+      updatedAt: isoString(row.updated_at),
+      ...(row.measurement_to ? { observedAt: isoString(row.measurement_to) } : {}),
+      sourceUrl: row.source_url,
+      summary: datexTravelTimeSummary(row),
+    },
+    payload: payload.value,
+    payloadBytes: payload.bytes,
+    redacted: payload.redacted,
+    truncated: payload.truncated,
+  };
+}
+
+function trafficCounterSummary(payload: unknown) {
+  const volume = telemetryPayloadNumber(payload, "volumeLastHour");
+  const anomalyRatio = telemetryPayloadNumber(payload, "anomalyRatio");
+  const coverage = telemetryPayloadNumber(payload, "coveragePercent");
+  return [
+    volume !== undefined ? `${volume} kjøretøy siste time` : undefined,
+    anomalyRatio !== undefined ? `${anomalyRatio.toFixed(1)}x normal trafikk` : undefined,
+    coverage !== undefined ? `${Math.round(coverage)} % dekning` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function rawTrafficCounterSummaryFromRow(
+  row: RawTrafficCounterSummaryRow,
+): RawInspectorTelemetrySummary {
+  return {
+    id: row.point_id,
+    source: "trafikkdata",
+    title: telemetryPayloadString(row.payload, "name") ?? row.point_id,
+    updatedAt: isoString(row.updated_at),
+    observedAt: telemetryPayloadString(row.payload, "updatedAt") ?? isoString(row.updated_at),
+    summary: trafficCounterSummary(row.payload),
+  };
+}
+
+function rawTrafficCounterDetailFromRow(
+  row: RawTrafficCounterSnapshotRow,
+): RawInspectorTelemetryDetail {
+  const payload = sanitizeRawPayload(row.payload);
+  const title = telemetryPayloadString(row.payload, "name") ?? row.point_id;
+  const observedAt = telemetryPayloadString(row.payload, "updatedAt") ?? isoString(row.updated_at);
+  return {
+    record: {
+      id: row.point_id,
+      source: "trafikkdata",
+      title,
+      updatedAt: isoString(row.updated_at),
+      observedAt,
+      summary: trafficCounterSummary(row.payload),
+      ...(row.geometry ? { geometry: row.geometry } : {}),
+    },
+    payload: payload.value,
+    payloadBytes: payload.bytes,
+    redacted: payload.redacted,
+    truncated: payload.truncated,
+  };
 }
 
 function delayDescription(seconds: number | undefined): string {
@@ -3494,6 +3647,22 @@ export class MemoryStore implements Store {
     );
   }
 
+  async listRawTelemetry(
+    filters: RawInspectorTelemetryFilters,
+  ): Promise<RawInspectorTelemetryPage> {
+    void filters;
+    return { items: [] };
+  }
+
+  async getRawTelemetryRecord(
+    source: RawInspectorTelemetrySource,
+    id: string,
+  ): Promise<RawInspectorTelemetryDetail | undefined> {
+    void source;
+    void id;
+    return undefined;
+  }
+
   async listRawAiRuns(filters: RawInspectorAiRunFilters): Promise<RawInspectorAiRunPage> {
     void filters;
     return { items: [] };
@@ -5181,6 +5350,140 @@ export class PgStore implements Store {
     void _login;
     const record = await this.getSourceItemRecord(id);
     return record ? rawSourceItemDetailFromRecord(record) : undefined;
+  }
+
+  async listRawTelemetry(
+    filters: RawInspectorTelemetryFilters,
+    _login: string,
+  ): Promise<RawInspectorTelemetryPage> {
+    void _login;
+    const limit = filters.limit ?? 20;
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const pageLimit = limit + 1;
+    const items: RawInspectorTelemetrySummary[] = [];
+    const sources = filters.source
+      ? [filters.source]
+      : (["datex_travel_time", "trafikkdata"] satisfies RawInspectorTelemetrySource[]);
+
+    if (sources.includes("datex_travel_time")) {
+      const params: unknown[] = [];
+      const where: string[] = [];
+      if (filters.q) {
+        params.push(`%${filters.q}%`);
+        where.push(
+          `(id ILIKE $${params.length}
+            OR name ILIKE $${params.length}
+            OR state ILIKE $${params.length}
+            OR source_url ILIKE $${params.length})`,
+        );
+      }
+      if (cursor) {
+        params.push(cursor.timestamp);
+        const timestampIndex = params.length;
+        if (cursor.id) {
+          params.push(cursor.id);
+          where.push(
+            `(updated_at < $${timestampIndex}
+              OR (updated_at = $${timestampIndex}
+                AND ('datex_travel_time:' || id) < $${params.length}))`,
+          );
+        } else {
+          where.push(`updated_at < $${timestampIndex}`);
+        }
+      }
+      params.push(pageLimit);
+      const result = await this.pool.query<RawDatexTravelTimeSummaryRow>(
+        `SELECT id, name, state, delay_seconds, measurement_to, source_url, updated_at,
+          to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_cursor
+         FROM datex_travel_times
+         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params,
+      );
+      items.push(...result.rows.map(rawDatexTravelTimeSummaryFromRow));
+    }
+
+    if (sources.includes("trafikkdata")) {
+      const params: unknown[] = [];
+      const where: string[] = [];
+      if (filters.q) {
+        params.push(`%${filters.q}%`);
+        where.push(
+          `(point_id ILIKE $${params.length}
+            OR COALESCE(payload->>'name', '') ILIKE $${params.length}
+            OR payload::text ILIKE $${params.length})`,
+        );
+      }
+      if (cursor) {
+        params.push(cursor.timestamp);
+        const timestampIndex = params.length;
+        if (cursor.id) {
+          params.push(cursor.id);
+          where.push(
+            `(updated_at < $${timestampIndex}
+              OR (updated_at = $${timestampIndex}
+                AND ('trafikkdata:' || point_id) < $${params.length}))`,
+          );
+        } else {
+          where.push(`updated_at < $${timestampIndex}`);
+        }
+      }
+      params.push(pageLimit);
+      const result = await this.pool.query<RawTrafficCounterSummaryRow>(
+        `SELECT point_id, payload, updated_at,
+          to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_cursor,
+          ST_AsGeoJSON(geometry)::json AS geometry
+         FROM traffic_counter_snapshots
+         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+         ORDER BY updated_at DESC, point_id DESC
+         LIMIT $${params.length}`,
+        params,
+      );
+      items.push(...result.rows.map(rawTrafficCounterSummaryFromRow));
+    }
+
+    const sorted = items.sort(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) ||
+        `${right.source}:${right.id}`.localeCompare(`${left.source}:${left.id}`),
+    );
+    const page = sorted.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: page,
+      nextCursor:
+        sorted.length > limit && last
+          ? encodeCursor(last.updatedAt, `${last.source}:${last.id}`)
+          : undefined,
+    };
+  }
+
+  async getRawTelemetryRecord(
+    source: RawInspectorTelemetrySource,
+    id: string,
+    _login: string,
+  ): Promise<RawInspectorTelemetryDetail | undefined> {
+    void _login;
+    if (source === "datex_travel_time") {
+      const result = await this.pool.query<RawDatexTravelTimeRow>(
+        `SELECT id, name, state, delay_seconds, measurement_to, source_url, payload, updated_at
+         FROM datex_travel_times
+         WHERE id = $1`,
+        [id],
+      );
+      const row = result.rows[0];
+      return row ? rawDatexTravelTimeDetailFromRow(row) : undefined;
+    }
+
+    const result = await this.pool.query<RawTrafficCounterSnapshotRow>(
+      `SELECT point_id, payload, updated_at, ST_AsGeoJSON(geometry)::json AS geometry
+       FROM traffic_counter_snapshots
+       WHERE point_id = $1`,
+      [id],
+    );
+    const row = result.rows[0];
+    return row ? rawTrafficCounterDetailFromRow(row) : undefined;
   }
 
   async listRawAiRuns(

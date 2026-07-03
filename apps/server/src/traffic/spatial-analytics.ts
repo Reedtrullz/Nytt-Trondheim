@@ -1,6 +1,7 @@
 import {
   sourceMixConfidenceSummary,
   type Article,
+  type SpatialRawDataRef,
   type SpatialHeatmapCell,
   type SpatialInvestigationQueueItem,
   type TrafficCounterSnapshot,
@@ -103,6 +104,28 @@ function trafficCounterPriority(
   if (anomalyRatio >= 3 || (counter.volumeLastHour ?? 0) >= 3000) return "critical";
   if (anomalyRatio >= 1.7 || (counter.volumeLastHour ?? 0) >= 1500) return "high";
   return "watch";
+}
+
+function rawRefForTravelTime(
+  travelTime: NonNullable<TrafficCorridorImpact["travelTime"]>,
+): SpatialRawDataRef {
+  return {
+    type: "telemetry",
+    source: "datex_travel_time",
+    id: travelTime.id,
+    label: "DATEX reisetid",
+    observedAt: travelTime.measurementTo ?? travelTime.updatedAt,
+  };
+}
+
+function rawRefForTrafficCounter(counter: TrafficCounterSnapshot): SpatialRawDataRef {
+  return {
+    type: "telemetry",
+    source: "trafikkdata",
+    id: counter.pointId,
+    label: "Trafikkdata teller",
+    observedAt: counter.updatedAt,
+  };
 }
 
 function articleTitleLookup(articles: Article[]) {
@@ -222,6 +245,7 @@ export function buildUnexplainedDelayCandidates(
           affectedEventIds: impact.affectedEventIds,
           confidence,
           reason,
+          rawRefs: [rawRefForTravelTime(travelTime)],
         },
       ];
     })
@@ -258,6 +282,7 @@ export function buildSpatialInvestigationQueue(
       evidence: delayEvidence(candidate, articleTitles),
       articleIds: candidate.matchedArticleIds,
       sourceItemIds: [],
+      ...(candidate.rawRefs?.length ? { rawRefs: candidate.rawRefs } : {}),
       ...(candidate.sourceConfidence ? { sourceConfidence: candidate.sourceConfidence } : {}),
       targetUrl: candidate.sourceUrl,
     };
@@ -303,6 +328,7 @@ export function buildSpatialInvestigationQueue(
         evidence: trafficCounterEvidence(counter),
         articleIds: [],
         sourceItemIds: [],
+        rawRefs: [rawRefForTrafficCounter(counter)],
         sourceConfidence: sourceMixConfidenceSummary(["trafikkdata"], {
           updatedAt: counter.updatedAt,
         }),

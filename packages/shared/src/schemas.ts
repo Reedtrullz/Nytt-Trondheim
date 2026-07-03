@@ -678,6 +678,15 @@ export const rawInspectorAiRunQuerySchema = z.object({
 
 export type RawInspectorAiRunQueryInput = z.infer<typeof rawInspectorAiRunQuerySchema>;
 
+export const rawInspectorTelemetrySourceSchema = z.enum(["datex_travel_time", "trafikkdata"]);
+
+export const rawInspectorTelemetryQuerySchema = z.object({
+  source: rawInspectorTelemetrySourceSchema.optional(),
+  q: z.string().trim().max(160).optional(),
+  cursor: z.string().trim().max(250).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
 export const trafficEventCategorySchema = z.enum([
   "roadworks",
   "accident",

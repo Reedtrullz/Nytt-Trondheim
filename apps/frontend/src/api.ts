@@ -31,6 +31,10 @@ import type {
   RawInspectorAiRunFilters,
   RawInspectorAiRunPage,
   RawInspectorSourceItemDetail,
+  RawInspectorTelemetryDetail,
+  RawInspectorTelemetryFilters,
+  RawInspectorTelemetryPage,
+  RawInspectorTelemetrySource,
   SessionPayload,
   Situation,
   SituationMapWorkspace,
@@ -285,6 +289,24 @@ export const api = {
     request<RawInspectorSourceItemDetail>(
       `/api/operations/raw/source-items/${encodeURIComponent(id)}`,
     ),
+  rawTelemetry: (source: RawInspectorTelemetrySource, id: string) =>
+    request<RawInspectorTelemetryDetail>(
+      `/api/operations/raw/telemetry/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
+    ),
+  rawTelemetryPage: (query: RawInspectorTelemetryFilters = { limit: 20 }) => {
+    const parameters = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (typeof value === "number") {
+        parameters.set(key, String(value));
+      } else if (typeof value === "string" && value.length > 0) {
+        parameters.set(key, value);
+      }
+    }
+    const search = parameters.toString();
+    return request<RawInspectorTelemetryPage>(
+      `/api/operations/raw/telemetry${search ? `?${search}` : ""}`,
+    );
+  },
   rawAiRuns: (query: RawInspectorAiRunFilters = { limit: 20 }) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

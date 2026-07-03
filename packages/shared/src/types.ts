@@ -369,6 +369,47 @@ export interface RawInspectorSourceItemDetail {
   truncated: boolean;
 }
 
+export type RawInspectorTelemetrySource = "datex_travel_time" | "trafikkdata";
+
+export interface RawInspectorTelemetryDetail {
+  record: {
+    id: string;
+    source: RawInspectorTelemetrySource;
+    title: string;
+    updatedAt: string;
+    observedAt?: string;
+    sourceUrl?: string;
+    summary?: string;
+    geometry?: Point;
+  };
+  payload: unknown;
+  payloadBytes: number;
+  redacted: boolean;
+  truncated: boolean;
+}
+
+export interface RawInspectorTelemetrySummary {
+  id: string;
+  source: RawInspectorTelemetrySource;
+  title: string;
+  updatedAt: string;
+  observedAt?: string;
+  sourceUrl?: string;
+  summary?: string;
+}
+
+export interface RawInspectorTelemetryPage {
+  items: RawInspectorTelemetrySummary[];
+  nextCursor?: string;
+}
+
+export interface RawInspectorTelemetryFilters {
+  source?: RawInspectorTelemetrySource;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export type AiAnalysisProfile = "standard" | "compact_recovery" | "brief_only_recovery";
 
 export interface AiAnalysisAttemptDiagnostics {

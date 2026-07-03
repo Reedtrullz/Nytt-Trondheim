@@ -10,6 +10,7 @@ import {
   type SourceConfidenceSummary,
   type SpatialHeatmapCell,
   type SpatialInvestigationQueueItem,
+  type SpatialRawDataRef,
   type TelemetryHistoryPattern,
   type UnexplainedDelayCandidate,
 } from "@nytt/shared";
@@ -345,6 +346,15 @@ function rawSourceItemHref(sourceItemId: string) {
   return `/command/radata?sourceItem=${encodeURIComponent(sourceItemId)}`;
 }
 
+function rawTelemetryHref(ref: SpatialRawDataRef) {
+  return `/command/radata?telemetrySource=${encodeURIComponent(ref.source)}&telemetryId=${encodeURIComponent(ref.id)}`;
+}
+
+function rawRefLabel(ref: SpatialRawDataRef) {
+  if (ref.source === "datex_travel_time") return ref.label || "DATEX reisetid";
+  return ref.label || "Trafikkdata";
+}
+
 function SourceItemLinks({ sourceItemIds }: { sourceItemIds?: string[] }) {
   const visibleIds = (sourceItemIds ?? []).slice(0, 3);
   if (visibleIds.length === 0) return null;
@@ -354,6 +364,22 @@ function SourceItemLinks({ sourceItemIds }: { sourceItemIds?: string[] }) {
       {visibleIds.map((sourceItemId, index) => (
         <Link key={sourceItemId} to={rawSourceItemHref(sourceItemId)}>
           Rådata {index + 1}
+        </Link>
+      ))}
+      {remaining > 0 ? <span>+{remaining} flere</span> : null}
+    </div>
+  );
+}
+
+function RawTelemetryLinks({ rawRefs }: { rawRefs?: SpatialRawDataRef[] }) {
+  const visibleRefs = (rawRefs ?? []).slice(0, 3);
+  if (visibleRefs.length === 0) return null;
+  const remaining = Math.max(0, (rawRefs?.length ?? 0) - visibleRefs.length);
+  return (
+    <div className="spatial-source-links" aria-label="Råtelemetri">
+      {visibleRefs.map((ref, index) => (
+        <Link key={`${ref.source}:${ref.id}`} to={rawTelemetryHref(ref)}>
+          {visibleRefs.length > 1 ? `${rawRefLabel(ref)} ${index + 1}` : rawRefLabel(ref)}
         </Link>
       ))}
       {remaining > 0 ? <span>+{remaining} flere</span> : null}
@@ -429,6 +455,7 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
                   <p>{delayText(candidate.delaySeconds)}</p>
                   <p>{candidate.reason}</p>
                   <p>{confidence.rationale}</p>
+                  <RawTelemetryLinks rawRefs={candidate.rawRefs} />
                 </article>
               </Popup>
             </Polyline>
@@ -506,6 +533,7 @@ function DelayCandidateRow({ candidate }: { candidate: UnexplainedDelayCandidate
           Åpne kilde
         </a>
       ) : null}
+      <RawTelemetryLinks rawRefs={candidate.rawRefs} />
     </article>
   );
 }
@@ -535,6 +563,7 @@ function InvestigationQueueItemRow({ item }: { item: SpatialInvestigationQueueIt
       <div className="spatial-investigation-actions">
         {item.articleIds.length > 0 ? <span>{item.articleIds.length} mulige saker</span> : null}
         <SourceItemLinks sourceItemIds={item.sourceItemIds} />
+        <RawTelemetryLinks rawRefs={item.rawRefs} />
         {sourceUrl ? (
           <a href={sourceUrl} rel="noreferrer" target="_blank">
             Åpne kilde

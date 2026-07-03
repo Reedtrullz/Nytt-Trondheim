@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import type { RawInspectorAiRunDetail, RawInspectorSourceItemDetail } from "@nytt/shared";
+import type {
+  RawInspectorAiRunDetail,
+  RawInspectorSourceItemDetail,
+  RawInspectorTelemetryDetail,
+} from "@nytt/shared";
 import { RawDataInspectorDashboard } from "./RawDataInspectorPage.js";
 
 const sourceItem: RawInspectorSourceItemDetail = {
@@ -66,6 +70,26 @@ const aiRun: RawInspectorAiRunDetail = {
   error: "JSON response was truncated",
 };
 
+const telemetryDetail: RawInspectorTelemetryDetail = {
+  record: {
+    id: "100141",
+    source: "datex_travel_time",
+    title: "E6 Okstadbakken - E6 Sluppenrampene",
+    updatedAt: "2026-07-02T09:40:20.000Z",
+    observedAt: "2026-07-02T09:40:00.000Z",
+    sourceUrl: "https://example.test/datex-travel-time",
+    summary: "Sakte trafikk · 6 min forsinkelse",
+  },
+  payload: {
+    id: "100141",
+    delaySeconds: 360,
+    token: "[redacted]",
+  },
+  payloadBytes: 512,
+  redacted: true,
+  truncated: false,
+};
+
 describe("RawDataInspectorDashboard", () => {
   it("renders source payload and AI run detail without mutation controls", () => {
     const html = renderToStaticMarkup(
@@ -75,6 +99,19 @@ describe("RawDataInspectorDashboard", () => {
           filters={{ run: "ai:one" }}
           selectedAiRun={aiRun}
           sourceItem={sourceItem}
+          telemetryDetail={telemetryDetail}
+          telemetryPage={{
+            items: [
+              {
+                id: "100141",
+                source: "datex_travel_time",
+                title: "E6 Okstadbakken - E6 Sluppenrampene",
+                updatedAt: "2026-07-02T09:40:20.000Z",
+                observedAt: "2026-07-02T09:40:00.000Z",
+                summary: "Sakte trafikk · 6 min forsinkelse",
+              },
+            ],
+          }}
         />
       </MemoryRouter>,
     );
@@ -84,6 +121,12 @@ describe("RawDataInspectorDashboard", () => {
     expect(html).toContain("Normalisert payload");
     expect(html).toContain("Rå payload");
     expect(html).toContain("deepseek-v4-flash");
+    expect(html).toContain("Telemetri");
+    expect(html).toContain("DATEX reisetid");
+    expect(html).toContain("E6 Okstadbakken - E6 Sluppenrampene");
+    expect(html).toContain("DATEX reisetid");
+    expect(html).toContain("Sakte trafikk · 6 min forsinkelse");
+    expect(html).toContain("Telemetripayload");
     expect(html).toContain("Kompakt gjenoppretting");
     expect(html).toContain("Full analyse feilet");
     expect(html).toContain("JSON response was truncated");
@@ -99,6 +142,8 @@ describe("RawDataInspectorDashboard", () => {
     );
 
     expect(html).toContain("Ingen AI-kjøringer matcher filtrene.");
+    expect(html).toContain("Ingen telemetri matcher filtrene.");
+    expect(html).toContain("Velg telemetri fra romlig analyse eller oppgi kilde og ID.");
     expect(html).toContain("Velg et kildeelement for råpayload.");
     expect(html).toContain("Velg en AI-kjøring for resultatpayload.");
   });
