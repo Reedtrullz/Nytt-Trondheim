@@ -2252,6 +2252,19 @@ test("command notification bridge shows Web Push readiness responsively", async 
                 href: "/situasjoner/road-one",
                 situationId: "road-one",
               },
+              {
+                kind: "source_audit",
+                label: "Kildeaudit: Statens vegvesen DATEX",
+                href: "/command/kilder?sources=datex&detail=datex",
+                sourceId: "datex",
+              },
+              {
+                kind: "source_item",
+                label: "Rådata: Statens vegvesen DATEX",
+                href: "/command/radata?sourceItem=source%3Adatex-one",
+                sourceId: "datex",
+                sourceItemId: "source:datex-one",
+              },
             ],
             publicSurface: {
               state: "visible",
@@ -2295,7 +2308,13 @@ test("command notification bridge shows Web Push readiness responsively", async 
             sourceLabels: ["Politiloggen"],
             matchedKeywords: ["voldshendelse"],
             reasons: ["Høyeffektsord i fersk sak."],
-            links: [],
+            links: [
+              {
+                kind: "external",
+                label: "Politiloggen",
+                href: "https://example.test/politiloggen/violence-one",
+              },
+            ],
             publicSurface: {
               state: "hidden",
               label: "Ikke vist på Bypuls",
@@ -2375,12 +2394,27 @@ test("command notification bridge shows Web Push readiness responsively", async 
     await expect(page.getByText("Steinsprang, vegen er stengt").first()).toBeVisible();
     await expect(page.getByText("Synlig på Bypuls").first()).toBeVisible();
     await expect(page.getByText("Sjekk rute nå · Oppdatert nå").first()).toBeVisible();
+    await expect(page.getByText("1 audit · 1 rådata").first()).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /Kildeaudit.*Statens vegvesen DATEX/ }),
+    ).toHaveAttribute("href", "/command/kilder?sources=datex&detail=datex");
+    await expect(
+      page.getByRole("link", { name: /Rådata.*Statens vegvesen DATEX/ }),
+    ).toHaveAttribute("href", "/command/radata?sourceItem=source%3Adatex-one");
     await expect(page.getByText("Ingen abonnent").first()).toBeVisible();
     await expect(page.getByRole("group", { name: "Levering" })).toBeVisible();
-    await page.getByLabel("Filtre").getByLabel("Ingen abonnent").click();
     const candidateList = page.getByLabel("Varselkandidater");
+    const traceFilters = page.getByRole("group", { name: "Sporbarhet" });
+    await expect(traceFilters).toBeVisible();
+    await traceFilters.getByLabel("Rådata").click();
+    await expect(candidateList.getByText("1 vist av 2")).toBeVisible();
+    await expect(candidateList.getByText("Steinsprang, vegen er stengt")).toBeVisible();
+    await expect(candidateList.getByText("Voldshendelse på Lade")).not.toBeVisible();
+    await traceFilters.getByLabel("Rådata").click();
+    await page.getByLabel("Filtre").getByLabel("Ingen abonnent").click();
     await expect(candidateList.getByText("1 vist av 2")).toBeVisible();
     await expect(candidateList.getByText("Voldshendelse på Lade")).toBeVisible();
+    await expect(candidateList.getByText("Kun ekstern kilde")).toBeVisible();
     await expect(candidateList.getByText("Steinsprang, vegen er stengt")).not.toBeVisible();
     await expectNoHorizontalPageOverflow(page);
   }

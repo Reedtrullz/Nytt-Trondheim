@@ -66,6 +66,19 @@ const page: NotificationTriggerPage = {
           href: "/situasjoner/road-one",
           situationId: "road-one",
         },
+        {
+          kind: "source_audit",
+          label: "Kildeaudit: Statens vegvesen DATEX",
+          href: "/command/kilder?sources=datex&detail=datex",
+          sourceId: "datex",
+        },
+        {
+          kind: "source_item",
+          label: "Rådata: Statens vegvesen DATEX",
+          href: "/command/radata?sourceItem=source%3Adatex-one",
+          sourceId: "datex",
+          sourceItemId: "source:datex-one",
+        },
       ],
       publicSurface: {
         state: "visible",
@@ -148,11 +161,17 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Bypuls");
     expect(html).toContain("Synlig på Bypuls");
     expect(html).toContain("Sjekk rute nå · Oppdatert nå");
+    expect(html).toContain("Sporbarhet");
+    expect(html).toContain("1 audit · 1 rådata");
     expect(html).not.toContain("Ikke sendt");
     expect(html).toContain("Push-varsel er sendt for denne utløseren");
     expect(html).toContain("Har offentlig kildegrunnlag");
     expect(html).toContain("stengt");
     expect(html).toContain("/situasjoner/road-one");
+    expect(html).toContain("Kildeaudit");
+    expect(html).toContain("/command/kilder?sources=datex&amp;detail=datex");
+    expect(html).toContain("Rådata");
+    expect(html).toContain("/command/radata?sourceItem=source%3Adatex-one");
   });
 
   it("renders an honest empty state", () => {
@@ -270,5 +289,46 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Ingen abonnent");
     expect(html).toContain("Ingen aktive push-abonnement matcher alvorlighet og type.");
     expect(html).not.toContain("Steinsprang, vegen er stengt</strong>");
+  });
+
+  it("can render a trace-state-filtered operator list", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <NotificationTriggerCandidatesDashboard
+          filters={{ limit: 30, traceStates: ["raw_evidence"] }}
+          onFiltersChange={vi.fn()}
+          page={{
+            ...page,
+            summary: {
+              ...page.summary,
+              total: 2,
+            },
+            items: [
+              page.items[0]!,
+              {
+                ...page.items[0]!,
+                id: "notification:article:external-one",
+                title: "Politiet oppdaterer om voldshendelse",
+                body: "Kun ekstern kilde i denne fixture-kandidaten.",
+                links: [
+                  {
+                    kind: "external",
+                    label: "Politiloggen",
+                    href: "https://example.test/politiloggen",
+                  },
+                ],
+              },
+            ],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Sporbarhet");
+    expect(html).toContain("Rådata");
+    expect(html).toContain("1 vist av 2");
+    expect(html).toContain("Steinsprang, vegen er stengt");
+    expect(html).toContain("1 audit · 1 rådata");
+    expect(html).not.toContain("Politiet oppdaterer om voldshendelse</strong>");
   });
 });

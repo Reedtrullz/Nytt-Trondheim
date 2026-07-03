@@ -188,12 +188,13 @@ describe("frontend source item API helpers", () => {
     await api.notificationTriggers({
       kinds: ["public_safety", "traffic_disruption"],
       severities: ["critical", "warning"],
+      traceStates: ["raw_evidence", "source_audit"],
       q: "røyk",
       limit: 20,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/operations/notification-triggers?kinds=public_safety%2Ctraffic_disruption&severities=critical%2Cwarning&q=r%C3%B8yk&limit=20",
+      "/api/operations/notification-triggers?kinds=public_safety%2Ctraffic_disruption&severities=critical%2Cwarning&traceStates=raw_evidence%2Csource_audit&q=r%C3%B8yk&limit=20",
       expect.objectContaining({ credentials: "include" }),
     );
   });

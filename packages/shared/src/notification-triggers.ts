@@ -7,6 +7,8 @@ import type {
   NotificationTriggerPage,
   NotificationTriggerQuery,
   NotificationTriggerSeverity,
+  NotificationTriggerTraceState,
+  OperationsTimelineEventLink,
   PublicNotificationSignalHighlight,
   PushDeliveryListItem,
   PushSubscriptionSummary,
@@ -59,6 +61,15 @@ export type NotificationSubscriptionPreference = Pick<
   PushSubscriptionSummary,
   "enabled" | "kinds" | "minSeverity"
 >;
+
+export function notificationTriggerTraceState(
+  candidate: Pick<NotificationTriggerCandidate, "links">,
+): NotificationTriggerTraceState {
+  if (candidate.links.some((link) => link.kind === "source_item")) return "raw_evidence";
+  if (candidate.links.some((link) => link.kind === "source_audit")) return "source_audit";
+  if (candidate.links.some((link) => link.kind === "external")) return "external_only";
+  return "missing";
+}
 
 const highImpactRules: NotificationTriggerRule[] = [
   {
@@ -596,6 +607,45 @@ function sourceLabelsForSituation(situation: Situation): string[] {
   ]).filter(Boolean);
 }
 
+function sourceAuditLinksForSources(sourceIds: SourceId[]): OperationsTimelineEventLink[] {
+  return unique(sourceIds).map((source) => ({
+    kind: "source_audit",
+    label: `Kildeaudit: ${sourceIdLabel(source)}`,
+    href: `/command/kilder?sources=${encodeURIComponent(source)}&detail=${encodeURIComponent(
+      source,
+    )}`,
+    sourceId: source,
+  }));
+}
+
+function sourceItemTraceLinksForSituation(situation: Situation): OperationsTimelineEventLink[] {
+  const sourceItemSources = new Map<string, SourceId | undefined>();
+  const add = (sourceItemId: string | undefined, source?: SourceId) => {
+    if (!sourceItemId || sourceItemSources.has(sourceItemId)) return;
+    sourceItemSources.set(sourceItemId, source);
+  };
+
+  for (const summary of situation.provenanceSummary ?? []) {
+    for (const sourceItemId of summary.sourceItemIds ?? []) add(sourceItemId, summary.sourceIds[0]);
+  }
+  for (const feature of situation.features) {
+    for (const sourceItemId of feature.properties.sourceItemIds ?? []) {
+      add(sourceItemId, feature.properties.source);
+    }
+  }
+  for (const entry of situation.timeline) {
+    for (const sourceItemId of entry.sourceItemIds ?? []) add(sourceItemId, entry.source);
+  }
+
+  return [...sourceItemSources.entries()].slice(0, 12).map(([sourceItemId, source]) => ({
+    kind: "source_item",
+    label: `Rådata: ${source ? sourceIdLabel(source) : "kildeelement"}`,
+    href: `/command/radata?sourceItem=${encodeURIComponent(sourceItemId)}`,
+    ...(source ? { sourceId: source } : {}),
+    sourceItemId,
+  }));
+}
+
 function articlesBySituation(articles: Article[]): Map<string, Article[]> {
   const map = new Map<string, Article[]>();
   for (const article of articles) {
@@ -704,6 +754,8 @@ function situationCandidate(
         href: `/situasjoner/${encodeURIComponent(situation.id)}`,
         situationId: situation.id,
       },
+      ...sourceAuditLinksForSources(sourceIds),
+      ...sourceItemTraceLinksForSituation(situation),
     ],
     publicSurface: publicSurfaceFromHighlight(
       publicSituationSignalHighlight(homeSummaryFromSituation(situation), generatedAt),
@@ -771,7 +823,10 @@ function articleCandidate(
         : undefined,
       `Høyeffektspråk: ${matchedKeywords.slice(0, 4).join(", ")}.`,
     ].filter((reason): reason is string => Boolean(reason)),
-    links: [{ kind: "external", label: article.sourceLabel, href: article.url }],
+    links: [
+      ...sourceAuditLinksForSources([article.source]),
+      { kind: "external", label: article.sourceLabel, href: article.url },
+    ],
     publicSurface: publicSurfaceFromHighlight(
       publicArticleSignalHighlight(article, generatedAt),
       "Artikkelkandidaten er under offentlig visningsterskel eller mangler public-safe signalgrunnlag.",
@@ -785,6 +840,10 @@ function candidateMatchesQuery(
 ) {
   if (filters.kinds?.length && !filters.kinds.includes(candidate.kind)) return false;
   if (filters.severities?.length && !filters.severities.includes(candidate.severity)) return false;
+  if (filters.traceStates?.length) {
+    const traceState = notificationTriggerTraceState(candidate);
+    if (!filters.traceStates.includes(traceState)) return false;
+  }
   if (filters.q) {
     const query = normalizeText(filters.q);
     const haystack = normalizeText(

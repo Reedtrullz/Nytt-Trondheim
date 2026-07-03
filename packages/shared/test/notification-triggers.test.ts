@@ -5,6 +5,7 @@ import {
   buildPublicNotificationSignalHighlights,
   buildNotificationTriggerPage,
   filterNotificationTriggerPageByDeliveryStates,
+  notificationTriggerTraceState,
   notificationSubscriptionMatchesCandidate,
   publicNotificationTriggerGuidance,
 } from "../src/index.js";
@@ -165,6 +166,72 @@ describe("notification trigger candidates", () => {
       ]),
     });
     expect(page.items[0]?.links[0]).toMatchObject({ href: "/situasjoner/situation-one" });
+    expect(page.items[0]?.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "source_audit",
+          href: "/command/kilder?sources=datex&detail=datex",
+          sourceId: "datex",
+        }),
+      ]),
+    );
+  });
+
+  it("links situation notification candidates to operator source evidence", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [
+        situation({
+          timeline: [
+            {
+              id: "timeline-one",
+              situationId: "situation-one",
+              timestamp: "2026-07-02T08:58:00.000Z",
+              kind: "source_update",
+              title: "DATEX oppdatert",
+              detail: "Vegen er fortsatt stengt.",
+              sourceLabel: "Vegvesen DATEX",
+              source: "datex",
+              sourceUrl: "https://example.test/datex",
+              official: true,
+              provenance: "official",
+              sourceItemIds: ["source:datex-one"],
+            },
+          ],
+          provenanceSummary: [
+            {
+              provenance: "official",
+              label: "Offisiell",
+              sourceIds: ["datex"],
+              confidence: { level: "confirmed", score: 0.9 },
+              sourceItemIds: ["source:datex-one"],
+            },
+          ],
+        }),
+      ],
+      articles: [],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "source_audit",
+          label: "Kildeaudit: Statens vegvesen DATEX",
+          href: "/command/kilder?sources=datex&detail=datex",
+          sourceId: "datex",
+        }),
+        expect.objectContaining({
+          kind: "source_item",
+          label: "Rådata: Statens vegvesen DATEX",
+          href: "/command/radata?sourceItem=source%3Adatex-one",
+          sourceId: "datex",
+          sourceItemId: "source:datex-one",
+        }),
+      ]),
+    );
+    expect(page.items[0]?.links.filter((link) => link.kind === "source_item")).toHaveLength(1);
+    expect(notificationTriggerTraceState(page.items[0]!)).toBe("raw_evidence");
   });
 
   it("builds public-safe signal highlights from home situation summaries", () => {
@@ -551,5 +618,69 @@ describe("notification trigger candidates", () => {
       kind: "public_safety",
       severity: "critical",
     });
+    expect(page.items[0]?.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "source_audit",
+          href: "/command/kilder?sources=nrk&detail=nrk",
+          sourceId: "nrk",
+        }),
+        expect.objectContaining({
+          kind: "external",
+          href: "https://example.test/article-one",
+        }),
+      ]),
+    );
+  });
+
+  it("supports trace-state filters for command center views", () => {
+    const situations = [
+      situation({
+        timeline: [
+          {
+            id: "timeline-one",
+            situationId: "situation-one",
+            timestamp: "2026-07-02T08:58:00.000Z",
+            kind: "source_update",
+            title: "DATEX oppdatert",
+            detail: "Vegen er fortsatt stengt.",
+            sourceLabel: "Vegvesen DATEX",
+            source: "datex",
+            sourceUrl: "https://example.test/datex",
+            official: true,
+            provenance: "official",
+            sourceItemIds: ["source:datex-one"],
+          },
+        ],
+      }),
+    ];
+    const articles = [
+      article({
+        id: "article-violence",
+        title: "Én person kritisk skadet etter voldshendelse på Lade",
+        excerpt: "Politiet bekrefter at en mann er kritisk skadet.",
+        category: "Krim",
+      }),
+    ];
+
+    const rawPage = buildNotificationTriggerPage({
+      situations,
+      articles,
+      generatedAt: "2026-07-02T09:00:00.000Z",
+      filters: { traceStates: ["raw_evidence"], limit: 10 },
+    });
+    const auditPage = buildNotificationTriggerPage({
+      situations,
+      articles,
+      generatedAt: "2026-07-02T09:00:00.000Z",
+      filters: { traceStates: ["source_audit"], limit: 10 },
+    });
+
+    expect(rawPage.items.map((item) => item.id)).toEqual(["notification:situation:situation-one"]);
+    expect(rawPage.summary.total).toBe(1);
+    expect(auditPage.items.map((item) => item.id)).toEqual([
+      "notification:article:article-violence",
+    ]);
+    expect(auditPage.summary.total).toBe(1);
   });
 });

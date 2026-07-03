@@ -1000,11 +1000,18 @@ export const notificationTriggerDeliveryStateSchema = z.enum([
   "failed",
   "suppressed",
 ]);
+export const notificationTriggerTraceStateSchema = z.enum([
+  "raw_evidence",
+  "source_audit",
+  "external_only",
+  "missing",
+]);
 
 export const notificationTriggerQuerySchema = z.object({
   kinds: csvListSchema(notificationTriggerKindSchema),
   severities: csvListSchema(notificationTriggerSeveritySchema),
   deliveryStates: csvListSchema(notificationTriggerDeliveryStateSchema),
+  traceStates: csvListSchema(notificationTriggerTraceStateSchema),
   q: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });

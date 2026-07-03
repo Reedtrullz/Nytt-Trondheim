@@ -8,13 +8,16 @@ import type {
   NotificationPushStatus,
   NotificationTriggerQueryInput,
   NotificationTriggerSeverity,
+  NotificationTriggerTraceState,
   PushDeliveryPage,
 } from "@nytt/shared";
+import { notificationTriggerTraceState, notificationTriggerTraceStateLabels } from "@nytt/shared";
 import { api } from "../api.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 
 interface NotificationTriggerFilters extends NotificationTriggerQueryInput {
   deliveryStates?: NotificationTriggerDeliveryState[];
+  traceStates?: NotificationTriggerTraceState[];
   selected?: string;
 }
 
@@ -64,6 +67,13 @@ const deliveryStateOptions: Array<{ value: NotificationTriggerDeliveryState; lab
   { value: "candidate_only", label: "Kun kandidat" },
 ];
 
+const traceStateOptions: Array<{ value: NotificationTriggerTraceState; label: string }> = [
+  { value: "raw_evidence", label: notificationTriggerTraceStateLabels.raw_evidence },
+  { value: "source_audit", label: notificationTriggerTraceStateLabels.source_audit },
+  { value: "external_only", label: notificationTriggerTraceStateLabels.external_only },
+  { value: "missing", label: notificationTriggerTraceStateLabels.missing },
+];
+
 function time(value?: string) {
   return value
     ? new Intl.DateTimeFormat("nb-NO", {
@@ -76,6 +86,38 @@ function time(value?: string) {
 
 function percent(value: number) {
   return `${Math.round(value * 100)} %`;
+}
+
+function linkKindLabel(kind: NotificationTriggerCandidate["links"][number]["kind"]) {
+  switch (kind) {
+    case "source_item":
+      return "Rådata";
+    case "source_audit":
+      return "Kildeaudit";
+    case "situation":
+      return "Situasjon";
+    case "private_workspace":
+      return "Arbeidsrom";
+    case "external":
+      return "Ekstern";
+  }
+}
+
+function evidenceTraceSummary(candidate: NotificationTriggerCandidate) {
+  const auditCount = candidate.links.filter((link) => link.kind === "source_audit").length;
+  const rawCount = candidate.links.filter((link) => link.kind === "source_item").length;
+  if (auditCount > 0 || rawCount > 0) {
+    return [
+      auditCount > 0 ? `${auditCount} audit` : undefined,
+      rawCount > 0 ? `${rawCount} rådata` : "ingen rådata",
+    ]
+      .filter((item): item is string => Boolean(item))
+      .join(" · ");
+  }
+  const traceState = notificationTriggerTraceState(candidate);
+  return traceState === "external_only"
+    ? "Kun ekstern kilde"
+    : notificationTriggerTraceStateLabels[traceState];
 }
 
 function parseList<T extends string>(value: string | null, allowed: readonly T[]): T[] | undefined {
@@ -102,6 +144,10 @@ function parseFilters(search: string): NotificationTriggerFilters {
     parameters.get("deliveryStates"),
     deliveryStateOptions.map((option) => option.value),
   );
+  const traceStates = parseList(
+    parameters.get("traceStates"),
+    traceStateOptions.map((option) => option.value),
+  );
   const q = parameters.get("q")?.trim() || undefined;
   const selected = parameters.get("trigger")?.trim() || undefined;
   const parsedLimit = Number(parameters.get("limit"));
@@ -110,6 +156,7 @@ function parseFilters(search: string): NotificationTriggerFilters {
     ...(severities ? { severities } : {}),
     ...(kinds ? { kinds } : {}),
     ...(deliveryStates ? { deliveryStates } : {}),
+    ...(traceStates ? { traceStates } : {}),
     ...(q ? { q } : {}),
     ...(selected ? { selected } : {}),
   };
@@ -121,6 +168,7 @@ function buildSearch(filters: NotificationTriggerFilters) {
   if (filters.kinds?.length) parameters.set("kinds", filters.kinds.join(","));
   if (filters.deliveryStates?.length)
     parameters.set("deliveryStates", filters.deliveryStates.join(","));
+  if (filters.traceStates?.length) parameters.set("traceStates", filters.traceStates.join(","));
   if (filters.q) parameters.set("q", filters.q);
   if (filters.limit) parameters.set("limit", String(filters.limit));
   if (filters.selected) parameters.set("trigger", filters.selected);
@@ -133,6 +181,7 @@ function queryFromFilters(filters: NotificationTriggerFilters): NotificationTrig
     ...(filters.severities?.length ? { severities: filters.severities } : {}),
     ...(filters.kinds?.length ? { kinds: filters.kinds } : {}),
     ...(filters.deliveryStates?.length ? { deliveryStates: filters.deliveryStates } : {}),
+    ...(filters.traceStates?.length ? { traceStates: filters.traceStates } : {}),
     ...(filters.q ? { q: filters.q } : {}),
   };
 }
@@ -198,6 +247,10 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
               : ""}
           </dd>
         </div>
+        <div>
+          <dt>Sporbarhet</dt>
+          <dd>{evidenceTraceSummary(candidate)}</dd>
+        </div>
       </dl>
       <section>
         <h3>Offentlig flate</h3>
@@ -236,18 +289,21 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
         <div className="coverage-bundle-member-list">
           {candidate.links.map((link) => {
             const href = link.kind === "external" ? safeExternalUrl(link.href) : link.href;
+            const key = `${link.kind}:${
+              link.sourceItemId ?? link.sourceId ?? link.situationId ?? link.href ?? link.label
+            }`;
             return href ? (
               <a
                 href={href}
-                key={`${link.kind}:${link.label}`}
+                key={key}
                 target={link.kind === "external" ? "_blank" : undefined}
                 rel={link.kind === "external" ? "noreferrer" : undefined}
               >
-                <span>{link.kind === "external" ? "Ekstern" : "Nytt"}</span>
+                <span>{linkKindLabel(link.kind)}</span>
                 <strong>{link.label}</strong>
               </a>
             ) : (
-              <div className="coverage-bundle-member-linkless" key={`${link.kind}:${link.label}`}>
+              <div className="coverage-bundle-member-linkless" key={key}>
                 <strong>{link.label}</strong>
               </div>
             );
@@ -384,9 +440,21 @@ export function NotificationTriggerCandidatesDashboard({
   filters: NotificationTriggerFilters;
   onFiltersChange: (filters: NotificationTriggerFilters) => void;
 }) {
-  const visibleItems = filters.deliveryStates?.length
-    ? page.items.filter((candidate) => filters.deliveryStates?.includes(candidate.deliveryState))
-    : page.items;
+  const visibleItems = page.items.filter((candidate) => {
+    if (
+      filters.deliveryStates?.length &&
+      !filters.deliveryStates.includes(candidate.deliveryState)
+    ) {
+      return false;
+    }
+    if (
+      filters.traceStates?.length &&
+      !filters.traceStates.includes(notificationTriggerTraceState(candidate))
+    ) {
+      return false;
+    }
+    return true;
+  });
   const selectedCandidate =
     visibleItems.find((item) => item.id === filters.selected) ?? visibleItems[0];
 
@@ -487,6 +555,23 @@ export function NotificationTriggerCandidatesDashboard({
               </label>
             ))}
           </fieldset>
+          <fieldset className="notification-trigger-filter">
+            <legend>Sporbarhet</legend>
+            {traceStateOptions.map((option) => (
+              <label key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={filters.traceStates?.includes(option.value) ?? false}
+                  onChange={() =>
+                    update({
+                      traceStates: toggle(filters.traceStates, option.value),
+                    })
+                  }
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </fieldset>
         </aside>
         <section className="notification-trigger-list" aria-label="Varselkandidater">
           <div className="coverage-bundle-list-heading">
@@ -523,6 +608,7 @@ export function NotificationTriggerCandidatesDashboard({
                   <span>{percent(candidate.score)}</span>
                   <span>{deliveryStateLabels[candidate.deliveryState]}</span>
                   <span>{candidate.publicSurface.label}</span>
+                  <span>{evidenceTraceSummary(candidate)}</span>
                 </div>
               </button>
             ))

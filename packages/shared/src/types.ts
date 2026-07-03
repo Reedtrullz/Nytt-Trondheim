@@ -849,6 +849,18 @@ export type NotificationTriggerDeliveryState =
   | "sent"
   | "failed"
   | "suppressed";
+export type NotificationTriggerTraceState =
+  | "raw_evidence"
+  | "source_audit"
+  | "external_only"
+  | "missing";
+
+export const notificationTriggerTraceStateLabels = {
+  raw_evidence: "Rådata",
+  source_audit: "Kildeaudit",
+  external_only: "Ekstern",
+  missing: "Mangler spor",
+} as const satisfies Record<NotificationTriggerTraceState, string>;
 
 export interface NotificationTriggerPublicSurface {
   state: "visible" | "hidden";
@@ -933,6 +945,7 @@ export interface NotificationTriggerQuery {
   kinds?: NotificationTriggerKind[];
   severities?: NotificationTriggerSeverity[];
   deliveryStates?: NotificationTriggerDeliveryState[];
+  traceStates?: NotificationTriggerTraceState[];
   q?: string;
   limit?: number;
 }
