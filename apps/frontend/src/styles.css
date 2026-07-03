@@ -6062,6 +6062,106 @@ button {
   font-weight: 750;
 }
 
+.spatial-blackspot-strip {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.spatial-blackspot-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.spatial-blackspot-heading h2 {
+  margin: 3px 0 0;
+  font: 28px/1.1 var(--serif);
+}
+
+.spatial-blackspot-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.spatial-blackspot-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.spatial-blackspot-list article {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--line);
+  background: var(--page);
+}
+
+.spatial-blackspot-list article.priority-high {
+  border-left-color: #c07818;
+}
+
+.spatial-blackspot-list article.priority-critical {
+  border-left-color: var(--rust);
+}
+
+.spatial-blackspot-rank {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  background: var(--ink);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.spatial-blackspot-list h3 {
+  margin: 3px 0 4px;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.spatial-blackspot-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.spatial-blackspot-tags,
+.spatial-blackspot-list .spatial-source-links {
+  grid-column: 1 / -1;
+}
+
+.spatial-blackspot-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.spatial-blackspot-tags span {
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .spatial-analytics-map {
   height: min(60vh, 560px);
   min-height: 420px;
@@ -10553,6 +10653,15 @@ button {
 
   .spatial-correlation-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .spatial-blackspot-list {
+    grid-template-columns: 1fr;
+  }
+
+  .spatial-blackspot-heading {
+    display: grid;
+    justify-items: start;
   }
 
   .source-audit-row,

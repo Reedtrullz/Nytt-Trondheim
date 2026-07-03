@@ -1516,6 +1516,19 @@ test("command spatial analytics links heatmap evidence to raw source payloads", 
   await expect(spatialModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
   await expect(spatialModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Analysefilter" })).toBeVisible();
+  const blackSpotStrip = page.locator(".spatial-blackspot-strip");
+  await expect(
+    blackSpotStrip.getByRole("heading", { name: "Svartpunkt-kandidater" }),
+  ).toBeVisible();
+  await expect(blackSpotStrip.getByText("1 prioritert")).toBeVisible();
+  await expect(blackSpotStrip.getByRole("heading", { name: "63.398, 10.400" })).toBeVisible();
+  await expect(
+    blackSpotStrip.getByText("Nyhetsdekning og rådata peker mot samme område."),
+  ).toBeVisible();
+  await expect(blackSpotStrip.getByText("2 kilder")).toBeVisible();
+  await expect(blackSpotStrip.getByText("nyhet + trafikkhendelse")).toBeVisible();
+  await expect(blackSpotStrip.getByText("1 råspor")).toBeVisible();
+  await expect(blackSpotStrip.getByRole("link", { name: "Rådata 1" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Signaler å undersøke" }).first()).toBeVisible();
   const correlationBrief = page.locator(".spatial-correlation-brief");
   await expect(

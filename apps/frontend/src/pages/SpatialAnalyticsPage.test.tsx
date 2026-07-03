@@ -408,9 +408,19 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Redaksjonell dekning støttes av kontekstsignaler");
     expect(html).toContain("API-levert kildevurdering");
     expect(html).toContain("Varmepunkter");
+    expect(html).toContain("Varmekartbeslutning");
+    expect(html).toContain("Svartpunkt-kandidater");
+    expect(html).toContain("1 prioritert");
+    expect(html).toContain("63.390, 10.390");
+    expect(html).toContain("Gjentakende signal over flere dager");
+    expect(html).toContain("nyhet + trafikkhendelse");
+    expect(html).toContain("3 råspor");
+    expect(html).not.toContain(
+      "Lavere prioritet, men stedfestet nok til å følge i videre analyse.",
+    );
     expect(html).toContain("Høy prioritet");
     expect(html).toContain("Bekreftet tillit");
-    expect(html).toContain("4 observasjoner");
+    expect(html).toContain("63.390, 10.390 · 4 observasjoner");
     expect(html).toContain("Først sett 30. juni 2026");
     expect(html).toContain("3 aktive dager");
     expect(html).toContain("Tidsprofil");
@@ -472,6 +482,7 @@ describe("SpatialAnalyticsDashboard", () => {
     expect(html).toContain("Ingen prioriterte romlige signaler");
     expect(html).toContain("Ingen gjentakende DATEX- eller Trafikkdata-signaler");
     expect(html).toContain("Ingen stedfestede observasjoner");
+    expect(html).toContain("Ingen varmepunkter har nok tetthet");
   });
 
   it("renders stale live status when the spatial sources lag", () => {

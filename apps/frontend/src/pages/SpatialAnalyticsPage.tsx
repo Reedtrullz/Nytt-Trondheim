@@ -234,6 +234,50 @@ function hotspotConfidence(cell: SpatialHeatmapCell): SourceConfidenceSummary {
   return sourceMixConfidenceSummary([...sources], { updatedAt: cell.lastSeenAt });
 }
 
+function heatmapCellCoordinateLabel(cell: SpatialHeatmapCell) {
+  return `${cell.center.lat.toFixed(3)}, ${cell.center.lng.toFixed(3)}`;
+}
+
+function blackSpotSignalTags(cell: SpatialHeatmapCell) {
+  const tags: string[] = [];
+  const sourceCount = new Set(cell.sourceIds).size;
+  if (cell.activeDayCount > 1) tags.push(activeDaysLabel(cell.activeDayCount));
+  if (sourceCount > 1) {
+    tags.push(`${sourceCount} kilder`);
+  }
+  if (cell.articleCount > 0 && cell.trafficEventCount > 0) {
+    tags.push("nyhet + trafikkhendelse");
+  } else if (cell.articleCount > 0) {
+    tags.push(`${cell.articleCount} nyhetssaker`);
+  } else if (cell.trafficEventCount > 0) {
+    tags.push(`${cell.trafficEventCount} trafikkhendelser`);
+  }
+  if (cell.sourceItemCount > 0) tags.push(`${cell.sourceItemCount} råspor`);
+  if (cell.maxSeverity && cell.maxSeverity !== "low") {
+    tags.push(`${severityLabels[cell.maxSeverity]} alvorlighet`);
+  }
+  if (cell.count >= 4) tags.push(`${cell.count} observasjoner`);
+  return [...new Set(tags)].slice(0, 5);
+}
+
+function blackSpotDecisionReason(cell: SpatialHeatmapCell) {
+  const priority = hotspotPriority(cell);
+  if (priority === "critical") {
+    return "Kritisk svartpunkt-kandidat med tett eller alvorlig observasjonsmønster.";
+  }
+  if (cell.activeDayCount >= 3) {
+    return "Gjentakende signal over flere dager. Bør kontrolleres mot kart, rådata og relevante saker.";
+  }
+  if (cell.articleCount > 0 && cell.sourceItemCount > 0) {
+    return "Nyhetsdekning og rådata peker mot samme område.";
+  }
+  return "Lavere prioritet, men stedfestet nok til å følge i videre analyse.";
+}
+
+function prioritizedCountLabel(count: number) {
+  return `${count} ${count === 1 ? "prioritert" : "prioriterte"}`;
+}
+
 function delayConfidence(candidate: UnexplainedDelayCandidate): SourceConfidenceSummary {
   if (candidate.sourceConfidence) return candidate.sourceConfidence;
   const sources = new Set<string>(["datex_travel_time"]);
@@ -951,6 +995,55 @@ function TelemetryPatternsSection({ payload }: { payload: CommandCenterSpatialAn
   );
 }
 
+function BlackSpotDecisionStrip({ cells }: { cells: SpatialHeatmapCell[] }) {
+  const candidates = cells.filter((cell) => hotspotPriority(cell) !== "watch").slice(0, 4);
+  return (
+    <section className="spatial-blackspot-strip" aria-labelledby="spatial-blackspot-heading">
+      <div className="spatial-blackspot-heading">
+        <div>
+          <p className="label">Varmekartbeslutning</p>
+          <h2 id="spatial-blackspot-heading">Svartpunkt-kandidater</h2>
+        </div>
+        <span>{prioritizedCountLabel(candidates.length)}</span>
+      </div>
+      {candidates.length === 0 ? (
+        <p className="spatial-empty-state">
+          Ingen varmepunkter har nok tetthet, gjentakelse eller tverrkildegrunnlag til å løftes som
+          svartpunkt-kandidat i dette vinduet.
+        </p>
+      ) : (
+        <div className="spatial-blackspot-list">
+          {candidates.map((cell, index) => {
+            const priority = hotspotPriority(cell);
+            const confidence = hotspotConfidence(cell);
+            return (
+              <article className={`priority-${priority}`} key={cell.id}>
+                <div className="spatial-blackspot-rank">{index + 1}</div>
+                <div>
+                  <p className={`spatial-hotspot-priority priority-${priority}`}>
+                    {hotspotPriorityLabels[priority]}
+                  </p>
+                  <h3>{heatmapCellCoordinateLabel(cell)}</h3>
+                  <p className={`spatial-hotspot-confidence confidence-${confidence.level}`}>
+                    {confidence.label} tillit · {confidenceScoreLabel(confidence)}
+                  </p>
+                  <small>{blackSpotDecisionReason(cell)}</small>
+                </div>
+                <div className="spatial-blackspot-tags">
+                  {blackSpotSignalTags(cell).map((tag) => (
+                    <span key={tag}>{tag}</span>
+                  ))}
+                </div>
+                <SourceItemLinks sourceItemIds={cell.sourceItemIds} />
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function InvestigationQueueSection({ payload }: { payload: CommandCenterSpatialAnalyticsPayload }) {
   return (
     <section
@@ -1026,7 +1119,9 @@ function HeatmapCellsSection({ cells }: { cells: SpatialHeatmapCell[] }) {
                 <p className={`spatial-hotspot-confidence confidence-${confidence.level}`}>
                   {confidence.label} tillit · {confidenceScoreLabel(confidence)}
                 </p>
-                <strong>{cell.count} observasjoner</strong>
+                <strong>
+                  {heatmapCellCoordinateLabel(cell)} · {cell.count} observasjoner
+                </strong>
                 <span>
                   {cell.articleCount} saker · {cell.trafficEventCount} trafikkhendelser · sist sett{" "}
                   {time(cell.lastSeenAt)}
@@ -1219,6 +1314,7 @@ export function SpatialAnalyticsDashboard({
           <span>Bekreftet/sannsynlig</span>
         </article>
       </section>
+      <BlackSpotDecisionStrip cells={rankedHeatmapCells} />
       <DashboardGrid
         ariaLabel="Romlig analysemoduler"
         configMode="toggle"
