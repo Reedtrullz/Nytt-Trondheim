@@ -995,6 +995,8 @@ function summaryForCandidates(
     critical: items.filter((item) => item.severity === "critical").length,
     warning: items.filter((item) => item.severity === "warning").length,
     watch: items.filter((item) => item.severity === "watch").length,
+    cityPulseVisible: items.filter((item) => item.publicSurface.state === "visible").length,
+    commandOnly: items.filter((item) => item.publicSurface.state === "hidden").length,
     officialBacked: items.filter((item) =>
       item.sourceIds.some((source) => officialSources.has(source)),
     ).length,

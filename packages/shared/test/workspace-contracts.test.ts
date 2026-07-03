@@ -256,6 +256,8 @@ describe("workspace contract schemas", () => {
         critical: 1,
         warning: 0,
         watch: 0,
+        cityPulseVisible: 1,
+        commandOnly: 0,
         officialBacked: 1,
         highConfidence: 1,
       },

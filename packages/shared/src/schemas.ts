@@ -1067,6 +1067,8 @@ export const notificationTriggerSummarySchema = z
     critical: z.number().int().nonnegative().max(100_000),
     warning: z.number().int().nonnegative().max(100_000),
     watch: z.number().int().nonnegative().max(100_000),
+    cityPulseVisible: z.number().int().nonnegative().max(100_000),
+    commandOnly: z.number().int().nonnegative().max(100_000),
     officialBacked: z.number().int().nonnegative().max(100_000),
     highConfidence: z.number().int().nonnegative().max(100_000),
   })

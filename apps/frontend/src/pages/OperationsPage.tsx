@@ -281,9 +281,6 @@ function NotificationBridgeWidget({ page }: { page?: NotificationTriggerPage }) 
     ? activeCandidates.slice(0, 3)
     : page.items.slice(0, 3);
   const pushStatus = page.pushStatus;
-  const publicVisibleCount = page.items.filter(
-    (candidate) => candidate.publicSurface.state === "visible",
-  ).length;
 
   return (
     <div className="notification-bridge-widget">
@@ -294,9 +291,9 @@ function NotificationBridgeWidget({ page }: { page?: NotificationTriggerPage }) 
           <small>{page.summary.warning} varsel</small>
         </article>
         <article>
-          <span>Offentlig</span>
-          <strong>{publicVisibleCount}</strong>
-          <small>{page.summary.officialBacked} kildebacket</small>
+          <span>Bypuls</span>
+          <strong>{page.summary.cityPulseVisible}</strong>
+          <small>{page.summary.commandOnly} kun Command Center</small>
         </article>
         <article>
           <span>Push</span>

@@ -2540,6 +2540,8 @@ test("command notification bridge shows Web Push readiness responsively", async 
           critical: 1,
           warning: 1,
           watch: 0,
+          cityPulseVisible: 1,
+          commandOnly: 1,
           officialBacked: 1,
           highConfidence: 1,
         },
@@ -2726,6 +2728,10 @@ test("command notification bridge shows Web Push readiness responsively", async 
     await page.goto("/command/varsler");
     await expect(page.getByRole("heading", { name: "Varselutløsere" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Mangler match" })).toBeVisible();
+    await expect(page.locator(".notification-triggers-summary").getByText("Bypuls")).toBeVisible();
+    await expect(
+      page.locator(".notification-triggers-summary").getByText("Kun Command Center"),
+    ).toBeVisible();
     await expect(page.getByText("1/2")).toBeVisible();
     await expect(page.getByText("Kildehelse kontrollert")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Siste leveranser" })).toBeVisible();

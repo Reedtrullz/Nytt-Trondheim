@@ -899,6 +899,8 @@ export interface NotificationTriggerSummary {
   critical: number;
   warning: number;
   watch: number;
+  cityPulseVisible: number;
+  commandOnly: number;
   officialBacked: number;
   highConfidence: number;
 }

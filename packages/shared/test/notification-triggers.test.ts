@@ -183,6 +183,8 @@ describe("notification trigger candidates", () => {
     });
 
     expect(page.summary.total).toBe(1);
+    expect(page.summary.cityPulseVisible).toBe(1);
+    expect(page.summary.commandOnly).toBe(0);
     expect(page.items[0]).toMatchObject({
       kind: "traffic_disruption",
       severity: "critical",
@@ -244,6 +246,8 @@ describe("notification trigger candidates", () => {
     });
 
     expect(page.summary.total).toBe(1);
+    expect(page.summary.cityPulseVisible).toBe(0);
+    expect(page.summary.commandOnly).toBe(1);
     expect(page.summary.officialBacked).toBe(0);
     expect(page.items[0]).toMatchObject({
       id: "notification:spatial:investigation:delay:e6-south:100141",
@@ -618,6 +622,8 @@ describe("notification trigger candidates", () => {
 
     expect(blockedPage.filters.deliveryStates).toEqual(["no_subscribers"]);
     expect(blockedPage.summary.total).toBe(1);
+    expect(blockedPage.summary.cityPulseVisible).toBe(1);
+    expect(blockedPage.summary.commandOnly).toBe(0);
     expect(blockedPage.items).toHaveLength(1);
     expect(blockedPage.items[0]).toMatchObject({
       id: "notification:article:article-violence",
@@ -637,6 +643,10 @@ describe("notification trigger candidates", () => {
     expect(page.items[0]).toMatchObject({
       id: "notification:spatial:investigation:delay:e6-south:100141",
       publicSurface: expect.objectContaining({ state: "hidden" }),
+    });
+    expect(page.summary).toMatchObject({
+      cityPulseVisible: 0,
+      commandOnly: 1,
     });
 
     const viewerOnlyPage = applyNotificationDeliveryStates(page, {

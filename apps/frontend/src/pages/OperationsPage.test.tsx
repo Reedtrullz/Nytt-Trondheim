@@ -140,6 +140,8 @@ const notificationTriggers: NotificationTriggerPage = {
     critical: 1,
     warning: 1,
     watch: 0,
+    cityPulseVisible: 1,
+    commandOnly: 1,
     officialBacked: 1,
     highConfidence: 1,
   },
@@ -286,6 +288,8 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Varselbro");
     expect(html).toContain("Høyeffektskandidater");
     expect(html).toContain("Mangler match");
+    expect(html).toContain("Bypuls");
+    expect(html).toContain("1 kun Command Center");
     expect(html).toContain("1 klare · 1 sendt");
     expect(html).toContain("Kollisjon stenger E6");
     expect(html).toContain("Vegvesen DATEX, Adresseavisen");

@@ -610,6 +610,14 @@ export function NotificationTriggerCandidatesDashboard({
           <span>Kritiske</span>
         </article>
         <article>
+          <strong>{page.summary.cityPulseVisible}</strong>
+          <span>Bypuls</span>
+        </article>
+        <article>
+          <strong>{page.summary.commandOnly}</strong>
+          <span>Kun Command Center</span>
+        </article>
+        <article>
           <strong>{page.summary.officialBacked}</strong>
           <span>Offentlig støttet</span>
         </article>
