@@ -950,6 +950,7 @@ export interface Situation {
   title: string;
   summary: string;
   status: SituationLifecycle;
+  publicVisibility?: "public" | "command_center";
   verificationStatus: "Foreløpig fra rapportering" | "Offentlig bekreftet";
   importance: "high" | "normal";
   updatedAt: string;

@@ -22,6 +22,8 @@ export const situationTypeSchema = z.enum([
 
 export const situationLifecycleSchema = z.enum(["preliminary", "active", "resolved", "dismissed"]);
 
+export const situationPublicVisibilitySchema = z.enum(["public", "command_center"]);
+
 export const sourceConfidenceLevelSchema = z.enum([
   "confirmed",
   "likely",

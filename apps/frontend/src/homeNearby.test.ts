@@ -295,4 +295,75 @@ describe("home nearby story model", () => {
       title: "Ras kan stenge vegen i flere uker",
     });
   });
+
+  it("filters public map items by latest article or situation update time", () => {
+    const freshArticle = article({
+      id: "fresh-article",
+      title: "Fersk trafikkhendelse ved Sluppen",
+      category: "Transport",
+      publishedAt: "2026-07-02T09:45:00.000Z",
+      location: { lat: 63.39, lng: 10.4, label: "Sluppen" },
+    });
+    const staleArticle = article({
+      id: "stale-article",
+      title: "Gammel hendelse på Lade",
+      publishedAt: "2026-07-01T07:00:00.000Z",
+      location: { lat: 63.443, lng: 10.447, label: "Lade" },
+    });
+    const stalePrimaryFreshUpdate = article({
+      id: "stale-primary",
+      title: "Oppdatert sak ved Moholt",
+      publishedAt: "2026-07-01T06:00:00.000Z",
+      location: { lat: 63.413, lng: 10.433, label: "Moholt" },
+    });
+    const freshUpdate = article({
+      id: "fresh-update",
+      title: "Ny oppdatering ved Moholt",
+      publishedAt: "2026-07-02T09:30:00.000Z",
+      location: { lat: 63.413, lng: 10.433, label: "Moholt" },
+    });
+
+    const items = nearbyStoryItemsForGroupsAndSituations(
+      [
+        {
+          id: "fresh-group",
+          primary: freshArticle,
+          articles: [freshArticle],
+          sourceLabels: ["NRK Trøndelag"],
+        },
+        {
+          id: "stale-group",
+          primary: staleArticle,
+          articles: [staleArticle],
+          sourceLabels: ["Adresseavisen"],
+        },
+        {
+          id: "updated-group",
+          primary: stalePrimaryFreshUpdate,
+          articles: [stalePrimaryFreshUpdate, freshUpdate],
+          sourceLabels: ["Adresseavisen", "NRK Trøndelag"],
+        },
+      ],
+      [
+        situation({
+          id: "fresh-situation",
+          updatedAt: "2026-07-02T09:15:00.000Z",
+          createdAt: "2026-07-01T08:00:00.000Z",
+        }),
+        situation({
+          id: "stale-situation",
+          updatedAt: "2026-07-01T07:30:00.000Z",
+          createdAt: "2026-07-01T06:00:00.000Z",
+        }),
+      ],
+      { limit: 10, from: "2026-07-02T08:00:00.000Z" },
+    );
+
+    expect(items.map((item) => item.id)).toEqual([
+      "situation:fresh-situation",
+      "fresh-group",
+      "updated-group",
+    ]);
+    expect(items.map((item) => item.markerLabel)).toEqual(["1", "2", "3"]);
+  });
 });

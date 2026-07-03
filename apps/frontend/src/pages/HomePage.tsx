@@ -634,6 +634,7 @@ function NearbyRail({
   onTimeWindowChange,
   timeWindow,
   timeWindowLabel,
+  timeWindowFrom,
 }: {
   articles: Article[];
   data: BootstrapPayload;
@@ -641,6 +642,7 @@ function NearbyRail({
   localFocus?: HomeLocalFocusPoint;
   onTimeWindowChange: (timeWindow: HomeTimeWindow) => void;
   timeWindow: HomeTimeWindow;
+  timeWindowFrom?: string;
   timeWindowLabel?: string;
 }) {
   const allNearby = useMemo(
@@ -648,8 +650,9 @@ function NearbyRail({
       nearbyStoryItemsForGroupsAndSituations(groups, data.situations, {
         limit: Number.MAX_SAFE_INTEGER,
         localFocus,
+        from: timeWindowFrom,
       }),
-    [data.situations, groups, localFocus],
+    [data.situations, groups, localFocus, timeWindowFrom],
   );
   const nearby = useMemo(() => allNearby.slice(0, 4), [allNearby]);
   const mapNearby = useMemo(() => allNearby.slice(0, 24), [allNearby]);
@@ -1335,6 +1338,7 @@ export function HomePage({
           localFocus={activeLocalFocus}
           onTimeWindowChange={(nextWindow) => updateFilters({ timeWindow: nextWindow })}
           timeWindow={timeWindow}
+          timeWindowFrom={timeWindowFrom}
           timeWindowLabel={timeWindow === "all" ? undefined : homeTimeWindowLabels[timeWindow]}
           data={initialData}
         />

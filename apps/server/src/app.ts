@@ -16,6 +16,7 @@ import {
   commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
   emailLoginRequestSchema,
+  isPublicSituation,
   lifecycleInputSchema,
   noteInputSchema,
   notificationTriggerQuerySchema,
@@ -637,6 +638,18 @@ function inferredTimelineProvenance(entry: TimelineEntry): Provenance {
   return entry.official ? "official" : "reporting_estimate";
 }
 
+function isPrivateTimelineEntry(entry: TimelineEntry): boolean {
+  return (
+    entry.kind === "private_annotation" ||
+    entry.privateAnnotationId !== undefined ||
+    inferredTimelineProvenance(entry) === "private_annotation"
+  );
+}
+
+function viewerSafeTimeline(timeline: TimelineEntry[]): TimelineEntry[] {
+  return timeline.filter((entry) => !isPrivateTimelineEntry(entry));
+}
+
 function timelineEntryMatchesWorkspaceQuery(
   entry: TimelineEntry,
   query: ReturnType<typeof workspaceMapQuerySchema.parse>,
@@ -717,12 +730,17 @@ function viewerSafeWorkspace(workspace: SituationWorkspace): SituationWorkspace 
       features: workspace.situation.features.filter(
         (feature) => !isPrivateAnnotationFeature(feature),
       ),
+      timeline: viewerSafeTimeline(workspace.situation.timeline),
       saved: false,
     },
     tasks: [],
     notes: [],
     attachments: [],
   };
+}
+
+function canReadSituation(req: express.Request, situation: Situation): boolean {
+  return req.user?.role === "owner" || isPublicSituation(situation);
 }
 
 function sourceIdsForSituation(situation: Situation, sourceItems: SourceItem[]): Set<SourceId> {
@@ -1328,7 +1346,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/situations", async (req, res, next) => {
     try {
       const query = situationQuerySchema.parse(req.query);
-      res.json(await store.listSituations(query, currentLogin(req)));
+      res.json(
+        await store.listSituations(
+          { ...query, publicOnly: req.user?.role !== "owner" },
+          currentLogin(req),
+        ),
+      );
     } catch (error) {
       next(error);
     }
@@ -1347,7 +1370,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
             };
       const login = currentLogin(req);
       const includeDismissed = effectiveQuery.statuses?.includes("dismissed") ?? false;
-      const situations = await store.listSituations({ includeDismissed, limit: 100 }, login);
+      const situations = await store.listSituations(
+        { includeDismissed, limit: 100, publicOnly: req.user?.role !== "owner" },
+        login,
+      );
       const workspaceRows = await Promise.all(
         situations.items.map(async (situation) => {
           const [workspace, sourceItems] = await Promise.all([
@@ -1432,6 +1458,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         res.status(404).json({ error: "Situasjonen finnes ikke." });
         return;
       }
+      if (!canReadSituation(req, workspace.situation)) {
+        res.status(404).json({ error: "Situasjonen finnes ikke." });
+        return;
+      }
       const sourceItems = await store.listSituationSourceItems(req.params.id, currentLogin(req));
       const visibleWorkspace =
         req.user?.role === "owner" ? workspace : viewerSafeWorkspace(workspace);
@@ -1448,7 +1478,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
-      res.json(workspace.situation.timeline);
+      if (!canReadSituation(req, workspace.situation)) {
+        return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      }
+      const visibleWorkspace =
+        req.user?.role === "owner" ? workspace : viewerSafeWorkspace(workspace);
+      res.json(visibleWorkspace.situation.timeline);
     } catch (error) {
       next(error);
     }
@@ -1458,6 +1493,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      if (!canReadSituation(req, workspace.situation)) {
+        return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      }
       res.json(workspace.relatedArticles);
     } catch (error) {
       next(error);
@@ -1468,6 +1506,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const workspace = await store.getWorkspace(req.params.id, currentLogin(req));
       if (!workspace) return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      if (!canReadSituation(req, workspace.situation)) {
+        return void res.status(404).json({ error: "Situasjonen finnes ikke." });
+      }
       res.json(await store.listSituationSourceItems(req.params.id, currentLogin(req)));
     } catch (error) {
       next(error);

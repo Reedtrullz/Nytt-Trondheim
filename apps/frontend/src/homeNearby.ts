@@ -52,6 +52,12 @@ interface NearbyArticleGroup {
   sourceLabels: string[];
 }
 
+interface NearbyStoryOptions {
+  limit?: number;
+  localFocus?: HomeLocalFocusPoint;
+  from?: string;
+}
+
 const categoryPriority = {
   Hendelser: 60,
   Krim: 54,
@@ -136,6 +142,45 @@ function locatedArticle(group: NearbyArticleGroup): Article | undefined {
     ...group.articles.filter((article) => article.id !== group.primary.id),
   ].filter((article) => latLngFromLonLat(article.location?.lng, article.location?.lat));
   return located[0];
+}
+
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : undefined;
+}
+
+function lowerBoundMs(from: string | undefined): number | undefined {
+  return timestampMs(from);
+}
+
+function groupLatestTimestampMs(group: NearbyArticleGroup): number | undefined {
+  const timestamps = group.articles
+    .map((article) => timestampMs(article.publishedAt))
+    .filter((value): value is number => value !== undefined);
+  return timestamps.length > 0 ? Math.max(...timestamps) : undefined;
+}
+
+function groupWithinWindow(group: NearbyArticleGroup, from: string | undefined): boolean {
+  const lowerBound = lowerBoundMs(from);
+  if (lowerBound === undefined) return true;
+  const latest = groupLatestTimestampMs(group);
+  return latest !== undefined && latest >= lowerBound;
+}
+
+function situationTimestampMs(situation: HomeSituationSummary): number | undefined {
+  const updatedAt = timestampMs(situation.updatedAt);
+  const createdAt = timestampMs(situation.createdAt);
+  if (updatedAt === undefined) return createdAt;
+  if (createdAt === undefined) return updatedAt;
+  return Math.max(updatedAt, createdAt);
+}
+
+function situationWithinWindow(situation: HomeSituationSummary, from: string | undefined): boolean {
+  const lowerBound = lowerBoundMs(from);
+  if (lowerBound === undefined) return true;
+  const timestamp = situationTimestampMs(situation);
+  return timestamp !== undefined && timestamp >= lowerBound;
 }
 
 function sourceLabelFor(group: NearbyArticleGroup): string {
@@ -272,65 +317,68 @@ function rankNearbyItems(
 
 export function nearbyStoryItemsForGroups(
   groups: NearbyArticleGroup[],
-  { limit = 4, localFocus }: { limit?: number; localFocus?: HomeLocalFocusPoint } = {},
+  { limit = 4, localFocus, from }: NearbyStoryOptions = {},
 ): NearbyStoryItem[] {
-  const items = groups.flatMap((group) => {
-    const locationArticle = locatedArticle(group);
-    const position = latLngFromLonLat(
-      locationArticle?.location?.lng,
-      locationArticle?.location?.lat,
-    );
-    if (!position || !locationArticle?.location) return [];
-    const representative = group.articles.find((article) => article.situationId) ?? group.primary;
-    const kind = nearbyKind(representative);
-    const copy = relevanceCopy(kind);
-    const sourceConfidence = sourceConfidenceForGroup(group);
-    const verification = verificationForGroup(group);
-    const distanceKm = localFocus
-      ? distanceKmBetween(localFocus, {
-          lat: locationArticle.location.lat,
-          lng: locationArticle.location.lng,
-        })
-      : undefined;
-    return [
-      {
-        id: group.id,
-        article: group.primary,
-        situationId: situationIdFor(group),
-        position,
-        markerLabel: "",
-        title: group.primary.title,
-        locationLabel: locationArticle.location.label,
-        sourceLabel: sourceLabelFor(group),
-        category: group.primary.category,
-        publishedAt: group.primary.publishedAt,
-        kind,
-        score: Math.max(
-          ...group.articles.map((article) => nearbyScore(article, nearbyKind(article))),
-        ),
-        sourceConfidence,
-        ...(verification ? { verification } : {}),
-        ...(distanceKm !== undefined
-          ? {
-              distanceKm,
-              withinLocalRadius: distanceKm <= (localFocus?.radiusKm ?? 10),
-            }
-          : {}),
-        ...copy,
-      },
-    ];
-  });
+  const items = groups
+    .filter((group) => groupWithinWindow(group, from))
+    .flatMap((group) => {
+      const locationArticle = locatedArticle(group);
+      const position = latLngFromLonLat(
+        locationArticle?.location?.lng,
+        locationArticle?.location?.lat,
+      );
+      if (!position || !locationArticle?.location) return [];
+      const representative = group.articles.find((article) => article.situationId) ?? group.primary;
+      const kind = nearbyKind(representative);
+      const copy = relevanceCopy(kind);
+      const sourceConfidence = sourceConfidenceForGroup(group);
+      const verification = verificationForGroup(group);
+      const distanceKm = localFocus
+        ? distanceKmBetween(localFocus, {
+            lat: locationArticle.location.lat,
+            lng: locationArticle.location.lng,
+          })
+        : undefined;
+      return [
+        {
+          id: group.id,
+          article: group.primary,
+          situationId: situationIdFor(group),
+          position,
+          markerLabel: "",
+          title: group.primary.title,
+          locationLabel: locationArticle.location.label,
+          sourceLabel: sourceLabelFor(group),
+          category: group.primary.category,
+          publishedAt: group.primary.publishedAt,
+          kind,
+          score: Math.max(
+            ...group.articles.map((article) => nearbyScore(article, nearbyKind(article))),
+          ),
+          sourceConfidence,
+          ...(verification ? { verification } : {}),
+          ...(distanceKm !== undefined
+            ? {
+                distanceKm,
+                withinLocalRadius: distanceKm <= (localFocus?.radiusKm ?? 10),
+              }
+            : {}),
+          ...copy,
+        },
+      ];
+    });
   return rankNearbyItems(items, { limit, localFocus });
 }
 
 export function nearbyStoryItemsForGroupsAndSituations(
   groups: NearbyArticleGroup[],
   situations: HomeSituationSummary[] = [],
-  { limit = 4, localFocus }: { limit?: number; localFocus?: HomeLocalFocusPoint } = {},
+  { limit = 4, localFocus, from }: NearbyStoryOptions = {},
 ): NearbyStoryItem[] {
   const articleItems = nearbyStoryItemsForGroups(groups, {
     limit: Number.MAX_SAFE_INTEGER,
     localFocus,
+    from,
   });
   const coveredSituationIds = new Set(
     articleItems.flatMap((item) => (item.situationId ? [item.situationId] : [])),
@@ -338,6 +386,7 @@ export function nearbyStoryItemsForGroupsAndSituations(
   const situationItems = situations.flatMap((situation) => {
     if (situation.status !== "preliminary" && situation.status !== "active") return [];
     if (coveredSituationIds.has(situation.id)) return [];
+    if (!situationWithinWindow(situation, from)) return [];
     const item = situationItem(situation, localFocus);
     return item ? [item] : [];
   });

@@ -5,6 +5,7 @@ export * from "./article-bundles.js";
 export * from "./incident-text.js";
 export * from "./source-confidence.js";
 export * from "./source-labels.js";
+export * from "./situation-publication.js";
 export * from "./situation-activation-policy.js";
 export * from "./morning-brief.js";
 export * from "./notification-triggers.js";

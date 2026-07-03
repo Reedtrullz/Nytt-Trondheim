@@ -99,6 +99,7 @@ import {
   activationPolicyForSource,
   bootstrapWithMorningBrief,
   buildNotificationTriggerPage,
+  isPublicSituation,
   sampleArticles,
   sampleBootstrap,
   sampleNotes,
@@ -130,6 +131,7 @@ export interface SituationFilters {
   status?: Situation["status"];
   saved?: boolean;
   includeDismissed?: boolean;
+  publicOnly?: boolean;
   cursor?: string;
   limit?: number;
 }
@@ -3240,7 +3242,11 @@ export class MemoryStore implements Store {
   async getBootstrap(): Promise<BootstrapPayload> {
     const articles = await this.listArticles({ scope: "trondheim", limit: 40 });
     const situations = [...this.situations.values()]
-      .filter((situation) => situation.status === "preliminary" || situation.status === "active")
+      .filter(
+        (situation) =>
+          isPublicSituation(situation) &&
+          (situation.status === "preliminary" || situation.status === "active"),
+      )
       .sort(
         (left, right) =>
           right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
@@ -3286,7 +3292,9 @@ export class MemoryStore implements Store {
         enrichArticlesWithSituations(
           page,
           [...this.situations.values()].filter(
-            (situation) => situation.status === "preliminary" || situation.status === "active",
+            (situation) =>
+              isPublicSituation(situation) &&
+              (situation.status === "preliminary" || situation.status === "active"),
           ),
         ),
       ),
@@ -3332,7 +3340,7 @@ export class MemoryStore implements Store {
     filters: NotificationTriggerQueryInput,
   ): Promise<NotificationTriggerPage> {
     const [situations, articles] = await Promise.all([
-      this.listSituations({ includeDismissed: false, limit: 100 }),
+      this.listSituations({ includeDismissed: false, limit: 100, publicOnly: true }),
       this.listArticles({ limit: 500 }),
     ]);
     return buildNotificationTriggerPage({
@@ -3696,6 +3704,7 @@ export class MemoryStore implements Store {
     const items = [...this.situations.values()]
       .filter(
         (situation) =>
+          (!filters.publicOnly || isPublicSituation(situation)) &&
           ((!filters.status && (filters.includeDismissed || situation.status !== "dismissed")) ||
             situation.status === filters.status) &&
           (!filters.saved || this.savedSituations.has(situation.id)) &&
@@ -3994,6 +4003,7 @@ export class PgStore implements Store {
       `SELECT payload
        FROM situations
        WHERE status IN ('preliminary', 'active')
+         AND COALESCE(payload->>'publicVisibility', 'public') = 'public'
          AND EXISTS (
            SELECT 1
            FROM jsonb_array_elements_text(COALESCE(payload->'relatedArticleIds', '[]'::jsonb)) related(id)
@@ -4027,6 +4037,7 @@ export class PgStore implements Store {
          payload->>'locationLabel' AS "locationLabel"
        FROM situations
        WHERE status IN ('preliminary', 'active')
+         AND COALESCE(payload->>'publicVisibility', 'public') = 'public'
        ORDER BY updated_at DESC, id DESC
        LIMIT $1`,
       [limit],
@@ -4927,7 +4938,7 @@ export class PgStore implements Store {
     login: string,
   ): Promise<NotificationTriggerPage> {
     const [situations, articles] = await Promise.all([
-      this.listSituations({ includeDismissed: false, limit: 100 }, login),
+      this.listSituations({ includeDismissed: false, limit: 100, publicOnly: true }, login),
       this.listArticles({ limit: 500 }, login),
     ]);
     return buildNotificationTriggerPage({
@@ -5701,6 +5712,9 @@ export class PgStore implements Store {
       where.push("s.status <> 'dismissed'");
     }
     if (filters.saved) where.push("ss.situation_id IS NOT NULL");
+    if (filters.publicOnly) {
+      where.push("COALESCE(s.payload->>'publicVisibility', 'public') = 'public'");
+    }
     if (filters.cursor) {
       const cursor = decodeCursor(filters.cursor);
       params.push(cursor.timestamp);

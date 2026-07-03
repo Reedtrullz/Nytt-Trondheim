@@ -11,7 +11,7 @@ import { buildSituationExplanation, createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { loadConfig, type EmailMessage } from "../src/config.js";
-import { PgStore } from "../src/store.js";
+import { PgStore, type Store } from "../src/store.js";
 import { sampleSituation } from "@nytt/shared";
 import type {
   Article,
@@ -158,6 +158,30 @@ async function ownerAgent() {
   const agent = request.agent(app);
   const session = await agent.get("/api/session").expect(200);
   return { agent, csrf: session.body.csrfToken as string };
+}
+
+async function loginViewer(runtime: Awaited<ReturnType<typeof testAppWithEmail>>) {
+  const grant = await runtime.store.grantUserAccess(
+    {
+      displayName: "Timeline Viewer",
+      email: "timeline-viewer@example.test",
+    },
+    "owner",
+  );
+  const agent = request.agent(runtime.app);
+  await agent
+    .get(`/auth/email/callback?token=${encodeURIComponent(grant.invite.token)}`)
+    .expect(302)
+    .expect("Location", "/");
+  return agent;
+}
+
+function addMemorySituation(store: Store, situation: Situation): void {
+  const memoryStore = store as unknown as { situations?: Map<string, Situation> };
+  if (!memoryStore.situations) {
+    throw new Error("Expected MemoryStore-backed test runtime.");
+  }
+  memoryStore.situations.set(situation.id, structuredClone(situation));
 }
 
 describe("private situation API", () => {
@@ -540,6 +564,167 @@ describe("private situation API", () => {
       .post("/api/situations/skogbrann-bymarka/exports")
       .set("X-CSRF-Token", session.body.csrfToken as string)
       .expect(403);
+  });
+
+  it("keeps private timeline entries out of viewer situation endpoints", async () => {
+    const publicEntry = {
+      id: "timeline-public",
+      situationId: sampleSituation.id,
+      timestamp: "2026-06-15T07:00:00.000Z",
+      kind: "source_update",
+      title: "Offentlig oppdatering",
+      detail: "Kan vises for lesere.",
+      sourceLabel: "NRK Trøndelag",
+      source: "nrk",
+      sourceUrl: "https://example.test/public",
+      official: false,
+    } satisfies Situation["timeline"][number];
+    const privateAnnotationEntry = {
+      id: "timeline-private-annotation",
+      situationId: sampleSituation.id,
+      timestamp: "2026-06-15T07:05:00.000Z",
+      kind: "private_annotation",
+      title: "Privat kartmarkering",
+      detail: "Intern observasjon for Command Center.",
+      sourceLabel: "Privat markering",
+      source: "private_annotations",
+      sourceUrl: "",
+      official: false,
+      provenance: "private_annotation",
+      privateAnnotationId: "annotation-one",
+    } satisfies Situation["timeline"][number];
+    const privateReviewEntry = {
+      id: "timeline-private-review",
+      situationId: sampleSituation.id,
+      timestamp: "2026-06-15T07:10:00.000Z",
+      kind: "review_action",
+      title: "Privat vurdering",
+      detail: "Intern vurdering som ikke skal til City Pulse.",
+      sourceLabel: "Privat markering",
+      source: "private_annotations",
+      sourceUrl: "",
+      official: false,
+      provenance: "private_annotation",
+    } satisfies Situation["timeline"][number];
+    const situation = {
+      ...sampleSituation,
+      timeline: [publicEntry, privateAnnotationEntry, privateReviewEntry],
+    } satisfies Situation;
+    const workspace = {
+      situation,
+      relatedArticles: [],
+      tasks: [],
+      notes: [],
+      attachments: [],
+    };
+
+    const ownerRuntime = await testApp();
+    vi.spyOn(ownerRuntime.store, "getWorkspace").mockResolvedValue(workspace);
+    const owner = request.agent(ownerRuntime.app);
+    await owner.get("/api/session").expect(200);
+    await owner
+      .get(`/api/situations/${sampleSituation.id}/timeline`)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.map((entry: { id: string }) => entry.id)).toEqual([
+          "timeline-public",
+          "timeline-private-annotation",
+          "timeline-private-review",
+        ]);
+      });
+
+    const viewerRuntime = await testAppWithEmail(false);
+    vi.spyOn(viewerRuntime.store, "getWorkspace").mockResolvedValue(workspace);
+    const viewer = await loginViewer(viewerRuntime);
+    await viewer
+      .get(`/api/situations/${sampleSituation.id}/timeline`)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.map((entry: { id: string }) => entry.id)).toEqual(["timeline-public"]);
+        expect(JSON.stringify(response.body)).not.toContain("Intern observasjon");
+        expect(JSON.stringify(response.body)).not.toContain("Intern vurdering");
+      });
+    await viewer
+      .get(`/api/situations/${sampleSituation.id}`)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.situation.timeline.map((entry: { id: string }) => entry.id)).toEqual([
+          "timeline-public",
+        ]);
+      });
+  });
+
+  it("keeps command-center-only situations out of City Pulse viewer surfaces", async () => {
+    const commandOnlySituation = {
+      ...sampleSituation,
+      id: "command-only-ras",
+      title: "Intern vurdering av rasfare",
+      summary: "Kun for Command Center inntil publisering er besluttet.",
+      publicVisibility: "command_center",
+      updatedAt: "2026-07-03T03:50:00.000Z",
+      createdAt: "2026-07-03T03:30:00.000Z",
+      relatedArticleIds: [],
+      timeline: [
+        {
+          id: "command-only-timeline",
+          situationId: "command-only-ras",
+          timestamp: "2026-07-03T03:45:00.000Z",
+          kind: "review_action",
+          title: "Intern vurdering",
+          detail: "Skal ikke vises på City Pulse.",
+          sourceLabel: "Privat markering",
+          source: "private_annotations",
+          sourceUrl: "",
+          official: false,
+          provenance: "private_annotation",
+        },
+      ],
+    } satisfies Situation;
+
+    const ownerRuntime = await testApp();
+    addMemorySituation(ownerRuntime.store, commandOnlySituation);
+    const owner = request.agent(ownerRuntime.app);
+    await owner.get("/api/session").expect(200);
+    await owner
+      .get("/api/situations")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.items).toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: "command-only-ras" })]),
+        );
+      });
+    await owner
+      .get("/api/bootstrap")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.situations).toEqual(
+          expect.not.arrayContaining([expect.objectContaining({ id: "command-only-ras" })]),
+        );
+      });
+
+    const viewerRuntime = await testAppWithEmail(false);
+    addMemorySituation(viewerRuntime.store, commandOnlySituation);
+    const viewer = await loginViewer(viewerRuntime);
+    await viewer
+      .get("/api/bootstrap")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.situations).toEqual(
+          expect.not.arrayContaining([expect.objectContaining({ id: "command-only-ras" })]),
+        );
+      });
+    await viewer
+      .get("/api/situations")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.items).toEqual(
+          expect.not.arrayContaining([expect.objectContaining({ id: "command-only-ras" })]),
+        );
+      });
+    await viewer.get("/api/situations/command-only-ras").expect(404);
+    await viewer.get("/api/situations/command-only-ras/timeline").expect(404);
+    await viewer.get("/api/situations/command-only-ras/articles").expect(404);
+    await viewer.get("/api/situations/command-only-ras/source-items").expect(404);
   });
 
   it("lets the owner grant viewer access without a prior request", async () => {
