@@ -106,6 +106,101 @@ test("frontpage uses bootstrap feed without immediate duplicate refreshes", asyn
   expect(duplicateRefreshes).toEqual([]);
 });
 
+test("filtered City Pulse modules use refreshed feed instead of stale bootstrap context", async ({
+  page,
+}) => {
+  const staleArticle: Article = {
+    id: "stale-default-story",
+    source: "adressa",
+    sourceLabel: "Adresseavisen",
+    title: "Stale default road story",
+    excerpt: "Denne saken hører til standardforsiden.",
+    url: "https://example.test/stale",
+    publishedAt: "2026-06-01T08:00:00.000Z",
+    scope: "trondheim",
+    category: "Nyheter",
+    places: ["Trondheim"],
+    location: { lat: 63.43, lng: 10.39, label: "Trondheim" },
+  };
+  const freshArticle: Article = {
+    id: "fresh-traffic-story",
+    source: "nrk",
+    sourceLabel: "NRK Trøndelag",
+    title: "Fersk trafikk ved Sluppen",
+    excerpt: "Trafikken går sakte ved Sluppen etter arbeid i vegbanen.",
+    url: "https://example.test/fresh-traffic",
+    publishedAt: "2026-07-02T10:30:00.000Z",
+    scope: "trondheim",
+    category: "Transport",
+    places: ["Sluppen"],
+    location: { lat: 63.39795, lng: 10.3997, label: "Sluppen" },
+  };
+  const staleBrief: MorningBrief = {
+    generatedAt: "2026-06-01T08:30:00.000Z",
+    title: "Stale morgenbrief",
+    mode: "ai_assisted",
+    sourceLine: "AI-assistert · gammelt grunnlag",
+    paragraphs: [
+      "Denne morgenbriefen hører til standardforsiden.",
+      "Den skal ikke vises i et filtrert transportvindu.",
+      "Stale Ras følger fortsatt standardforsiden.",
+    ],
+    highlights: [
+      { label: "Saker", value: "99", detail: "Stale leder bildet" },
+      { label: "Situasjoner", value: "1", detail: "Aktive eller til vurdering" },
+      { label: "Kilder", value: "1/1", detail: "Rapporterer OK" },
+    ],
+    articleIds: [staleArticle.id],
+    situationIds: ["stale-ras"],
+  };
+
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        articles: [staleArticle],
+        situations: [
+          {
+            id: "stale-ras",
+            title: "Stale Ras",
+            summary: "Denne situasjonen hører til standardforsiden.",
+            status: "active",
+            verificationStatus: "Offentlig bekreftet",
+            createdAt: "2026-06-01T07:00:00.000Z",
+            updatedAt: "2026-06-01T08:00:00.000Z",
+            locationLabel: "Gangåsvegen",
+            primaryLocation: { lat: 63.311, lng: 10.21, label: "Gangåsvegen" },
+          },
+        ],
+        sourceHealth: sampleBootstrap.sourceHealth,
+        morningBrief: staleBrief,
+      }),
+    });
+  });
+  await page.route("**/api/articles?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [freshArticle] }),
+    });
+  });
+
+  await page.goto("/?category=Transport&window=24h");
+
+  await expect(
+    page.locator(".news-section").getByRole("heading", { name: "Fersk trafikk ved Sluppen" }),
+  ).toBeVisible();
+  await expect(page.getByText("Stale morgenbrief")).toHaveCount(0);
+  await expect(page.getByText("Stale leder bildet")).toHaveCount(0);
+  await expect(page.getByText("Stale Ras")).toHaveCount(0);
+  await expect(page.getByText("Morgenbildet dekker 1 ferske saker")).toBeVisible();
+
+  const nearby = page.locator(".nearby-module");
+  await expect(nearby.getByText("1 stedsfestede saker og situasjoner.")).toBeVisible();
+  await expect(nearby.getByRole("button", { name: /Fersk trafikk ved Sluppen/ })).toBeVisible();
+});
+
 test("City Pulse pins the AI-assisted morning brief on the public frontpage", async ({ page }) => {
   const article = sampleBootstrap.articles.find((item) => item.id === "a-road")!;
   const situation = sampleBootstrap.situations[0]!;

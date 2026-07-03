@@ -10,7 +10,9 @@ import {
   MorningBriefPanel,
   StoryConfidenceBadge,
   StoryVerificationProof,
+  cityPulseDataForCurrentFeed,
 } from "./HomePage.js";
+import type { HomeFilters } from "../homeFilters.js";
 
 const brief: MorningBrief = {
   generatedAt: "2026-07-02T07:30:00.000Z",
@@ -63,6 +65,7 @@ const situation = {
 
 const bootstrap = {
   articles: [article],
+  articleNextCursor: "next-page",
   situations: [situation],
   sourceHealth: [],
   morningBrief: brief,
@@ -129,6 +132,76 @@ describe("CityPulseDashboard", () => {
     expect(html).toContain("Reservebrief");
     expect(html).toContain("Morgenbildet er rolig");
     expect(html).toContain("dashboard-layout-city-pulse");
+  });
+});
+
+describe("cityPulseDataForCurrentFeed", () => {
+  it("keeps the stored morning brief and standalone situations on the default view", () => {
+    const filters = {
+      q: "",
+      scope: "trondheim",
+      category: "Alle",
+      timeWindow: "all",
+    } satisfies HomeFilters;
+
+    const data = cityPulseDataForCurrentFeed({
+      articles: bootstrap.articles,
+      filters,
+      initialData: bootstrap,
+    });
+
+    expect(data.morningBrief).toBe(brief);
+    expect(data.articleNextCursor).toBe(bootstrap.articleNextCursor);
+    expect(data.situations).toEqual([situation]);
+  });
+
+  it("drops stale default brief and unrelated standalone situations for filtered views", () => {
+    const filteredArticle = {
+      ...article,
+      id: "article-two",
+      title: "Trafikken åpner ved Sluppen",
+    } satisfies Article;
+    const filters = {
+      q: "",
+      scope: "trondheim",
+      category: "Transport",
+      timeWindow: "24h",
+    } satisfies HomeFilters;
+
+    const data = cityPulseDataForCurrentFeed({
+      articles: [filteredArticle],
+      filters,
+      initialData: bootstrap,
+      timeWindowFrom: "2026-07-02T08:00:00.000Z",
+    });
+
+    expect(data.articles).toEqual([filteredArticle]);
+    expect(data.morningBrief).toBeUndefined();
+    expect(data.articleNextCursor).toBeUndefined();
+    expect(data.situations).toEqual([]);
+  });
+
+  it("keeps linked situations in filtered views when the current stories point to them", () => {
+    const linkedArticle = {
+      ...article,
+      id: "article-linked",
+      situationId: situation.id,
+    } satisfies Article;
+    const filters = {
+      q: "",
+      scope: "trondheim",
+      category: "Transport",
+      timeWindow: "24h",
+    } satisfies HomeFilters;
+
+    const data = cityPulseDataForCurrentFeed({
+      articles: [linkedArticle],
+      filters,
+      initialData: bootstrap,
+      timeWindowFrom: "2026-07-02T06:00:00.000Z",
+    });
+
+    expect(data.situations).toEqual([situation]);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
+  type HomeSituationSummary,
   type NotificationTriggerSeverity,
   type SourceConfidenceSummary,
 } from "@nytt/shared";
@@ -858,6 +859,71 @@ function searchParamsFor(filters: HomeFilters) {
   return buildHomeSearch(filters).replace(/^\?/, "");
 }
 
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function situationLatestMs(situation: HomeSituationSummary): number | undefined {
+  const updatedAt = timestampMs(situation.updatedAt);
+  const createdAt = timestampMs(situation.createdAt);
+  if (updatedAt === undefined) return createdAt;
+  if (createdAt === undefined) return updatedAt;
+  return Math.max(updatedAt, createdAt);
+}
+
+function situationMatchesWindow(
+  situation: HomeSituationSummary,
+  timeWindowFrom: string | undefined,
+): boolean {
+  const lowerBound = timestampMs(timeWindowFrom);
+  if (lowerBound === undefined) return true;
+  const latest = situationLatestMs(situation);
+  return latest !== undefined && latest >= lowerBound;
+}
+
+function isDefaultHomeFeed(filters: HomeFilters): boolean {
+  return (
+    filters.scope === "trondheim" &&
+    filters.category === "Alle" &&
+    !filters.topic &&
+    filters.q.trim().length === 0 &&
+    filters.timeWindow === "all"
+  );
+}
+
+export function cityPulseDataForCurrentFeed({
+  articles,
+  filters,
+  initialData,
+  timeWindowFrom,
+}: {
+  articles: Article[];
+  filters: HomeFilters;
+  initialData: BootstrapPayload;
+  timeWindowFrom?: string;
+}): BootstrapPayload {
+  const defaultFeed = isDefaultHomeFeed(filters);
+  const linkedSituationIds = new Set(
+    articles.flatMap((article) => (article.situationId ? [article.situationId] : [])),
+  );
+  const includeStandaloneSituations =
+    filters.category === "Alle" && filters.q.trim().length === 0 && !filters.topic;
+  const situations = initialData.situations.filter((situation) => {
+    if (!situationMatchesWindow(situation, timeWindowFrom)) return false;
+    return includeStandaloneSituations || linkedSituationIds.has(situation.id);
+  });
+
+  return {
+    ...initialData,
+    articles,
+    articleNextCursor: defaultFeed ? initialData.articleNextCursor : undefined,
+    situations,
+    morningBrief: defaultFeed ? initialData.morningBrief : undefined,
+  };
+}
+
 interface SavedOverride {
   expiresAt: number;
   saved: boolean;
@@ -875,8 +941,13 @@ export function HomePage({
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
   const { scope, category, topic, timeWindow, q: query } = filters;
-  const [articles, setArticles] = useState(initialData.articles);
-  const [nextCursor, setNextCursor] = useState<string | undefined>(initialData.articleNextCursor);
+  const initialFeedIsDefault = isDefaultHomeFeed(filters);
+  const [articles, setArticles] = useState(() =>
+    initialFeedIsDefault ? initialData.articles : [],
+  );
+  const [nextCursor, setNextCursor] = useState<string | undefined>(() =>
+    initialFeedIsDefault ? initialData.articleNextCursor : undefined,
+  );
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
@@ -1031,6 +1102,7 @@ export function HomePage({
     setLoadingMore(false);
     loadMoreRequestIdRef.current += 1;
     setNextCursor(undefined);
+    setArticles([]);
     setFeedError(undefined);
     const timeout = window.setTimeout(
       () => {
@@ -1084,6 +1156,16 @@ export function HomePage({
 
   const filtered = useMemo(() => articles, [articles]);
   const isTextSearch = query.trim().length > 0;
+  const cityPulseData = useMemo(
+    () =>
+      cityPulseDataForCurrentFeed({
+        articles: filtered,
+        filters,
+        initialData,
+        timeWindowFrom,
+      }),
+    [filtered, filters, initialData, timeWindowFrom],
+  );
 
   const groupedArticles = useMemo(() => groupHomeArticles(filtered), [filtered]);
   const storyCards = useMemo(() => homeStoryCardsForGroups(groupedArticles), [groupedArticles]);
@@ -1295,7 +1377,7 @@ export function HomePage({
           summary={localFocusSummary}
         />
       ) : null}
-      {!isTextSearch ? <CityPulseDashboard data={initialData} /> : null}
+      {!isTextSearch ? <CityPulseDashboard data={cityPulseData} /> : null}
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
@@ -1344,7 +1426,7 @@ export function HomePage({
           timeWindow={timeWindow}
           timeWindowFrom={timeWindowFrom}
           timeWindowLabel={timeWindow === "all" ? undefined : homeTimeWindowLabels[timeWindow]}
-          data={initialData}
+          data={cityPulseData}
         />
       </div>
     </main>
