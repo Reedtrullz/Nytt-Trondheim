@@ -65,6 +65,13 @@ const situation = {
   updatedAt: "2026-07-02T07:10:00.000Z",
   createdAt: "2026-07-02T07:00:00.000Z",
   locationLabel: "Gangåsvegen",
+  sourceConfidence: {
+    level: "confirmed",
+    label: "Bekreftet",
+    score: 0.91,
+    sourceCount: 2,
+    rationale: "Offisielle kilder og redaksjonelle kilder peker mot samme område.",
+  },
 } satisfies BootstrapPayload["situations"][number];
 
 const bootstrap = {
@@ -156,6 +163,8 @@ describe("CityPulseDashboard", () => {
     expect(html).not.toContain("Flytt Morgenbrief senere");
     expect(html).not.toContain("Tilbakestill");
     expect(html).toContain("Steinsprang, vegen er stengt");
+    expect(html).toContain("Kildetillit: Bekreftet");
+    expect(html).toContain("91 %");
   });
 
   it("renders a deterministic morning brief fallback when no stored brief exists", () => {

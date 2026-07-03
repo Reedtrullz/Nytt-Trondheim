@@ -963,6 +963,13 @@ button {
   font-size: 12px;
 }
 
+.situation-confidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -5px 0 15px;
+}
+
 .situation-copy ul {
   display: flex;
   gap: 28px;

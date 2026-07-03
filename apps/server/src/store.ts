@@ -425,6 +425,23 @@ function publicPrimaryLocationForSituation(
   };
 }
 
+function publicSourceConfidenceForSituation(situation: Situation): SourceConfidenceSummary {
+  if (situation.sourceConfidence) return situation.sourceConfidence;
+  const sources = new Set<string>();
+  if (situation.officialSource) sources.add(situation.officialSource);
+  for (const source of situation.activationBasis?.sourceIds ?? []) sources.add(source);
+  for (const summary of situation.provenanceSummary ?? []) {
+    if (summary.provenance === "private_annotation") continue;
+    for (const source of summary.sourceIds) sources.add(source);
+  }
+  for (const item of situation.evidence) sources.add(item.source);
+  for (const item of situation.timeline) {
+    if (item.kind === "private_annotation" || item.provenance === "private_annotation") continue;
+    if (item.source) sources.add(item.source);
+  }
+  return sourceMixConfidenceSummary([...sources], { updatedAt: situation.updatedAt });
+}
+
 function homeSituationSummary(situation: Situation): HomeSituationSummary {
   const primaryLocation = publicPrimaryLocationForSituation(situation);
   return {
@@ -436,6 +453,7 @@ function homeSituationSummary(situation: Situation): HomeSituationSummary {
     updatedAt: situation.updatedAt,
     createdAt: situation.createdAt,
     locationLabel: situation.locationLabel,
+    sourceConfidence: publicSourceConfidenceForSituation(situation),
     ...(primaryLocation ? { primaryLocation } : {}),
   };
 }

@@ -290,7 +290,14 @@ describe("private situation API", () => {
       expect(situation).not.toHaveProperty("relatedArticleIds");
       expect(situation).not.toHaveProperty("activationBasis");
       expect(situation).not.toHaveProperty("provenanceSummary");
-      expect(situation).not.toHaveProperty("sourceConfidence");
+      expect(situation.sourceConfidence).toEqual(
+        expect.objectContaining({
+          level: expect.any(String),
+          label: expect.any(String),
+          score: expect.any(Number),
+          sourceCount: expect.any(Number),
+        }),
+      );
     }
   });
 
@@ -376,6 +383,10 @@ describe("private situation API", () => {
     expect(bootstrap.situations).toEqual([
       expect.objectContaining({
         id: sampleSituation.id,
+        sourceConfidence: expect.objectContaining({
+          level: "likely",
+          label: "Sannsynlig",
+        }),
         primaryLocation: expect.objectContaining({
           lat: expect.any(Number),
           lng: expect.any(Number),

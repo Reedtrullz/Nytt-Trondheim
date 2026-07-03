@@ -1035,6 +1035,7 @@ export type HomeSituationSummary = Pick<
   | "createdAt"
   | "locationLabel"
 > & {
+  sourceConfidence?: SourceConfidenceSummary;
   primaryLocation?: {
     lat: number;
     lng: number;

@@ -207,6 +207,11 @@ function SituationBanner({
         <p className="status-time">
           {situationTimeMeta(situation)} · {situation.verificationStatus}
         </p>
+        {situation.sourceConfidence ? (
+          <div className="situation-confidence">
+            <StoryConfidenceBadge confidence={situation.sourceConfidence} />
+          </div>
+        ) : null}
         <ul>
           <li>{situation.summary}</li>
           <li>Farevarsel og kartgrunnlag vises med tydelig kildeangivelse.</li>
