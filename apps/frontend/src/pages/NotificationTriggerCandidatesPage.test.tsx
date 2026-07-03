@@ -108,6 +108,7 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Web Push-kanal");
     expect(html).toContain("Klar");
     expect(html).toContain("1/1");
+    expect(html).toContain("Ingen kjente blokkere");
     expect(html).toContain("Kildehelse kontrollert");
     expect(html).toContain("Siste leveranser");
     expect(html).toContain("1 sendt");
@@ -197,5 +198,8 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Ingen abonnent");
     expect(html).toContain("Ingen aktive push-abonnement matcher alvorlighet og type.");
     expect(html).toContain("Mangler match");
+    expect(html).toContain("Må følges opp");
+    expect(html).toContain("Ingen aktive nettleserabonnement er registrert.");
+    expect(html).toContain("1 kandidat mangler match eller har feilet levering.");
   });
 });

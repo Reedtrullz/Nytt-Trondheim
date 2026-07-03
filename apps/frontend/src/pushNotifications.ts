@@ -30,6 +30,7 @@ function urlBase64ToUint8Array(value: string): Uint8Array {
 export async function subscribeBrowserToPush(
   publicKey: string,
   minSeverity: PushSubscriptionInput["minSeverity"] = "warning",
+  kinds: PushSubscriptionInput["kinds"] = [],
 ): Promise<PushSubscriptionInput> {
   const support = pushBrowserSupport();
   if (support !== "supported") {
@@ -61,6 +62,6 @@ export async function subscribeBrowserToPush(
     },
     userAgent: navigator.userAgent,
     minSeverity,
-    kinds: [],
+    kinds,
   };
 }

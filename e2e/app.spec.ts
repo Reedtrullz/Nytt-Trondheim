@@ -1815,6 +1815,64 @@ test("command notification bridge shows Web Push readiness responsively", async 
   }
 });
 
+test("public notification settings explain background readiness responsively", async ({ page }) => {
+  await page.route("**/api/notifications/settings", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        configured: true,
+        publicKey: "test-public-vapid-key",
+        subscriptions: [
+          {
+            id: "subscription-one",
+            endpointHash: "hashed-endpoint",
+            enabled: true,
+            minSeverity: "warning",
+            kinds: [],
+            createdAt: "2026-07-02T09:00:00.000Z",
+            updatedAt: "2026-07-02T09:05:00.000Z",
+            lastSeenAt: "2026-07-02T09:05:00.000Z",
+            lastSuccessAt: "2026-07-02T09:10:00.000Z",
+            failureCount: 0,
+          },
+        ],
+      }),
+    });
+  });
+
+  for (const viewport of [
+    { width: 360, height: 780 },
+    { width: 820, height: 1180 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/varsler");
+    await expect(page.getByRole("heading", { name: "Varsler", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Hva virker hvor?" })).toBeVisible();
+    const readiness = page.locator(".notification-readiness");
+    await expect(readiness.getByText("Serverkanal", { exact: true })).toBeVisible();
+    await expect(readiness.getByText("Nettleser", { exact: true })).toBeVisible();
+    await expect(readiness.getByText("Åpen fane", { exact: true })).toBeVisible();
+    const background = readiness.locator('[data-readiness-key="background"]');
+    await expect(background).toContainText(/Koblet|Ikke klar|Ikke koblet/);
+    const guidance = page.locator(".notification-trigger-guidance");
+    await expect(guidance.getByRole("heading", { name: "Dette kan gi varsel" })).toBeVisible();
+    await expect(guidance.getByRole("heading", { name: "Liv og helse" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Hva vil du bli varslet om?" })).toBeVisible();
+    const defaultSeverity = page.getByRole("button", { name: /Kritisk \+ varsel/ });
+    const criticalOnly = page.getByRole("button", { name: /Bare kritisk/ });
+    const trafficOnly = page.getByRole("button", { name: "Stengte hovedårer" }).first();
+    await expect(defaultSeverity).toHaveAttribute("aria-pressed", "true");
+    await criticalOnly.click();
+    await expect(criticalOnly).toHaveAttribute("aria-pressed", "true");
+    await trafficOnly.click();
+    await expect(trafficOnly).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("Stengte hovedårer").first()).toBeVisible();
+    await expect(page.getByText("hashed-endpoint")).toHaveCount(0);
+    await expectNoHorizontalPageOverflow(page);
+  }
+});
+
 test("unknown viewer route is a missing page, not an owner-only denial", async ({ page }) => {
   await page.goto("/sport-does-not-exist");
 

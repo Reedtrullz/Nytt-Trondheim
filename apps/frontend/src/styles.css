@@ -4715,6 +4715,33 @@ button {
   grid-column: 1 / -1;
 }
 
+.notification-push-blockers {
+  grid-column: 1 / -1;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.notification-push-blockers strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.notification-push-blockers ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.notification-push-blockers li,
+.notification-push-blockers p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .notification-delivery-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4768,6 +4795,8 @@ button {
 }
 
 .notification-settings-card,
+.notification-readiness,
+.notification-profile,
 .notification-trigger-guidance,
 .notification-settings-list {
   margin-top: 20px;
@@ -4784,6 +4813,7 @@ button {
 }
 
 .notification-settings-card h2,
+.notification-profile h2,
 .notification-trigger-guidance h2,
 .notification-settings-list h2 {
   margin: 0 0 6px;
@@ -4802,6 +4832,157 @@ button {
 
 .notification-settings-list {
   padding: 20px;
+}
+
+.notification-readiness {
+  padding: 20px;
+}
+
+.notification-profile {
+  padding: 20px;
+}
+
+.notification-profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.notification-profile-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.notification-profile-fieldset legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.notification-profile-fieldset p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.notification-profile-segments,
+.notification-profile-kind-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-profile-segments {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.notification-profile-kind-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.notification-profile-segments button,
+.notification-profile-kind-grid button {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--page);
+  color: var(--ink);
+  text-align: left;
+}
+
+.notification-profile-segments button {
+  padding: 12px;
+}
+
+.notification-profile-kind-grid button {
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.notification-profile-segments button.selected,
+.notification-profile-kind-grid button.selected {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 13%, var(--paper));
+}
+
+.notification-profile-segments strong,
+.notification-profile-segments span {
+  display: block;
+}
+
+.notification-profile-segments strong {
+  font-size: 14px;
+}
+
+.notification-profile-segments span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.notification-readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.notification-readiness-item {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--muted);
+  background: var(--page);
+}
+
+.notification-readiness-item.ready {
+  border-left-color: var(--green);
+}
+
+.notification-readiness-item.warning {
+  border-left-color: #c07818;
+}
+
+.notification-readiness-item.blocked {
+  border-left-color: var(--accent);
+}
+
+.notification-readiness-item.info {
+  border-left-color: var(--blue);
+}
+
+.notification-readiness-item span,
+.notification-readiness-item strong,
+.notification-readiness-item p {
+  display: block;
+}
+
+.notification-readiness-item span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.notification-readiness-item strong {
+  margin-top: 7px;
+  font-size: 18px;
+}
+
+.notification-readiness-item p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .notification-trigger-guidance {
@@ -7963,6 +8144,9 @@ button {
   .coverage-bundle-row,
   .notification-trigger-row,
   .notification-settings-card,
+  .notification-readiness-grid,
+  .notification-profile-grid,
+  .notification-profile-segments,
   .notification-trigger-guidance-grid,
   .notification-subscription-row {
     grid-template-columns: 1fr;
@@ -7976,6 +8160,10 @@ button {
   .coverage-bundle-row-meta,
   .notification-trigger-row-meta {
     justify-content: flex-start;
+  }
+
+  .notification-profile-kind-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

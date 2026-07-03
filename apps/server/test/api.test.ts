@@ -2650,6 +2650,43 @@ describe("private situation API", () => {
     });
   });
 
+  it("keeps candidates blocked when the saved push profile filters them out", async () => {
+    const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+    await agent
+      .post("/api/notifications/subscriptions")
+      .set("X-CSRF-Token", session.body.csrfToken as string)
+      .send({
+        endpoint: "https://push.example.test/send/traffic-critical-only",
+        keys: {
+          p256dh: "p256dh-key-material-that-is-long-enough",
+          auth: "auth-key-long-enough",
+        },
+        minSeverity: "critical",
+        kinds: ["traffic_disruption"],
+      })
+      .expect(201);
+
+    const response = await agent
+      .get("/api/operations/notification-triggers?severities=critical,warning&q=brann&limit=10")
+      .expect(200);
+
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(response.body.items[0]).toMatchObject({
+      id: expect.stringContaining("notification:"),
+      deliveryState: "no_subscribers",
+      detail: expect.stringContaining("Ingen aktive push-abonnement"),
+    });
+    expect(response.body.pushStatus).toMatchObject({
+      configured: true,
+      label: "Mangler match",
+      activeSubscriptions: 1,
+      matchingCandidates: 0,
+      blockedCandidates: expect.any(Number),
+    });
+  });
+
   it("lets signed-in users manage Web Push subscriptions without exposing endpoint secrets", async () => {
     const { app } = await testAppWithPushPublicKey("test-public-vapid-key");
     const agent = request.agent(app);

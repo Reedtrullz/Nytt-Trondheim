@@ -478,8 +478,8 @@ describe("frontend source item API helpers", () => {
         p256dh: "p256dh-key-material-that-is-long-enough",
         auth: "auth-key-long-enough",
       },
-      minSeverity: "warning",
-      kinds: [],
+      minSeverity: "critical",
+      kinds: ["traffic_disruption"],
     });
     await freshApi.unsubscribeFromNotifications("subscription one");
 
@@ -489,6 +489,15 @@ describe("frontend source item API helpers", () => {
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify({
+          endpoint: "https://push.example.test/send/secret",
+          keys: {
+            p256dh: "p256dh-key-material-that-is-long-enough",
+            auth: "auth-key-long-enough",
+          },
+          minSeverity: "critical",
+          kinds: ["traffic_disruption"],
+        }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

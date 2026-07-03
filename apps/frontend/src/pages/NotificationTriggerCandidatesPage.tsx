@@ -253,6 +253,22 @@ function DeliveryHistory({ deliveries }: { deliveries?: PushDeliveryPage }) {
 function PushStatusPanel({ status }: { status?: NotificationPushStatus }) {
   if (!status) return null;
   const healthState = status.health?.state ?? (status.configured ? "ok" : "disabled");
+  const blockers = [
+    !status.configured
+      ? "VAPID-nøkler mangler, så worker kan ikke sende bakgrunnsvarsler."
+      : undefined,
+    status.activeSubscriptions === 0
+      ? "Ingen aktive nettleserabonnement er registrert."
+      : undefined,
+    status.blockedCandidates > 0
+      ? `${status.blockedCandidates} kandidat${
+          status.blockedCandidates === 1 ? "" : "er"
+        } mangler match eller har feilet levering.`
+      : undefined,
+    status.deliveryCounts.failed > 0
+      ? `${status.deliveryCounts.failed} siste leveringsforsøk feilet.`
+      : undefined,
+  ].filter((item): item is string => Boolean(item));
   return (
     <section className={`notification-push-status ${healthState}`} aria-labelledby="push-status">
       <div>
@@ -289,6 +305,18 @@ function PushStatusPanel({ status }: { status?: NotificationPushStatus }) {
           ? `Kildehelse kontrollert ${time(status.health.lastCheckedAt)}`
           : "Kildehelse venter på første worker-kjøring"}
       </small>
+      <div className="notification-push-blockers" aria-label="Leveringsblokkere">
+        <strong>{blockers.length ? "Må følges opp" : "Ingen kjente blokkere"}</strong>
+        {blockers.length ? (
+          <ul>
+            {blockers.map((blocker) => (
+              <li key={blocker}>{blocker}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>Konfigurasjon, abonnement og siste leveranser ser klare ut.</p>
+        )}
+      </div>
     </section>
   );
 }
