@@ -17,6 +17,7 @@ import type {
   SourceConfidenceSummary,
   SourceHealth,
   SourceId,
+  UserRole,
 } from "./types.js";
 import type { SpatialInvestigationQueueItem, SpatialRawDataRef } from "./traffic-map.js";
 import { sourceConfidenceLabels } from "./types.js";
@@ -61,8 +62,11 @@ export interface NotificationDeliveryStateContext {
 
 export type NotificationSubscriptionPreference = Pick<
   PushSubscriptionSummary,
-  "enabled" | "kinds" | "minSeverity"
->;
+  "kinds" | "minSeverity"
+> & {
+  enabled?: boolean;
+  role?: UserRole;
+};
 
 export function notificationTriggerTraceState(
   candidate: Pick<NotificationTriggerCandidate, "links">,
@@ -242,6 +246,16 @@ export function notificationSubscriptionMatchesCandidate(
   if (subscription.enabled === false) return false;
   if (severityRank[candidate.severity] < severityRank[subscription.minSeverity]) return false;
   return subscription.kinds.length === 0 || subscription.kinds.includes(candidate.kind);
+}
+
+export function notificationSubscriptionCanReceiveCandidate(
+  subscription: NotificationSubscriptionPreference,
+  candidate: Pick<NotificationTriggerCandidate, "kind" | "severity" | "publicSurface">,
+): boolean {
+  if (!notificationSubscriptionMatchesCandidate(subscription, candidate)) return false;
+  const publicSurfaceState = candidate.publicSurface?.state;
+  if (publicSurfaceState === "visible") return true;
+  return subscription.role === "owner";
 }
 
 export function notificationTriggerCandidateCanDispatch(
@@ -1001,7 +1015,7 @@ function deliveryStateForCandidate(
   if (
     context.subscriptions &&
     !context.subscriptions.some((subscription) =>
-      notificationSubscriptionMatchesCandidate(subscription, candidate),
+      notificationSubscriptionCanReceiveCandidate(subscription, candidate),
     )
   ) {
     return "no_subscribers";
@@ -1014,7 +1028,7 @@ function deliveryDetail(state: NotificationTriggerDeliveryState): string {
     case "not_configured":
       return "Web Push er ikke konfigurert. Kandidaten blir ikke sendt automatisk.";
     case "no_subscribers":
-      return "Ingen aktive push-abonnement matcher alvorlighet og type.";
+      return "Ingen aktive push-abonnement matcher alvorlighet, type og tilgangsnivå.";
     case "ready":
       return "Klar for Web Push dersom en aktiv abonnent matcher alvorlighet og type.";
     case "sent":
@@ -1064,7 +1078,8 @@ function pushStatusLabel(
   if (blockedCandidates > 0) {
     return {
       label: "Mangler match",
-      detail: "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+      detail:
+        "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet, type og tilgangsnivå.",
     };
   }
   return {
@@ -1077,11 +1092,12 @@ function notificationPushStatus(
   page: NotificationTriggerPage,
   context: NotificationDeliveryStateContext,
 ): NotificationTriggerPage["pushStatus"] {
-  const subscriptions = context.subscriptions?.filter((subscription) => subscription.enabled) ?? [];
+  const subscriptions =
+    context.subscriptions?.filter((subscription) => subscription.enabled !== false) ?? [];
   const health = context.sourceHealth?.find((source) => source.source === "web_push");
   const matchingCandidates = page.items.filter((candidate) =>
     subscriptions.some((subscription) =>
-      notificationSubscriptionMatchesCandidate(subscription, candidate),
+      notificationSubscriptionCanReceiveCandidate(subscription, candidate),
     ),
   ).length;
   const readyCandidates = page.items.filter(

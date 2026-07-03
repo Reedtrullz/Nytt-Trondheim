@@ -10,6 +10,7 @@ import {
   buildPublicNotificationSignalHighlights,
   buildNotificationTriggerPage,
   filterNotificationTriggerPageByDeliveryStates,
+  notificationSubscriptionCanReceiveCandidate,
   notificationTriggerTraceState,
   notificationSubscriptionMatchesCandidate,
   publicNotificationTriggerGuidance,
@@ -625,6 +626,53 @@ describe("notification trigger candidates", () => {
     expect(blockedPage.pushStatus).toEqual(pageWithDeliveryState.pushStatus);
   });
 
+  it("keeps hidden command-center candidates out of viewer push readiness", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [],
+      spatialInvestigationItems: [spatialInvestigationItem()],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items[0]).toMatchObject({
+      id: "notification:spatial:investigation:delay:e6-south:100141",
+      publicSurface: expect.objectContaining({ state: "hidden" }),
+    });
+
+    const viewerOnlyPage = applyNotificationDeliveryStates(page, {
+      configured: true,
+      subscriptions: [{ enabled: true, minSeverity: "warning", kinds: [], role: "viewer" }],
+    });
+
+    expect(viewerOnlyPage.items[0]).toMatchObject({
+      deliveryState: "no_subscribers",
+      detail: expect.stringContaining("Ingen aktive push-abonnement"),
+    });
+    expect(viewerOnlyPage.pushStatus).toMatchObject({
+      label: "Mangler match",
+      activeSubscriptions: 1,
+      matchingCandidates: 0,
+      readyCandidates: 0,
+      blockedCandidates: 1,
+    });
+
+    const ownerPage = applyNotificationDeliveryStates(page, {
+      configured: true,
+      subscriptions: [{ enabled: true, minSeverity: "warning", kinds: [], role: "owner" }],
+    });
+
+    expect(ownerPage.items[0]).toMatchObject({
+      deliveryState: "ready",
+      detail: expect.stringContaining("Klar for Web Push"),
+    });
+    expect(ownerPage.pushStatus).toMatchObject({
+      activeSubscriptions: 1,
+      matchingCandidates: 1,
+      readyCandidates: 1,
+      blockedCandidates: 0,
+    });
+  });
+
   it("suppresses low-confidence watch candidates from automatic Web Push delivery", () => {
     const page = buildNotificationTriggerPage({
       situations: [
@@ -675,13 +723,13 @@ describe("notification trigger candidates", () => {
     expect(pageWithDeliveryState.pushStatus).toMatchObject({
       label: "Klar",
       activeSubscriptions: 1,
-      matchingCandidates: 1,
+      matchingCandidates: 0,
       readyCandidates: 0,
       blockedCandidates: 0,
     });
   });
 
-  it("uses the same subscription matching rule as worker dispatch", () => {
+  it("separates subscription matching from command-center visibility dispatch rules", () => {
     const page = buildNotificationTriggerPage({
       situations: [situation()],
       articles: [],
@@ -707,6 +755,40 @@ describe("notification trigger candidates", () => {
         candidate,
       ),
     ).toBe(false);
+
+    expect(
+      notificationSubscriptionCanReceiveCandidate(
+        { enabled: true, minSeverity: "warning", kinds: [], role: "viewer" },
+        candidate,
+      ),
+    ).toBe(true);
+
+    const hiddenCandidate = {
+      ...candidate,
+      publicSurface: {
+        ...candidate.publicSurface,
+        state: "hidden" as const,
+        label: "Kun Command Center",
+      },
+    };
+    expect(
+      notificationSubscriptionMatchesCandidate(
+        { enabled: true, minSeverity: "warning", kinds: [] },
+        hiddenCandidate,
+      ),
+    ).toBe(true);
+    expect(
+      notificationSubscriptionCanReceiveCandidate(
+        { enabled: true, minSeverity: "warning", kinds: [], role: "viewer" },
+        hiddenCandidate,
+      ),
+    ).toBe(false);
+    expect(
+      notificationSubscriptionCanReceiveCandidate(
+        { enabled: true, minSeverity: "warning", kinds: [], role: "owner" },
+        hiddenCandidate,
+      ),
+    ).toBe(true);
   });
 
   it("keeps sport stories about Brann out of public-safety triggers", () => {

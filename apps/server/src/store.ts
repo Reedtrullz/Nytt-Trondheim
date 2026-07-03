@@ -3951,6 +3951,9 @@ export class MemoryStore implements Store {
           enabled: subscription.enabled,
           minSeverity: subscription.minSeverity,
           kinds: subscription.kinds,
+          role:
+            this.users.find((item) => item.id === subscription.userId)?.role ??
+            (subscription.userId === "dev-owner" ? "owner" : "viewer"),
         })),
     );
   }
@@ -5644,11 +5647,13 @@ export class PgStore implements Store {
       enabled: boolean;
       minSeverity: NotificationSubscriptionPreference["minSeverity"];
       kinds: NotificationSubscriptionPreference["kinds"];
+      role: NotificationSubscriptionPreference["role"];
     }>(
       `SELECT
          ps.enabled,
          ps.min_severity AS "minSeverity",
-         ps.kinds
+         ps.kinds,
+         COALESCE(u.role, 'viewer') AS role
        FROM push_subscriptions ps
        LEFT JOIN users u ON u.id=ps.user_id
        WHERE ps.enabled=true AND ps.revoked_at IS NULL
@@ -5659,6 +5664,7 @@ export class PgStore implements Store {
       enabled: row.enabled,
       minSeverity: row.minSeverity,
       kinds: row.kinds ?? [],
+      role: row.role === "owner" ? "owner" : "viewer",
     }));
   }
 

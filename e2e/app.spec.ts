@@ -2546,7 +2546,8 @@ test("command notification bridge shows Web Push readiness responsively", async 
         pushStatus: {
           configured: true,
           label: "Mangler match",
-          detail: "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+          detail:
+            "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet, type og tilgangsnivå.",
           activeSubscriptions: 1,
           matchingCandidates: 1,
           readyCandidates: 1,
@@ -2632,7 +2633,7 @@ test("command notification bridge shows Web Push readiness responsively", async 
             deliveryState: "no_subscribers",
             title: "Voldshendelse på Lade",
             body: "Ingen aktive abonnement matcher denne typen.",
-            detail: "Ingen aktive push-abonnement matcher alvorlighet og type.",
+            detail: "Ingen aktive push-abonnement matcher alvorlighet, type og tilgangsnivå.",
             score: 0.72,
             confidence: {
               level: "likely",

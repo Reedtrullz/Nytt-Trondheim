@@ -146,7 +146,8 @@ const notificationTriggers: NotificationTriggerPage = {
   pushStatus: {
     configured: true,
     label: "Mangler match",
-    detail: "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+    detail:
+      "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet, type og tilgangsnivå.",
     activeSubscriptions: 1,
     matchingCandidates: 1,
     readyCandidates: 1,

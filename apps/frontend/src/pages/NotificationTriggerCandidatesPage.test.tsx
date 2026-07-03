@@ -318,14 +318,14 @@ describe("NotificationTriggerCandidatesDashboard", () => {
               {
                 ...page.items[0]!,
                 deliveryState: "no_subscribers",
-                detail: "Ingen aktive push-abonnement matcher alvorlighet og type.",
+                detail: "Ingen aktive push-abonnement matcher alvorlighet, type og tilgangsnivå.",
               },
             ],
             pushStatus: {
               configured: true,
               label: "Mangler match",
               detail:
-                "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet og type.",
+                "Minst én kandidat mangler aktivt abonnement som matcher alvorlighet, type og tilgangsnivå.",
               activeSubscriptions: 0,
               matchingCandidates: 0,
               readyCandidates: 0,
@@ -339,7 +339,9 @@ describe("NotificationTriggerCandidatesDashboard", () => {
 
     expect(html).toContain("Ingen abonnent");
     expect(html).toContain("Blokkert: Steinsprang, vegen er stengt");
-    expect(html).toContain("Ingen aktive push-abonnement matcher alvorlighet og type.");
+    expect(html).toContain(
+      "Ingen aktive push-abonnement matcher alvorlighet, type og tilgangsnivå.",
+    );
     expect(html).toContain("Mangler match");
     expect(html).toContain("Må følges opp");
     expect(html).toContain("Ingen aktive nettleserabonnement er registrert.");
@@ -366,7 +368,7 @@ describe("NotificationTriggerCandidatesDashboard", () => {
                 title: "Ung mann kritisk skadd",
                 body: "Ingen aktive abonnenter matcher denne typen akkurat nå.",
                 deliveryState: "no_subscribers",
-                detail: "Ingen aktive push-abonnement matcher alvorlighet og type.",
+                detail: "Ingen aktive push-abonnement matcher alvorlighet, type og tilgangsnivå.",
               },
             ],
           }}
@@ -378,7 +380,9 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("1 vist av 2");
     expect(html).toContain("Ung mann kritisk skadd");
     expect(html).toContain("Ingen abonnent");
-    expect(html).toContain("Ingen aktive push-abonnement matcher alvorlighet og type.");
+    expect(html).toContain(
+      "Ingen aktive push-abonnement matcher alvorlighet, type og tilgangsnivå.",
+    );
     expect(html).not.toContain("Steinsprang, vegen er stengt</strong>");
   });
 
