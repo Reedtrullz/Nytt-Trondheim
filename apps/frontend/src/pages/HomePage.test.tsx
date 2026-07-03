@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import type { Article, BootstrapPayload, MorningBrief } from "@nytt/shared";
+import type { Article, BootstrapPayload, MorningBrief, SourceHealth } from "@nytt/shared";
 import {
   CityPulseDashboard,
   ChannelContextPanel,
@@ -11,6 +11,7 @@ import {
   MapClusterSummary,
   MapTimeSlider,
   MorningBriefPanel,
+  PublicSourceStatusPanel,
   StoryConfidenceBadge,
   StoryVerificationProof,
   channelStoryCountsForCards,
@@ -85,6 +86,36 @@ const bootstrap = {
   sourceHealth: [],
   morningBrief: brief,
 } satisfies BootstrapPayload;
+
+const sourceHealth: SourceHealth[] = [
+  {
+    source: "nrk",
+    label: "NRK Trøndelag",
+    state: "ok",
+    detail: "RSS",
+    lastCheckedAt: "2026-07-02T07:24:00.000Z",
+  },
+  {
+    source: "datex",
+    label: "Vegvesen DATEX",
+    state: "awaiting_access",
+    detail: "Venter på DATEX Basic Auth-brukernavn og passord",
+    lastCheckedAt: "2026-07-02T07:22:00.000Z",
+  },
+  {
+    source: "deepseek",
+    label: "AI-analyse",
+    state: "degraded",
+    detail: "DeepSeek bruker deterministisk reserveanalyse.",
+    lastCheckedAt: "2026-07-02T07:25:00.000Z",
+  },
+  {
+    source: "web_push",
+    label: "Web Push",
+    state: "disabled",
+    detail: "Intern varslingskanal.",
+  },
+];
 
 describe("MorningBriefPanel", () => {
   it("renders the pinned public briefing with mode and highlights", () => {
@@ -164,6 +195,9 @@ describe("CityPulseDashboard", () => {
     expect(html).toContain("Slik vurderes høyeffekt-signaler");
     expect(html).toContain("Liv og helse");
     expect(html).toContain("Stengte hovedårer");
+    expect(html).toContain("Høyeffektsaker fanget av varselreglene");
+    expect(html).toContain("1 aktive");
+    expect(html).toContain("Situasjonsrommet er offentlig bekreftet.");
     expect(html).not.toContain("Flytt Morgenbrief senere");
     expect(html).toContain("Tilpass oppsett");
     expect(html).not.toContain("Tilbakestill");
@@ -273,9 +307,50 @@ describe("CityPulseSignalPanel", () => {
     expect(html).toContain("Liv og helse");
     expect(html).toContain("Viktige bortfall");
     expect(html).toContain("/varsler");
+    expect(html).toContain("Akkurat nå");
+    expect(html).toContain("Rolig");
+    expect(html).toContain(
+      "Ingen åpne saker i gjeldende bypulsdata krysser varselterskelen akkurat nå.",
+    );
     expect(html).not.toContain("triggerId");
     expect(html).not.toContain("endpoint");
     expect(html).not.toContain("Abonnementer");
+  });
+
+  it("renders public-safe active signal highlights from current City Pulse data", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CityPulseSignalPanel
+          articles={[
+            {
+              ...article,
+              id: "article-road",
+              title: "Ti meter stort ras kan bli stengt i flere uker",
+              excerpt: "Veien er stengt ved Gangåsvegen.",
+              category: "Transport",
+              situationId: "situation-one",
+            },
+          ]}
+          brief={brief}
+          now={new Date("2026-07-02T12:00:00.000Z")}
+          situations={[situation]}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Høyeffektsaker fanget av varselreglene");
+    expect(html).toContain("1 aktive");
+    expect(html).toContain("Trafikk · Kritisk · Oppdatert nå");
+    expect(html).toContain("Sjekk rute nå");
+    expect(html).toContain("Hendelsen kan påvirke reisevei eller framkommelighet.");
+    expect(html).toContain("Steinsprang, vegen er stengt");
+    expect(html).toContain("Kildetillit: Bekreftet");
+    expect(html).toContain("Offentlig bekreftet");
+    expect(html).toContain("Treff:");
+    expect(html).toContain("stengt");
+    expect(html).toContain("/situasjoner/situation-one");
+    expect(html).not.toContain("deliveryState");
+    expect(html).not.toContain("subscription");
   });
 
   it("carries stale morning brief status into the public AI signal module", () => {
@@ -328,6 +403,24 @@ describe("MapClusterSummary", () => {
 
     expect(html).toContain("Kartet viser 1 stedsfestet sak som 1 markør.");
     expect(html).toContain("Ingen punkter er slått sammen.");
+  });
+});
+
+describe("PublicSourceStatusPanel", () => {
+  it("summarizes public source status without exposing private collector details", () => {
+    const html = renderToStaticMarkup(<PublicSourceStatusPanel sources={sourceHealth} />);
+
+    expect(html).toContain("Kilder");
+    expect(html).toContain("Delvis kildegrunnlag");
+    expect(html).toContain("1 kilde trenger tilsyn blant 2 åpne kilder.");
+    expect(html).toContain("NRK Trøndelag");
+    expect(html).toContain("Vegvesen DATEX");
+    expect(html).toContain("Avventer");
+    expect(html).toContain("2 interne kontroller vises bare i Command Center.");
+    expect(html).not.toContain("Basic Auth");
+    expect(html).not.toContain("AI-analyse");
+    expect(html).not.toContain("DeepSeek bruker");
+    expect(html).not.toContain("Web Push");
   });
 });
 

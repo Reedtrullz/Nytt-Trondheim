@@ -485,6 +485,8 @@ button {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px 14px;
+  min-width: 0;
+  max-width: 100%;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
@@ -519,16 +521,20 @@ button {
 
 .channel-context p:not(.label) {
   flex: 1 1 280px;
+  min-width: 0;
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .channel-context strong {
-  flex: 0 0 auto;
+  flex: 1 1 180px;
+  min-width: 0;
   color: var(--ink);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .channel-context-clear {
@@ -1012,6 +1018,151 @@ button {
 
 .city-pulse-signal-status .freshness-tone-stale {
   color: #9b2d20;
+}
+
+.city-pulse-signal-live {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 88%, var(--blue) 12%);
+  padding: 14px;
+}
+
+.city-pulse-signal-live-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.city-pulse-signal-live-heading h3 {
+  margin: 2px 0 0;
+  font: 22px/1.1 var(--serif);
+}
+
+.city-pulse-signal-live-heading > span {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--blue) 38%, var(--line));
+  background: var(--paper);
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+.city-pulse-signal-live ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.city-pulse-signal-live-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 0.42fr);
+  gap: 12px;
+  border-left: 4px solid var(--blue);
+  background: var(--paper);
+  padding: 11px 12px;
+}
+
+.city-pulse-signal-live-item.critical {
+  border-left-color: var(--red);
+}
+
+.city-pulse-signal-live-item.warning {
+  border-left-color: var(--brown);
+}
+
+.city-pulse-signal-live-item.watch {
+  border-left-color: var(--muted);
+}
+
+.city-pulse-signal-live-item span,
+.city-pulse-signal-live-meta em,
+.city-pulse-signal-live-meta small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.city-pulse-signal-live-item strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.18;
+}
+
+.city-pulse-signal-live-item p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.city-pulse-signal-live-meta {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.city-pulse-signal-live-meta .story-confidence {
+  justify-self: start;
+}
+
+.city-pulse-signal-attention {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 82%, var(--blue-soft));
+  padding: 7px 8px;
+}
+
+.city-pulse-signal-attention.urgent {
+  border-color: color-mix(in srgb, var(--red) 42%, var(--line));
+  background: color-mix(in srgb, var(--paper) 82%, var(--red) 18%);
+}
+
+.city-pulse-signal-attention.watch {
+  border-color: color-mix(in srgb, var(--brown) 42%, var(--line));
+  background: color-mix(in srgb, var(--paper) 82%, var(--brown) 18%);
+}
+
+.city-pulse-signal-attention strong {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.city-pulse-signal-attention small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.city-pulse-signal-live-meta a {
+  justify-self: start;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.city-pulse-signal-empty {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .city-pulse-signal-guidance {
@@ -1629,6 +1780,38 @@ button {
   font: 30px/1.1 var(--serif);
 }
 
+.source-status-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  border-left: 4px solid var(--green);
+  padding-left: 10px;
+}
+
+.source-status-attention .source-status-summary {
+  border-left-color: var(--amber);
+}
+
+.source-status-unknown .source-status-summary {
+  border-left-color: var(--muted);
+}
+
+.source-status-summary span,
+.source-status-summary p,
+.source-status-private,
+.source-status-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.source-status-summary strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
 .rail-title a {
   display: inline-flex;
   align-items: center;
@@ -2071,20 +2254,48 @@ button {
 .health-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 9px 14px;
+  gap: 8px;
   margin-top: 14px;
   color: var(--muted);
   font-size: 11px;
 }
 
+.health-grid span {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 5px 7px;
+  line-height: 1.1;
+}
+
 .health-grid span::before {
   content: "";
-  display: inline-block;
+  display: block;
+  flex: 0 0 auto;
   width: 7px;
   height: 7px;
-  margin-right: 6px;
   border-radius: 50%;
   background: var(--green);
+}
+
+.health-grid b,
+.health-grid small {
+  overflow-wrap: anywhere;
+}
+
+.health-grid b {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.health-grid small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .health-grid .degraded::before,
@@ -2094,6 +2305,11 @@ button {
 
 .health-grid .disabled::before {
   background: var(--muted);
+}
+
+.source-status-private,
+.source-status-empty {
+  margin-top: 10px;
 }
 
 .loading,
@@ -9395,6 +9611,10 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .city-pulse-signal-live-item {
+    grid-template-columns: 1fr;
+  }
+
   .sport-hero-meta {
     justify-content: flex-start;
   }
@@ -9677,6 +9897,7 @@ button {
   .lead-story,
   .morning-brief,
   .city-pulse-signal-status,
+  .city-pulse-signal-live,
   .city-pulse-signal-guidance,
   .dashboard-layout-config,
   .workspace-panel,

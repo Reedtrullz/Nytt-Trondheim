@@ -1011,6 +1011,25 @@ export const notificationTriggerQuerySchema = z.object({
 
 export type NotificationTriggerQueryInput = z.infer<typeof notificationTriggerQuerySchema>;
 
+export const notificationTriggerPublicSurfaceSchema = z
+  .object({
+    state: z.enum(["visible", "hidden"]),
+    label: z.string().trim().min(1).max(140),
+    detail: z.string().trim().min(1).max(500),
+    reason: z.string().trim().min(1).max(500),
+    attention: z
+      .object({
+        label: z.string().trim().min(1).max(140),
+        detail: z.string().trim().min(1).max(500),
+        tone: z.enum(["urgent", "watch", "observe"]),
+      })
+      .strict()
+      .optional(),
+    recencyLabel: z.string().trim().min(1).max(80).optional(),
+    link: operationsTimelineEventLinkSchema.optional(),
+  })
+  .strict();
+
 export const notificationTriggerCandidateSchema = z
   .object({
     id: z.string().trim().min(1).max(260),
@@ -1031,6 +1050,7 @@ export const notificationTriggerCandidateSchema = z
     matchedKeywords: z.array(z.string().trim().min(1).max(80)).max(40),
     reasons: z.array(z.string().trim().min(1).max(300)).max(20),
     links: z.array(operationsTimelineEventLinkSchema).max(20),
+    publicSurface: notificationTriggerPublicSurfaceSchema,
   })
   .strict();
 

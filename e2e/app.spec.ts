@@ -6,6 +6,7 @@ import {
   sampleWorkspace,
   type Article,
   type MorningBrief,
+  type SourceHealth,
 } from "@nytt/shared";
 
 async function openTrafficLayersIfHidden(page: Page): Promise<void> {
@@ -112,6 +113,7 @@ test("frontpage uses bootstrap feed without immediate duplicate refreshes", asyn
 test("filtered City Pulse modules use refreshed feed instead of stale bootstrap context", async ({
   page,
 }) => {
+  const freshPublishedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const staleArticle: Article = {
     id: "stale-default-story",
     source: "adressa",
@@ -132,7 +134,7 @@ test("filtered City Pulse modules use refreshed feed instead of stale bootstrap 
     title: "Fersk trafikk ved Sluppen",
     excerpt: "Trafikken går sakte ved Sluppen etter arbeid i vegbanen.",
     url: "https://example.test/fresh-traffic",
-    publishedAt: "2026-07-02T10:30:00.000Z",
+    publishedAt: freshPublishedAt,
     scope: "trondheim",
     category: "Transport",
     places: ["Sluppen"],
@@ -231,6 +233,22 @@ test("City Pulse pins the AI-assisted morning brief on the public frontpage", as
       completedAt: "2026-07-02T07:25:00.000Z",
     },
   };
+  const sourceHealth: SourceHealth[] = [
+    ...sampleBootstrap.sourceHealth,
+    {
+      source: "deepseek",
+      label: "AI-analyse",
+      state: "degraded",
+      detail: "DeepSeek bruker deterministisk reserveanalyse.",
+      lastCheckedAt: "2026-07-02T07:35:00.000Z",
+    },
+    {
+      source: "web_push",
+      label: "Web Push",
+      state: "disabled",
+      detail: "Intern varslingskanal.",
+    },
+  ];
 
   await page.route("**/api/bootstrap", async (route) => {
     await route.fulfill({
@@ -239,6 +257,7 @@ test("City Pulse pins the AI-assisted morning brief on the public frontpage", as
       body: JSON.stringify({
         ...sampleBootstrap,
         morningBrief,
+        sourceHealth,
       }),
     });
   });
@@ -262,6 +281,13 @@ test("City Pulse pins the AI-assisted morning brief on the public frontpage", as
   ).toHaveAttribute("href", `/situasjoner/${situation.id}`);
   await expect(page.getByLabel("Bypulsmoduler")).toContainText("Varsel og AI-spor");
   await expect(page.getByLabel("Bypulsmoduler")).toContainText("Brief-ferskhet");
+  const publicSources = page.locator(".source-status");
+  await expect(publicSources).toContainText("Delvis kildegrunnlag");
+  await expect(publicSources).toContainText("2 kilder trenger tilsyn blant 7 åpne kilder.");
+  await expect(publicSources).toContainText("2 interne kontroller vises bare i Command Center.");
+  await expect(publicSources).not.toContainText("Basic Auth");
+  await expect(publicSources).not.toContainText("AI-analyse");
+  await expect(publicSources).not.toContainText("Web Push");
   await expectNoHorizontalPageOverflow(page);
 });
 
@@ -417,7 +443,7 @@ test("home nearby module links ranked local stories with the map", async ({ page
   await municipalRow.click();
   await expect(municipalRow).toHaveAttribute("aria-current", "true");
   await expect(nearby.getByRole("heading", { name: /Varsel om veiarbeid/ })).toBeVisible();
-  await expect(nearby.getByText("Kommunalt varsel")).toBeVisible();
+  await expect(nearby.locator(".nearby-kind-municipal")).toHaveText("Kommunalt varsel");
   await expect(nearby.getByRole("link", { name: /Åpne trafikkart/ })).toHaveAttribute(
     "href",
     "/trafikk",
@@ -2227,6 +2253,24 @@ test("command notification bridge shows Web Push readiness responsively", async 
                 situationId: "road-one",
               },
             ],
+            publicSurface: {
+              state: "visible",
+              label: "Synlig på Bypuls",
+              detail: "Sjekk rute nå · Oppdatert nå",
+              reason: "Samme offentlige varselregel treffer City Pulse-datasettet.",
+              attention: {
+                label: "Sjekk rute nå",
+                detail: "Hendelsen kan påvirke reisevei eller framkommelighet.",
+                tone: "urgent",
+              },
+              recencyLabel: "Oppdatert nå",
+              link: {
+                kind: "situation",
+                label: "Åpne situasjonsrom",
+                href: "/situasjoner/road-one",
+                situationId: "road-one",
+              },
+            },
           },
           {
             id: "notification:article:violence-one",
@@ -2252,6 +2296,14 @@ test("command notification bridge shows Web Push readiness responsively", async 
             matchedKeywords: ["voldshendelse"],
             reasons: ["Høyeffektsord i fersk sak."],
             links: [],
+            publicSurface: {
+              state: "hidden",
+              label: "Ikke vist på Bypuls",
+              detail:
+                "Kandidaten er beholdt for operatørvurdering, men vises ikke som offentlig signal.",
+              reason:
+                "Artikkelkandidaten er under offentlig visningsterskel eller mangler public-safe signalgrunnlag.",
+            },
           },
         ],
       }),
@@ -2321,6 +2373,8 @@ test("command notification bridge shows Web Push readiness responsively", async 
     await expect(deliveryHistory.getByText("91 % score")).toBeVisible();
     await expect(deliveryHistory.getByText("Vegvesen DATEX, Adresseavisen")).toBeVisible();
     await expect(page.getByText("Steinsprang, vegen er stengt").first()).toBeVisible();
+    await expect(page.getByText("Synlig på Bypuls").first()).toBeVisible();
+    await expect(page.getByText("Sjekk rute nå · Oppdatert nå").first()).toBeVisible();
     await expect(page.getByText("Ingen abonnent").first()).toBeVisible();
     await expect(page.getByRole("group", { name: "Levering" })).toBeVisible();
     await page.getByLabel("Filtre").getByLabel("Ingen abonnent").click();

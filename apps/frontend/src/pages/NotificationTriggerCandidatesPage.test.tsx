@@ -67,6 +67,24 @@ const page: NotificationTriggerPage = {
           situationId: "road-one",
         },
       ],
+      publicSurface: {
+        state: "visible",
+        label: "Synlig på Bypuls",
+        detail: "Sjekk rute nå · Oppdatert nå",
+        reason: "Samme offentlige varselregel treffer City Pulse-datasettet.",
+        attention: {
+          label: "Sjekk rute nå",
+          detail: "Hendelsen kan påvirke reisevei eller framkommelighet.",
+          tone: "urgent",
+        },
+        recencyLabel: "Oppdatert nå",
+        link: {
+          kind: "situation",
+          label: "Åpne situasjonsrom",
+          href: "/situasjoner/road-one",
+          situationId: "road-one",
+        },
+      },
     },
   ],
 };
@@ -127,6 +145,9 @@ describe("NotificationTriggerCandidatesDashboard", () => {
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kritisk");
     expect(html).toContain("Sendt");
+    expect(html).toContain("Bypuls");
+    expect(html).toContain("Synlig på Bypuls");
+    expect(html).toContain("Sjekk rute nå · Oppdatert nå");
     expect(html).not.toContain("Ikke sendt");
     expect(html).toContain("Push-varsel er sendt for denne utløseren");
     expect(html).toContain("Har offentlig kildegrunnlag");

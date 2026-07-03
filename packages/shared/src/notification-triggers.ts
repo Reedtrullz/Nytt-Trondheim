@@ -1,11 +1,13 @@
 import type {
   Article,
+  HomeSituationSummary,
   NotificationTriggerCandidate,
   NotificationTriggerDeliveryState,
   NotificationTriggerKind,
   NotificationTriggerPage,
   NotificationTriggerQuery,
   NotificationTriggerSeverity,
+  PublicNotificationSignalHighlight,
   PushDeliveryListItem,
   PushSubscriptionSummary,
   Situation,
@@ -14,6 +16,9 @@ import type {
   SourceHealth,
   SourceId,
 } from "./types.js";
+import { sourceConfidenceLabels } from "./types.js";
+import { sourceMixConfidenceSummary } from "./source-confidence.js";
+import { sourceIdLabel } from "./source-labels.js";
 
 interface NotificationTriggerRule {
   kind: NotificationTriggerKind;
@@ -34,6 +39,13 @@ export interface BuildNotificationTriggersInput {
   articles: Article[];
   generatedAt: string;
   filters?: NotificationTriggerQuery;
+}
+
+export interface BuildPublicNotificationSignalHighlightsInput {
+  situations: HomeSituationSummary[];
+  articles: Article[];
+  generatedAt: string;
+  limit?: number;
 }
 
 export interface NotificationDeliveryStateContext {
@@ -241,6 +253,7 @@ function confidenceFromScore(
           : "speculative";
   return {
     level,
+    label: sourceConfidenceLabels[level],
     score,
     sourceCount,
     updatedAt: generatedAt,
@@ -253,6 +266,287 @@ function confidenceFromScore(
   };
 }
 
+function publicSourceLabelsForArticle(article: Article): string[] {
+  const labels = new Map<string, string>();
+  labels.set(article.source, article.sourceLabel);
+  const verification = article.publicVerification;
+  if (verification) {
+    for (const source of verification.officialSources) labels.set(source, sourceIdLabel(source));
+    for (const source of verification.reportingSources) labels.set(source, sourceIdLabel(source));
+  }
+  return [...labels.values()];
+}
+
+function publicConfidenceForArticle(
+  article: Article,
+  score: number,
+  generatedAt: string,
+): SourceConfidenceSummary {
+  const verification = article.publicVerification;
+  if (!verification) return confidenceFromScore(score, 1, generatedAt);
+  return sourceMixConfidenceSummary(
+    [article.source, ...verification.officialSources, ...verification.reportingSources],
+    { updatedAt: article.publishedAt },
+  );
+}
+
+function publicAttentionForSignal(
+  kind: NotificationTriggerKind,
+  severity: NotificationTriggerSeverity,
+): PublicNotificationSignalHighlight["attention"] {
+  if (severity === "critical") {
+    if (kind === "traffic_disruption") {
+      return {
+        label: "Sjekk rute nå",
+        detail: "Hendelsen kan påvirke reisevei eller framkommelighet.",
+        tone: "urgent",
+      };
+    }
+    if (kind === "public_safety") {
+      return {
+        label: "Følg med nå",
+        detail: "Liv, helse eller nødetater er sentrale i saken.",
+        tone: "urgent",
+      };
+    }
+    return {
+      label: "Krever oppmerksomhet",
+      detail: "Signalet vurderes som kritisk og bør følges tett.",
+      tone: "urgent",
+    };
+  }
+
+  if (kind === "weather_hazard") {
+    return {
+      label: "Følg utviklingen",
+      detail: "Natur- eller værforhold kan endre seg raskt.",
+      tone: "watch",
+    };
+  }
+  if (kind === "service_disruption") {
+    return {
+      label: "Sjekk praktisk beredskap",
+      detail: "Bortfall eller driftssignaler kan påvirke hverdagsfunksjoner.",
+      tone: "watch",
+    };
+  }
+  if (kind === "traffic_disruption") {
+    return {
+      label: "Planlegg litt ekstra",
+      detail: "Trafikksignalet kan påvirke lokale reiser.",
+      tone: "watch",
+    };
+  }
+  return {
+    label: "Følg med",
+    detail: "Saken har høyeffektsignaler, men ikke kritisk varselnivå.",
+    tone: "observe",
+  };
+}
+
+function publicRecencyLabel(updatedAt: string, generatedAt: string): string {
+  const updatedMs = Date.parse(updatedAt);
+  const generatedMs = Date.parse(generatedAt);
+  if (!Number.isFinite(updatedMs) || !Number.isFinite(generatedMs)) return "Ukjent ferskhet";
+  const ageMinutes = Math.max(0, (generatedMs - updatedMs) / 60_000);
+  if (ageMinutes <= 30) return "Oppdatert nå";
+  if (ageMinutes <= 120) return "Oppdatert siste 2 t";
+  if (ageMinutes <= 24 * 60) return "Oppdatert i dag";
+  return "Eldre signal";
+}
+
+function publicSituationSignalHighlight(
+  situation: HomeSituationSummary,
+  generatedAt: string,
+): PublicNotificationSignalHighlight | undefined {
+  if (situation.status === "dismissed" || situation.status === "resolved") return undefined;
+  const matches = keywordsForText(
+    `${situation.title} ${situation.summary} ${situation.locationLabel}`,
+  );
+  if (matches.length === 0) return undefined;
+
+  const score = clampScore(
+    0.16 +
+      (situation.status === "active" ? 0.14 : 0.08) +
+      (situation.verificationStatus === "Offentlig bekreftet" ? 0.16 : 0) +
+      (situation.sourceConfidence?.score ??
+        confidenceLevelScore[situation.sourceConfidence?.level ?? "uncertain"]) *
+        0.28 +
+      Math.min(0.18, matches.length * 0.06) +
+      recencyBoost(situation.updatedAt, generatedAt),
+  );
+  if (score < 0.58) return undefined;
+
+  const severity = strongestSeverity([
+    ...matches.map((match) => match.severity),
+    score >= 0.82 ? "critical" : score >= 0.68 ? "warning" : "watch",
+  ]);
+  const matchedKeywords = unique(matches.map((match) => match.keyword));
+  const confidence = situation.sourceConfidence ?? confidenceFromScore(score, 1, generatedAt);
+  const kind = candidateKind(matches);
+
+  return {
+    id: `public-signal:situation:${situation.id}`,
+    kind,
+    severity,
+    title: situation.title,
+    body: `${situation.locationLabel}: ${situation.summary}`,
+    attention: publicAttentionForSignal(kind, severity),
+    confidence,
+    eventUpdatedAt: situation.updatedAt,
+    recencyLabel: publicRecencyLabel(situation.updatedAt, generatedAt),
+    sourceLabels: [situation.verificationStatus],
+    matchedKeywords,
+    reasons: [
+      situation.status === "active" ? "Situasjonen er aktiv." : "Situasjonen er til vurdering.",
+      situation.verificationStatus === "Offentlig bekreftet"
+        ? "Situasjonsrommet er offentlig bekreftet."
+        : undefined,
+      matchedKeywords.length
+        ? `Høyeffektspråk: ${matchedKeywords.slice(0, 3).join(", ")}.`
+        : undefined,
+    ].filter((reason): reason is string => Boolean(reason)),
+    link: {
+      kind: "situation",
+      label: "Åpne situasjonsrom",
+      href: `/situasjoner/${encodeURIComponent(situation.id)}`,
+      situationId: situation.id,
+    },
+  };
+}
+
+function publicArticleSignalHighlight(
+  article: Article,
+  generatedAt: string,
+): PublicNotificationSignalHighlight | undefined {
+  if (article.category === "Sport" || article.category === "Kultur") return undefined;
+  const matches = keywordsForText(
+    `${article.title} ${article.excerpt} ${article.places.join(" ")}`,
+  );
+  if (matches.length === 0) return undefined;
+
+  const official = officialSources.has(article.source);
+  const reporting = reportingSources.has(article.source);
+  const verified = Boolean(article.publicVerification);
+  const coverageBoost =
+    article.coverageBundle?.confidence === "high"
+      ? 0.16
+      : article.coverageBundle?.confidence === "medium"
+        ? 0.08
+        : 0;
+  const score = clampScore(
+    0.12 +
+      (official ? 0.22 : 0) +
+      (reporting ? 0.1 : 0) +
+      (verified ? 0.18 : 0) +
+      (["Hendelser", "Krim", "Transport", "Vær"].includes(article.category) ? 0.12 : 0) +
+      coverageBoost +
+      Math.min(0.18, matches.length * 0.06) +
+      recencyBoost(article.publishedAt, generatedAt),
+  );
+  if (score < 0.64) return undefined;
+
+  const severity = strongestSeverity([
+    ...matches.map((match) => match.severity),
+    score >= 0.82 ? "critical" : "warning",
+  ]);
+  const matchedKeywords = unique(matches.map((match) => match.keyword));
+  const kind = candidateKind(matches);
+  return {
+    id: `public-signal:article:${article.id}`,
+    kind,
+    severity,
+    title: article.title,
+    body: article.excerpt,
+    attention: publicAttentionForSignal(kind, severity),
+    confidence: publicConfidenceForArticle(article, score, generatedAt),
+    eventUpdatedAt: article.publishedAt,
+    recencyLabel: publicRecencyLabel(article.publishedAt, generatedAt),
+    sourceLabels: publicSourceLabelsForArticle(article),
+    matchedKeywords,
+    reasons: [
+      verified ? "Saken er verifisert mot offentlig kilde og redaksjonell dekning." : undefined,
+      article.coverageBundle
+        ? `Inngår i dekningsgruppe med ${article.coverageBundle.confidence} tillit.`
+        : undefined,
+      `Høyeffektspråk: ${matchedKeywords.slice(0, 3).join(", ")}.`,
+    ].filter((reason): reason is string => Boolean(reason)),
+    link: article.situationId
+      ? {
+          kind: "situation",
+          label: "Åpne situasjonsrom",
+          href: `/situasjoner/${encodeURIComponent(article.situationId)}`,
+          situationId: article.situationId,
+        }
+      : { kind: "external", label: article.sourceLabel, href: article.url },
+  };
+}
+
+function publicSurfaceFromHighlight(
+  highlight: PublicNotificationSignalHighlight | undefined,
+  hiddenReason: string,
+): NotificationTriggerCandidate["publicSurface"] {
+  if (!highlight) {
+    return {
+      state: "hidden",
+      label: "Ikke vist på Bypuls",
+      detail: "Kandidaten er beholdt for operatørvurdering, men vises ikke som offentlig signal.",
+      reason: hiddenReason,
+    };
+  }
+  return {
+    state: "visible",
+    label: "Synlig på Bypuls",
+    detail: `${highlight.attention.label} · ${highlight.recencyLabel}`,
+    reason: "Samme offentlige varselregel treffer City Pulse-datasettet.",
+    attention: highlight.attention,
+    recencyLabel: highlight.recencyLabel,
+    ...(highlight.link ? { link: highlight.link } : {}),
+  };
+}
+
+function homeSummaryFromSituation(situation: Situation): HomeSituationSummary {
+  return {
+    id: situation.id,
+    title: situation.title,
+    summary: situation.summary,
+    status: situation.status,
+    verificationStatus: situation.verificationStatus,
+    updatedAt: situation.updatedAt,
+    createdAt: situation.createdAt,
+    locationLabel: situation.locationLabel,
+    ...(situation.sourceConfidence ? { sourceConfidence: situation.sourceConfidence } : {}),
+  };
+}
+
+export function buildPublicNotificationSignalHighlights(
+  input: BuildPublicNotificationSignalHighlightsInput,
+): PublicNotificationSignalHighlight[] {
+  const highlights: PublicNotificationSignalHighlight[] = [];
+  const coveredSituationIds = new Set<string>();
+  for (const situation of input.situations) {
+    const highlight = publicSituationSignalHighlight(situation, input.generatedAt);
+    if (!highlight) continue;
+    highlights.push(highlight);
+    coveredSituationIds.add(situation.id);
+  }
+
+  for (const article of input.articles) {
+    if (article.situationId && coveredSituationIds.has(article.situationId)) continue;
+    const highlight = publicArticleSignalHighlight(article, input.generatedAt);
+    if (highlight) highlights.push(highlight);
+  }
+
+  return highlights
+    .sort(
+      (left, right) =>
+        severityRank[right.severity] - severityRank[left.severity] ||
+        (right.confidence.score ?? 0) - (left.confidence.score ?? 0) ||
+        right.eventUpdatedAt.localeCompare(left.eventUpdatedAt),
+    )
+    .slice(0, input.limit ?? 3);
+}
+
 function keywordsForText(text: string) {
   const normalized = normalizeText(text);
   const matches: Array<{
@@ -262,7 +556,12 @@ function keywordsForText(text: string) {
   }> = [];
   for (const rule of highImpactRules) {
     for (const keyword of rule.keywords) {
-      if (normalized.includes(normalizeText(keyword))) {
+      const normalizedKeyword = normalizeText(keyword);
+      const matched =
+        normalizedKeyword === "ko"
+          ? new RegExp(`(^|[^a-z0-9])${normalizedKeyword}([^a-z0-9]|$)`).test(normalized)
+          : normalized.includes(normalizedKeyword);
+      if (matched) {
         matches.push({ kind: rule.kind, severity: rule.severity, keyword });
       }
     }
@@ -406,6 +705,10 @@ function situationCandidate(
         situationId: situation.id,
       },
     ],
+    publicSurface: publicSurfaceFromHighlight(
+      publicSituationSignalHighlight(homeSummaryFromSituation(situation), generatedAt),
+      "Situasjonen er under offentlig visningsterskel eller ikke aktiv/offentlig nok for City Pulse.",
+    ),
   };
 }
 
@@ -469,6 +772,10 @@ function articleCandidate(
       `Høyeffektspråk: ${matchedKeywords.slice(0, 4).join(", ")}.`,
     ].filter((reason): reason is string => Boolean(reason)),
     links: [{ kind: "external", label: article.sourceLabel, href: article.url }],
+    publicSurface: publicSurfaceFromHighlight(
+      publicArticleSignalHighlight(article, generatedAt),
+      "Artikkelkandidaten er under offentlig visningsterskel eller mangler public-safe signalgrunnlag.",
+    ),
   };
 }
 

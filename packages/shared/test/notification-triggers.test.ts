@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Article, Situation } from "../src/index.js";
+import type { Article, HomeSituationSummary, Situation } from "../src/index.js";
 import {
   applyNotificationDeliveryStates,
+  buildPublicNotificationSignalHighlights,
   buildNotificationTriggerPage,
   filterNotificationTriggerPageByDeliveryStates,
   notificationSubscriptionMatchesCandidate,
@@ -73,6 +74,27 @@ function situation(overrides: Partial<Situation> = {}): Situation {
   };
 }
 
+function homeSituation(overrides: Partial<HomeSituationSummary> = {}): HomeSituationSummary {
+  return {
+    id: "situation-one",
+    title: "Steinsprang, vegen er stengt",
+    summary: "Vegen er stengt ved Gangåsvegen, og omkjøring er skiltet.",
+    status: "active",
+    verificationStatus: "Offentlig bekreftet",
+    updatedAt: "2026-07-02T08:55:00.000Z",
+    createdAt: "2026-07-02T07:40:00.000Z",
+    locationLabel: "Gangåsvegen",
+    sourceConfidence: {
+      level: "confirmed",
+      label: "Bekreftet",
+      score: 0.92,
+      sourceCount: 2,
+      updatedAt: "2026-07-02T08:55:00.000Z",
+    },
+    ...overrides,
+  };
+}
+
 describe("notification trigger candidates", () => {
   it("exposes public guidance for the high-impact trigger categories", () => {
     expect(publicNotificationTriggerGuidance).toEqual(
@@ -124,12 +146,150 @@ describe("notification trigger candidates", () => {
       situationId: "situation-one",
       sourceIds: ["datex"],
       matchedKeywords: expect.arrayContaining(["stengt"]),
+      publicSurface: {
+        state: "visible",
+        label: "Synlig på Bypuls",
+        detail: "Sjekk rute nå · Oppdatert nå",
+        reason: "Samme offentlige varselregel treffer City Pulse-datasettet.",
+        attention: {
+          label: "Sjekk rute nå",
+          detail: "Hendelsen kan påvirke reisevei eller framkommelighet.",
+          tone: "urgent",
+        },
+        recencyLabel: "Oppdatert nå",
+        link: expect.objectContaining({ href: "/situasjoner/situation-one" }),
+      },
       reasons: expect.arrayContaining([
         "Situasjonen er markert med høy operativ prioritet.",
         "Har offentlig kildegrunnlag.",
       ]),
     });
     expect(page.items[0]?.links[0]).toMatchObject({ href: "/situasjoner/situation-one" });
+  });
+
+  it("builds public-safe signal highlights from home situation summaries", () => {
+    const highlights = buildPublicNotificationSignalHighlights({
+      situations: [homeSituation()],
+      articles: [],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(highlights).toHaveLength(1);
+    expect(highlights[0]).toMatchObject({
+      id: "public-signal:situation:situation-one",
+      kind: "traffic_disruption",
+      severity: "critical",
+      title: "Steinsprang, vegen er stengt",
+      sourceLabels: ["Offentlig bekreftet"],
+      attention: {
+        label: "Sjekk rute nå",
+        detail: "Hendelsen kan påvirke reisevei eller framkommelighet.",
+        tone: "urgent",
+      },
+      confidence: expect.objectContaining({ level: "confirmed", label: "Bekreftet" }),
+      recencyLabel: "Oppdatert nå",
+      matchedKeywords: expect.arrayContaining(["stengt", "omkjøring"]),
+      reasons: expect.arrayContaining([
+        "Situasjonen er aktiv.",
+        "Situasjonsrommet er offentlig bekreftet.",
+      ]),
+      link: expect.objectContaining({ href: "/situasjoner/situation-one" }),
+    });
+    expect(JSON.stringify(highlights[0])).not.toContain("deliveryState");
+    expect(JSON.stringify(highlights[0])).not.toContain("subscription");
+  });
+
+  it("keeps private candidates when public City Pulse has no safe signal projection", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [
+        situation({
+          id: "internal-followup",
+          title: "Operativ oppfolging",
+          summary: "Kommunen vurderer videre tiltak.",
+          locationLabel: "Midtbyen",
+          relatedArticleIds: [],
+          evidence: [],
+          timeline: [],
+        }),
+      ],
+      articles: [],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.publicSurface).toMatchObject({
+      state: "hidden",
+      label: "Ikke vist på Bypuls",
+      reason:
+        "Situasjonen er under offentlig visningsterskel eller ikke aktiv/offentlig nok for City Pulse.",
+    });
+  });
+
+  it("builds public-safe signal highlights from verified high-impact articles", () => {
+    const highlights = buildPublicNotificationSignalHighlights({
+      situations: [],
+      articles: [
+        article({
+          id: "article-verified",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ung mann kritisk skadet etter voldshendelse på Lade",
+          excerpt: "Politiet bekrefter at en mann er kritisk skadet.",
+          publishedAt: "2026-07-02T07:20:00.000Z",
+          category: "Krim",
+          publicVerification: {
+            status: "verified",
+            label: "Verifisert",
+            detail: "Bekreftet av Politiloggen og Adresseavisen.",
+            officialSources: ["politiloggen"],
+            reportingSources: ["adressa"],
+            situationId: "lade-vold",
+          },
+          situationId: "lade-vold",
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(highlights).toHaveLength(1);
+    expect(highlights[0]).toMatchObject({
+      id: "public-signal:article:article-verified",
+      kind: "public_safety",
+      severity: "critical",
+      sourceLabels: ["Adresseavisen", "Politiloggen"],
+      attention: expect.objectContaining({
+        label: "Følg med nå",
+        tone: "urgent",
+      }),
+      confidence: expect.objectContaining({ level: "confirmed", label: "Bekreftet" }),
+      recencyLabel: "Oppdatert siste 2 t",
+      link: expect.objectContaining({ href: "/situasjoner/lade-vold" }),
+    });
+  });
+
+  it("keeps public signal highlights deduplicated and avoids sport false positives", () => {
+    const highlights = buildPublicNotificationSignalHighlights({
+      situations: [homeSituation({ id: "road-one" })],
+      articles: [
+        article({
+          id: "article-road",
+          title: "Ti meter stort ras kan bli stengt i flere uker",
+          excerpt: "Veien er stengt ved Gangåsvegen.",
+          category: "Transport",
+          situationId: "road-one",
+        }),
+        article({
+          id: "sport-one",
+          title: "Freyr Alexandersson ferdig i Brann",
+          excerpt: "Rosenborg vurderer trenerkandidater.",
+          category: "Sport",
+          topics: ["rosenborg"],
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(highlights.map((item) => item.id)).toEqual(["public-signal:situation:road-one"]);
   });
 
   it("annotates candidates with Web Push readiness and delivery history", () => {

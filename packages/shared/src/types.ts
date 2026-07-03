@@ -850,6 +850,16 @@ export type NotificationTriggerDeliveryState =
   | "failed"
   | "suppressed";
 
+export interface NotificationTriggerPublicSurface {
+  state: "visible" | "hidden";
+  label: string;
+  detail: string;
+  reason: string;
+  attention?: PublicNotificationSignalHighlight["attention"];
+  recencyLabel?: string;
+  link?: OperationsTimelineEventLink;
+}
+
 export interface NotificationTriggerCandidate {
   id: string;
   kind: NotificationTriggerKind;
@@ -869,6 +879,7 @@ export interface NotificationTriggerCandidate {
   matchedKeywords: string[];
   reasons: string[];
   links: OperationsTimelineEventLink[];
+  publicSurface: NotificationTriggerPublicSurface;
 }
 
 export interface NotificationTriggerSummary {
@@ -878,6 +889,26 @@ export interface NotificationTriggerSummary {
   watch: number;
   officialBacked: number;
   highConfidence: number;
+}
+
+export interface PublicNotificationSignalHighlight {
+  id: string;
+  kind: NotificationTriggerKind;
+  severity: NotificationTriggerSeverity;
+  title: string;
+  body: string;
+  attention: {
+    label: string;
+    detail: string;
+    tone: "urgent" | "watch" | "observe";
+  };
+  confidence: SourceConfidenceSummary;
+  eventUpdatedAt: string;
+  recencyLabel: string;
+  sourceLabels: string[];
+  matchedKeywords: string[];
+  reasons: string[];
+  link?: OperationsTimelineEventLink;
 }
 
 export interface NotificationPushStatus {

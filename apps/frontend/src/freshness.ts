@@ -18,10 +18,30 @@ const publicFreshnessHiddenSources = new Set<SourceHealth["source"]>([
   "web_push",
 ]);
 
+const sourceStateLabels: Record<SourceHealth["state"], string> = {
+  ok: "OK",
+  degraded: "Delvis",
+  disabled: "Pause",
+  awaiting_access: "Avventer",
+};
+
+export interface PublicSourceHealthSummary {
+  tone: "ok" | "attention" | "unknown";
+  label: string;
+  detail: string;
+  freshnessLabel: string;
+  publicSourceCount: number;
+  attentionCount: number;
+  hiddenSourceCount: number;
+  sources: Array<Pick<SourceHealth, "source" | "label" | "state"> & { stateLabel: string }>;
+}
+
+function publicSourcesForFreshness(sources: SourceHealth[]): SourceHealth[] {
+  return sources.filter((source) => !publicFreshnessHiddenSources.has(source.source));
+}
+
 export function headerFreshnessLabel(sources: SourceHealth[], now = new Date()): string {
-  const publicSources = sources.filter(
-    (source) => !publicFreshnessHiddenSources.has(source.source),
-  );
+  const publicSources = publicSourcesForFreshness(sources);
   const nonOkCount = publicSources.filter((source) => source.state !== "ok").length;
   const newest = publicSources
     .map((source) => (source.lastCheckedAt ? new Date(source.lastCheckedAt).getTime() : Number.NaN))
@@ -38,4 +58,46 @@ export function headerFreshnessLabel(sources: SourceHealth[], now = new Date()):
   }
   const prefix = now.getTime() - newest <= freshnessWindowMs ? "Oppdatert" : "Sist oppdatert";
   return `${prefix} ${timeFormatter.format(timestamp)}`;
+}
+
+export function publicSourceHealthSummary(
+  sources: SourceHealth[],
+  now = new Date(),
+): PublicSourceHealthSummary {
+  const publicSources = publicSourcesForFreshness(sources);
+  const attentionSources = publicSources.filter((source) => source.state !== "ok");
+  const freshnessLabel = headerFreshnessLabel(sources, now);
+  const hiddenSourceCount = sources.length - publicSources.length;
+
+  if (publicSources.length === 0) {
+    return {
+      tone: "unknown",
+      label: "Kildestatus ukjent",
+      detail: "Ingen åpne kilder rapporterer status i denne visningen.",
+      freshnessLabel,
+      publicSourceCount: 0,
+      attentionCount: 0,
+      hiddenSourceCount,
+      sources: [],
+    };
+  }
+
+  const tone = attentionSources.length ? "attention" : "ok";
+  return {
+    tone,
+    label: attentionSources.length ? "Delvis kildegrunnlag" : "Kilder oppdatert",
+    detail: attentionSources.length
+      ? `${sourceAttentionText(attentionSources.length)} blant ${publicSources.length} åpne kilder.`
+      : `Alle ${publicSources.length} åpne kilder rapporterer normal status.`,
+    freshnessLabel,
+    publicSourceCount: publicSources.length,
+    attentionCount: attentionSources.length,
+    hiddenSourceCount,
+    sources: publicSources.slice(0, 6).map((source) => ({
+      source: source.source,
+      label: source.label,
+      state: source.state,
+      stateLabel: sourceStateLabels[source.state],
+    })),
+  };
 }

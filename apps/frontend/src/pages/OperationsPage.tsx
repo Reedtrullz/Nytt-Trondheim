@@ -281,6 +281,9 @@ function NotificationBridgeWidget({ page }: { page?: NotificationTriggerPage }) 
     ? activeCandidates.slice(0, 3)
     : page.items.slice(0, 3);
   const pushStatus = page.pushStatus;
+  const publicVisibleCount = page.items.filter(
+    (candidate) => candidate.publicSurface.state === "visible",
+  ).length;
 
   return (
     <div className="notification-bridge-widget">
@@ -292,8 +295,8 @@ function NotificationBridgeWidget({ page }: { page?: NotificationTriggerPage }) 
         </article>
         <article>
           <span>Offentlig</span>
-          <strong>{page.summary.officialBacked}</strong>
-          <small>{page.summary.highConfidence} høy tillit</small>
+          <strong>{publicVisibleCount}</strong>
+          <small>{page.summary.officialBacked} kildebacket</small>
         </article>
         <article>
           <span>Push</span>
@@ -316,6 +319,7 @@ function NotificationBridgeWidget({ page }: { page?: NotificationTriggerPage }) 
                 </span>
                 <strong>{candidate.title}</strong>
                 <small>{candidate.sourceLabels.join(", ") || candidate.sourceIds.join(", ")}</small>
+                <small>{candidate.publicSurface.label}</small>
               </div>
               <b>{percent(candidate.score)}</b>
             </article>

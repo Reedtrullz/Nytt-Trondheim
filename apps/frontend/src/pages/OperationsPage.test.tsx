@@ -178,6 +178,19 @@ const notificationTriggers: NotificationTriggerPage = {
       matchedKeywords: ["stengt"],
       reasons: ["Har offentlig kildegrunnlag."],
       links: [{ kind: "situation", label: "Åpne situasjon", href: "/situasjoner/e6" }],
+      publicSurface: {
+        state: "visible",
+        label: "Synlig på Bypuls",
+        detail: "Sjekk rute nå · Oppdatert nå",
+        reason: "Samme offentlige varselregel treffer City Pulse-datasettet.",
+        attention: {
+          label: "Sjekk rute nå",
+          detail: "Hendelsen kan påvirke reisevei eller framkommelighet.",
+          tone: "urgent",
+        },
+        recencyLabel: "Oppdatert nå",
+        link: { kind: "situation", label: "Åpne situasjonsrom", href: "/situasjoner/e6" },
+      },
     },
     {
       id: "notification:article:fire",
@@ -202,6 +215,13 @@ const notificationTriggers: NotificationTriggerPage = {
       matchedKeywords: ["røyk"],
       reasons: ["Høyeffektspråk: røyk."],
       links: [{ kind: "external", label: "NRK Trøndelag", href: "https://example.test/fire" }],
+      publicSurface: {
+        state: "hidden",
+        label: "Ikke vist på Bypuls",
+        detail: "Kandidaten er beholdt for operatørvurdering, men vises ikke som offentlig signal.",
+        reason:
+          "Artikkelkandidaten er under offentlig visningsterskel eller mangler public-safe signalgrunnlag.",
+      },
     },
   ],
 };
@@ -261,6 +281,7 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("1 klare · 1 sendt");
     expect(html).toContain("Kollisjon stenger E6");
     expect(html).toContain("Vegvesen DATEX, Adresseavisen");
+    expect(html).toContain("Synlig på Bypuls");
     expect(html).toContain("91 %");
     expect(html).toContain("/command/romlig");
     expect(html).toContain("PostGIS Heatmaps");

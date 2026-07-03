@@ -230,6 +230,24 @@ describe("workspace contract schemas", () => {
               situationId: "one",
             },
           ],
+          publicSurface: {
+            state: "visible",
+            label: "Synlig på Bypuls",
+            detail: "Sjekk rute nå · Oppdatert nå",
+            reason: "Samme offentlige varselregel treffer City Pulse-datasettet.",
+            attention: {
+              label: "Sjekk rute nå",
+              detail: "Hendelsen kan påvirke reisevei eller framkommelighet.",
+              tone: "urgent",
+            },
+            recencyLabel: "Oppdatert nå",
+            link: {
+              kind: "situation",
+              label: "Åpne situasjonsrom",
+              href: "/situasjoner/one",
+              situationId: "one",
+            },
+          },
         },
       ],
       summary: {

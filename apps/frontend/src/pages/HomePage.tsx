@@ -10,13 +10,16 @@ import {
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  buildPublicNotificationSignalHighlights,
   buildMorningBrief,
   publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
   type HomeSituationSummary,
+  type PublicNotificationSignalHighlight,
   type NotificationTriggerSeverity,
   type SourceConfidenceSummary,
+  type SourceHealth,
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
@@ -65,6 +68,7 @@ import {
   type HomeStoryCard,
   type HomeStoryVerification,
 } from "../homeStoryCards.js";
+import { publicSourceHealthSummary } from "../freshness.js";
 import { newsMapClusterSummary, type NewsMapClusterSummary } from "../newsMapClusters.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
@@ -164,6 +168,19 @@ function notificationSeverityLabel(severity: NotificationTriggerSeverity) {
       return "Varsel";
     case "watch":
       return "Følg med";
+  }
+}
+
+function notificationKindLabel(kind: PublicNotificationSignalHighlight["kind"]) {
+  switch (kind) {
+    case "public_safety":
+      return "Liv og helse";
+    case "traffic_disruption":
+      return "Trafikk";
+    case "weather_hazard":
+      return "Vær";
+    case "service_disruption":
+      return "Driftsbrudd";
   }
 }
 
@@ -342,13 +359,27 @@ export function MorningBriefPanel({
 }
 
 export function CityPulseSignalPanel({
+  articles = [],
   brief,
   now = new Date(),
+  situations = [],
 }: {
+  articles?: Article[];
   brief?: BootstrapPayload["morningBrief"];
   now?: Date;
+  situations?: HomeSituationSummary[];
 }) {
   const freshness = brief ? morningBriefFreshness(brief.generatedAt, now) : undefined;
+  const signalHighlights = useMemo(
+    () =>
+      buildPublicNotificationSignalHighlights({
+        articles,
+        generatedAt: brief?.generatedAt ?? now.toISOString(),
+        limit: 3,
+        situations,
+      }),
+    [articles, brief?.generatedAt, now, situations],
+  );
   return (
     <section className="city-pulse-signal-panel" aria-labelledby="city-pulse-signal-heading">
       <div className="section-heading-row">
@@ -381,6 +412,66 @@ export function CityPulseSignalPanel({
           <strong>{publicNotificationTriggerGuidance.length} offentlige kategorier</strong>
         </div>
       </div>
+      <section className="city-pulse-signal-live" aria-labelledby="city-pulse-live-heading">
+        <div className="city-pulse-signal-live-heading">
+          <div>
+            <p className="label">Akkurat nå</p>
+            <h3 id="city-pulse-live-heading">Høyeffektsaker fanget av varselreglene</h3>
+          </div>
+          <span>{signalHighlights.length ? `${signalHighlights.length} aktive` : "Rolig"}</span>
+        </div>
+        {signalHighlights.length ? (
+          <ol>
+            {signalHighlights.map((item) => {
+              const href =
+                item.link?.kind === "external" ? safeExternalUrl(item.link.href) : item.link?.href;
+              const action =
+                href && item.link ? (
+                  item.link.kind === "external" ? (
+                    <a href={href} target="_blank" rel="noreferrer noopener">
+                      {item.link.label} <ArrowIcon />
+                    </a>
+                  ) : (
+                    <Link to={href}>
+                      {item.link.label} <ArrowIcon />
+                    </Link>
+                  )
+                ) : null;
+              return (
+                <li className={`city-pulse-signal-live-item ${item.severity}`} key={item.id}>
+                  <div>
+                    <span>
+                      {notificationKindLabel(item.kind)} ·{" "}
+                      {notificationSeverityLabel(item.severity)} · {item.recencyLabel}
+                    </span>
+                    <strong>{item.title}</strong>
+                    <p>{item.body}</p>
+                  </div>
+                  <div className="city-pulse-signal-live-meta">
+                    <div className={`city-pulse-signal-attention ${item.attention.tone}`}>
+                      <strong>{item.attention.label}</strong>
+                      <small>{item.attention.detail}</small>
+                    </div>
+                    <StoryConfidenceBadge confidence={item.confidence} />
+                    {item.sourceLabels.length ? <em>{item.sourceLabels.join(" + ")}</em> : null}
+                    {item.reasons.slice(0, 2).map((reason) => (
+                      <small key={reason}>{reason}</small>
+                    ))}
+                    {item.matchedKeywords.length ? (
+                      <small>Treff: {item.matchedKeywords.slice(0, 3).join(", ")}</small>
+                    ) : null}
+                    {action}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <p className="city-pulse-signal-empty">
+            Ingen åpne saker i gjeldende bypulsdata krysser varselterskelen akkurat nå.
+          </p>
+        )}
+      </section>
       <div className="city-pulse-signal-guidance">
         {publicNotificationTriggerGuidance.map((item) => (
           <article key={item.kind}>
@@ -426,7 +517,13 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
       title: "Varsel og AI-spor",
       description: "Offentlig forklaring på høyeffekt-signaler.",
       defaultSize: "full",
-      children: <CityPulseSignalPanel brief={morningBrief} />,
+      children: (
+        <CityPulseSignalPanel
+          articles={data.articles}
+          brief={morningBrief}
+          situations={data.situations}
+        />
+      ),
     });
     if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
       nextWidgets.push({
@@ -980,17 +1077,39 @@ function NearbyRail({
           );
         })}
       </section>
-      <section className="source-status">
-        <h2>Kilder</h2>
-        <div className="health-grid">
-          {data.sourceHealth.slice(0, 5).map((source) => (
+      <PublicSourceStatusPanel sources={data.sourceHealth} />
+    </aside>
+  );
+}
+
+export function PublicSourceStatusPanel({ sources }: { sources: SourceHealth[] }) {
+  const summary = publicSourceHealthSummary(sources);
+  return (
+    <section className={`source-status source-status-${summary.tone}`}>
+      <h2>Kilder</h2>
+      <div className="source-status-summary">
+        <span>{summary.freshnessLabel}</span>
+        <strong>{summary.label}</strong>
+        <p>{summary.detail}</p>
+      </div>
+      {summary.sources.length ? (
+        <div className="health-grid" aria-label="Åpne kilder">
+          {summary.sources.map((source) => (
             <span key={source.source} className={source.state}>
-              {source.label}
+              <b>{source.label}</b>
+              <small>{source.stateLabel}</small>
             </span>
           ))}
         </div>
-      </section>
-    </aside>
+      ) : (
+        <p className="source-status-empty">Venter på første åpne kildekontroll.</p>
+      )}
+      {summary.hiddenSourceCount > 0 ? (
+        <p className="source-status-private">
+          {summary.hiddenSourceCount} interne kontroller vises bare i Command Center.
+        </p>
+      ) : null}
+    </section>
   );
 }
 

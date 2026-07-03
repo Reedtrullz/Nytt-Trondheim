@@ -189,7 +189,28 @@ function TriggerDrawer({ candidate }: { candidate?: NotificationTriggerCandidate
           <dt>Levering</dt>
           <dd>{deliveryStateLabels[candidate.deliveryState]}</dd>
         </div>
+        <div>
+          <dt>Bypuls</dt>
+          <dd>
+            {candidate.publicSurface.label}
+            {candidate.publicSurface.recencyLabel
+              ? ` · ${candidate.publicSurface.recencyLabel}`
+              : ""}
+          </dd>
+        </div>
       </dl>
+      <section>
+        <h3>Offentlig flate</h3>
+        <p>{candidate.publicSurface.detail}</p>
+        <ul className="coverage-bundle-signal-list">
+          <li>{candidate.publicSurface.reason}</li>
+          {candidate.publicSurface.attention ? (
+            <li>
+              {candidate.publicSurface.attention.label}: {candidate.publicSurface.attention.detail}
+            </li>
+          ) : null}
+        </ul>
+      </section>
       <section>
         <h3>Hvorfor fanget</h3>
         <ul className="coverage-bundle-signal-list">
@@ -501,6 +522,7 @@ export function NotificationTriggerCandidatesDashboard({
                   <span>{severityLabels[candidate.severity]}</span>
                   <span>{percent(candidate.score)}</span>
                   <span>{deliveryStateLabels[candidate.deliveryState]}</span>
+                  <span>{candidate.publicSurface.label}</span>
                 </div>
               </button>
             ))
