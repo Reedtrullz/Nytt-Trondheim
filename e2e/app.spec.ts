@@ -102,6 +102,9 @@ test("frontpage uses bootstrap feed without immediate duplicate refreshes", asyn
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
+  await expect(page.getByLabel("Sammendrag av bypulssaker")).toContainText(
+    /bypulssaker samlet fra/,
+  );
   await expect(page.getByText("Oppdaterer saker...")).toHaveCount(0);
   expect(duplicateRefreshes).toEqual([]);
 });
@@ -258,6 +261,7 @@ test("City Pulse pins the AI-assisted morning brief on the public frontpage", as
     brief.getByLabel("Morgenbrief-grunnlag").getByRole("link", { name: situation.title }),
   ).toHaveAttribute("href", `/situasjoner/${situation.id}`);
   await expect(page.getByLabel("Bypulsmoduler")).toContainText("Varsel og AI-spor");
+  await expect(page.getByLabel("Bypulsmoduler")).toContainText("Brief-ferskhet");
   await expectNoHorizontalPageOverflow(page);
 });
 

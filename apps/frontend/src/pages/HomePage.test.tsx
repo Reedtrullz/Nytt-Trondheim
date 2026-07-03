@@ -11,8 +11,12 @@ import {
   StoryConfidenceBadge,
   StoryVerificationProof,
   cityPulseDataForCurrentFeed,
+  morningBriefFreshness,
+  storyFeedSummary,
 } from "./HomePage.js";
+import { groupHomeArticles } from "../homeArticleGroups.js";
 import type { HomeFilters } from "../homeFilters.js";
+import { homeStoryCardsForGroups } from "../homeStoryCards.js";
 
 const brief: MorningBrief = {
   generatedAt: "2026-07-02T07:30:00.000Z",
@@ -74,11 +78,18 @@ const bootstrap = {
 describe("MorningBriefPanel", () => {
   it("renders the pinned public briefing with mode and highlights", () => {
     const html = renderToStaticMarkup(
-      <MorningBriefPanel articles={[article]} brief={brief} situations={[situation]} />,
+      <MorningBriefPanel
+        articles={[article]}
+        brief={brief}
+        now={new Date("2026-07-02T12:00:00.000Z")}
+        situations={[situation]}
+      />,
     );
 
     expect(html).toContain("AI-assistert");
     expect(html).toContain("Morgenbrief");
+    expect(html).toContain("Morgenbrief-ferskhet");
+    expect(html).toContain("Oppdatert i dag");
     expect(html).toContain("Trafikktrøbbel sør i byen");
     expect(html).toContain("AI-assistert · 5/6 kilder OK");
     expect(html).toContain("AI-spor");
@@ -96,6 +107,31 @@ describe("MorningBriefPanel", () => {
 
   it("renders nothing when bootstrap has no brief yet", () => {
     expect(renderToStaticMarkup(<MorningBriefPanel />)).toBe("");
+  });
+
+  it("labels older stored briefings as stale instead of silently looking fresh", () => {
+    const html = renderToStaticMarkup(
+      <MorningBriefPanel
+        brief={{ ...brief, generatedAt: "2026-06-30T07:30:00.000Z" }}
+        now={new Date("2026-07-03T12:00:00.000Z")}
+      />,
+    );
+
+    expect(html).toContain("Eldre brief");
+    expect(html).toContain("Oppdatert 30. juni");
+    expect(html).toContain("morning-brief-freshness-stale");
+  });
+
+  it("calculates Oslo-date freshness for today, yesterday and stale briefings", () => {
+    expect(
+      morningBriefFreshness("2026-07-02T17:30:00.000Z", new Date("2026-07-02T20:15:00.000Z")),
+    ).toEqual({ label: "Oppdatert i dag", tone: "fresh" });
+    expect(
+      morningBriefFreshness("2026-07-01T07:30:00.000Z", new Date("2026-07-02T12:00:00.000Z")),
+    ).toMatchObject({ label: "Oppdatert i går", tone: "watch" });
+    expect(
+      morningBriefFreshness("2026-06-29T07:30:00.000Z", new Date("2026-07-02T12:00:00.000Z")),
+    ).toMatchObject({ label: "Eldre brief", tone: "stale" });
   });
 });
 
@@ -209,13 +245,15 @@ describe("CityPulseSignalPanel", () => {
   it("renders public alert guidance and AI trace status without private delivery details", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
-        <CityPulseSignalPanel brief={brief} />
+        <CityPulseSignalPanel brief={brief} now={new Date("2026-07-02T12:00:00.000Z")} />
       </MemoryRouter>,
     );
 
     expect(html).toContain("Varsel og AI-spor");
     expect(html).toContain("AI-assistert");
     expect(html).toContain("09:25");
+    expect(html).toContain("Brief-ferskhet");
+    expect(html).toContain("Oppdatert i dag");
     expect(html).toContain("4 offentlige kategorier");
     expect(html).toContain("Liv og helse");
     expect(html).toContain("Viktige bortfall");
@@ -223,6 +261,21 @@ describe("CityPulseSignalPanel", () => {
     expect(html).not.toContain("triggerId");
     expect(html).not.toContain("endpoint");
     expect(html).not.toContain("Abonnementer");
+  });
+
+  it("carries stale morning brief status into the public AI signal module", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CityPulseSignalPanel
+          brief={{ ...brief, generatedAt: "2026-06-30T07:30:00.000Z" }}
+          now={new Date("2026-07-03T12:00:00.000Z")}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Eldre brief");
+    expect(html).toContain("Oppdatert 30. juni");
+    expect(html).toContain("freshness-tone-stale");
   });
 });
 
@@ -322,5 +375,55 @@ describe("StoryConfidenceBadge", () => {
     expect(html).toContain("98 %");
     expect(html).toContain("story-confidence-confirmed");
     expect(html).toContain("Offisielle kilder og redaksjonelle kilder peker mot samme område.");
+  });
+});
+
+describe("storyFeedSummary", () => {
+  it("explains that City Pulse shows clustered stories, not a raw article list", () => {
+    const coverageBundle = {
+      id: "coverage:incident:sluppen",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-02T07:30:00.000Z",
+    } as const;
+    const storyArticle = (overrides: Partial<Article> = {}) =>
+      ({
+        ...article,
+        ...overrides,
+      }) satisfies Article;
+    const cards = homeStoryCardsForGroups(
+      groupHomeArticles([
+        storyArticle({
+          id: "nrk-sluppen",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          coverageBundle,
+        }),
+        storyArticle({
+          id: "adressa-sluppen",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Kø ved Sluppen",
+          coverageBundle,
+        }),
+        storyArticle({
+          id: "single-culture",
+          source: "vg",
+          sourceLabel: "VG",
+          title: "Konsert på Byscenen",
+          category: "Kultur",
+          url: "https://example.test/kultur",
+        }),
+      ]),
+    );
+
+    expect(storyFeedSummary(cards)).toBe(
+      "Viser 2 bypulssaker samlet fra 3 artikler og 3 kilder. 1 kort samler flere kilder eller oppdateringer.",
+    );
+  });
+
+  it("keeps empty feed summaries honest", () => {
+    expect(storyFeedSummary([])).toBe("Ingen bypulssaker i denne visningen.");
   });
 });

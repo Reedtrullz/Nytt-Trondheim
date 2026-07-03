@@ -675,6 +675,33 @@ button {
   font-weight: 700;
 }
 
+.morning-brief-freshness {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  min-width: 112px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.morning-brief-freshness strong {
+  color: var(--green);
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.morning-brief-freshness-watch strong {
+  color: var(--brown);
+}
+
+.morning-brief-freshness-stale strong {
+  color: #9b2d20;
+}
+
+.morning-brief-freshness small {
+  line-height: 1.15;
+}
+
 .morning-brief-ai-trace {
   display: flex;
   flex-wrap: wrap;
@@ -808,8 +835,11 @@ button {
 .city-pulse-signal-status,
 .city-pulse-signal-guidance {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.city-pulse-signal-status {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .city-pulse-signal-status div,
@@ -838,6 +868,27 @@ button {
   color: var(--ink);
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+.city-pulse-signal-status small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.city-pulse-signal-status .freshness-tone-fresh {
+  color: var(--green);
+}
+
+.city-pulse-signal-status .freshness-tone-watch {
+  color: var(--brown);
+}
+
+.city-pulse-signal-status .freshness-tone-stale {
+  color: #9b2d20;
 }
 
 .city-pulse-signal-guidance {
@@ -1016,9 +1067,18 @@ button {
 }
 
 .news-section h1 {
-  margin: 0 0 23px;
+  margin: 0;
   font: 46px/1.05 var(--serif);
   letter-spacing: -0.025em;
+}
+
+.story-feed-summary {
+  max-width: 680px;
+  margin: 8px 0 23px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .lead-story {
@@ -9421,6 +9481,11 @@ button {
   .morning-brief-heading {
     display: grid;
     gap: 7px;
+  }
+
+  .morning-brief-freshness {
+    justify-items: start;
+    text-align: left;
   }
 
   .morning-brief-heading h2 {

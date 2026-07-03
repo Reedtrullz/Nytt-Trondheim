@@ -83,6 +83,74 @@ function formatTime(date: string) {
   }).format(new Date(date));
 }
 
+const osloDatePartsFormatter = new Intl.DateTimeFormat("en-CA", {
+  day: "2-digit",
+  month: "2-digit",
+  timeZone: "Europe/Oslo",
+  year: "numeric",
+});
+
+const osloDateLabelFormatter = new Intl.DateTimeFormat("nb-NO", {
+  day: "numeric",
+  month: "long",
+  timeZone: "Europe/Oslo",
+});
+
+function osloDateKey(date: Date): string | undefined {
+  if (!Number.isFinite(date.getTime())) return undefined;
+  const parts = new Map(
+    osloDatePartsFormatter.formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  const year = parts.get("year");
+  const month = parts.get("month");
+  const day = parts.get("day");
+  return year && month && day ? `${year}-${month}-${day}` : undefined;
+}
+
+function daysBetweenOsloDates(left: string, right: string): number {
+  const [leftYear, leftMonth, leftDay] = left.split("-").map(Number);
+  const [rightYear, rightMonth, rightDay] = right.split("-").map(Number);
+  if (!leftYear || !leftMonth || !leftDay || !rightYear || !rightMonth || !rightDay) {
+    return 0;
+  }
+  const leftMs = Date.UTC(leftYear, leftMonth - 1, leftDay);
+  const rightMs = Date.UTC(rightYear, rightMonth - 1, rightDay);
+  return Math.round((rightMs - leftMs) / 86_400_000);
+}
+
+export function morningBriefFreshness(
+  generatedAt: string,
+  now: Date = new Date(),
+): { label: string; detail?: string; tone: "fresh" | "watch" | "stale" } {
+  const generatedDate = new Date(generatedAt);
+  const generatedKey = osloDateKey(generatedDate);
+  const nowKey = osloDateKey(now);
+  if (!generatedKey || !nowKey) {
+    return {
+      label: "Ukjent alder",
+      detail: "Tidspunktet kunne ikke leses",
+      tone: "watch",
+    };
+  }
+
+  const ageDays = daysBetweenOsloDates(generatedKey, nowKey);
+  if (ageDays <= 0) {
+    return { label: "Oppdatert i dag", tone: "fresh" };
+  }
+  if (ageDays === 1) {
+    return {
+      label: "Oppdatert i går",
+      detail: osloDateLabelFormatter.format(generatedDate),
+      tone: "watch",
+    };
+  }
+  return {
+    label: "Eldre brief",
+    detail: `Oppdatert ${osloDateLabelFormatter.format(generatedDate)}`,
+    tone: "stale",
+  };
+}
+
 function notificationSeverityLabel(severity: NotificationTriggerSeverity) {
   switch (severity) {
     case "critical":
@@ -170,13 +238,16 @@ export function MorningBriefPanel({
   brief,
   articles = [],
   situations = [],
+  now = new Date(),
 }: {
   brief?: BootstrapPayload["morningBrief"];
   articles?: Article[];
   situations?: BootstrapPayload["situations"];
+  now?: Date;
 }) {
   if (!brief) return null;
   const modeLabel = brief.mode === "ai_assisted" ? "AI-assistert" : "Reservebrief";
+  const freshness = morningBriefFreshness(brief.generatedAt, now);
   const articlesById = new Map(articles.map((article) => [article.id, article]));
   const situationsById = new Map(situations.map((situation) => [situation.id, situation]));
   const linkedArticles = brief.articleIds
@@ -202,7 +273,14 @@ export function MorningBriefPanel({
         <p className="label">{modeLabel}</p>
         <div className="morning-brief-heading">
           <h2 id="morning-brief-heading">{brief.title}</h2>
-          <span>{formatTime(brief.generatedAt)}</span>
+          <div
+            className={`morning-brief-freshness morning-brief-freshness-${freshness.tone}`}
+            aria-label="Morgenbrief-ferskhet"
+          >
+            <span>{formatTime(brief.generatedAt)}</span>
+            <strong>{freshness.label}</strong>
+            {freshness.detail ? <small>{freshness.detail}</small> : null}
+          </div>
         </div>
         <div className="morning-brief-paragraphs">
           {brief.paragraphs.map((paragraph) => (
@@ -253,7 +331,14 @@ export function MorningBriefPanel({
   );
 }
 
-export function CityPulseSignalPanel({ brief }: { brief?: BootstrapPayload["morningBrief"] }) {
+export function CityPulseSignalPanel({
+  brief,
+  now = new Date(),
+}: {
+  brief?: BootstrapPayload["morningBrief"];
+  now?: Date;
+}) {
+  const freshness = brief ? morningBriefFreshness(brief.generatedAt, now) : undefined;
   return (
     <section className="city-pulse-signal-panel" aria-labelledby="city-pulse-signal-heading">
       <div className="section-heading-row">
@@ -273,6 +358,13 @@ export function CityPulseSignalPanel({ brief }: { brief?: BootstrapPayload["morn
         <div>
           <span>Siste analyse</span>
           <strong>{brief?.aiRun ? formatTime(brief.aiRun.completedAt) : "Ikke lagret"}</strong>
+        </div>
+        <div>
+          <span>Brief-ferskhet</span>
+          <strong className={freshness ? `freshness-tone-${freshness.tone}` : undefined}>
+            {freshness?.label ?? "Ikke lagret"}
+          </strong>
+          {freshness?.detail ? <small>{freshness.detail}</small> : null}
         </div>
         <div>
           <span>Varselregler</span>
@@ -502,6 +594,24 @@ export function StoryConfidenceBadge({ confidence }: { confidence: SourceConfide
       {scoreLabel}
     </span>
   );
+}
+
+export function storyFeedSummary(cards: HomeStoryCard[]): string {
+  if (cards.length === 0) return "Ingen bypulssaker i denne visningen.";
+  const articleCount = cards.reduce((sum, card) => sum + card.updateCount, 0);
+  const sourceCount = new Set(
+    cards.flatMap((card) =>
+      card.group.articles.map((article) => article.sourceLabel || article.source),
+    ),
+  ).size;
+  const clusteredCount = cards.filter((card) => card.isClustered).length;
+  const storyLabel = cards.length === 1 ? "bypulssak" : "bypulssaker";
+  const articleLabel = articleCount === 1 ? "artikkel" : "artikler";
+  const sourceLabel = sourceCount === 1 ? "kilde" : "kilder";
+  const base = `Viser ${cards.length} ${storyLabel} samlet fra ${articleCount} ${articleLabel} og ${sourceCount} ${sourceLabel}.`;
+  if (clusteredCount === 0) return base;
+  const clusterLabel = clusteredCount === 1 ? "kort samler" : "kort samler";
+  return `${base} ${clusteredCount} ${clusterLabel} flere kilder eller oppdateringer.`;
 }
 
 function StoryCard({
@@ -1381,6 +1491,11 @@ export function HomePage({
       <div className="home-grid">
         <section className="news-section">
           <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
+          {displayedStoryCards.length > 0 ? (
+            <p className="story-feed-summary" aria-label="Sammendrag av bypulssaker">
+              {storyFeedSummary(displayedStoryCards)}
+            </p>
+          ) : null}
           {feedError ? (
             <p className="feed-state error">Kunne ikke hente saker: {feedError}</p>
           ) : null}
