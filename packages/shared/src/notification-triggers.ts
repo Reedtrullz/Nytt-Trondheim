@@ -91,9 +91,16 @@ const highImpactRules: NotificationTriggerRule[] = [
       "døde",
       "dod",
       "død",
+      "leteaksjon",
+      "letemannskap",
+      "politihelikopter",
       "savnet",
+      "savnede",
       "evakuer",
       "redningsaksjon",
+      "redningshelikopter",
+      "sar queen",
+      "sarqueen",
       "kniv",
       "skyting",
       "grov vold",
@@ -183,6 +190,29 @@ const confidenceLevelScore: Record<SourceConfidenceLevel, number> = {
   confirmed: 0.88,
 };
 
+const standaloneArticleSignalMaxAgeHours = 72;
+
+const publicSafetySearchRescueKeywords = new Set(
+  [
+    "leteaksjon",
+    "letemannskap",
+    "politihelikopter",
+    "redningsaksjon",
+    "redningshelikopter",
+    "sar queen",
+    "sarqueen",
+    "savnet",
+    "savnede",
+  ].map(normalizeText),
+);
+
+const publicSignalKindRank: Record<NotificationTriggerKind, number> = {
+  public_safety: 4,
+  weather_hazard: 3,
+  service_disruption: 2,
+  traffic_disruption: 1,
+};
+
 const reportingSources = new Set<SourceId>([
   "nrk",
   "adressa",
@@ -231,6 +261,10 @@ function unique<T>(values: T[]): T[] {
 
 function clampScore(score: number): number {
   return Math.max(0, Math.min(1, Number(score.toFixed(2))));
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function strongestSeverity(severities: NotificationTriggerSeverity[]): NotificationTriggerSeverity {
@@ -302,6 +336,16 @@ function publicSourceLabelsForArticle(article: Article): string[] {
     for (const source of verification.reportingSources) labels.set(source, sourceIdLabel(source));
   }
   return [...labels.values()];
+}
+
+function publicSourceIdsForArticle(article: Article): SourceId[] {
+  const sources = new Set<SourceId>([article.source]);
+  const verification = article.publicVerification;
+  if (verification) {
+    for (const source of verification.officialSources) sources.add(source);
+    for (const source of verification.reportingSources) sources.add(source);
+  }
+  return [...sources];
 }
 
 function publicConfidenceForArticle(
@@ -382,15 +426,78 @@ function publicRecencyLabel(updatedAt: string, generatedAt: string): string {
   return "Eldre signal";
 }
 
+function ageHours(updatedAt: string, generatedAt: string): number | undefined {
+  const updatedMs = Date.parse(updatedAt);
+  const generatedMs = Date.parse(generatedAt);
+  if (!Number.isFinite(updatedMs) || !Number.isFinite(generatedMs)) return undefined;
+  return Math.max(0, (generatedMs - updatedMs) / 3_600_000);
+}
+
+function recencySortBucket(updatedAt: string, generatedAt: string): number {
+  const hours = ageHours(updatedAt, generatedAt);
+  if (hours === undefined) return 0;
+  if (hours <= 24) return 3;
+  if (hours <= 72) return 2;
+  if (hours <= 24 * 7) return 1;
+  return 0;
+}
+
+function isLongRunningTrafficSituation(
+  situation: Pick<HomeSituationSummary, "createdAt" | "title" | "summary" | "locationLabel"> & {
+    type?: Situation["type"];
+  },
+  generatedAt: string,
+): boolean {
+  const createdHours = ageHours(situation.createdAt, generatedAt);
+  if (createdHours === undefined || createdHours <= 24 * 7) return false;
+  if (
+    situation.type === "traffic" ||
+    situation.type === "landslide" ||
+    situation.type === "weather"
+  ) {
+    return true;
+  }
+  const text = normalizeText(`${situation.title} ${situation.summary} ${situation.locationLabel}`);
+  return /\b(?:omkjoring|ras|skred|stengt|trafikk|veg|vegen|vei|veien)\b/u.test(text);
+}
+
+function searchRescueSignalBoost(
+  matches: ReturnType<typeof keywordsForText>,
+  text: string,
+): number {
+  const matchedKeywords = new Set(matches.map((match) => normalizeText(match.keyword)));
+  const hasSearchRescueKeyword = [...publicSafetySearchRescueKeywords].some(
+    (keyword) => matchedKeywords.has(keyword) || normalizeText(text).includes(keyword),
+  );
+  if (!hasSearchRescueKeyword) return 0;
+  if (
+    matches.some(
+      (match) =>
+        match.kind === "public_safety" && severityRank[match.severity] >= severityRank.critical,
+    )
+  ) {
+    return 0.16;
+  }
+  return 0.08;
+}
+
+function isStaleArticleSignal(article: Article, generatedAt: string): boolean {
+  const hours = ageHours(article.publishedAt, generatedAt);
+  return hours !== undefined && hours > standaloneArticleSignalMaxAgeHours;
+}
+
 function publicSituationSignalHighlight(
   situation: HomeSituationSummary,
   generatedAt: string,
 ): PublicNotificationSignalHighlight | undefined {
   if (situation.status === "dismissed" || situation.status === "resolved") return undefined;
-  const matches = keywordsForText(
-    `${situation.title} ${situation.summary} ${situation.locationLabel}`,
-  );
+  const signalText = `${situation.title} ${situation.summary} ${situation.locationLabel}`;
+  const matches = keywordsForText(signalText);
   if (matches.length === 0) return undefined;
+  const kind = candidateKind(matches);
+  if (kind === "traffic_disruption" && isLongRunningTrafficSituation(situation, generatedAt)) {
+    return undefined;
+  }
 
   const score = clampScore(
     0.16 +
@@ -410,7 +517,6 @@ function publicSituationSignalHighlight(
   ]);
   const matchedKeywords = unique(matches.map((match) => match.keyword));
   const confidence = situation.sourceConfidence ?? confidenceFromScore(score, 1, generatedAt);
-  const kind = candidateKind(matches);
 
   return {
     id: `public-signal:situation:${situation.id}`,
@@ -447,9 +553,9 @@ function publicArticleSignalHighlight(
   generatedAt: string,
 ): PublicNotificationSignalHighlight | undefined {
   if (article.category === "Sport" || article.category === "Kultur") return undefined;
-  const matches = keywordsForText(
-    `${article.title} ${article.excerpt} ${article.places.join(" ")}`,
-  );
+  if (isStaleArticleSignal(article, generatedAt)) return undefined;
+  const signalText = `${article.title} ${article.excerpt} ${article.places.join(" ")}`;
+  const matches = keywordsForText(signalText);
   if (matches.length === 0) return undefined;
 
   const official = officialSources.has(article.source);
@@ -468,6 +574,7 @@ function publicArticleSignalHighlight(
       (verified ? 0.18 : 0) +
       (["Hendelser", "Krim", "Transport", "Vær"].includes(article.category) ? 0.12 : 0) +
       coverageBoost +
+      searchRescueSignalBoost(matches, signalText) +
       Math.min(0.18, matches.length * 0.06) +
       recencyBoost(article.publishedAt, generatedAt),
   );
@@ -568,10 +675,67 @@ export function buildPublicNotificationSignalHighlights(
     .sort(
       (left, right) =>
         severityRank[right.severity] - severityRank[left.severity] ||
+        recencySortBucket(right.eventUpdatedAt, input.generatedAt) -
+          recencySortBucket(left.eventUpdatedAt, input.generatedAt) ||
+        publicSignalKindRank[right.kind] - publicSignalKindRank[left.kind] ||
         (right.confidence.score ?? 0) - (left.confidence.score ?? 0) ||
         right.eventUpdatedAt.localeCompare(left.eventUpdatedAt),
     )
     .slice(0, input.limit ?? 3);
+}
+
+function humanSearchContext(normalizedText: string): boolean {
+  return /\b(?:barn(?:et)?|dame|gutt(?:en)?|jente(?:n)?|kvinne(?:n)?|mann(?:en)?|person(?:en)?|turg[åa]er(?:en)?|[0-9]{1,3}\s*[- ]?\s*[åa]r(?:ene|ing(?:en)?)?)\b/u.test(
+    normalizedText,
+  );
+}
+
+function nonHumanMissingContext(normalizedText: string): boolean {
+  return (
+    /\b(?:savnet(?:e)?|leteaksjon)\b.{0,36}\b(?:dyr|hund(?:en)?|katt(?:en)?|sau(?:en)?|hest(?:en)?|rein(?:en)?)\b/u.test(
+      normalizedText,
+    ) ||
+    /\b(?:dyr|hund(?:en)?|katt(?:en)?|sau(?:en)?|hest(?:en)?|rein(?:en)?)\b.{0,36}\b(?:savnet(?:e)?|leteaksjon)\b/u.test(
+      normalizedText,
+    )
+  );
+}
+
+function isSearchRescueKeyword(keyword: string): boolean {
+  return publicSafetySearchRescueKeywords.has(normalizeText(keyword));
+}
+
+function shouldSuppressSearchRescueKeyword(normalizedText: string, keyword: string): boolean {
+  return (
+    isSearchRescueKeyword(keyword) &&
+    nonHumanMissingContext(normalizedText) &&
+    !humanSearchContext(normalizedText)
+  );
+}
+
+function boundaryKeywordPattern(pattern: string, suffix = ""): RegExp {
+  return new RegExp(`(^|[^a-z0-9æøå])${pattern}${suffix}([^a-z0-9æøå]|$)`, "u");
+}
+
+function keywordMatches(normalizedText: string, keyword: string): boolean {
+  const normalizedKeyword = normalizeText(keyword);
+  if (normalizedKeyword.length === 0) return false;
+  if (normalizedKeyword === "ko" || normalizedKeyword === "kø") {
+    return boundaryKeywordPattern(escapeRegex(normalizedKeyword)).test(normalizedText);
+  }
+  if (normalizedKeyword === "politi") {
+    return boundaryKeywordPattern("politi", "(?:et|ets)?").test(normalizedText);
+  }
+  if (normalizedKeyword === "ras") {
+    return boundaryKeywordPattern("ras", "(?:et)?").test(normalizedText);
+  }
+  if (normalizedKeyword === "tele") {
+    return boundaryKeywordPattern("tele").test(normalizedText);
+  }
+  if (!normalizedKeyword.includes(" ") && normalizedKeyword.length <= 3) {
+    return boundaryKeywordPattern(escapeRegex(normalizedKeyword)).test(normalizedText);
+  }
+  return normalizedText.includes(normalizedKeyword);
 }
 
 function keywordsForText(text: string) {
@@ -583,12 +747,10 @@ function keywordsForText(text: string) {
   }> = [];
   for (const rule of highImpactRules) {
     for (const keyword of rule.keywords) {
-      const normalizedKeyword = normalizeText(keyword);
-      const matched =
-        normalizedKeyword === "ko"
-          ? new RegExp(`(^|[^a-z0-9])${normalizedKeyword}([^a-z0-9]|$)`).test(normalized)
-          : normalized.includes(normalizedKeyword);
-      if (matched) {
+      if (
+        keywordMatches(normalized, keyword) &&
+        !shouldSuppressSearchRescueKeyword(normalized, keyword)
+      ) {
         matches.push({ kind: rule.kind, severity: rule.severity, keyword });
       }
     }
@@ -677,6 +839,17 @@ function candidateKind(
   matches: ReturnType<typeof keywordsForText>,
   situationType?: Situation["type"],
 ) {
+  if (
+    situationType === "missing_person" ||
+    situationType === "rescue" ||
+    situationType === "fire" ||
+    matches.some(
+      (match) =>
+        match.kind === "public_safety" && severityRank[match.severity] >= severityRank.critical,
+    )
+  ) {
+    return "public_safety" as const;
+  }
   if (situationType === "traffic" || matches.some((match) => match.kind === "traffic_disruption")) {
     return "traffic_disruption" as const;
   }
@@ -706,6 +879,9 @@ function situationCandidate(
   if (situation.status === "dismissed" || situation.status === "resolved") return undefined;
   const matches = keywordsForText(situationText(situation));
   if (matches.length === 0 && situation.importance !== "high") return undefined;
+  const kind = candidateKind(matches, situation.type);
+  const longRunningTraffic =
+    kind === "traffic_disruption" && isLongRunningTrafficSituation(situation, generatedAt);
 
   const sourceIds = sourceIdsForSituation(situation);
   const score = clampScore(
@@ -719,7 +895,8 @@ function situationCandidate(
         0.2 +
       Math.min(0.16, Math.max(0, sourceIds.length - 1) * 0.08) +
       Math.min(0.2, matches.length * 0.06) +
-      recencyBoost(situation.updatedAt, generatedAt),
+      recencyBoost(situation.updatedAt, generatedAt) -
+      (longRunningTraffic ? 0.24 : 0),
   );
   if (score < 0.58) return undefined;
 
@@ -744,7 +921,7 @@ function situationCandidate(
 
   return {
     id: `notification:situation:${situation.id}`,
-    kind: candidateKind(matches, situation.type),
+    kind,
     severity,
     deliveryState: "candidate_only",
     title: situation.title,
@@ -775,8 +952,12 @@ function situationCandidate(
       ...sourceItemTraceLinksForSituation(situation),
     ],
     publicSurface: publicSurfaceFromHighlight(
-      publicSituationSignalHighlight(homeSummaryFromSituation(situation), generatedAt),
-      "Situasjonen er under offentlig visningsterskel eller ikke aktiv/offentlig nok for City Pulse.",
+      longRunningTraffic
+        ? undefined
+        : publicSituationSignalHighlight(homeSummaryFromSituation(situation), generatedAt),
+      longRunningTraffic
+        ? "Langvarig trafikk- eller naturfarehendelse beholdes for operatør, men dempes på offentlige akkurat-nå-flater."
+        : "Situasjonen er under offentlig visningsterskel eller ikke aktiv/offentlig nok for City Pulse.",
     ),
   };
 }
@@ -786,13 +967,16 @@ function articleCandidate(
   generatedAt: string,
 ): NotificationTriggerCandidate | undefined {
   if (article.category === "Sport" || article.category === "Kultur") return undefined;
-  const matches = keywordsForText(
-    `${article.title} ${article.excerpt} ${article.places.join(" ")}`,
-  );
+  if (isStaleArticleSignal(article, generatedAt)) return undefined;
+  const signalText = `${article.title} ${article.excerpt} ${article.places.join(" ")}`;
+  const matches = keywordsForText(signalText);
   if (matches.length === 0) return undefined;
 
   const official = officialSources.has(article.source);
   const reporting = reportingSources.has(article.source);
+  const verified = Boolean(article.publicVerification);
+  const sourceIds = publicSourceIdsForArticle(article);
+  const sourceLabels = publicSourceLabelsForArticle(article);
   const coverageBoost =
     article.coverageBundle?.confidence === "high"
       ? 0.18
@@ -803,8 +987,10 @@ function articleCandidate(
     0.14 +
       (official ? 0.24 : 0) +
       (reporting ? 0.1 : 0) +
+      (verified ? 0.18 : 0) +
       (["Hendelser", "Krim", "Transport", "Vær"].includes(article.category) ? 0.12 : 0) +
       coverageBoost +
+      searchRescueSignalBoost(matches, signalText) +
       Math.min(0.2, matches.length * 0.07) +
       recencyBoost(article.publishedAt, generatedAt),
   );
@@ -825,24 +1011,25 @@ function articleCandidate(
     detail:
       "Artikkelbasert kandidat før egen situasjon er bekreftet. Leveringsstatus avklares mot Web Push-konfigurasjon og abonnement.",
     score,
-    confidence: confidenceFromScore(score, official ? 1 : 0, generatedAt),
+    confidence: publicConfidenceForArticle(article, score, generatedAt),
     generatedAt,
     eventUpdatedAt: article.publishedAt,
     articleIds: [article.id],
-    sourceIds: [article.source],
-    sourceLabels: [article.sourceLabel],
+    sourceIds,
+    sourceLabels,
     matchedKeywords,
     reasons: [
       official
         ? "Artikkelen kommer fra offentlig kilde."
         : "Artikkelen kommer fra redaksjonell kilde.",
+      verified ? "Artikkelen er koblet til offentlig eller fler-kilde-verifisering." : undefined,
       article.coverageBundle
         ? `Inngår i dekningsgruppe med ${article.coverageBundle.confidence} tillit.`
         : undefined,
       `Høyeffektspråk: ${matchedKeywords.slice(0, 4).join(", ")}.`,
     ].filter((reason): reason is string => Boolean(reason)),
     links: [
-      ...sourceAuditLinksForSources([article.source]),
+      ...sourceAuditLinksForSources(sourceIds),
       { kind: "external", label: article.sourceLabel, href: article.url },
     ],
     publicSurface: publicSurfaceFromHighlight(
@@ -985,6 +1172,10 @@ function candidateMatchesQuery(
     if (!haystack.includes(query)) return false;
   }
   return true;
+}
+
+function publicSurfaceRank(candidate: NotificationTriggerCandidate): number {
+  return candidate.publicSurface.state === "visible" ? 1 : 0;
 }
 
 function isSpatialNotificationCandidate(candidate: NotificationTriggerCandidate): boolean {
@@ -1205,7 +1396,7 @@ export function buildNotificationTriggerPage(
   }
 
   for (const article of input.articles) {
-    if (article.situationId || coveredArticleIds.has(article.id)) continue;
+    if (coveredArticleIds.has(article.id)) continue;
     const candidate = articleCandidate(article, input.generatedAt);
     if (candidate) candidates.push(candidate);
   }
@@ -1214,7 +1405,11 @@ export function buildNotificationTriggerPage(
     .filter((candidate) => candidateMatchesQuery(candidate, filters))
     .sort(
       (left, right) =>
+        publicSurfaceRank(right) - publicSurfaceRank(left) ||
         severityRank[right.severity] - severityRank[left.severity] ||
+        recencySortBucket(right.eventUpdatedAt, input.generatedAt) -
+          recencySortBucket(left.eventUpdatedAt, input.generatedAt) ||
+        publicSignalKindRank[right.kind] - publicSignalKindRank[left.kind] ||
         right.score - left.score ||
         right.eventUpdatedAt.localeCompare(left.eventUpdatedAt),
     );

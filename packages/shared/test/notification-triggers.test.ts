@@ -473,6 +473,417 @@ describe("notification trigger candidates", () => {
     });
   });
 
+  it("surfaces fresh search-and-rescue articles ahead of long-running traffic situations", () => {
+    const searchArticle = article({
+      id: "nrk-meraker-search",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Leteaksjon nord for Meråker",
+      excerpt:
+        "Politiet har iverksatt en større leteaksjon etter en savnet mann i 70-årene. SARQueen sendes til området, og det søkes rundt Funnsjøen.",
+      publishedAt: "2026-07-03T15:33:57.000Z",
+      scope: "trondelag",
+      category: "Hendelser",
+      places: ["Meråker"],
+      url: "https://www.nrk.no/trondelag/leteaksjon-nord-for-meraker-1.17946801",
+    });
+    const longRunningRoad = situation({
+      id: "gangasvegen-long-running",
+      type: "landslide",
+      title: "Steinsprang/steinsprang, vegen er stengt",
+      summary: "Gangåsvegen er stengt, og omkjøring er skiltet.",
+      createdAt: "2026-03-26T09:31:00.000Z",
+      updatedAt: "2026-07-04T09:30:00.000Z",
+      locationLabel: "Gangåsvegen",
+    });
+
+    const page = buildNotificationTriggerPage({
+      situations: [longRunningRoad],
+      articles: [searchArticle],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(page.items[0]).toMatchObject({
+      id: "notification:article:nrk-meraker-search",
+      kind: "public_safety",
+      severity: "critical",
+      sourceIds: ["nrk"],
+      confidence: expect.objectContaining({ level: "likely", sourceCount: 1 }),
+      matchedKeywords: expect.arrayContaining(["leteaksjon", "savnet", "sarqueen"]),
+      publicSurface: expect.objectContaining({
+        state: "visible",
+        label: "Synlig på Bypuls",
+      }),
+    });
+    const roadCandidate = page.items.find(
+      (item) => item.id === "notification:situation:gangasvegen-long-running",
+    );
+    expect(roadCandidate?.publicSurface).toMatchObject({
+      state: "hidden",
+      reason:
+        "Langvarig trafikk- eller naturfarehendelse beholdes for operatør, men dempes på offentlige akkurat-nå-flater.",
+    });
+
+    const highlights = buildPublicNotificationSignalHighlights({
+      situations: [
+        homeSituation({
+          id: "gangasvegen-long-running",
+          title: "Steinsprang/steinsprang, vegen er stengt",
+          summary: "Gangåsvegen er stengt, og omkjøring er skiltet.",
+          createdAt: "2026-03-26T09:31:00.000Z",
+          updatedAt: "2026-07-04T09:30:00.000Z",
+          locationLabel: "Gangåsvegen",
+        }),
+      ],
+      articles: [searchArticle],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(highlights.map((item) => item.title)).toEqual(["Leteaksjon nord for Meråker"]);
+  });
+
+  it("does not keep stale standalone high-impact articles highlighted after the freshness window", () => {
+    const staleSearchArticle = article({
+      id: "old-search",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Leteaksjon etter savnet mann",
+      excerpt:
+        "Politiet og letemannskap søkte med redningshelikopter etter en savnet mann i fjellet.",
+      publishedAt: "2026-06-29T10:00:00.000Z",
+      scope: "trondelag",
+      category: "Hendelser",
+      places: ["Meråker"],
+    });
+
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [staleSearchArticle],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+    const highlights = buildPublicNotificationSignalHighlights({
+      situations: [],
+      articles: [staleSearchArticle],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(page.items).toEqual([]);
+    expect(highlights).toEqual([]);
+  });
+
+  it("keeps multi-day missing-person situations eligible while demoting old traffic leads", () => {
+    const missingPerson = situation({
+      id: "missing-meraker",
+      type: "missing_person",
+      title: "Leteaksjon etter savnet mann i Meråker",
+      summary:
+        "Politiet leder fortsatt søket ved Funnsjøen med letemannskap og redningshelikopter.",
+      status: "active",
+      verificationStatus: "Foreløpig fra rapportering",
+      importance: "high",
+      createdAt: "2026-07-01T15:30:00.000Z",
+      updatedAt: "2026-07-04T09:45:00.000Z",
+      locationLabel: "Funnsjøen",
+      officialSource: undefined,
+      activationBasis: {
+        rule: "two_independent_sources",
+        sourceIds: ["nrk", "merakerposten"],
+        articleIds: ["nrk-search", "merakerposten-search"],
+        activatedAt: "2026-07-03T15:33:57.000Z",
+      },
+      relatedArticleIds: ["nrk-search", "merakerposten-search"],
+      evidence: [],
+      timeline: [],
+      sourceConfidence: {
+        level: "likely",
+        label: "Sannsynlig",
+        score: 0.78,
+        sourceCount: 2,
+        updatedAt: "2026-07-04T09:45:00.000Z",
+      },
+    });
+    const longRunningRoad = situation({
+      id: "gangasvegen-long-running",
+      type: "landslide",
+      title: "Steinsprang/steinsprang, vegen er stengt",
+      summary: "Gangåsvegen er stengt, og omkjøring er skiltet.",
+      createdAt: "2026-03-26T09:31:00.000Z",
+      updatedAt: "2026-07-04T10:20:00.000Z",
+      locationLabel: "Gangåsvegen",
+    });
+
+    const page = buildNotificationTriggerPage({
+      situations: [longRunningRoad, missingPerson],
+      articles: [],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+    const highlights = buildPublicNotificationSignalHighlights({
+      situations: [
+        homeSituation({
+          id: "gangasvegen-long-running",
+          title: "Steinsprang/steinsprang, vegen er stengt",
+          summary: "Gangåsvegen er stengt, og omkjøring er skiltet.",
+          createdAt: "2026-03-26T09:31:00.000Z",
+          updatedAt: "2026-07-04T10:20:00.000Z",
+          locationLabel: "Gangåsvegen",
+        }),
+        homeSituation({
+          id: "missing-meraker",
+          title: "Leteaksjon etter savnet mann i Meråker",
+          summary:
+            "Politiet leder fortsatt søket ved Funnsjøen med letemannskap og redningshelikopter.",
+          createdAt: "2026-07-01T15:30:00.000Z",
+          updatedAt: "2026-07-04T09:45:00.000Z",
+          locationLabel: "Funnsjøen",
+          sourceConfidence: {
+            level: "likely",
+            label: "Sannsynlig",
+            score: 0.78,
+            sourceCount: 2,
+            updatedAt: "2026-07-04T09:45:00.000Z",
+          },
+        }),
+      ],
+      articles: [],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(page.items[0]).toMatchObject({
+      id: "notification:situation:missing-meraker",
+      kind: "public_safety",
+      publicSurface: expect.objectContaining({ state: "visible" }),
+    });
+    expect(highlights.map((item) => item.id)).toEqual(["public-signal:situation:missing-meraker"]);
+  });
+
+  it("classifies critical injury after a crash as public safety before traffic", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [
+        article({
+          id: "critical-crash",
+          title: "Én person kritisk skadet etter trafikkulykke på E6",
+          excerpt: "Politiet opplyser at en person er kritisk skadet etter ulykken.",
+          category: "Transport",
+          places: ["E6", "Trondheim"],
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items[0]).toMatchObject({
+      id: "notification:article:critical-crash",
+      kind: "public_safety",
+      severity: "critical",
+      matchedKeywords: expect.arrayContaining(["kritisk skadet", "ulykke", "politi"]),
+    });
+  });
+
+  it("keeps visible fresh public-safety signals ahead of hidden stale traffic candidates", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [
+        situation({
+          id: "old-road",
+          type: "landslide",
+          title: "Steinsprang, vegen er stengt",
+          summary: "Vegen er fortsatt stengt, og omkjøring er skiltet.",
+          createdAt: "2026-03-26T09:31:00.000Z",
+          updatedAt: "2026-07-04T10:20:00.000Z",
+          locationLabel: "Gangåsvegen",
+          relatedArticleIds: [],
+        }),
+      ],
+      articles: [
+        article({
+          id: "fresh-smoke",
+          title: "Nødetatene rykker ut etter røykutvikling i blokk",
+          excerpt: "Brannvesen og politi er på stedet, og beboere evakueres.",
+          publishedAt: "2026-07-04T10:25:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim"],
+        }),
+      ],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(page.items[0]).toMatchObject({
+      id: "notification:article:fresh-smoke",
+      kind: "public_safety",
+      publicSurface: expect.objectContaining({ state: "visible" }),
+    });
+    expect(page.items[1]).toMatchObject({
+      id: "notification:situation:old-road",
+      publicSurface: expect.objectContaining({ state: "hidden" }),
+    });
+  });
+
+  it("does not let stale linked articles resurrect old road situations", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [
+        situation({
+          id: "old-road",
+          type: "landslide",
+          title: "Steinsprang, vegen er stengt",
+          summary: "Vegen er fortsatt stengt, og omkjøring er skiltet.",
+          createdAt: "2026-03-26T09:31:00.000Z",
+          updatedAt: "2026-07-04T10:20:00.000Z",
+          locationLabel: "Gangåsvegen",
+          relatedArticleIds: ["old-road-update"],
+        }),
+      ],
+      articles: [
+        article({
+          id: "old-road-update",
+          title: "Vegen er stengt ved Gangåsvegen",
+          excerpt: "Omkjøring er fortsatt skiltet.",
+          category: "Transport",
+          publishedAt: "2026-06-28T10:30:00.000Z",
+          situationId: "old-road",
+        }),
+      ],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(page.items.map((item) => item.id)).toEqual(["notification:situation:old-road"]);
+    expect(page.items[0]?.publicSurface).toMatchObject({ state: "hidden" });
+
+    const highlights = buildPublicNotificationSignalHighlights({
+      situations: [
+        homeSituation({
+          id: "old-road",
+          title: "Steinsprang, vegen er stengt",
+          summary: "Vegen er fortsatt stengt, og omkjøring er skiltet.",
+          createdAt: "2026-03-26T09:31:00.000Z",
+          updatedAt: "2026-07-04T10:20:00.000Z",
+          locationLabel: "Gangåsvegen",
+        }),
+      ],
+      articles: [
+        article({
+          id: "old-road-update",
+          title: "Vegen er stengt ved Gangåsvegen",
+          excerpt: "Omkjøring er fortsatt skiltet.",
+          category: "Transport",
+          publishedAt: "2026-06-28T10:30:00.000Z",
+          situationId: "old-road",
+        }),
+      ],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(highlights).toEqual([]);
+  });
+
+  it("keeps fresh article candidates when their situation record is missing from the input", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [
+        article({
+          id: "linked-search",
+          title: "Stor leteaksjon etter savnet mann i 70-årene",
+          excerpt: "Politiet søker med letemannskap og redningshelikopter i Meråker.",
+          category: "Hendelser",
+          publishedAt: "2026-07-04T09:35:00.000Z",
+          scope: "trondelag",
+          places: ["Meråker"],
+          situationId: "missing-situation-not-loaded",
+        }),
+      ],
+      generatedAt: "2026-07-04T10:30:00.000Z",
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      id: "notification:article:linked-search",
+      kind: "public_safety",
+      publicSurface: expect.objectContaining({ state: "visible" }),
+    });
+  });
+
+  it("uses verified article source mixes for confidence and source-audit links", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [
+        article({
+          id: "verified-lade",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ung mann kritisk skadet etter voldshendelse på Lade",
+          excerpt: "Politiet bekrefter at en ung mann er kritisk skadet.",
+          category: "Krim",
+          publicVerification: {
+            status: "verified",
+            label: "Verifisert",
+            detail: "Bekreftet av Politiloggen og Adresseavisen.",
+            officialSources: ["politiloggen"],
+            reportingSources: ["adressa"],
+            situationId: "lade-vold",
+          },
+          situationId: "lade-vold",
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items[0]).toMatchObject({
+      id: "notification:article:verified-lade",
+      sourceIds: expect.arrayContaining(["adressa", "politiloggen"]),
+      sourceLabels: expect.arrayContaining(["Adresseavisen", "Politiloggen"]),
+      confidence: expect.objectContaining({
+        level: "confirmed",
+        sourceCount: 2,
+      }),
+      reasons: expect.arrayContaining([
+        "Artikkelen er koblet til offentlig eller fler-kilde-verifisering.",
+      ]),
+    });
+    expect(page.items[0]?.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "source_audit",
+          href: "/command/kilder?sources=politiloggen&detail=politiloggen",
+          sourceId: "politiloggen",
+        }),
+      ]),
+    );
+  });
+
+  it("does not treat missing animals as critical search-and-rescue signals", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [
+        article({
+          id: "missing-dog",
+          title: "Leteaksjon etter savnet hund",
+          excerpt: "Frivillige leter etter en hund som er savnet i marka.",
+          category: "Hendelser",
+          places: ["Trondheim"],
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items).toEqual([]);
+  });
+
+  it("uses word boundaries for short high-impact keywords", () => {
+    const page = buildNotificationTriggerPage({
+      situations: [],
+      articles: [
+        article({
+          id: "false-boundaries",
+          title: "Politisk debatt om rask utbygging ved hotellet",
+          excerpt: "Saken gjelder arealplaner og kommunal behandling.",
+          category: "Nyheter",
+          places: ["Trondheim"],
+        }),
+      ],
+      generatedAt: "2026-07-02T09:00:00.000Z",
+    });
+
+    expect(page.items).toEqual([]);
+  });
+
   it("keeps public signal highlights deduplicated and avoids sport false positives", () => {
     const highlights = buildPublicNotificationSignalHighlights({
       situations: [homeSituation({ id: "road-one" })],
@@ -611,10 +1022,14 @@ describe("notification trigger candidates", () => {
       ],
     });
 
-    expect(pageWithDeliveryState.items.map((candidate) => candidate.deliveryState)).toEqual([
-      "ready",
-      "no_subscribers",
-    ]);
+    expect(
+      Object.fromEntries(
+        pageWithDeliveryState.items.map((candidate) => [candidate.id, candidate.deliveryState]),
+      ),
+    ).toMatchObject({
+      "notification:situation:situation-one": "ready",
+      "notification:article:article-violence": "no_subscribers",
+    });
 
     const blockedPage = filterNotificationTriggerPageByDeliveryStates(pageWithDeliveryState, [
       "no_subscribers",

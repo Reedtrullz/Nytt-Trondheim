@@ -400,23 +400,15 @@ test("City Pulse pins the analyzed morning brief on the public frontpage", async
   const brief = page.locator(".morning-brief");
   await expect(brief.getByRole("heading", { name: "Morgenbrief" })).toBeVisible();
   await expect(brief.getByText("Analysert brief").first()).toBeVisible();
-  await expect(brief.getByText("Automatisk analyse · 6/7 kilder OK")).toBeVisible();
+  await expect(brief.getByLabel("Morgenbrief-ferskhet")).toContainText("Eldre brief");
   await expect(brief.getByText("Bypulsen starter med tre tydelige signaler")).toBeVisible();
-  await expect(brief.getByText("Trafikk og framkommelighet peker seg ut")).toBeVisible();
-  await expect(brief.getByText("offentlige kilder styrer prioriteringen")).toBeVisible();
-  await expect(brief.getByText("Analysespor")).toBeVisible();
-  await expect(brief.getByText("Automatisk analyse · OK")).toBeVisible();
   await expect(brief).not.toContainText("DeepSeek");
   await expect(brief).not.toContainText("deepseek-v4-flash");
   await expect(brief.getByLabel("Morgenbrief-nøkkeltall")).toContainText("Transport leder bildet");
+  await expect(brief.getByLabel("Morgenbrief-nøkkeltall")).toContainText("6/7");
   await expect(
-    brief.getByLabel("Morgenbrief-grunnlag").getByRole("link", { name: article.title }),
-  ).toHaveAttribute("href", article.url);
-  await expect(
-    brief.getByLabel("Morgenbrief-grunnlag").getByRole("link", { name: situation.title }),
-  ).toHaveAttribute("href", `/situasjoner/${situation.id}`);
-  await expect(page.getByLabel("Bypulsmoduler")).toContainText("Varsel og analysespor");
-  await expect(page.getByLabel("Bypulsmoduler")).toContainText("Brief-ferskhet");
+    page.getByLabel("Kort oversikt").getByRole("link", { name: /Situasjonsrom/ }),
+  ).toHaveAttribute("href", "/situasjoner");
   const publicSources = page.locator(".source-status");
   await expect(publicSources).toContainText("Delvis kildegrunnlag");
   await expect(publicSources).toContainText("2 kilder trenger tilsyn blant 7 åpne kilder.");
@@ -816,52 +808,11 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await expect(channelContext.getByRole("button", { name: "Vis alle kanaler" })).toHaveCount(0);
   await expectNoHorizontalPageOverflow(page);
 
-  const cityPulseModules = page.getByLabel("Bypulsmoduler");
-  await expect(cityPulseModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();
-  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
-  await expect(cityPulseModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
-  await expect(cityPulseModules.locator(".dashboard-widget").first()).toHaveAttribute(
-    "data-editable",
-    "false",
-  );
-  await cityPulseModules.getByRole("button", { name: "Tilpass oppsett" }).click();
-  await expect(cityPulseModules.getByLabel("Dashboard-oppsett")).toBeVisible();
-  await expect(cityPulseModules.locator(".dashboard-widget").first()).toHaveAttribute(
-    "data-editable",
-    "true",
-  );
-  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toBeVisible();
-  await cityPulseModules
-    .getByRole("button", { name: "Bytt modulstørrelse for Varsel og analysespor" })
-    .click();
-  const signalWidget = cityPulseModules.locator(".dashboard-widget", {
-    hasText: "Slik vurderes høyeffekt-signaler",
-  });
-  await expect(signalWidget).toHaveClass(/dashboard-widget-compact/);
-  await expect
-    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt-city-pulse-dashboard-v1")))
-    .toContain('"signal-trace":"compact"');
-  await cityPulseModules.getByRole("button", { name: "Skjul oppsett" }).click();
-  await expect(cityPulseModules.getByLabel("Dashboard-oppsett")).toHaveCount(0);
-  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
-  await expect(cityPulseModules.locator(".dashboard-widget").first()).toHaveAttribute(
-    "data-editable",
-    "false",
-  );
-  await expectNoHorizontalPageOverflow(page);
-
-  await page.reload();
-  await expect(cityPulseModules.getByRole("button", { name: "Tilpass oppsett" })).toBeVisible();
-  await expect(signalWidget).toHaveClass(/dashboard-widget-compact/);
-  await expect(cityPulseModules.getByRole("button", { name: "Tilbakestill" })).toHaveCount(0);
-  await cityPulseModules.getByRole("button", { name: "Tilpass oppsett" }).click();
-  await cityPulseModules.getByRole("button", { name: "Tilbakestill" }).click();
-  await expect(signalWidget).toHaveClass(/dashboard-widget-full/);
-  await expect
-    .poll(() => page.evaluate(() => window.localStorage.getItem("nytt-city-pulse-dashboard-v1")))
-    .toContain('"signal-trace":"full"');
-  await cityPulseModules.getByRole("button", { name: "Skjul oppsett" }).click();
-  await expectNoHorizontalPageOverflow(page);
+  await expect(
+    page.getByLabel("Kort oversikt").getByRole("heading", { name: "Morgenbrief" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Bypulsmoduler")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Tilpass oppsett" })).toHaveCount(0);
 
   const lead = page.locator(".lead-story");
   const sources = lead.locator(".source-cluster");
@@ -3449,7 +3400,10 @@ test("owner manages private situation workspace and creates an export", async ({
 
 test("owner can open the real situation index and operations status", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("link", { name: "Situasjonsrom", exact: true }).click();
+  await page
+    .getByLabel("Hovedmeny")
+    .getByRole("link", { name: "Situasjonsrom", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/situasjoner$/);
   await expect(page.getByRole("heading", { name: "Trondheim situasjonskart" })).toBeVisible();
   const situationDetails = page.getByLabel("Situasjonsdetaljer");

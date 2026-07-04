@@ -284,6 +284,14 @@ function articlePlaceTokens(article: Article): Set<string> {
     (place): place is string => Boolean(place),
   );
   const placeTokens = tokens(placeValues.join(" "));
+  const normalizedText = normalizeText([article.title, article.excerpt, ...placeValues].join(" "));
+  if (
+    /\btrondheim\s+torg(?:et)?\b/iu.test(normalizedText) ||
+    ((article.scope === "trondheim" || /\btrondheim\b/iu.test(normalizedText)) &&
+      /\b(?:torvet|torget)\b/iu.test(normalizedText))
+  ) {
+    placeTokens.add("trondheim-torg");
+  }
   placeValues.forEach((place) => {
     const normalized = normalizeText(place);
     if (normalized === "kroppanbrua" || normalized === "kroppan bru") {

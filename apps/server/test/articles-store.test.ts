@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
-import type { Article, OfficialEvent, Situation } from "@nytt/shared";
+import { sampleSituation, type Article, type OfficialEvent, type Situation } from "@nytt/shared";
 import { MemoryStore, PgStore } from "../src/store.js";
 
 describe("article store", () => {
@@ -82,6 +82,130 @@ describe("article store", () => {
     expect(articleIds).toContain("story-native-single-38");
     expect(articleIds).not.toContain("story-native-single-39");
     expect(articleIds).toHaveLength(41);
+  });
+
+  it("keeps stale traffic situations out of the public home lead without hiding active rescue", async () => {
+    const store = new MemoryStore();
+    const situations = (store as unknown as { situations: Map<string, Situation> }).situations;
+    const now = new Date();
+    const oldCreatedAt = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000).toISOString();
+    const recentCreatedAt = new Date(now.getTime() - 36 * 60 * 60 * 1000).toISOString();
+    const updatedAt = now.toISOString();
+    situations.clear();
+    situations.set("old-road", {
+      ...sampleSituation,
+      id: "old-road",
+      type: "traffic",
+      title: "Vegen er stengt",
+      summary: "Gangåsvegen er fortsatt stengt, og omkjøring er skiltet.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      createdAt: oldCreatedAt,
+      updatedAt,
+      locationLabel: "Gangåsvegen",
+      relatedArticleIds: [],
+    });
+    situations.set("missing-person", {
+      ...sampleSituation,
+      id: "missing-person",
+      type: "missing_person",
+      title: "Leteaksjon etter savnet mann i Meråker",
+      summary: "Politiet leder fortsatt søket med letemannskap og redningshelikopter.",
+      status: "active",
+      verificationStatus: "Foreløpig fra rapportering",
+      createdAt: recentCreatedAt,
+      updatedAt,
+      locationLabel: "Funnsjøen",
+      officialSource: undefined,
+      officialEventId: undefined,
+      relatedArticleIds: [],
+    });
+
+    const bootstrap = await store.getBootstrap();
+
+    expect(bootstrap.situations.map((situation) => situation.id)).toEqual(["missing-person"]);
+  });
+
+  it("does not promote articles with stale traffic situation links", async () => {
+    const store = new MemoryStore();
+    const article: Article = {
+      id: "stale-road-linked-article",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Siste status for gammel veistenging",
+      excerpt: "Vegen har vært stengt i lang tid, og saken er ikke lenger fersk.",
+      url: "https://example.test/stale-road",
+      publishedAt: new Date().toISOString(),
+      scope: "trondheim",
+      category: "Transport",
+      places: ["Gangåsvegen"],
+    };
+    (store as unknown as { articles: Article[] }).articles.unshift(article);
+    const situations = (store as unknown as { situations: Map<string, Situation> }).situations;
+    const oldCreatedAt = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString();
+    situations.set("old-road", {
+      ...sampleSituation,
+      id: "old-road",
+      type: "traffic",
+      title: "Vegen er stengt",
+      summary: "Gangåsvegen er fortsatt stengt, og omkjøring er skiltet.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      createdAt: oldCreatedAt,
+      updatedAt: new Date().toISOString(),
+      locationLabel: "Gangåsvegen",
+      officialSource: "datex",
+      officialEventId: "datex-old-road",
+      relatedArticleIds: [article.id],
+    });
+
+    const page = await store.listArticles({ q: "gammel veistenging", limit: 10 });
+
+    expect(page.items[0]).toMatchObject({
+      id: article.id,
+    });
+    expect(page.items[0]).not.toHaveProperty("situationId", "old-road");
+    expect(page.items[0]).not.toHaveProperty("publicVerification");
+  });
+
+  it("promotes articles linked to fresh traffic situations", async () => {
+    const store = new MemoryStore();
+    const article: Article = {
+      id: "fresh-road-linked-article",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Fersk veistenging etter ras",
+      excerpt: "Vegen er stengt etter et ferskt ras, og omkjøring er skiltet.",
+      url: "https://example.test/fresh-road",
+      publishedAt: new Date().toISOString(),
+      scope: "trondheim",
+      category: "Transport",
+      places: ["Gangåsvegen"],
+    };
+    (store as unknown as { articles: Article[] }).articles.unshift(article);
+    const situations = (store as unknown as { situations: Map<string, Situation> }).situations;
+    situations.set("fresh-road", {
+      ...sampleSituation,
+      id: "fresh-road",
+      type: "traffic",
+      title: "Vegen er stengt",
+      summary: "Vegen er stengt etter et ferskt ras, og omkjøring er skiltet.",
+      status: "active",
+      verificationStatus: "Offentlig bekreftet",
+      createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      updatedAt: new Date().toISOString(),
+      locationLabel: "Gangåsvegen",
+      officialSource: "datex",
+      officialEventId: "datex-fresh-road",
+      relatedArticleIds: [article.id],
+    });
+
+    const page = await store.listArticles({ q: "Fersk veistenging", limit: 10 });
+
+    expect(page.items[0]).toMatchObject({
+      id: article.id,
+      situationId: "fresh-road",
+    });
   });
 
   it("searches production articles by place metadata, source label, and category", async () => {
