@@ -4,7 +4,10 @@ import { BrowserRouter } from "react-router-dom";
 import "./styles.css";
 import { App } from "./App.js";
 
-createRoot(document.getElementById("root")!).render(
+const rootElement = document.getElementById("root")!;
+rootElement.textContent = "";
+
+createRoot(rootElement).render(
   <StrictMode>
     <BrowserRouter>
       <App />

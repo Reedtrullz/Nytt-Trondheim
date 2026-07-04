@@ -74,14 +74,14 @@ describe("article store", () => {
     expect(bootstrap.storyNextCursor).toBeTruthy();
     expect(bootstrap).not.toHaveProperty("articleNextCursor");
     expect(storyIds).toContain("coverage:incident:story-native-bootstrap");
-    expect(storyIds).toContain("article:story-native-single-38");
-    expect(storyIds).not.toContain("article:story-native-single-39");
-    expect(storyIds).toHaveLength(40);
+    expect(storyIds).toContain("article:story-native-single-18");
+    expect(storyIds).not.toContain("article:story-native-single-19");
+    expect(storyIds).toHaveLength(20);
     expect(articleIds).toContain("story-native-cluster-adressa");
     expect(articleIds).toContain("story-native-cluster-politiloggen");
-    expect(articleIds).toContain("story-native-single-38");
-    expect(articleIds).not.toContain("story-native-single-39");
-    expect(articleIds).toHaveLength(41);
+    expect(articleIds).toContain("story-native-single-18");
+    expect(articleIds).not.toContain("story-native-single-19");
+    expect(articleIds).toHaveLength(21);
   });
 
   it("keeps stale traffic situations out of the public home lead without hiding active rescue", async () => {

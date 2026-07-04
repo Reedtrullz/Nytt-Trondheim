@@ -251,15 +251,8 @@ describe("private situation API", () => {
     expect(response.body.articles.length).toBeGreaterThan(0);
     expect(response.body.sourceHealth.length).toBeGreaterThan(0);
     expect(response.body.situations.length).toBeGreaterThan(0);
-    expect(response.body.morningBrief).toEqual(
-      expect.objectContaining({
-        title: "Morgenbrief",
-        paragraphs: expect.arrayContaining([expect.any(String)]),
-        highlights: expect.arrayContaining([expect.objectContaining({ label: "Saker" })]),
-        sourceLine: expect.any(String),
-      }),
-    );
-    expect(response.body.morningBrief.paragraphs).toHaveLength(3);
+    expect(response.body.morningBrief).toBeUndefined();
+    expect(response.body.stories.length).toBeLessThanOrEqual(20);
     expect(response.body.situations.length).toBeLessThanOrEqual(3);
     for (const situation of response.body.situations as Array<Record<string, unknown>>) {
       expect(["preliminary", "active"]).toContain(situation.status);
@@ -299,7 +292,7 @@ describe("private situation API", () => {
     }
   });
 
-  it("serves the latest stored morning brief from PgStore bootstrap when available", async () => {
+  it("keeps PgStore bootstrap lean for the public first screen", async () => {
     const article: Article = {
       id: "article-one",
       source: "nrk",
@@ -312,24 +305,6 @@ describe("private situation API", () => {
       category: "Transport",
       places: ["Sluppen", "Trondheim"],
     };
-    const storedBrief: MorningBrief = {
-      generatedAt: "2026-07-02T07:30:00.000Z",
-      title: "Morgenbrief",
-      mode: "ai_assisted",
-      sourceLine: "Automatisk analyse · 5/6 kilder OK",
-      paragraphs: [
-        "Lagret brief fra worker.",
-        "Denne teksten skal ikke beregnes på nytt i serveren.",
-        "Siste avsnitt kommer også fra morning_briefs.",
-      ],
-      highlights: [
-        { label: "Saker", value: "1", detail: "Transport leder bildet" },
-        { label: "Situasjoner", value: "0", detail: "Aktive eller til vurdering" },
-        { label: "Kilder", value: "5/6", detail: "Rapporterer OK" },
-      ],
-      articleIds: [article.id],
-      situationIds: [sampleSituation.id],
-    };
     const captured: string[] = [];
     const fakePool = {
       async query(sql: string, params?: unknown[]) {
@@ -337,7 +312,7 @@ describe("private situation API", () => {
         captured.push(normalizedSql);
         if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
           expect(params?.slice(0, 2)).toEqual(["Reedtrullz", "trondheim"]);
-          expect([41, 201]).toContain(params?.[2]);
+          expect(params?.[2]).toBe(101);
           return { rows: [{ payload: article, saved: false }] };
         }
         if (normalizedSql.includes("FROM situations WHERE status IN")) {
@@ -352,22 +327,6 @@ describe("private situation API", () => {
                 state: "ok",
                 detail: "RSS",
               } satisfies SourceHealth,
-            ],
-          };
-        }
-        if (normalizedSql.includes("FROM morning_briefs")) {
-          return { rows: [{ payload: storedBrief }] };
-        }
-        if (normalizedSql.includes("FROM ai_processing_runs")) {
-          return {
-            rows: [
-              {
-                provider: "deepseek",
-                model: "deepseek-v4-flash",
-                status: "ok",
-                completedAt: "2026-07-02T07:25:00.000Z",
-                result: { morningBrief: { paragraphs: ["Skal", "ikke", "brukes"] } },
-              },
             ],
           };
         }
@@ -393,8 +352,9 @@ describe("private situation API", () => {
         }),
       }),
     ]);
-    expect(bootstrap.morningBrief).toBe(storedBrief);
-    expect(captured.some((sql) => sql.includes("FROM morning_briefs"))).toBe(true);
+    expect(bootstrap.morningBrief).toBeUndefined();
+    expect(captured.some((sql) => sql.includes("FROM morning_briefs"))).toBe(false);
+    expect(captured.some((sql) => sql.includes("FROM ai_processing_runs"))).toBe(false);
     const homeSituationSql = captured.find(
       (sql) =>
         sql.includes("FROM situations WHERE status IN") &&
@@ -404,7 +364,7 @@ describe("private situation API", () => {
     expect(homeSituationSql).toContain("LIMIT $2");
   });
 
-  it("sanitizes stored morning briefs against filtered public home situations", async () => {
+  it("sanitizes stored morning briefs for command-center briefing", async () => {
     const article: Article = {
       id: "article-one",
       source: "nrk",
@@ -445,6 +405,10 @@ describe("private situation API", () => {
           expect(params?.slice(0, 2)).toEqual(["Reedtrullz", "trondheim"]);
           return { rows: [{ payload: article, saved: false }] };
         }
+        if (normalizedSql.includes("SELECT payload FROM articles WHERE id = ANY")) {
+          expect(params).toEqual([[article.id]]);
+          return { rows: [{ payload: article }] };
+        }
         if (normalizedSql.includes("FROM situations WHERE status IN")) {
           return { rows: [] };
         }
@@ -462,10 +426,13 @@ describe("private situation API", () => {
     };
 
     const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
-    const bootstrap = await store.getBootstrap("Reedtrullz");
+    const briefing = await store.getCommandCenterBriefing("Reedtrullz");
 
-    expect(bootstrap.situations).toEqual([]);
-    expect(bootstrap.morningBrief).toMatchObject({
+    expect(briefing.supportingSituations).toEqual([]);
+    expect(briefing.supportingArticles).toEqual([
+      expect.objectContaining({ id: article.id, title: article.title }),
+    ]);
+    expect(briefing.morningBrief).toMatchObject({
       situationIds: [],
       highlights: expect.arrayContaining([
         expect.objectContaining({
@@ -492,7 +459,7 @@ describe("private situation API", () => {
     ).toBe(true);
   });
 
-  it("keeps surviving situation brief paragraphs when only stale traffic is filtered", async () => {
+  it("keeps surviving situation brief paragraphs in command-center briefing", async () => {
     const storedBrief: MorningBrief = {
       generatedAt: "2026-07-04T09:45:00.000Z",
       title: "Morgenbrief",
@@ -523,12 +490,16 @@ describe("private situation API", () => {
       locationLabel: "Funnsjøen",
     };
     const fakePool = {
-      async query(sql: string) {
+      async query(sql: string, params?: unknown[]) {
         const normalizedSql = sql.replace(/\s+/g, " ").trim();
         if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
           return { rows: [] };
         }
         if (normalizedSql.includes("FROM situations WHERE status IN")) {
+          return { rows: [{ payload: missingPersonSummary }] };
+        }
+        if (normalizedSql.includes("SELECT payload FROM situations WHERE id = ANY")) {
+          expect(params).toEqual([["missing-person"]]);
           return { rows: [{ payload: missingPersonSummary }] };
         }
         if (normalizedSql.includes("FROM source_health")) {
@@ -545,9 +516,9 @@ describe("private situation API", () => {
     };
 
     const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
-    const bootstrap = await store.getBootstrap("Reedtrullz");
+    const briefing = await store.getCommandCenterBriefing("Reedtrullz");
 
-    expect(bootstrap.morningBrief).toMatchObject({
+    expect(briefing.morningBrief).toMatchObject({
       situationIds: ["missing-person"],
       highlights: expect.arrayContaining([
         expect.objectContaining({
@@ -562,6 +533,12 @@ describe("private situation API", () => {
         "Kildebildet oppdateres fortløpende.",
       ],
     });
+    expect(briefing.supportingSituations).toEqual([
+      expect.objectContaining({
+        id: "missing-person",
+        title: "Leteaksjon etter savnet mann i Meråker",
+      }),
+    ]);
   });
 
   it("accepts only the configured GitHub owner account", () => {

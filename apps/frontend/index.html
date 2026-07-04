@@ -6,9 +6,36 @@
     <title>Nytt Trondheim</title>
     <meta name="theme-color" content="#fbfaf7" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      .initial-loading {
+        color: #18201f;
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        padding: 2rem;
+      }
+
+      .initial-loading h1 {
+        font-size: 1.5rem;
+        margin: 0 0 0.5rem;
+      }
+
+      .initial-loading p {
+        color: #63717c;
+        margin: 0;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="initial-loading" aria-live="polite">
+        <h1>Nytt Trondheim</h1>
+        <p>Henter siste nytt...</p>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

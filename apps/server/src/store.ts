@@ -1335,6 +1335,8 @@ function cityPulseStorySourceLimit(filters: ArticleFilters): number {
   return Math.min(500, Math.max(100, (filters.limit ?? 40) * 5));
 }
 
+const homeBootstrapStoryLimit = 20;
+
 function articleOverlapsTrafficEvent(article: Article, event: TrafficMapEvent): boolean {
   const articleMs = Date.parse(article.publishedAt);
   if (!Number.isFinite(articleMs)) return false;
@@ -3795,7 +3797,10 @@ export class MemoryStore implements Store {
   }
 
   async getBootstrap(): Promise<BootstrapPayload> {
-    const storyPage = await this.listCityPulseStories({ scope: "trondheim", limit: 40 });
+    const storyPage = await this.listCityPulseStories({
+      scope: "trondheim",
+      limit: homeBootstrapStoryLimit,
+    });
     const now = new Date();
     const situations = [...this.situations.values()]
       .filter(
@@ -3810,13 +3815,13 @@ export class MemoryStore implements Store {
       )
       .slice(0, 3)
       .map(homeSituationSummary);
-    return bootstrapWithMorningBrief({
+    return {
       articles: articlesFromCityPulseStoryPage(storyPage),
       stories: storyPage.items,
       ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
       situations,
       sourceHealth: clone(sampleBootstrap.sourceHealth),
-    });
+    };
   }
 
   async listArticles(filters: ArticleFilters): Promise<ArticlePage> {
@@ -4623,17 +4628,17 @@ export class MemoryStore implements Store {
   async getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload> {
     void login;
     const bootstrap = await this.getBootstrap();
+    const morningBrief = bootstrapWithMorningBrief(bootstrap).morningBrief;
     const sourceHealthSummary = briefingSourceHealthSummary(bootstrap.sourceHealth);
     const articleIds = new Set(
-      bootstrap.morningBrief?.articleIds ??
-        bootstrap.articles.slice(0, 8).map((article) => article.id),
+      morningBrief?.articleIds ?? bootstrap.articles.slice(0, 8).map((article) => article.id),
     );
     const situationIds = new Set(
-      bootstrap.morningBrief?.situationIds ?? bootstrap.situations.map((situation) => situation.id),
+      morningBrief?.situationIds ?? bootstrap.situations.map((situation) => situation.id),
     );
     return {
-      generatedAt: bootstrap.morningBrief?.generatedAt ?? new Date().toISOString(),
-      ...(bootstrap.morningBrief ? { morningBrief: bootstrap.morningBrief } : {}),
+      generatedAt: morningBrief?.generatedAt ?? new Date().toISOString(),
+      ...(morningBrief ? { morningBrief } : {}),
       operationsNotes: [],
       supportingArticles: bootstrap.articles
         .filter((article) => articleIds.has(article.id))
@@ -5260,55 +5265,22 @@ export class PgStore implements Store {
   }
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
-    const [storyPage, situations, sourceHealth, latestMorningBrief, latestAiRun] =
-      await Promise.all([
-        this.listCityPulseStories({ scope: "trondheim", limit: 40 }, login),
-        this.listHomeSituationSummaries(),
-        this.listSourceHealth(),
-        this.latestMorningBrief(),
-        this.pool.query<{
-          provider: AiProcessingRun["provider"];
-          model: string;
-          status: AiProcessingRun["status"];
-          completedAt: Date | string;
-          result: unknown;
-        }>(
-          `SELECT provider, model, status, completed_at AS "completedAt", result
-         FROM ai_processing_runs
-         ORDER BY completed_at DESC
-         LIMIT 1`,
-        ),
-      ]);
-    const bootstrapPayload = {
+    const [storyPage, situations, sourceHealth] = await Promise.all([
+      this.listCityPulseStories({ scope: "trondheim", limit: homeBootstrapStoryLimit }, login),
+      this.listHomeSituationSummaries(),
+      this.listSourceHealth(),
+    ]);
+    return {
       articles: articlesFromCityPulseStoryPage(storyPage),
       stories: storyPage.items,
       ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
       situations,
       sourceHealth,
     };
-    if (latestMorningBrief) {
-      return {
-        ...bootstrapPayload,
-        morningBrief: sanitizeMorningBriefForHomeSituations(latestMorningBrief, situations),
-      };
-    }
-    const latestAiRunRow = latestAiRun.rows[0];
-    return bootstrapWithMorningBrief(
-      bootstrapPayload,
-      latestAiRunRow
-        ? {
-            provider: latestAiRunRow.provider,
-            model: latestAiRunRow.model,
-            status: latestAiRunRow.status,
-            completedAt: new Date(latestAiRunRow.completedAt).toISOString(),
-            result: latestAiRunRow.result,
-          }
-        : undefined,
-    );
   }
 
   async getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload> {
-    const [bootstrap, latestAiRunResult] = await Promise.all([
+    const [bootstrap, latestAiRunResult, latestMorningBrief] = await Promise.all([
       this.getBootstrap(login),
       this.pool.query<AiProcessingRunRow>(
         `SELECT id, provider, model, status, started_at, completed_at,
@@ -5318,8 +5290,23 @@ export class PgStore implements Store {
          ORDER BY completed_at DESC, id DESC
          LIMIT 1`,
       ),
+      this.latestMorningBrief(),
     ]);
-    const morningBrief = bootstrap.morningBrief;
+    const latestAiRunRow = latestAiRunResult.rows[0];
+    const morningBrief = latestMorningBrief
+      ? sanitizeMorningBriefForHomeSituations(latestMorningBrief, bootstrap.situations)
+      : bootstrapWithMorningBrief(
+          bootstrap,
+          latestAiRunRow
+            ? {
+                provider: latestAiRunRow.provider,
+                model: latestAiRunRow.model,
+                status: latestAiRunRow.status,
+                completedAt: new Date(latestAiRunRow.completed_at).toISOString(),
+                result: latestAiRunRow.result,
+              }
+            : undefined,
+        ).morningBrief;
     const articleIds = [...new Set(morningBrief?.articleIds ?? [])];
     const situationIds = [...new Set(morningBrief?.situationIds ?? [])];
     const [articleResult, situationResult] = await Promise.all([
