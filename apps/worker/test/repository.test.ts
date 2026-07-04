@@ -1,22 +1,23 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
-import type {
-  AiProcessingRun,
-  Article,
-  MorningBrief,
-  NotificationTriggerCandidate,
-  OfficialEvent,
-  PersistedTrafficMapEvent,
-  PublicTransportServiceAlert,
-  PublicTransportVehicle,
-  RoadCamera,
-  RoadWeatherObservation,
-  Situation,
-  SourceItemInput,
-  TrafficCounterSnapshot,
-  TrafficMapEvent,
-  TrafficPulseCorridor,
-  WorkerCycleMetrics,
+import {
+  sampleSituation,
+  type AiProcessingRun,
+  type Article,
+  type MorningBrief,
+  type NotificationTriggerCandidate,
+  type OfficialEvent,
+  type PersistedTrafficMapEvent,
+  type PublicTransportServiceAlert,
+  type PublicTransportVehicle,
+  type RoadCamera,
+  type RoadWeatherObservation,
+  type Situation,
+  type SourceItemInput,
+  type TrafficCounterSnapshot,
+  type TrafficMapEvent,
+  type TrafficPulseCorridor,
+  type WorkerCycleMetrics,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerRepository } from "../src/repository.js";
@@ -265,6 +266,74 @@ describe("WorkerRepository", () => {
       brief.aiRun?.completedAt,
       JSON.stringify(brief),
     ]);
+  });
+
+  it("filters worker morning-brief situations before persisting derived briefs", async () => {
+    const now = new Date();
+    const oldCreatedAt = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000).toISOString();
+    const recentCreatedAt = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const staleRoad: Situation = {
+      ...sampleSituation,
+      id: "old-road",
+      type: "traffic",
+      title: "Vegen er stengt",
+      summary: "Gangåsvegen er fortsatt stengt, og omkjøring er skiltet.",
+      status: "active",
+      publicVisibility: "public",
+      createdAt: oldCreatedAt,
+      updatedAt: now.toISOString(),
+      locationLabel: "Gangåsvegen",
+    };
+    const privateSearch: Situation = {
+      ...sampleSituation,
+      id: "private-search",
+      type: "missing_person",
+      title: "Leteaksjon etter savnet mann",
+      summary: "Intern operativ koordinering.",
+      status: "active",
+      publicVisibility: "command_center",
+      createdAt: recentCreatedAt,
+      updatedAt: now.toISOString(),
+      locationLabel: "Meråker",
+    };
+    const publicSearch: Situation = {
+      ...sampleSituation,
+      id: "public-search",
+      type: "missing_person",
+      title: "Leteaksjon etter savnet mann i Meråker",
+      summary: "Politiet søker med letemannskap og redningshelikopter.",
+      status: "active",
+      publicVisibility: "public",
+      createdAt: recentCreatedAt,
+      updatedAt: now.toISOString(),
+      locationLabel: "Funnsjøen",
+      sourceConfidence: {
+        level: "likely",
+        label: "Sannsynlig",
+        score: 0.78,
+        sourceCount: 2,
+        updatedAt: now.toISOString(),
+      },
+    };
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ payload: staleRoad }, { payload: privateSearch }, { payload: publicSearch }],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    const situations = await repository.homeSituationSummaries(3);
+
+    expect(situations).toEqual([
+      expect.objectContaining({
+        id: "public-search",
+        sourceConfidence: publicSearch.sourceConfidence,
+      }),
+    ]);
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("COALESCE(payload->>'publicVisibility', 'public') = 'public'");
+    expect(sql).toContain("payload->>'createdAt' < $1");
+    expect(sql).toContain("LIMIT $2");
+    const params = query.mock.calls[0]?.[1] as unknown[];
+    expect(params[1]).toBeGreaterThanOrEqual(3);
   });
 
   it("claims Web Push deliveries outside the source item ledger", async () => {

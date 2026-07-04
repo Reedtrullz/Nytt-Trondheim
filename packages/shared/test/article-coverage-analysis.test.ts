@@ -188,6 +188,102 @@ describe("article coverage analysis", () => {
     });
   });
 
+  it("merges a Trondheim Torg fight bundle with the Politiloggen situation update", () => {
+    const generatedAt = "2026-07-04T20:10:00.000Z";
+    const newsBundle = {
+      id: "coverage:incident:trondheim-torg-fight",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt,
+    };
+
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "nrk-trondheim-torg",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Slagsmål på Trondheim Torg",
+          excerpt:
+            "Politiet rykker ut til Trondheim Torg etter melding om slagsmål mellom flere personer. Det er ikke meldt inn at noen er skadet.",
+          publishedAt: "2026-07-04T20:04:00.000Z",
+          category: "Krim",
+          places: ["Midtbyen", "Trondheim"],
+          location: { lat: 63.4306, lng: 10.3949, label: "Midtbyen" },
+          coverageBundle: newsBundle,
+        }),
+        article({
+          id: "nidaros-torvet",
+          source: "nidaros",
+          sourceLabel: "Nidaros",
+          title: "Slagsmål på Torvet: - Flere løp fra stedet",
+          excerpt:
+            "Politiet er på stedet etter melding om slagsmål på Torvet. Flere skal ha løpt fra stedet.",
+          publishedAt: "2026-07-04T20:04:00.000Z",
+          category: "Krim",
+          places: ["Midtbyen", "Trondheim"],
+          location: { lat: 63.4306, lng: 10.3949, label: "Midtbyen" },
+          coverageBundle: newsBundle,
+        }),
+        article({
+          id: "adressa-torvet",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Slagsmål på Torvet i Trondheim: - Flere har løpt fra stedet",
+          excerpt:
+            "Politiet har kontroll på noen av de involverte etter melding om slagsmål på Torvet i Trondheim.",
+          publishedAt: "2026-07-04T20:03:00.000Z",
+          category: "Krim",
+          places: ["Midtbyen", "Trondheim"],
+          location: { lat: 63.4306, lng: 10.3949, label: "Midtbyen" },
+          coverageBundle: newsBundle,
+        }),
+        article({
+          id: "politiloggen-trondheim-torg",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Voldshendelse: Trondheim, Sentrum",
+          excerpt:
+            "Politiet rykker ut til Trondheim Torg etter melding om slagsmål mellom flere personer. Ikke fått melding om at noen er skadd. Flere personer har løpt fra stedet.",
+          publishedAt: "2026-07-04T20:03:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim", "Sentrum"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Trondheim sentrum" },
+          situationId: "politiloggen-trondheim-torg",
+        }),
+      ],
+      generatedAt,
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      id: "coverage:situation:politiloggen-trondheim-torg",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse med offisiell tråd",
+      memberArticleIds: expect.arrayContaining([
+        "nrk-trondheim-torg",
+        "nidaros-torvet",
+        "adressa-torvet",
+        "politiloggen-trondheim-torg",
+      ]),
+      sourceIds: expect.arrayContaining(["nrk", "nidaros", "adressa", "politiloggen"]),
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "slagsmal",
+        }),
+      ]),
+    });
+    expect(analysis.articles.map((item) => item.coverageBundle?.id)).toEqual([
+      "coverage:situation:politiloggen-trondheim-torg",
+      "coverage:situation:politiloggen-trondheim-torg",
+      "coverage:situation:politiloggen-trondheim-torg",
+      "coverage:situation:politiloggen-trondheim-torg",
+    ]);
+  });
+
   it("bundles serious violence reports with different source counts but the same victim context", () => {
     const analysis = analyzeArticleCoverage(
       [
@@ -231,6 +327,47 @@ describe("article coverage analysis", () => {
         }),
       ]),
     });
+  });
+
+  it("keeps similar violence reports separate when they name different specific places", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "lade-vold",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Ung mann kritisk skadd på Lade",
+          excerpt: "Politiet leter etter flere personer etter en voldshendelse på Lade.",
+          publishedAt: "2026-06-28T16:59:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Lade"],
+          location: { lat: 63.443, lng: 10.445, label: "Lade" },
+        }),
+        article({
+          id: "saupstad-vold",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Én person kritisk skadet etter voldshendelse på Saupstad",
+          excerpt: "Politiet undersøker en voldshendelse på Saupstad.",
+          publishedAt: "2026-06-28T16:52:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Saupstad"],
+          location: { lat: 63.3675, lng: 10.3567, label: "Saupstad" },
+        }),
+      ],
+      "2026-06-28T17:10:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(0);
+    expect(analysis.nearMisses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          articleIds: ["lade-vold", "saupstad-vold"],
+          reason: "conflicting_specific_places",
+        }),
+      ]),
+    );
+    expect(analysis.articles.map((item) => item.coverageBundle)).toEqual([undefined, undefined]);
   });
 
   it("merges compatible violence bundles when later updates split across rows", () => {

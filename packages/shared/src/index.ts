@@ -7,6 +7,7 @@ export * from "./sports-context.js";
 export * from "./source-confidence.js";
 export * from "./source-labels.js";
 export * from "./public-verification.js";
+export * from "./public-home-situations.js";
 export * from "./situation-publication.js";
 export * from "./situation-activation-policy.js";
 export * from "./morning-brief.js";

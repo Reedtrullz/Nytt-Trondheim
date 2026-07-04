@@ -113,6 +113,7 @@ import {
   groupHomeArticles,
   isLocalSportsCoverageText,
   isNewsroomPublicVerificationSource,
+  publicLeadLongRunningSituationAgeMs,
   isPublicSituation,
   sampleArticles,
   sampleBootstrap,
@@ -120,6 +121,7 @@ import {
   sampleSituation,
   sampleTasks,
   sampleWorkspace,
+  shouldFeaturePublicHomeSituation,
   sourceIdLabel,
   sourceMixConfidenceSummary,
 } from "@nytt/shared";
@@ -536,6 +538,63 @@ function homeSituationSummary(situation: Situation): HomeSituationSummary {
     locationLabel: situation.locationLabel,
     sourceConfidence: publicSourceConfidenceForSituation(situation),
     ...(primaryLocation ? { primaryLocation } : {}),
+  };
+}
+
+const removedSituationReferencePattern =
+  /(?:^|[^a-z0-9æøå])(?:omkjøring|omkjoring|ras(?:et)?|skred(?:et)?|stengt|stengt\s+(?:veg|vei)|(?:veg|vegen|vei|veien)\s+er\s+stengt)(?:[^a-z0-9æøå]|$)/u;
+const genericRemovedSituationReferencePattern = /(?:pågående\s+situasjon|situasjonsrom)/u;
+
+function isSituationMorningBriefHighlight(highlight: MorningBrief["highlights"][number]): boolean {
+  return highlight.label.toLocaleLowerCase("nb").includes("situasjon");
+}
+
+function paragraphReferencesRemovedSituation(
+  text: string,
+  remainingSituationCount: number,
+): boolean {
+  if (removedSituationReferencePattern.test(text)) return true;
+  return remainingSituationCount === 0 && genericRemovedSituationReferencePattern.test(text);
+}
+
+function sanitizeMorningBriefForHomeSituations(
+  brief: MorningBrief,
+  situations: HomeSituationSummary[],
+): MorningBrief {
+  const allowedSituationIds = new Set(situations.map((situation) => situation.id));
+  const originalSituationIds = brief.situationIds ?? [];
+  const situationIds = originalSituationIds.filter((id) => allowedSituationIds.has(id));
+  if (situationIds.length === originalSituationIds.length) return brief;
+
+  const hadRemovedSituation = originalSituationIds.length > situationIds.length;
+  const highlights = brief.highlights.map((highlight) => {
+    if (!isSituationMorningBriefHighlight(highlight)) return highlight;
+    return {
+      ...highlight,
+      value: String(situationIds.length),
+      detail:
+        situationIds.length > 0
+          ? "Aktive eller til vurdering"
+          : "Ingen ferske høyeffekt-situasjoner i offentlig toppbilde",
+    };
+  });
+  const paragraphs = brief.paragraphs.map((paragraph) => {
+    if (!hadRemovedSituation) return paragraph;
+    const text = paragraph.toLocaleLowerCase("nb");
+    const referencesRemovedSituation = paragraphReferencesRemovedSituation(
+      text,
+      situationIds.length,
+    );
+    return referencesRemovedSituation
+      ? "Ingen ferske høyeffekt-situasjoner dominerer toppbildet akkurat nå."
+      : paragraph;
+  }) as MorningBrief["paragraphs"];
+
+  return {
+    ...brief,
+    situationIds,
+    highlights,
+    paragraphs,
   };
 }
 
@@ -3737,11 +3796,13 @@ export class MemoryStore implements Store {
 
   async getBootstrap(): Promise<BootstrapPayload> {
     const storyPage = await this.listCityPulseStories({ scope: "trondheim", limit: 40 });
+    const now = new Date();
     const situations = [...this.situations.values()]
       .filter(
         (situation) =>
           isPublicSituation(situation) &&
-          (situation.status === "preliminary" || situation.status === "active"),
+          (situation.status === "preliminary" || situation.status === "active") &&
+          shouldFeaturePublicHomeSituation(situation, now),
       )
       .sort(
         (left, right) =>
@@ -3762,6 +3823,7 @@ export class MemoryStore implements Store {
     const search = filters.q?.toLocaleLowerCase("nb");
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
     const limit = filters.limit ?? 40;
+    const now = new Date();
     const items = this.articles
       .filter(
         (article) =>
@@ -3792,7 +3854,8 @@ export class MemoryStore implements Store {
             [...this.situations.values()].filter(
               (situation) =>
                 isPublicSituation(situation) &&
-                (situation.status === "preliminary" || situation.status === "active"),
+                (situation.status === "preliminary" || situation.status === "active") &&
+                shouldFeaturePublicHomeSituation(situation, now),
             ),
           ),
         ),
@@ -4598,20 +4661,39 @@ export class PgStore implements Store {
        ORDER BY updated_at DESC`,
       [articleIds],
     );
-    return result.rows.map((row) => row.payload);
+    const now = new Date();
+    return result.rows
+      .map((row) => row.payload)
+      .filter((situation) => shouldFeaturePublicHomeSituation(situation, now));
   }
 
   private async listHomeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
+    const now = new Date();
+    const staleCutoff = new Date(now.getTime() - publicLeadLongRunningSituationAgeMs).toISOString();
+    const candidateLimit = Math.max(limit * 4, limit + 6);
     const result = await this.pool.query<{ payload: Situation }>(
       `SELECT payload
        FROM situations
        WHERE status IN ('preliminary', 'active')
          AND COALESCE(payload->>'publicVisibility', 'public') = 'public'
+         AND NOT (
+           COALESCE(payload->>'createdAt', '') <> ''
+           AND payload->>'createdAt' < $1
+           AND (
+             payload->>'type' IN ('traffic', 'landslide', 'weather')
+             OR LOWER(CONCAT_WS(' ', payload->>'title', payload->>'summary', payload->>'locationLabel'))
+               ~ '(^|[^[:alnum:]_])(omkjøring|omkjoring|ras|skred|stengt|trafikk|veg|vegen|vei|veien)([^[:alnum:]_]|$)'
+           )
+         )
        ORDER BY updated_at DESC, id DESC
-       LIMIT $1`,
-      [limit],
+       LIMIT $2`,
+      [staleCutoff, candidateLimit],
     );
-    return result.rows.map((row) => homeSituationSummary(row.payload));
+    return result.rows
+      .map((row) => row.payload)
+      .filter((situation) => shouldFeaturePublicHomeSituation(situation, now))
+      .slice(0, limit)
+      .map(homeSituationSummary);
   }
 
   private async latestMorningBrief(): Promise<MorningBrief | undefined> {
@@ -5204,7 +5286,12 @@ export class PgStore implements Store {
       situations,
       sourceHealth,
     };
-    if (latestMorningBrief) return { ...bootstrapPayload, morningBrief: latestMorningBrief };
+    if (latestMorningBrief) {
+      return {
+        ...bootstrapPayload,
+        morningBrief: sanitizeMorningBriefForHomeSituations(latestMorningBrief, situations),
+      };
+    }
     const latestAiRunRow = latestAiRun.rows[0];
     return bootstrapWithMorningBrief(
       bootstrapPayload,

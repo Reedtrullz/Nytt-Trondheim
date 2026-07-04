@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
+import {
+  publicLeadLongRunningSituationAgeMs,
+  shouldFeaturePublicHomeSituation,
+} from "@nytt/shared";
 import type {
   AiProcessingRun,
   Article,
@@ -523,41 +527,42 @@ export class WorkerRepository {
   }
 
   async homeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
-    const result = await this.pool.query<{
-      id: string;
-      title: string;
-      summary: string;
-      status: HomeSituationSummary["status"];
-      verificationStatus: HomeSituationSummary["verificationStatus"];
-      updatedAt: Date | string;
-      createdAt: string;
-      locationLabel: string;
-    }>(
-      `SELECT
-         id,
-         payload->>'title' AS "title",
-         payload->>'summary' AS "summary",
-         status,
-         payload->>'verificationStatus' AS "verificationStatus",
-         updated_at AS "updatedAt",
-         payload->>'createdAt' AS "createdAt",
-         payload->>'locationLabel' AS "locationLabel"
+    const now = new Date();
+    const staleCutoff = new Date(now.getTime() - publicLeadLongRunningSituationAgeMs).toISOString();
+    const candidateLimit = Math.max(limit * 4, limit + 6);
+    const result = await this.pool.query<{ payload: Situation }>(
+      `SELECT payload
        FROM situations
        WHERE status IN ('preliminary', 'active')
+         AND COALESCE(payload->>'publicVisibility', 'public') = 'public'
+         AND NOT (
+           COALESCE(payload->>'createdAt', '') <> ''
+           AND payload->>'createdAt' < $1
+           AND (
+             payload->>'type' IN ('traffic', 'landslide', 'weather')
+             OR LOWER(CONCAT_WS(' ', payload->>'title', payload->>'summary', payload->>'locationLabel'))
+               ~ '(^|[^[:alnum:]_])(omkjøring|omkjoring|ras|skred|stengt|trafikk|veg|vegen|vei|veien)([^[:alnum:]_]|$)'
+           )
+         )
        ORDER BY updated_at DESC, id DESC
-       LIMIT $1`,
-      [limit],
+       LIMIT $2`,
+      [staleCutoff, candidateLimit],
     );
-    return result.rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      summary: row.summary,
-      status: row.status,
-      verificationStatus: row.verificationStatus,
-      updatedAt: new Date(row.updatedAt).toISOString(),
-      createdAt: row.createdAt,
-      locationLabel: row.locationLabel,
-    }));
+    return result.rows
+      .map((row) => row.payload)
+      .filter((situation) => shouldFeaturePublicHomeSituation(situation, now))
+      .slice(0, limit)
+      .map((situation) => ({
+        id: situation.id,
+        title: situation.title,
+        summary: situation.summary,
+        status: situation.status,
+        verificationStatus: situation.verificationStatus,
+        updatedAt: situation.updatedAt,
+        createdAt: situation.createdAt,
+        locationLabel: situation.locationLabel,
+        ...(situation.sourceConfidence ? { sourceConfidence: situation.sourceConfidence } : {}),
+      }));
   }
 
   async trackedSituations(): Promise<Situation[]> {

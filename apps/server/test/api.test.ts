@@ -218,21 +218,19 @@ describe("private situation API", () => {
   it("can disable API rate limiting through config", async () => {
     const { app } = await testAppWithRateLimit(false);
     const agent = request.agent(app);
-    await agent.get("/api/session").expect(200);
 
     for (let attempt = 0; attempt < 130; attempt += 1) {
-      await agent.get("/api/bootstrap").expect(200);
+      await agent.get("/api/session").expect(200);
     }
   });
 
   it("enforces API rate limiting when config enables it", async () => {
     const { app } = await testAppWithRateLimit(true);
     const agent = request.agent(app);
-    await agent.get("/api/session").expect(200);
 
     let lastStatus = 0;
     for (let attempt = 0; attempt < 130; attempt += 1) {
-      const response = await agent.get("/api/bootstrap");
+      const response = await agent.get("/api/session");
       lastStatus = response.status;
       if (response.status === 429) {
         expect(response.headers["retry-after"]).toBeTruthy();
@@ -397,6 +395,173 @@ describe("private situation API", () => {
     ]);
     expect(bootstrap.morningBrief).toBe(storedBrief);
     expect(captured.some((sql) => sql.includes("FROM morning_briefs"))).toBe(true);
+    const homeSituationSql = captured.find(
+      (sql) =>
+        sql.includes("FROM situations WHERE status IN") &&
+        sql.includes("ORDER BY updated_at DESC, id DESC"),
+    );
+    expect(homeSituationSql).toContain("payload->>'createdAt' < $1");
+    expect(homeSituationSql).toContain("LIMIT $2");
+  });
+
+  it("sanitizes stored morning briefs against filtered public home situations", async () => {
+    const article: Article = {
+      id: "article-one",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Leteaksjon etter savnet mann i Meråker",
+      excerpt: "Politiet søker med letemannskap ved Funnsjøen.",
+      url: "https://example.test/article-one",
+      publishedAt: "2026-07-04T09:35:00.000Z",
+      scope: "trondelag",
+      category: "Hendelser",
+      places: ["Meråker"],
+    };
+    const storedBrief: MorningBrief = {
+      generatedAt: "2026-07-04T09:45:00.000Z",
+      title: "Morgenbrief",
+      mode: "deterministic",
+      sourceLine: "Automatisk analyse",
+      paragraphs: [
+        "Pågående situasjon: Gangåsvegen er fortsatt stengt.",
+        "Fersk leteaksjon følges i nyhetsbildet.",
+        "Frustrasjonen over køen er forståelig.",
+        "Skreddersydd pendlerinfo er ikke en faresak.",
+        "Kildebildet oppdateres fortløpende.",
+      ],
+      highlights: [
+        { label: "Saker", value: "1", detail: "Hendelser leder bildet" },
+        { label: "Situasjoner", value: "1", detail: "Aktive eller til vurdering" },
+      ],
+      articleIds: [article.id],
+      situationIds: ["old-road"],
+    };
+    const captured: string[] = [];
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push(normalizedSql);
+        if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
+          expect(params?.slice(0, 2)).toEqual(["Reedtrullz", "trondheim"]);
+          return { rows: [{ payload: article, saved: false }] };
+        }
+        if (normalizedSql.includes("FROM situations WHERE status IN")) {
+          return { rows: [] };
+        }
+        if (normalizedSql.includes("FROM source_health")) {
+          return { rows: [] };
+        }
+        if (normalizedSql.includes("FROM morning_briefs")) {
+          return { rows: [{ payload: storedBrief }] };
+        }
+        if (normalizedSql.includes("FROM ai_processing_runs")) {
+          return { rows: [] };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+    const bootstrap = await store.getBootstrap("Reedtrullz");
+
+    expect(bootstrap.situations).toEqual([]);
+    expect(bootstrap.morningBrief).toMatchObject({
+      situationIds: [],
+      highlights: expect.arrayContaining([
+        expect.objectContaining({
+          label: "Situasjoner",
+          value: "0",
+          detail: "Ingen ferske høyeffekt-situasjoner i offentlig toppbilde",
+        }),
+      ]),
+      paragraphs: [
+        "Ingen ferske høyeffekt-situasjoner dominerer toppbildet akkurat nå.",
+        "Fersk leteaksjon følges i nyhetsbildet.",
+        "Frustrasjonen over køen er forståelig.",
+        "Skreddersydd pendlerinfo er ikke en faresak.",
+        "Kildebildet oppdateres fortløpende.",
+      ],
+    });
+    expect(
+      captured.some(
+        (sql) =>
+          sql.includes("FROM situations WHERE status IN") &&
+          sql.includes("payload->>'createdAt' < $1") &&
+          sql.includes("LIMIT $2"),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps surviving situation brief paragraphs when only stale traffic is filtered", async () => {
+    const storedBrief: MorningBrief = {
+      generatedAt: "2026-07-04T09:45:00.000Z",
+      title: "Morgenbrief",
+      mode: "deterministic",
+      sourceLine: "Automatisk analyse",
+      paragraphs: [
+        "Pågående situasjon: Gangåsvegen er fortsatt stengt.",
+        "Situasjonsrommet følger fersk leteaksjon i Meråker.",
+        "Kildebildet oppdateres fortløpende.",
+      ],
+      highlights: [
+        { label: "Saker", value: "1", detail: "Hendelser leder bildet" },
+        { label: "Situasjoner", value: "2", detail: "Aktive eller til vurdering" },
+      ],
+      articleIds: [],
+      situationIds: ["old-road", "missing-person"],
+    };
+    const missingPersonSummary = {
+      ...sampleSituation,
+      id: "missing-person",
+      type: "missing_person",
+      title: "Leteaksjon etter savnet mann i Meråker",
+      summary: "Politiet søker med letemannskap og redningshelikopter.",
+      status: "active",
+      verificationStatus: "Foreløpig fra rapportering",
+      createdAt: "2026-07-04T08:45:00.000Z",
+      updatedAt: "2026-07-04T09:40:00.000Z",
+      locationLabel: "Funnsjøen",
+    };
+    const fakePool = {
+      async query(sql: string) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
+          return { rows: [] };
+        }
+        if (normalizedSql.includes("FROM situations WHERE status IN")) {
+          return { rows: [{ payload: missingPersonSummary }] };
+        }
+        if (normalizedSql.includes("FROM source_health")) {
+          return { rows: [] };
+        }
+        if (normalizedSql.includes("FROM morning_briefs")) {
+          return { rows: [{ payload: storedBrief }] };
+        }
+        if (normalizedSql.includes("FROM ai_processing_runs")) {
+          return { rows: [] };
+        }
+        throw new Error(`Unexpected query: ${normalizedSql}`);
+      },
+    };
+
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+    const bootstrap = await store.getBootstrap("Reedtrullz");
+
+    expect(bootstrap.morningBrief).toMatchObject({
+      situationIds: ["missing-person"],
+      highlights: expect.arrayContaining([
+        expect.objectContaining({
+          label: "Situasjoner",
+          value: "1",
+          detail: "Aktive eller til vurdering",
+        }),
+      ]),
+      paragraphs: [
+        "Ingen ferske høyeffekt-situasjoner dominerer toppbildet akkurat nå.",
+        "Situasjonsrommet følger fersk leteaksjon i Meråker.",
+        "Kildebildet oppdateres fortløpende.",
+      ],
+    });
   });
 
   it("accepts only the configured GitHub owner account", () => {
