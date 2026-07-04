@@ -20,6 +20,7 @@ import { safeExternalUrl } from "../safeExternalUrl.js";
 
 type SpatialAnalyticsFilters = CommandCenterSpatialAnalyticsQueryInput;
 type SpatialAnalyticsTimeWindow = "all" | "2h" | "24h" | "7d";
+type DelayDecisionTone = "evidence" | "resolved" | "gap" | "watch";
 
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
@@ -164,6 +165,10 @@ function activeDaysLabel(activeDayCount: number) {
   return `${activeDayCount} ${activeDayCount === 1 ? "aktiv dag" : "aktive dager"}`;
 }
 
+function countLabel(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function sourceLabel(source: SpatialHeatmapCell["sourceIds"][number]) {
   switch (source) {
     case "datex":
@@ -284,6 +289,59 @@ function delayConfidence(candidate: UnexplainedDelayCandidate): SourceConfidence
   if (candidate.matchedArticleIds.length > 0) sources.add("news_article");
   if (candidate.affectedEventIds.length > 0) sources.add("vegvesen_traffic_info");
   return sourceMixConfidenceSummary([...sources], { updatedAt: candidate.updatedAt });
+}
+
+function delayDecisionChecks(candidate: UnexplainedDelayCandidate): Array<{
+  label: string;
+  value: string;
+  detail: string;
+  tone: DelayDecisionTone;
+}> {
+  const trafficEventCount = candidate.affectedEventIds.length;
+  const matchedArticleCount = candidate.matchedArticleIds.length;
+  const rawTraceCount = candidate.rawRefs?.length ?? 0;
+
+  return [
+    {
+      label: "Målt av DATEX",
+      value: delayText(candidate.delaySeconds),
+      detail: `Sist målt ${time(candidate.updatedAt)}.`,
+      tone: "evidence",
+    },
+    {
+      label: "Koblet trafikkhendelse",
+      value:
+        trafficEventCount > 0
+          ? countLabel(trafficEventCount, "hendelse", "hendelser")
+          : "Ingen koblet",
+      detail:
+        trafficEventCount > 0
+          ? "Har offisiell trafikkhendelse i samme korridor."
+          : "Flagges fordi reisetid mangler koblet hendelse.",
+      tone: trafficEventCount > 0 ? "resolved" : "gap",
+    },
+    {
+      label: "Nyhetsforklaring",
+      value:
+        candidate.explanationStatus === "unlinked_news_match"
+          ? countLabel(matchedArticleCount, "teksttreff", "teksttreff")
+          : "Ingen treff",
+      detail:
+        candidate.explanationStatus === "unlinked_news_match"
+          ? "Nyhet omtaler trafikk, men er ikke romlig koblet til korridoren."
+          : "Ingen tydelig trafikknyhet forklarer forsinkelsen.",
+      tone: candidate.explanationStatus === "unlinked_news_match" ? "watch" : "gap",
+    },
+    {
+      label: "Råspor",
+      value: countLabel(rawTraceCount, "telemetrispor", "telemetrispor"),
+      detail:
+        rawTraceCount > 0
+          ? "Bruk råtelemetri før offentlig publisering."
+          : "Ingen råtelemetrispor følger raden.",
+      tone: rawTraceCount > 0 ? "evidence" : "gap",
+    },
+  ];
 }
 
 function confidenceScoreLabel(confidence: SourceConfidenceSummary) {
@@ -742,6 +800,7 @@ function SpatialAnalyticsMap({ payload }: { payload: CommandCenterSpatialAnalyti
 function DelayCandidateRow({ candidate }: { candidate: UnexplainedDelayCandidate }) {
   const sourceUrl = safeExternalUrl(candidate.sourceUrl);
   const confidence = delayConfidence(candidate);
+  const decisionChecks = delayDecisionChecks(candidate);
   return (
     <article className={`spatial-delay-row ${candidate.confidence}`}>
       <div>
@@ -771,12 +830,29 @@ function DelayCandidateRow({ candidate }: { candidate: UnexplainedDelayCandidate
           <dd>{candidate.matchedArticleIds.length}</dd>
         </div>
       </dl>
-      {sourceUrl ? (
-        <a href={sourceUrl} rel="noreferrer" target="_blank">
-          Åpne kilde
-        </a>
-      ) : null}
-      <RawTelemetryLinks rawRefs={candidate.rawRefs} />
+      <div
+        className="spatial-delay-decision"
+        aria-label={`Beslutningsgrunnlag for ${candidate.corridorName}`}
+      >
+        <strong>Beslutningsgrunnlag</strong>
+        <div>
+          {decisionChecks.map((check) => (
+            <span className={`spatial-delay-decision-check ${check.tone}`} key={check.label}>
+              <b>{check.label}</b>
+              <em>{check.value}</em>
+              <small>{check.detail}</small>
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="spatial-delay-actions">
+        {sourceUrl ? (
+          <a href={sourceUrl} rel="noreferrer" target="_blank">
+            Åpne kilde
+          </a>
+        ) : null}
+        <RawTelemetryLinks rawRefs={candidate.rawRefs} />
+      </div>
     </article>
   );
 }

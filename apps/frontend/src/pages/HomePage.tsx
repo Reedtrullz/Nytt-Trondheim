@@ -1328,6 +1328,76 @@ function timestampMs(value: string | undefined): number | undefined {
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
+const publicFeedPriorityWindowMs = 3 * 60 * 60 * 1000;
+
+const publicFeedKindScore = {
+  situasjon: 90,
+  hendelse: 64,
+  oppdatering: 36,
+  tema: 18,
+  sak: 0,
+} as const satisfies Record<HomeStoryCard["cardKind"], number>;
+
+const publicFeedCategoryScore = {
+  Hendelser: 24,
+  Transport: 20,
+  Krim: 18,
+  Vær: 14,
+  Byutvikling: 6,
+  Politikk: 4,
+  Nyheter: 0,
+  Sport: -4,
+  Kultur: -6,
+} as const satisfies Record<Article["category"], number>;
+
+const publicFeedConfidenceScore = {
+  confirmed: 18,
+  likely: 10,
+  uncertain: 0,
+  speculative: -8,
+} as const satisfies Record<SourceConfidenceSummary["level"], number>;
+
+export function publicFeedSignalScore(card: HomeStoryCard): number {
+  return (
+    publicFeedKindScore[card.cardKind] +
+    publicFeedCategoryScore[card.category] +
+    publicFeedConfidenceScore[card.sourceConfidence.level] +
+    (card.verification ? 28 : 0) +
+    (card.isClustered ? 20 : 0) +
+    Math.min(20, Math.max(0, card.sourceCount - 1) * 8) +
+    (card.locationLabel ? 4 : 0)
+  );
+}
+
+export function rankHomeStoryCardsForPublicFeed(
+  cards: HomeStoryCard[],
+  options: { enabled: boolean },
+): HomeStoryCard[] {
+  if (!options.enabled || cards.length < 2) return cards;
+  const ranked = cards.map((card, index) => {
+    const timestamp = timestampMs(card.latestAt) ?? 0;
+    return { card, index, score: publicFeedSignalScore(card), timestamp };
+  });
+  const newestTimestamp = ranked.reduce((max, item) => Math.max(max, item.timestamp), 0);
+  if (newestTimestamp <= 0) return cards;
+  return ranked
+    .sort((left, right) => {
+      const leftBucket = Math.floor(
+        (newestTimestamp - left.timestamp) / publicFeedPriorityWindowMs,
+      );
+      const rightBucket = Math.floor(
+        (newestTimestamp - right.timestamp) / publicFeedPriorityWindowMs,
+      );
+      return (
+        leftBucket - rightBucket ||
+        right.score - left.score ||
+        right.timestamp - left.timestamp ||
+        left.index - right.index
+      );
+    })
+    .map((item) => item.card);
+}
+
 function situationLatestMs(situation: HomeSituationSummary): number | undefined {
   const updatedAt = timestampMs(situation.updatedAt);
   const createdAt = timestampMs(situation.createdAt);
@@ -1937,9 +2007,18 @@ export function HomePage({
     [groupedArticles, stories],
   );
   const channelStoryCounts = useMemo(() => channelStoryCountsForCards(storyCards), [storyCards]);
-  const displayedStoryCards = useMemo(
+  const localRankedStoryCards = useMemo(
     () => rankHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus),
     [activeLocalFocus, storyCards],
+  );
+  const publicFeedRankingEnabled =
+    !activeLocalFocus && category === "Alle" && !isTextSearch && !topic;
+  const displayedStoryCards = useMemo(
+    () =>
+      rankHomeStoryCardsForPublicFeed(localRankedStoryCards, {
+        enabled: publicFeedRankingEnabled,
+      }),
+    [localRankedStoryCards, publicFeedRankingEnabled],
   );
   const displayedGroups = useMemo(
     () => displayedStoryCards.map((card) => card.group),

@@ -31,6 +31,7 @@ import {
   cityPulseLatestTimestamp,
   mergeCityPulseStoryLists,
   morningBriefFreshness,
+  rankHomeStoryCardsForPublicFeed,
   storyFeedSummary,
   storyFeedTrustStats,
 } from "./HomePage.js";
@@ -935,6 +936,93 @@ describe("channelStoryCountsForCards", () => {
       Kultur: 1,
       Krim: 0,
     });
+  });
+});
+
+describe("rankHomeStoryCardsForPublicFeed", () => {
+  it("lifts high-signal story bundles inside the same freshness band without hiding newer material", () => {
+    const incidentBundle = {
+      id: "coverage:incident:elgeseter-fall",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-02T09:50:00.000Z",
+    } as const;
+    const publicVerification = {
+      status: "verified",
+      label: "Verifisert",
+      detail: "Bekreftet av nødetater og redaksjonelle kilder.",
+      officialSources: ["politiloggen"],
+      reportingSources: ["nrk", "adressa"],
+    } satisfies NonNullable<Article["publicVerification"]>;
+    const storyArticle = (overrides: Partial<Article> = {}) =>
+      ({
+        ...article,
+        ...overrides,
+      }) satisfies Article;
+    const cards = homeStoryCardsForGroups(
+      groupHomeArticles([
+        storyArticle({
+          id: "culture-single",
+          title: "Sommerkonsert i sentrum",
+          excerpt: "Et kulturarrangement fyller byen.",
+          category: "Kultur",
+          source: "vg",
+          sourceLabel: "VG",
+          publishedAt: "2026-07-02T10:00:00.000Z",
+          url: "https://example.test/culture",
+        }),
+        storyArticle({
+          id: "nrk-fall",
+          title: "Fallulykke i Trondheim",
+          excerpt: "Nødetatene har rykket ut til Elgeseter.",
+          category: "Hendelser",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          publishedAt: "2026-07-02T09:45:00.000Z",
+          coverageBundle: incidentBundle,
+          publicVerification,
+          places: ["Elgeseter"],
+        }),
+        storyArticle({
+          id: "adressa-fall",
+          title: "Person skadet etter fallulykke",
+          excerpt: "En person er fraktet til sykehus.",
+          category: "Hendelser",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          publishedAt: "2026-07-02T09:42:00.000Z",
+          coverageBundle: incidentBundle,
+          places: ["Elgeseter"],
+        }),
+        storyArticle({
+          id: "old-incident",
+          title: "Tidligere utrykning på Tiller",
+          excerpt: "Politiet rykket ut i morgentimene.",
+          category: "Hendelser",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          publishedAt: "2026-07-02T06:20:00.000Z",
+          coverageBundle: {
+            id: "coverage:incident:tiller",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme hendelse på tvers av kilder",
+            generatedAt: "2026-07-02T06:30:00.000Z",
+          },
+          places: ["Tiller"],
+        }),
+      ]),
+    );
+
+    const ranked = rankHomeStoryCardsForPublicFeed(cards, { enabled: true });
+
+    expect(ranked.map((card) => card.title)).toEqual([
+      "Fallulykke i Trondheim",
+      "Sommerkonsert i sentrum",
+      "Tidligere utrykning på Tiller",
+    ]);
+    expect(rankHomeStoryCardsForPublicFeed(cards, { enabled: false })).toBe(cards);
   });
 });
 
