@@ -5,6 +5,19 @@ import { describe, expect, it } from "vitest";
 const schemaPath = fileURLToPath(new URL("../src/db/schema.sql", import.meta.url));
 
 describe("source item schema", () => {
+  it("indexes the public home feed read path", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("articles_published_idx");
+    expect(schema).toContain("articles_scope_published_idx");
+    expect(schema).toContain("articles_scope_category_published_idx");
+    expect(schema).toContain("situations_public_status_updated_idx");
+    expect(schema).toContain("situations_related_article_ids_public_gin_idx");
+    expect(schema).toContain("official_events_source_published_idx");
+    expect(schema).toContain("official_events_source_state_published_idx");
+    expect(schema).toContain("015_home_feed_read_indexes");
+  });
+
   it("defines source_items with safe dedupe indexes and situation links", async () => {
     const schema = await readFile(schemaPath, "utf8");
 

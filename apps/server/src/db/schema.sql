@@ -21,6 +21,12 @@ ALTER TABLE articles ADD COLUMN IF NOT EXISTS dedupe_key text;
 UPDATE articles SET dedupe_key = id WHERE dedupe_key IS NULL;
 ALTER TABLE articles ALTER COLUMN dedupe_key SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS articles_dedupe_key_idx ON articles (dedupe_key);
+CREATE INDEX IF NOT EXISTS articles_published_idx
+  ON articles (published_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS articles_scope_published_idx
+  ON articles (scope, published_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS articles_scope_category_published_idx
+  ON articles (scope, category, published_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS coverage_bundles (
   id text PRIMARY KEY,
@@ -59,6 +65,13 @@ CREATE TABLE IF NOT EXISTS situations (
   updated_at timestamptz NOT NULL,
   payload jsonb NOT NULL
 );
+CREATE INDEX IF NOT EXISTS situations_public_status_updated_idx
+  ON situations (status, updated_at DESC, id DESC)
+  WHERE COALESCE(payload->>'publicVisibility', 'public') = 'public';
+CREATE INDEX IF NOT EXISTS situations_related_article_ids_public_gin_idx
+  ON situations USING gin ((COALESCE(payload->'relatedArticleIds', '[]'::jsonb)))
+  WHERE status IN ('preliminary', 'active')
+    AND COALESCE(payload->>'publicVisibility', 'public') = 'public';
 ALTER TABLE situations ADD COLUMN IF NOT EXISTS confidence_score real;
 ALTER TABLE situations ADD COLUMN IF NOT EXISTS activation_rule_id text;
 ALTER TABLE situations ADD COLUMN IF NOT EXISTS resolved_by text;
@@ -368,6 +381,10 @@ CREATE TABLE IF NOT EXISTS official_events (
   payload jsonb NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS official_events_source_published_idx
+  ON official_events (source, published_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS official_events_source_state_published_idx
+  ON official_events (source, state, published_at DESC, id DESC);
 
 ALTER TABLE official_events DROP CONSTRAINT IF EXISTS official_events_source_check;
 ALTER TABLE official_events ADD CONSTRAINT official_events_source_check
@@ -1346,3 +1363,4 @@ INSERT INTO schema_migrations (version) VALUES ('011_access_requests') ON CONFLI
 INSERT INTO schema_migrations (version) VALUES ('012_restricted_beta_auth') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('013_morning_briefs') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('014_web_push_notifications') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('015_home_feed_read_indexes') ON CONFLICT DO NOTHING;

@@ -218,8 +218,20 @@ function AuthenticatedApp() {
     let ignore = false;
     setLoading(true);
     setError(undefined);
-    loadAuthenticatedShellData()
-      .then(({ sessionPayload, bootstrapPayload }) => {
+    const sessionRequest = api.session().then((sessionPayload) => {
+      if (!ignore) {
+        setSession(sessionPayload);
+      }
+      return sessionPayload;
+    });
+    const bootstrapRequest = api.bootstrap().then((bootstrapPayload) => {
+      if (!ignore) {
+        setData(bootstrapPayload);
+      }
+      return bootstrapPayload;
+    });
+    Promise.all([sessionRequest, bootstrapRequest])
+      .then(([sessionPayload, bootstrapPayload]) => {
         if (!ignore) {
           setSession(sessionPayload);
           setData(bootstrapPayload);

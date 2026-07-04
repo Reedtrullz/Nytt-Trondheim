@@ -4594,11 +4594,7 @@ export class PgStore implements Store {
        FROM situations
        WHERE status IN ('preliminary', 'active')
          AND COALESCE(payload->>'publicVisibility', 'public') = 'public'
-         AND EXISTS (
-           SELECT 1
-           FROM jsonb_array_elements_text(COALESCE(payload->'relatedArticleIds', '[]'::jsonb)) related(id)
-           WHERE related.id = ANY($1::text[])
-         )
+         AND COALESCE(payload->'relatedArticleIds', '[]'::jsonb) ?| $1::text[]
        ORDER BY updated_at DESC`,
       [articleIds],
     );
