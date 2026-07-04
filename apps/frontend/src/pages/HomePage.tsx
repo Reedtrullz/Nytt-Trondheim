@@ -540,18 +540,12 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
           <p className="label">Bypuls</p>
           <h2 id="city-pulse-summary-heading">Kort oversikt</h2>
         </div>
-        <Link to="/varsler">
-          Varsler <ArrowIcon />
+        <Link to="/situasjoner">
+          Situasjonsrom <ArrowIcon />
         </Link>
       </div>
       <div className="city-pulse-summary-grid">
         <MorningBriefPanel
-          articles={data.articles}
-          brief={morningBrief}
-          density="compact"
-          situations={data.situations}
-        />
-        <CityPulseSignalPanel
           articles={data.articles}
           brief={morningBrief}
           density="compact"

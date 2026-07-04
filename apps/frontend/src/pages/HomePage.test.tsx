@@ -210,7 +210,7 @@ describe("MorningBriefPanel", () => {
 });
 
 describe("CityPulseDashboard", () => {
-  it("keeps the public briefing and signal modules compact on the front page", () => {
+  it("keeps the public front page focused on briefing and situations", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <CityPulseDashboard data={bootstrap} />
@@ -221,17 +221,18 @@ describe("CityPulseDashboard", () => {
     expect(html).toContain("Bypuls");
     expect(html).toContain("Kort oversikt");
     expect(html).toContain("Morgenbrief");
-    expect(html).toContain("Høyeffekt-signaler");
-    expect(html).toContain("Høyeffektsaker fanget av varselreglene");
-    expect(html).toContain("1 aktive");
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kildetillit: Bekreftet");
     expect(html).toContain("91 %");
-    expect(html).toContain("Varsler");
-    expect(html).toContain("/varsler");
+    expect(html).toContain("Situasjonsrom");
+    expect(html).toContain("/situasjoner");
     expect(html).not.toContain("dashboard-layout-city-pulse");
     expect(html).not.toContain("dashboard-widget-full");
+    expect(html).not.toContain("Høyeffekt-signaler");
+    expect(html).not.toContain("Høyeffektsaker fanget av varselreglene");
     expect(html).not.toContain("Slik vurderes høyeffekt-signaler");
+    expect(html).not.toContain("Åpne varsler");
+    expect(html).not.toContain("/varsler");
     expect(html).not.toContain("Liv og helse");
     expect(html).not.toContain("Stengte hovedårer");
     expect(html).not.toContain("Situasjonsrommet er offentlig bekreftet.");
