@@ -916,7 +916,7 @@ function nearbyMapTarget(item: NearbyStoryItem | undefined): { label: string; to
   if (item?.situationId) {
     return { label: "Åpne situasjon", to: `/situasjoner/${item.situationId}` };
   }
-  if (item?.category === "Transport") return { label: "Åpne trafikkart", to: "/trafikk" };
+  if (item?.category === "Transport") return { label: "Åpne trafikk", to: "/trafikk" };
   if (item?.category === "Vær") return { label: "Åpne værkart", to: "/vaer" };
   return { label: "Åpne situasjonskart", to: "/situasjoner" };
 }

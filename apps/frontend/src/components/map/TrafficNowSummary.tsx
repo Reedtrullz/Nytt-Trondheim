@@ -5,7 +5,7 @@ export function TrafficNowSummary({ cards }: { cards: TrafficSummaryCardModel[] 
     <section className="traffic-now-summary" aria-labelledby="traffic-now-heading">
       <header>
         <p className="label">Trafikk i Trondheim</p>
-        <h1 id="traffic-now-heading">Nå i trafikken</h1>
+        <h2 id="traffic-now-heading">Nå i trafikken</h2>
       </header>
       <div className="traffic-now-cards">
         {cards.map((card) => (

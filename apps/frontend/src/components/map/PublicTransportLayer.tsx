@@ -2,9 +2,19 @@ import type {
   PublicTransportMapPayload,
   PublicTransportServiceAlert,
   PublicTransportVehicle,
+  PublicTransportVehicleMode,
 } from "@nytt/shared";
 import { CircleMarker, Popup } from "react-leaflet";
 import { latLngFromGeoJsonPosition, latLngFromPoint } from "../../mapCoordinates.js";
+
+const modeLabels: Record<PublicTransportVehicleMode, string> = {
+  bus: "Buss",
+  tram: "Trikk",
+  rail: "Tog",
+  water: "Båt",
+  metro: "T-bane",
+  unknown: "Annet",
+};
 
 function alertPositions(alert: PublicTransportServiceAlert): Array<[number, number]> {
   if (!alert.geometry) return [];
@@ -34,6 +44,53 @@ function formatTime(value?: string): string {
     minute: "2-digit",
     timeZone: "Europe/Oslo",
   });
+}
+
+function modesFromAlert(alert: PublicTransportServiceAlert): PublicTransportVehicleMode[] {
+  const text = [
+    alert.summary,
+    alert.description,
+    alert.advice,
+    ...(alert.affectedLineNames ?? []),
+    ...(alert.affectedStopNames ?? []),
+  ]
+    .join(" ")
+    .toLocaleLowerCase("nb");
+  const modes = new Set<PublicTransportVehicleMode>();
+  if (/\b(?:trikk|tram)\b/u.test(text)) modes.add("tram");
+  if (/\b(?:tog|trønderbanen|dovrebanen|nordlandsbanen|meråkerbanen|rail)\b/u.test(text)) {
+    modes.add("rail");
+  }
+  if (/\b(?:båt|hurtigbåt|ferje|ferry|boat)\b/u.test(text)) modes.add("water");
+  if (/\b(?:buss|bus|linje)\b/u.test(text)) modes.add("bus");
+  return modes.size ? Array.from(modes) : ["unknown"];
+}
+
+export function publicTransportModeGroups(payload: PublicTransportMapPayload): Array<{
+  mode: PublicTransportVehicleMode;
+  label: string;
+  vehicles: PublicTransportVehicle[];
+  alerts: PublicTransportServiceAlert[];
+}> {
+  const order: PublicTransportVehicleMode[] = ["bus", "tram", "rail", "water", "metro", "unknown"];
+  return order
+    .map((mode) => ({
+      mode,
+      label: modeLabels[mode],
+      vehicles: payload.vehicles.filter((vehicle) => vehicle.mode === mode),
+      alerts: payload.alerts.filter((alert) => modesFromAlert(alert).includes(mode)),
+    }))
+    .filter((group) => group.vehicles.length > 0 || group.alerts.length > 0);
+}
+
+function alertAffectedSummary(alert: PublicTransportServiceAlert): string {
+  const lines = alert.affectedLineNames?.filter(Boolean) ?? [];
+  const stops = alert.affectedStopNames?.filter(Boolean) ?? [];
+  const parts = [
+    lines.length ? `Linjer: ${lines.slice(0, 4).join(", ")}` : undefined,
+    stops.length ? `Stopp: ${stops.slice(0, 3).join(", ")}` : undefined,
+  ].filter((part): part is string => Boolean(part));
+  return parts.join(" · ");
 }
 
 export function PublicTransportLayer({
@@ -138,22 +195,37 @@ export function PublicTransportSummary({
       {loading ? <p>Henter kollektivtrafikk...</p> : null}
       {payload ? (
         <>
-          <ul>
-            {payload.vehicles.slice(0, 12).map((vehicle) => (
-              <li key={vehicle.id}>
-                <strong>{vehicleTitle(vehicle)}</strong>
-                <span>Entur kjøretøyposisjoner · {formatTime(vehicle.lastUpdated)}</span>
-              </li>
-            ))}
-            {payload.alerts.slice(0, 12).map((alert) => (
-              <li key={alert.id}>
-                <strong>{alert.summary}</strong>
-                <span>Entur avvik · {formatTime(alert.updatedAt)}</span>
-              </li>
-            ))}
-          </ul>
+          {publicTransportModeGroups(payload).map((group) => (
+            <section key={group.mode} className="public-transport-mode-group">
+              <h3>{group.label}</h3>
+              <ul>
+                {group.alerts.slice(0, 6).map((alert) => {
+                  const affectedSummary = alertAffectedSummary(alert);
+                  return (
+                    <li key={alert.id}>
+                      <strong>{alert.summary}</strong>
+                      <span>
+                        Entur avvik · {formatTime(alert.updatedAt)}
+                        {affectedSummary ? ` · ${affectedSummary}` : ""}
+                      </span>
+                      {alert.advice ? <small>{alert.advice}</small> : null}
+                    </li>
+                  );
+                })}
+                {group.vehicles.slice(0, 6).map((vehicle) => (
+                  <li key={vehicle.id}>
+                    <strong>{vehicleTitle(vehicle)}</strong>
+                    <span>Entur kjøretøyposisjoner · {formatTime(vehicle.lastUpdated)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
           {payload.vehicles.length === 0 && payload.alerts.length === 0 ? (
-            <p>Ingen kollektivtrafikk i valgt kartutsnitt.</p>
+            <p>
+              Ingen aktive kollektivavvik eller kjøretøyposisjoner i valgt kartutsnitt. Sjekk
+              AtB/Entur for konkrete avganger.
+            </p>
           ) : null}
           {payload.sources.length ? (
             <div className="public-transport-sources">

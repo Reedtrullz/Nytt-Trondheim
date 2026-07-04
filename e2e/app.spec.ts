@@ -570,7 +570,7 @@ test("home nearby module links ranked local stories with the map", async ({ page
   await expect(municipalRow).toHaveAttribute("aria-current", "true");
   await expect(nearby.getByRole("heading", { name: /Varsel om veiarbeid/ })).toBeVisible();
   await expect(nearby.locator(".nearby-kind-municipal")).toHaveText("Kommunalt varsel");
-  await expect(nearby.getByRole("link", { name: /Åpne trafikkart/ })).toHaveAttribute(
+  await expect(nearby.getByRole("link", { name: /Åpne trafikk/ })).toHaveAttribute(
     "href",
     "/trafikk",
   );
@@ -1924,13 +1924,17 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   });
 
   await page.goto("/trafikk");
-  await openTrafficLayersIfHidden(page);
+  await expect(page.getByRole("heading", { name: "Planlegg reisen" })).toBeVisible();
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
-  await expect(page.getByRole("heading", { name: "Reiseråd for ruten" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sjekk ruten før du drar" })).toBeVisible();
   await expect(page.getByText("Munkegata, Midtbyen → Leangen, Trondheim")).toBeVisible();
+  const routeAssessment = page.getByLabel("Rutevurdering");
+  await expect(routeAssessment.getByText("Vegmeldinger", { exact: true })).toBeVisible();
+  await expect(routeAssessment.getByText("Kollektivavvik", { exact: true })).toBeVisible();
+  await expect(routeAssessment.getByText("Kjøretøy nær ruten", { exact: true })).toBeVisible();
   await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
   await expect(page.getByText("Buss 3 mot Lade")).toBeVisible();
   await expect(page.getByText("Forsinkelse på linje 3")).toBeVisible();
@@ -1994,11 +1998,12 @@ test("traffic map clears a stale route when planner validation fails", async ({ 
   });
 
   await page.goto("/trafikk");
-  await openTrafficLayersIfHidden(page);
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
-  await expect(page.getByRole("heading", { name: "Reiseråd for ruten" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Ingen kjente hindringer langs ruten" }),
+  ).toBeVisible();
   await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(1);
 
   await page.getByLabel("Hvor er du?").fill("");
@@ -2052,7 +2057,6 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
   });
 
   await page.goto("/trafikk");
-  await openTrafficLayersIfHidden(page);
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
@@ -2064,6 +2068,9 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
   await page.waitForTimeout(100);
 
   await expect(page.getByRole("heading", { name: "Reiseråd for ruten" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Ingen kjente hindringer langs ruten" }),
+  ).toHaveCount(0);
   await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(0);
 });
 
@@ -3106,14 +3113,14 @@ test("situation save failure stays visible and blocks duplicate clicks while pen
   expect(calls).toBe(1);
 });
 
-test("mobile traffic page prioritizes the map before long summaries and filters", async ({
+test("mobile traffic page prioritizes travel planning before map summaries and filters", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chromium", "mobile layout contract");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/trafikk");
 
-  const heading = page.getByRole("heading", { name: "Nå i trafikken" });
+  const heading = page.getByRole("heading", { name: "Planlegg reisen" });
   await expect(heading).toBeVisible();
   const layersButton = page.getByRole("button", { name: "Kartlag og filtre" });
   await expect(layersButton).toBeVisible();
@@ -3122,7 +3129,7 @@ test("mobile traffic page prioritizes the map before long summaries and filters"
   const layersBox = await layersButton.boundingBox();
   const workspaceBox = await page.locator(".traffic-workspace").boundingBox();
   const mapBox = await page.locator(".traffic-map").boundingBox();
-  expect(mapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(headingBox?.y ?? 0);
+  expect(headingBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(mapBox?.y ?? 0);
   expect(mapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(layersBox?.y ?? 0);
   for (const box of [layersBox, workspaceBox, mapBox]) {
     expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);

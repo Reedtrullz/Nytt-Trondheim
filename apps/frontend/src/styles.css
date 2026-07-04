@@ -9145,6 +9145,7 @@ button {
 
 .traffic-filter-panel,
 .traffic-brief-card,
+.travel-planner-panel,
 .travel-plan-card,
 .traffic-event-list-card,
 .public-transport-card,
@@ -9156,6 +9157,7 @@ button {
 
 .traffic-filter-panel h2,
 .traffic-brief-card h2,
+.travel-planner-panel h1,
 .travel-plan-card h2,
 .traffic-event-list-card h2,
 .public-transport-card h2,
@@ -9165,13 +9167,70 @@ button {
 }
 
 .traffic-filter-panel h3,
+.travel-planner-panel h3,
 .travel-plan-card h3,
+.public-transport-mode-group h3,
 .corridor-impact-card h3 {
   margin: 16px 0 8px;
   color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.travel-planner-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  gap: 18px;
+  align-items: stretch;
+  border-left: 5px solid var(--blue);
+}
+
+.travel-planner-copy {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.travel-planner-panel h1 {
+  margin-top: 0;
+  font-size: 42px;
+}
+
+.travel-planner-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.travel-planner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.travel-planner-actions button {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  color: var(--blue);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.travel-planner-actions button.selected {
+  border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+  color: var(--green);
+  background: color-mix(in srgb, var(--paper) 86%, var(--green) 14%);
+}
+
+.travel-planner-workbench {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.1fr);
+  gap: 14px;
+  align-items: start;
 }
 
 .traffic-filter-panel label,
@@ -9190,6 +9249,10 @@ button {
   padding: 14px;
   border: 1px solid var(--line);
   background: #fbfbf8;
+}
+
+.route-planner-form-primary {
+  min-height: 100%;
 }
 
 .route-planner-form input {
@@ -9228,6 +9291,49 @@ button {
 
 .travel-plan-card {
   border-left: 5px solid var(--blue);
+}
+
+.travel-plan-card-ok {
+  border-left-color: var(--green);
+}
+
+.travel-plan-card-warning {
+  border-left-color: var(--terracotta);
+}
+
+.travel-plan-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.travel-plan-decision-grid article {
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.travel-plan-decision-grid span {
+  display: block;
+  font: 28px/1 var(--serif);
+}
+
+.travel-plan-decision-grid strong,
+.travel-plan-decision-grid small {
+  display: block;
+}
+
+.travel-plan-decision-grid strong {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.travel-plan-decision-grid small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
 }
 
 .travel-plan-card header small,
@@ -9300,6 +9406,7 @@ button {
 
 .public-transport-card li strong,
 .public-transport-card li span,
+.public-transport-card li small,
 .public-transport-sources small,
 .public-transport-popup span {
   display: block;
@@ -9311,10 +9418,15 @@ button {
 }
 
 .public-transport-card li span,
+.public-transport-card li small,
 .public-transport-sources small {
   margin-top: 4px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.public-transport-mode-group + .public-transport-mode-group {
+  margin-top: 10px;
 }
 
 .public-transport-sources {
@@ -10170,13 +10282,11 @@ button {
 }
 
 .traffic-now-summary header {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
-  gap: 18px;
+  display: grid;
+  gap: 4px;
 }
 
-.traffic-now-summary h1 {
+.traffic-now-summary h2 {
   margin: 0;
   font: 46px/1.04 var(--serif);
   letter-spacing: -0.025em;
@@ -10660,6 +10770,8 @@ button {
   }
 
   .traffic-workspace,
+  .travel-planner-panel,
+  .travel-planner-workbench,
   .traffic-bottom-panel {
     grid-template-columns: 1fr;
   }
@@ -11484,11 +11596,31 @@ button {
   .traffic-page-shell > *,
   .traffic-now-summary,
   .traffic-now-cards,
+  .travel-planner-panel,
+  .travel-planner-workbench,
   .traffic-workspace,
   .traffic-bottom-panel {
     width: 100%;
     max-width: 100%;
     min-width: 0;
+  }
+
+  .travel-planner-panel {
+    order: 1;
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .travel-planner-panel h1 {
+    font-size: 34px;
+  }
+
+  .travel-planner-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .travel-plan-decision-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .situation-workspace-page {
@@ -11550,10 +11682,10 @@ button {
   }
 
   .traffic-now-summary {
-    order: 2;
+    order: 3;
   }
 
-  .traffic-now-summary h1 {
+  .traffic-now-summary h2 {
     font-size: 34px;
   }
 
@@ -11567,7 +11699,7 @@ button {
   }
 
   .traffic-workspace {
-    order: 1;
+    order: 2;
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     width: 100%;
@@ -11610,7 +11742,7 @@ button {
 
   .traffic-bottom-panel {
     display: block;
-    order: 3;
+    order: 4;
   }
 
   .traffic-bottom-list {

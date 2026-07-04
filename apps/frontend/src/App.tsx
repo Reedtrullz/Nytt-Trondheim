@@ -127,7 +127,7 @@ function Header({
         <nav aria-label="Hovedmeny">
           <NavLink to="/">Siste nytt</NavLink>
           <NavLink to="/situasjoner">Situasjonsrom</NavLink>
-          <NavLink to="/trafikk">Trafikkart</NavLink>
+          <NavLink to="/trafikk">Trafikk</NavLink>
           <NavLink to="/vaer">Vær</NavLink>
           <NavLink to="/sport">Sport</NavLink>
           <NavLink to="/varsler">Varsler</NavLink>

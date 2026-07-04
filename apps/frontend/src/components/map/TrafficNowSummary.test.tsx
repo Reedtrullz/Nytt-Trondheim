@@ -48,5 +48,7 @@ describe("TrafficNowSummary", () => {
     expect(html).toContain("OFFISIELL");
     expect(html).toContain("REISETID");
     expect(html).toContain("Sist hentet 18:42");
+    expect(html).toContain('<h2 id="traffic-now-heading">Nå i trafikken</h2>');
+    expect(html).not.toContain("<h1");
   });
 });

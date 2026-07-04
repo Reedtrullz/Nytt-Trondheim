@@ -141,6 +141,68 @@ function strongestRouteImpact(plan: TravelPlanPayload): TrafficEventSeverity | u
   )[0]?.severity;
 }
 
+export function travelPlanDecision(plan?: TravelPlanPayload): {
+  heading: string;
+  detail: string;
+  roadImpactCount: number;
+  vehicleCount: number;
+  alertCount: number;
+  severity: "ok" | "watch" | "warning";
+} {
+  if (!plan) {
+    return {
+      heading: "Planlegg reisen",
+      detail:
+        "Skriv start og mål for å se vegmeldinger, reisetidskorridorer og kollektivavvik langs ruten.",
+      roadImpactCount: 0,
+      vehicleCount: 0,
+      alertCount: 0,
+      severity: "watch",
+    };
+  }
+
+  const roadImpactCount = plan.trafficImpacts.length;
+  const vehicleCount = plan.publicTransportSuggestions.filter(
+    (suggestion) => suggestion.kind === "vehicle",
+  ).length;
+  const alertCount = plan.publicTransportSuggestions.filter(
+    (suggestion) => suggestion.kind === "alert",
+  ).length;
+  const strongestRoadImpact = strongestRouteImpact(plan);
+  const hasHighRoadImpact = strongestRoadImpact === "critical" || strongestRoadImpact === "high";
+
+  if (hasHighRoadImpact || alertCount > 0) {
+    return {
+      heading: "Sjekk ruten før du drar",
+      detail: `${roadImpactCount} vegmelding${roadImpactCount === 1 ? "" : "er"} og ${alertCount} kollektivavvik kan påvirke reisen.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      severity: "warning",
+    };
+  }
+
+  if (roadImpactCount > 0 || vehicleCount > 0) {
+    return {
+      heading: "Følg med på ruten",
+      detail: `${roadImpactCount} vegmelding${roadImpactCount === 1 ? "" : "er"} og ${vehicleCount} kollektivkjøretøy er funnet nær korridoren.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      severity: "watch",
+    };
+  }
+
+  return {
+    heading: "Ingen kjente hindringer langs ruten",
+    detail: "Nytt fant ingen aktive vegmeldinger eller kollektivavvik langs korridoren akkurat nå.",
+    roadImpactCount,
+    vehicleCount,
+    alertCount,
+    severity: "ok",
+  };
+}
+
 function trafficEventListCopy(
   selectedPreset: TrafficMapPreset,
   showAll: boolean,
@@ -332,11 +394,31 @@ function TravelPlanCard({
     );
   }
   const duration = formatDuration(plan.route.durationSeconds);
+  const decision = travelPlanDecision(plan);
   return (
-    <article className="travel-plan-card">
+    <article className={`travel-plan-card travel-plan-card-${decision.severity}`}>
       <header>
         <p className="label">Reiseråd</p>
-        <h2>Reiseråd for ruten</h2>
+        <h2>{decision.heading}</h2>
+        <p>{decision.detail}</p>
+        <div className="travel-plan-decision-grid" aria-label="Rutevurdering">
+          <article>
+            <span>{decision.roadImpactCount}</span>
+            <strong>Vegmeldinger</strong>
+            <small>langs korridoren</small>
+          </article>
+          <article>
+            <span>{decision.alertCount}</span>
+            <strong>Kollektivavvik</strong>
+            <small>fra Entur/AtB</small>
+          </article>
+          <article>
+            <span>{decision.vehicleCount}</span>
+            <strong>Kjøretøy nær ruten</strong>
+            <small>buss, trikk, tog eller båt</small>
+          </article>
+        </div>
+        <h3>Rute</h3>
         <p>
           {plan.origin.label} → {plan.destination.label}
         </p>
@@ -385,6 +467,91 @@ function TravelPlanCard({
         </ul>
       </section>
     </article>
+  );
+}
+
+function TravelPlannerPanel({
+  originInput,
+  destinationInput,
+  travelPlan,
+  travelPlanLoading,
+  travelPlanError,
+  publicTransportDisruptionsVisible,
+  publicTransportVehiclesVisible,
+  onOriginChange,
+  onDestinationChange,
+  onSubmit,
+  onShowDisruptions,
+  onShowVehicles,
+}: {
+  originInput: string;
+  destinationInput: string;
+  travelPlan?: TravelPlanPayload;
+  travelPlanLoading: boolean;
+  travelPlanError?: string;
+  publicTransportDisruptionsVisible: boolean;
+  publicTransportVehiclesVisible: boolean;
+  onOriginChange: (value: string) => void;
+  onDestinationChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onShowDisruptions: () => void;
+  onShowVehicles: () => void;
+}) {
+  return (
+    <section className="travel-planner-panel" aria-labelledby="travel-planner-heading">
+      <div className="travel-planner-copy">
+        <p className="label">Reise og trafikk</p>
+        <h1 id="travel-planner-heading">Planlegg reisen</h1>
+        <p>
+          Sjekk vegmeldinger, reisetid og kollektivavvik langs ruten. Nytt viser kontekst; bruk
+          AtB/Entur for avgangstid, billetter og endelig reisevalg.
+        </p>
+        <div className="travel-planner-actions" aria-label="Kollektivvalg">
+          <button
+            type="button"
+            className={publicTransportDisruptionsVisible ? "selected" : undefined}
+            aria-pressed={publicTransportDisruptionsVisible}
+            onClick={onShowDisruptions}
+          >
+            Vis kollektivavvik
+          </button>
+          <button
+            type="button"
+            className={publicTransportVehiclesVisible ? "selected" : undefined}
+            aria-pressed={publicTransportVehiclesVisible}
+            onClick={onShowVehicles}
+          >
+            Vis kjøretøy
+          </button>
+        </div>
+      </div>
+      <div className="travel-planner-workbench">
+        <form className="route-planner-form route-planner-form-primary" onSubmit={onSubmit}>
+          <div>
+            <label htmlFor="travel-origin">Hvor er du?</label>
+            <input
+              id="travel-origin"
+              value={originInput}
+              onChange={(event) => onOriginChange(event.target.value)}
+              placeholder="F.eks. Munkegata eller 63.43, 10.39"
+            />
+          </div>
+          <div>
+            <label htmlFor="travel-destination">Hvor skal du?</label>
+            <input
+              id="travel-destination"
+              value={destinationInput}
+              onChange={(event) => onDestinationChange(event.target.value)}
+              placeholder="F.eks. Leangen"
+            />
+          </div>
+          <button type="submit" disabled={travelPlanLoading}>
+            {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
+          </button>
+        </form>
+        <TravelPlanCard plan={travelPlan} loading={travelPlanLoading} error={travelPlanError} />
+      </div>
+    </section>
   );
 }
 
@@ -635,6 +802,13 @@ export function TrafficMapPage() {
     });
   }, [handleContextLayersChange, visibleContextLayers]);
 
+  const showPublicTransportVehicles = useCallback(() => {
+    handleContextLayersChange({
+      ...visibleContextLayers,
+      publicTransportVehicles: true,
+    });
+  }, [handleContextLayersChange, visibleContextLayers]);
+
   async function handleTravelPlanSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const requestId = invalidateTravelPlan();
@@ -669,6 +843,20 @@ export function TrafficMapPage() {
 
   return (
     <main className="traffic-page-shell">
+      <TravelPlannerPanel
+        originInput={originInput}
+        destinationInput={destinationInput}
+        travelPlan={travelPlan}
+        travelPlanLoading={travelPlanLoading}
+        travelPlanError={travelPlanError}
+        publicTransportDisruptionsVisible={visibleContextLayers.publicTransportDisruptions}
+        publicTransportVehiclesVisible={visibleContextLayers.publicTransportVehicles}
+        onOriginChange={(value) => handleTravelInputChange(value, setOriginInput)}
+        onDestinationChange={(value) => handleTravelInputChange(value, setDestinationInput)}
+        onSubmit={(event) => void handleTravelPlanSubmit(event)}
+        onShowDisruptions={showPublicTransportDisruptions}
+        onShowVehicles={showPublicTransportVehicles}
+      />
       <TrafficNowSummary cards={summaryCardsForDisplay} />
 
       <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
@@ -696,34 +884,6 @@ export function TrafficMapPage() {
             onContextLayersChange={handleContextLayersChange}
           />
           <TrafficLegend />
-          <form
-            className="route-planner-form"
-            onSubmit={(event) => void handleTravelPlanSubmit(event)}
-          >
-            <div>
-              <label htmlFor="travel-origin">Hvor er du?</label>
-              <input
-                id="travel-origin"
-                value={originInput}
-                onChange={(event) => handleTravelInputChange(event.target.value, setOriginInput)}
-                placeholder="F.eks. Munkegata eller 63.43, 10.39"
-              />
-            </div>
-            <div>
-              <label htmlFor="travel-destination">Hvor skal du?</label>
-              <input
-                id="travel-destination"
-                value={destinationInput}
-                onChange={(event) =>
-                  handleTravelInputChange(event.target.value, setDestinationInput)
-                }
-                placeholder="F.eks. Leangen"
-              />
-            </div>
-            <button type="submit" disabled={travelPlanLoading}>
-              {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
-            </button>
-          </form>
           {loading || error ? (
             <section className="traffic-status-card">
               <h2>Datastatus</h2>
@@ -771,7 +931,6 @@ export function TrafficMapPage() {
 
       <section className="traffic-bottom-panel" aria-label="Trafikkdetaljer">
         <div className="traffic-bottom-list">
-          <TravelPlanCard plan={travelPlan} loading={travelPlanLoading} error={travelPlanError} />
           {!data ? (
             <section className="traffic-event-list-card">
               <header>
