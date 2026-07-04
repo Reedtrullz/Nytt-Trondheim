@@ -288,6 +288,18 @@ describe("article coverage analysis", () => {
     const analysis = analyzeArticleCoverage(
       [
         article({
+          id: "adressa-pinne-update",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Mann skal ha med pinne - ble bortvist",
+          excerpt:
+            "Operasjonsleder meldte kl 19.47 om at politiet har kontroll på en mann. Mannen gikk gjennom Elgeseter gate og viftet med en pinne mot forbipasserende. Han fremstår ruset, og vi har kjørt mannen til legevakten.",
+          publishedAt: "2026-07-04T17:51:00.000Z",
+          category: "Krim",
+          places: ["Elgeseter", "Trondheim"],
+          location: { lat: 63.424, lng: 10.395, label: "Elgeseter" },
+        }),
+        article({
           id: "nrk-pinne",
           source: "nrk",
           sourceLabel: "NRK Trøndelag",
@@ -296,20 +308,20 @@ describe("article coverage analysis", () => {
             "Kl. 19.47 melder politiet at de har kontroll på en mann som har gått å viftet med en pinne mot forbipasserende i Elgesetergate i Trondheim. Mannen skal ha fremstått som ruset. Han blir kjørt til legevakta.",
           publishedAt: "2026-07-04T17:50:00.000Z",
           category: "Nyheter",
-          places: ["Trondheim", "Prinsensgate"],
-          location: { lat: 63.424, lng: 10.395, label: "Prinsensgate" },
+          places: ["Trondheim", "Prinsengate"],
+          location: { lat: 63.424, lng: 10.395, label: "Prinsengate" },
         }),
         article({
           id: "politiloggen-pinne",
           source: "politiloggen",
           sourceLabel: "Politiloggen",
-          title: "Ro og orden: Trondheim, Prinsensgate",
+          title: "Ro og orden: Trondheim, Prinsengate",
           excerpt:
             "Patruljen har kontroll på en mann som viftet med en pinne mot forbipasserende i Elgesetergate. Mannen fremstår ruset og kjøres til legevakt.",
           publishedAt: "2026-07-04T17:47:00.000Z",
           category: "Hendelser",
-          places: ["Trondheim", "Prinsensgate"],
-          location: { lat: 63.424, lng: 10.395, label: "Prinsensgate" },
+          places: ["Trondheim", "Prinsengate"],
+          location: { lat: 63.424, lng: 10.395, label: "Prinsengate" },
           situationId: "politiloggen-prinsensgate-pinne",
         }),
         article({
@@ -358,6 +370,7 @@ describe("article coverage analysis", () => {
       kind: "incident",
       confidence: "high",
       memberArticleIds: expect.arrayContaining([
+        "adressa-pinne-update",
         "nrk-pinne",
         "politiloggen-pinne",
         "nrk-trussel",

@@ -133,15 +133,19 @@ const centralTrondheimPlaceAliases = new Set([
   "midtbyen",
   "sentrum",
   "trondheim sentrum",
+  "prinsengate",
+  "prinsen gate",
   "prinsensgate",
   "prinsens gate",
+  "elgeseter",
+  "elgeseter gate",
   "elgesetergate",
   "elgesetergata",
   "elgesetergaten",
 ]);
 const centralTrondheimAreaPattern = /\b(?:midtbyen|sentrum|trondheim\s+sentrum)\b/iu;
 const centralTrondheimStreetPattern =
-  /\b(?:prinsens\s*gate|prinsensgate|elgeseter(?:gate|gata|gaten)|elgesetergate|elgesetergata)\b/iu;
+  /\b(?:prinsen(?:s)?\s*gate|elgeseter\s*(?:gate|gata|gaten)|elgesetergate|elgesetergata)\b/iu;
 const genericIncidentTokens = new Set([
   ...genericPlaceTokens,
   "badeulykke",
