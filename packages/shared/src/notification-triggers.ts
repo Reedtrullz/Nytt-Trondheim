@@ -987,9 +987,25 @@ function candidateMatchesQuery(
   return true;
 }
 
+function isSpatialNotificationCandidate(candidate: NotificationTriggerCandidate): boolean {
+  return (
+    candidate.id.startsWith("notification:spatial:") ||
+    candidate.sourceIds.includes("datex_travel_time") ||
+    candidate.sourceIds.includes("trafikkdata") ||
+    candidate.matchedKeywords.includes("uforklart forsinkelse") ||
+    candidate.matchedKeywords.includes("trafikkdata-avvik")
+  );
+}
+
+function isUnexplainedDelayCandidate(candidate: NotificationTriggerCandidate): boolean {
+  return candidate.matchedKeywords.includes("uforklart forsinkelse");
+}
+
 function summaryForCandidates(
   items: NotificationTriggerCandidate[],
 ): NotificationTriggerPage["summary"] {
+  const spatialSignals = items.filter(isSpatialNotificationCandidate);
+
   return {
     total: items.length,
     critical: items.filter((item) => item.severity === "critical").length,
@@ -1001,6 +1017,9 @@ function summaryForCandidates(
       item.sourceIds.some((source) => officialSources.has(source)),
     ).length,
     highConfidence: items.filter((item) => item.confidence.level === "confirmed").length,
+    spatialSignals: spatialSignals.length,
+    spatialCritical: spatialSignals.filter((item) => item.severity === "critical").length,
+    unexplainedDelays: spatialSignals.filter(isUnexplainedDelayCandidate).length,
   };
 }
 

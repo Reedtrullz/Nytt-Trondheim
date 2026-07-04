@@ -2560,6 +2560,9 @@ test("command notification bridge shows Web Push readiness responsively", async 
           commandOnly: 1,
           officialBacked: 1,
           highConfidence: 1,
+          spatialSignals: 0,
+          spatialCritical: 0,
+          unexplainedDelays: 0,
         },
         pushStatus: {
           configured: true,

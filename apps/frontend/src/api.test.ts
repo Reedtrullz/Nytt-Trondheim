@@ -198,8 +198,13 @@ describe("frontend source item API helpers", () => {
           critical: 0,
           warning: 0,
           watch: 0,
+          cityPulseVisible: 0,
+          commandOnly: 0,
           officialBacked: 0,
           highConfidence: 0,
+          spatialSignals: 0,
+          spatialCritical: 0,
+          unexplainedDelays: 0,
         },
       }),
     );

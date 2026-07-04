@@ -1071,6 +1071,9 @@ export const notificationTriggerSummarySchema = z
     commandOnly: z.number().int().nonnegative().max(100_000),
     officialBacked: z.number().int().nonnegative().max(100_000),
     highConfidence: z.number().int().nonnegative().max(100_000),
+    spatialSignals: z.number().int().nonnegative().max(100_000),
+    spatialCritical: z.number().int().nonnegative().max(100_000),
+    unexplainedDelays: z.number().int().nonnegative().max(100_000),
   })
   .strict();
 

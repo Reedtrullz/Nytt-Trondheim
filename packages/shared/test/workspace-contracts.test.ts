@@ -260,6 +260,9 @@ describe("workspace contract schemas", () => {
         commandOnly: 0,
         officialBacked: 1,
         highConfidence: 1,
+        spatialSignals: 0,
+        spatialCritical: 0,
+        unexplainedDelays: 0,
       },
     } satisfies NotificationTriggerPage;
 

@@ -903,6 +903,9 @@ export interface NotificationTriggerSummary {
   commandOnly: number;
   officialBacked: number;
   highConfidence: number;
+  spatialSignals: number;
+  spatialCritical: number;
+  unexplainedDelays: number;
 }
 
 export interface PublicNotificationSignalHighlight {

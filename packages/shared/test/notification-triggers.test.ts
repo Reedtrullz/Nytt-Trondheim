@@ -647,6 +647,9 @@ describe("notification trigger candidates", () => {
     expect(page.summary).toMatchObject({
       cityPulseVisible: 0,
       commandOnly: 1,
+      spatialSignals: 1,
+      spatialCritical: 0,
+      unexplainedDelays: 1,
     });
 
     const viewerOnlyPage = applyNotificationDeliveryStates(page, {

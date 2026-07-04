@@ -125,6 +125,24 @@ interface CommandTool {
   tone: CommandToolTone;
 }
 
+interface SpatialSignalSummary {
+  critical: number;
+  total: number;
+  unexplainedDelay: number;
+}
+
+function spatialSignalSummary(page: NotificationTriggerPage | undefined): SpatialSignalSummary {
+  return {
+    critical: page?.summary.spatialCritical ?? 0,
+    total: page?.summary.spatialSignals ?? 0,
+    unexplainedDelay: page?.summary.unexplainedDelays ?? 0,
+  };
+}
+
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function commandTools({
   status,
   briefing,
@@ -143,6 +161,7 @@ function commandTools({
   const blockedPush = notificationTriggers?.pushStatus?.blockedCandidates ?? 0;
   const sourceAttention = staleSources;
   const briefingMode = analysisModeSummary(briefing?.latestAiRun, briefing?.morningBrief);
+  const spatialSignals = spatialSignalSummary(notificationTriggers);
 
   return [
     {
@@ -186,9 +205,24 @@ function commandTools({
       capability: "PostGIS Heatmaps",
       href: "/command/romlig",
       cta: "Åpne romlig analyse",
-      status: `${status.trafficPulse?.length ?? 0} korridorer`,
-      detail: "Varmepunkt og uforklarte DATEX-forsinkelser.",
-      tone: (status.trafficPulse?.length ?? 0) > 0 ? "ok" : "idle",
+      status:
+        spatialSignals.total > 0
+          ? countLabel(spatialSignals.total, "romlig signal", "romlige signaler")
+          : `${status.trafficPulse?.length ?? 0} korridorer`,
+      detail:
+        spatialSignals.total > 0
+          ? `${countLabel(
+              spatialSignals.unexplainedDelay,
+              "uforklart forsinkelse",
+              "uforklarte forsinkelser",
+            )} · ${countLabel(spatialSignals.critical, "kritisk signal", "kritiske signaler")}.`
+          : "Varmepunkt og uforklarte DATEX-forsinkelser.",
+      tone:
+        spatialSignals.critical > 0
+          ? "watch"
+          : spatialSignals.total > 0 || (status.trafficPulse?.length ?? 0) > 0
+            ? "ok"
+            : "idle",
     },
     {
       title: "Rådata-inspektør",

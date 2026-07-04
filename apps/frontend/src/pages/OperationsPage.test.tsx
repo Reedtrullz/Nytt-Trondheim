@@ -136,14 +136,17 @@ const notificationTriggers: NotificationTriggerPage = {
   generatedAt: "2026-06-02T06:06:00.000Z",
   filters: { limit: 4 },
   summary: {
-    total: 2,
-    critical: 1,
+    total: 3,
+    critical: 2,
     warning: 1,
     watch: 0,
     cityPulseVisible: 1,
-    commandOnly: 1,
-    officialBacked: 1,
-    highConfidence: 1,
+    commandOnly: 2,
+    officialBacked: 2,
+    highConfidence: 2,
+    spatialSignals: 1,
+    spatialCritical: 1,
+    unexplainedDelays: 1,
   },
   pushStatus: {
     configured: true,
@@ -226,6 +229,46 @@ const notificationTriggers: NotificationTriggerPage = {
           "Artikkelkandidaten er under offentlig visningsterskel eller mangler public-safe signalgrunnlag.",
       },
     },
+    {
+      id: "notification:spatial:delay:e6-sluppen",
+      kind: "traffic_disruption",
+      severity: "critical",
+      deliveryState: "candidate_only",
+      title: "Uforklart kø på Omkjøringsvegen",
+      body: "DATEX reisetid viser kø uten koblet nyhetssak.",
+      detail: "Romlig analyse har flagget et trafikkavvik for operatørvurdering.",
+      score: 0.84,
+      confidence: {
+        level: "confirmed",
+        score: 0.84,
+        sourceCount: 1,
+        updatedAt: "2026-06-02T06:06:00.000Z",
+      },
+      generatedAt: "2026-06-02T06:06:00.000Z",
+      eventUpdatedAt: "2026-06-02T06:05:00.000Z",
+      articleIds: [],
+      sourceIds: ["datex_travel_time"],
+      sourceLabels: ["Vegvesen reisetid"],
+      matchedKeywords: ["uforklart forsinkelse"],
+      reasons: [
+        "Romlig analyse kobler telemetri, trafikkbilde og nyhetsdekning.",
+        "Ingen nyhetssak er koblet til forsinkelsen.",
+      ],
+      links: [
+        {
+          kind: "source_item",
+          label: "Rå reisetid",
+          href: "/command/radata?telemetrySource=datex_travel_time&telemetryId=e6-sluppen",
+        },
+      ],
+      publicSurface: {
+        state: "hidden",
+        label: "Kun Command Center",
+        detail: "Dette er et romlig operatørsignal og vises ikke direkte på City Pulse.",
+        reason:
+          "Telemetriavvik krever manuell kontroll mot trafikkart, nyheter og offisielle hendelser før offentlig varsel.",
+      },
+    },
   ],
 };
 
@@ -292,15 +335,18 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Høyeffektskandidater");
     expect(html).toContain("Mangler match");
     expect(html).toContain("Bypuls");
-    expect(html).toContain("1 kun Command Center");
+    expect(html).toContain("2 kun Command Center");
     expect(html).toContain("1 klare · 1 sendt");
     expect(html).toContain("Kollisjon stenger E6");
     expect(html).toContain("Vegvesen DATEX, Adresseavisen");
     expect(html).toContain("Synlig på Bypuls");
+    expect(html).toContain("Uforklart kø på Omkjøringsvegen");
+    expect(html).toContain("Vegvesen reisetid");
     expect(html).toContain("91 %");
     expect(html).toContain("/command/romlig");
     expect(html).toContain("PostGIS Heatmaps");
-    expect(html).toContain("0 korridorer");
+    expect(html).toContain("1 romlig signal");
+    expect(html).toContain("1 uforklart forsinkelse · 1 kritisk signal.");
     expect(html).toContain("Åpne romlig analyse");
     expect(html).toContain("/command/radata");
     expect(html).toContain("Raw Data Inspector");

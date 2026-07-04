@@ -16,6 +16,9 @@ const page: NotificationTriggerPage = {
     commandOnly: 0,
     officialBacked: 1,
     highConfidence: 1,
+    spatialSignals: 0,
+    spatialCritical: 0,
+    unexplainedDelays: 0,
   },
   pushStatus: {
     configured: true,
@@ -198,6 +201,9 @@ describe("NotificationTriggerCandidatesDashboard", () => {
               commandOnly: 1,
               officialBacked: 0,
               highConfidence: 0,
+              spatialSignals: 1,
+              spatialCritical: 0,
+              unexplainedDelays: 1,
             },
             items: [
               {
@@ -290,6 +296,9 @@ describe("NotificationTriggerCandidatesDashboard", () => {
               commandOnly: 0,
               officialBacked: 0,
               highConfidence: 0,
+              spatialSignals: 0,
+              spatialCritical: 0,
+              unexplainedDelays: 0,
             },
             pushStatus: {
               configured: true,
