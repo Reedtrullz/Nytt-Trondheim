@@ -210,33 +210,38 @@ describe("MorningBriefPanel", () => {
 });
 
 describe("CityPulseDashboard", () => {
-  it("uses the shared dashboard layout for public briefing and situation modules", () => {
+  it("keeps the public briefing and signal modules compact on the front page", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <CityPulseDashboard data={bootstrap} />
       </MemoryRouter>,
     );
 
-    expect(html).toContain("Bypulsmoduler");
-    expect(html).toContain("City Pulse");
-    expect(html).toContain("Dagens oversikt");
-    expect(html).toContain("dashboard-layout-city-pulse");
-    expect(html).toContain("dashboard-widget-full");
+    expect(html).toContain("city-pulse-summary");
+    expect(html).toContain("Bypuls");
+    expect(html).toContain("Kort oversikt");
     expect(html).toContain("Morgenbrief");
-    expect(html).toContain("Varsel og analysespor");
-    expect(html).toContain("Slik vurderes høyeffekt-signaler");
-    expect(html).toContain("Liv og helse");
-    expect(html).toContain("Stengte hovedårer");
+    expect(html).toContain("Høyeffekt-signaler");
     expect(html).toContain("Høyeffektsaker fanget av varselreglene");
     expect(html).toContain("1 aktive");
-    expect(html).toContain("Situasjonsrommet er offentlig bekreftet.");
-    expect(html).not.toContain("Flytt Morgenbrief senere");
-    expect(html).toContain("Tilpass oppsett");
-    expect(html).not.toContain("Tilbakestill");
-    expect(html).not.toContain("Dashboard-oppsett");
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kildetillit: Bekreftet");
     expect(html).toContain("91 %");
+    expect(html).toContain("Varsler");
+    expect(html).toContain("/varsler");
+    expect(html).not.toContain("dashboard-layout-city-pulse");
+    expect(html).not.toContain("dashboard-widget-full");
+    expect(html).not.toContain("Slik vurderes høyeffekt-signaler");
+    expect(html).not.toContain("Liv og helse");
+    expect(html).not.toContain("Stengte hovedårer");
+    expect(html).not.toContain("Situasjonsrommet er offentlig bekreftet.");
+    expect(html).not.toContain("Trafikktrøbbel sør i byen");
+    expect(html).not.toContain("1 situasjonsrom følges nå");
+    expect(html).not.toContain("Morgenbrief-grunnlag");
+    expect(html).not.toContain("Flytt Morgenbrief senere");
+    expect(html).not.toContain("Tilpass oppsett");
+    expect(html).not.toContain("Tilbakestill");
+    expect(html).not.toContain("Dashboard-oppsett");
   });
 
   it("renders a deterministic morning brief fallback when no stored brief exists", () => {
@@ -248,7 +253,7 @@ describe("CityPulseDashboard", () => {
 
     expect(html).toContain("Reservebrief");
     expect(html).toContain("Morgenbildet er rolig");
-    expect(html).toContain("dashboard-layout-city-pulse");
+    expect(html).toContain("city-pulse-summary");
   });
 });
 

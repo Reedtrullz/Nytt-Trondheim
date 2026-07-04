@@ -813,6 +813,62 @@ button {
   }
 }
 
+.city-pulse-summary {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--green) 18%, var(--line));
+  border-left: 4px solid var(--green);
+  background: color-mix(in srgb, var(--green-soft) 34%, var(--paper));
+}
+
+.city-pulse-summary-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.city-pulse-summary-heading h2 {
+  margin: 0;
+  font: 25px/1.05 var(--serif);
+}
+
+.city-pulse-summary-heading a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.city-pulse-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.city-pulse-summary > .situation-banner {
+  margin-top: 12px;
+  min-height: 0;
+  padding: 16px 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 290px);
+  gap: 18px;
+}
+
+.city-pulse-summary > .situation-banner .situation-heading h2 {
+  font-size: 28px;
+}
+
+.city-pulse-summary > .situation-banner .status-time,
+.city-pulse-summary > .situation-banner .situation-confidence,
+.city-pulse-summary > .situation-banner .situation-copy ul {
+  margin-bottom: 10px;
+}
+
 .morning-brief {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 330px);
@@ -822,6 +878,16 @@ button {
   border: 1px solid rgba(20, 104, 75, 0.22);
   border-left: 4px solid var(--green);
   background: linear-gradient(115deg, rgba(20, 104, 75, 0.08), transparent 45%), var(--paper);
+}
+
+.morning-brief-compact {
+  height: 100%;
+  margin-top: 0;
+  padding: 14px 15px;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 230px);
+  gap: 14px;
+  border-left-width: 3px;
+  background: var(--paper);
 }
 
 .morning-brief-deterministic {
@@ -843,6 +909,10 @@ button {
 .morning-brief-heading h2 {
   margin: 0;
   font: 34px/1.06 var(--serif);
+}
+
+.morning-brief-compact .morning-brief-heading h2 {
+  font-size: 25px;
 }
 
 .morning-brief-heading span,
@@ -908,6 +978,16 @@ button {
   color: #3f4b50;
   font-size: 14px;
   line-height: 1.48;
+}
+
+.morning-brief-compact .morning-brief-paragraphs {
+  gap: 0;
+  margin: 8px 0 7px;
+}
+
+.morning-brief-compact .morning-brief-paragraphs p {
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .morning-brief-sources {
@@ -989,10 +1069,41 @@ button {
   line-height: 1.25;
 }
 
+.morning-brief-compact .morning-brief-highlights {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.morning-brief-compact .morning-brief-highlights div {
+  padding: 8px 9px;
+}
+
+.morning-brief-compact .morning-brief-highlights dd {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.morning-brief-compact .morning-brief-highlights strong {
+  font-size: 21px;
+}
+
+.morning-brief-compact .morning-brief-highlights span {
+  font-size: 10px;
+}
+
 .city-pulse-signal-panel {
   display: grid;
   gap: 16px;
   padding: 20px 0 0;
+}
+
+.city-pulse-signal-panel-compact {
+  height: 100%;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--blue) 14%, var(--line));
+  background: var(--paper);
 }
 
 .city-pulse-signal-panel .section-heading-row {
@@ -1002,6 +1113,10 @@ button {
 .city-pulse-signal-panel .section-heading-row h2 {
   margin: 4px 0 0;
   font: 28px/1.08 var(--serif);
+}
+
+.city-pulse-signal-panel-compact .section-heading-row h2 {
+  font-size: 24px;
 }
 
 .city-pulse-signal-panel .section-heading-row a {
@@ -1019,6 +1134,11 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+.city-pulse-signal-panel-compact .city-pulse-signal-status {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .city-pulse-signal-status div,
 .city-pulse-signal-guidance article {
   min-width: 0;
@@ -1028,6 +1148,10 @@ button {
 
 .city-pulse-signal-status div {
   padding: 13px;
+}
+
+.city-pulse-signal-panel-compact .city-pulse-signal-status div {
+  padding: 8px;
 }
 
 .city-pulse-signal-status span,
@@ -1045,6 +1169,10 @@ button {
   color: var(--ink);
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+.city-pulse-signal-panel-compact .city-pulse-signal-status strong {
+  font-size: 12px;
 }
 
 .city-pulse-signal-status small {
@@ -1076,6 +1204,11 @@ button {
   padding: 14px;
 }
 
+.city-pulse-signal-panel-compact .city-pulse-signal-live {
+  gap: 8px;
+  padding: 10px;
+}
+
 .city-pulse-signal-live-heading {
   display: flex;
   align-items: flex-start;
@@ -1086,6 +1219,10 @@ button {
 .city-pulse-signal-live-heading h3 {
   margin: 2px 0 0;
   font: 22px/1.1 var(--serif);
+}
+
+.city-pulse-signal-panel-compact .city-pulse-signal-live-heading h3 {
+  font-size: 18px;
 }
 
 .city-pulse-signal-live-heading > span {
@@ -1114,6 +1251,12 @@ button {
   border-left: 4px solid var(--blue);
   background: var(--paper);
   padding: 11px 12px;
+}
+
+.city-pulse-signal-panel-compact .city-pulse-signal-live-item {
+  grid-template-columns: 1fr;
+  gap: 7px;
+  padding: 9px 10px;
 }
 
 .city-pulse-signal-live-item.critical {
@@ -1152,6 +1295,12 @@ button {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.city-pulse-signal-panel-compact .city-pulse-signal-live-item p,
+.city-pulse-signal-panel-compact .city-pulse-signal-live-meta small:nth-of-type(n + 2),
+.city-pulse-signal-panel-compact .city-pulse-signal-live-meta em {
+  display: none;
 }
 
 .city-pulse-signal-live-meta {
@@ -10334,8 +10483,10 @@ button {
   }
 
   .home-grid,
+  .city-pulse-summary-grid,
   .morning-brief,
   .situation-banner,
+  .city-pulse-summary > .situation-banner,
   .situation-layout,
   .situation-explanation,
   .dashboard-widget-grid,
@@ -10368,6 +10519,14 @@ button {
 
   .city-pulse-signal-live-item {
     grid-template-columns: 1fr;
+  }
+
+  .city-pulse-summary {
+    padding: 12px;
+  }
+
+  .city-pulse-summary > .situation-banner {
+    gap: 16px;
   }
 
   .sport-hero-meta {
@@ -10667,6 +10826,8 @@ button {
   .situation-banner,
   .lead-story,
   .morning-brief,
+  .city-pulse-summary-grid,
+  .city-pulse-summary > .situation-banner,
   .city-pulse-signal-status,
   .city-pulse-signal-live,
   .city-pulse-signal-guidance,
@@ -10719,6 +10880,104 @@ button {
 
   .morning-brief-highlights {
     grid-template-columns: 1fr;
+  }
+
+  .city-pulse-summary {
+    margin-top: 12px;
+    padding: 10px 12px;
+  }
+
+  .city-pulse-summary-heading {
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .city-pulse-summary-heading h2 {
+    font-size: 22px;
+  }
+
+  .city-pulse-summary-grid {
+    gap: 8px;
+  }
+
+  .morning-brief-compact {
+    gap: 9px;
+    padding: 10px 11px;
+  }
+
+  .morning-brief-compact .morning-brief-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .morning-brief-compact .morning-brief-heading h2 {
+    font-size: 25px;
+  }
+
+  .morning-brief-compact .morning-brief-paragraphs p {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .morning-brief-compact .morning-brief-highlights {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .morning-brief-compact .morning-brief-highlights div {
+    padding: 6px;
+  }
+
+  .morning-brief-compact .morning-brief-highlights dd {
+    display: block;
+    margin-top: 2px;
+  }
+
+  .morning-brief-compact .morning-brief-highlights strong {
+    font-size: 20px;
+  }
+
+  .morning-brief-compact .morning-brief-highlights span {
+    display: none;
+  }
+
+  .city-pulse-signal-panel-compact {
+    gap: 8px;
+    padding: 10px 11px;
+  }
+
+  .city-pulse-signal-panel-compact .section-heading-row h2 {
+    font-size: 23px;
+  }
+
+  .city-pulse-signal-panel-compact .city-pulse-signal-live {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .city-pulse-signal-panel-compact .city-pulse-signal-live-heading h3 {
+    font-size: 17px;
+  }
+
+  .city-pulse-summary > .situation-banner {
+    gap: 10px;
+    margin-top: 8px;
+    padding: 11px 12px;
+  }
+
+  .city-pulse-summary > .situation-banner .situation-heading h2 {
+    font-size: 24px;
+  }
+
+  .city-pulse-summary > .situation-banner .situation-preview,
+  .city-pulse-summary > .situation-banner .status-time,
+  .city-pulse-summary > .situation-banner .situation-copy ul {
+    display: none;
+  }
+
+  .city-pulse-summary > .situation-banner .situation-confidence {
+    margin: 6px 0 8px;
   }
 
   .source-audit-hero,

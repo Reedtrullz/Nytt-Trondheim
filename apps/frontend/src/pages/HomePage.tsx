@@ -25,7 +25,6 @@ import {
   type SourceHealth,
 } from "@nytt/shared";
 import { api } from "../api.js";
-import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
 import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
 import {
   articleCategories,
@@ -285,20 +284,24 @@ function SituationBanner({
 export function MorningBriefPanel({
   brief,
   articles = [],
+  density = "normal",
   situations = [],
   now = new Date(),
 }: {
   brief?: BootstrapPayload["morningBrief"];
   articles?: Article[];
+  density?: "normal" | "compact";
   situations?: BootstrapPayload["situations"];
   now?: Date;
 }) {
   if (!brief) return null;
+  const compact = density === "compact";
   const modeLabel = morningBriefModeLabel(brief.mode);
   const freshness = morningBriefFreshness(brief.generatedAt, now);
   const analysisRunLabel = publicAnalysisRunLabel(brief);
   const articlesById = new Map(articles.map((article) => [article.id, article]));
   const situationsById = new Map(situations.map((situation) => [situation.id, situation]));
+  const paragraphs = compact ? brief.paragraphs.slice(0, 1) : brief.paragraphs;
   const linkedArticles = brief.articleIds
     .flatMap((id) => {
       const article = articlesById.get(id);
@@ -312,10 +315,10 @@ export function MorningBriefPanel({
       return situation ? [situation] : [];
     })
     .slice(0, 2);
-  const hasSourceLinks = linkedArticles.length > 0 || linkedSituations.length > 0;
+  const hasSourceLinks = !compact && (linkedArticles.length > 0 || linkedSituations.length > 0);
   return (
     <section
-      className={`morning-brief morning-brief-${brief.mode}`}
+      className={`morning-brief morning-brief-${brief.mode} morning-brief-${density}`}
       aria-labelledby="morning-brief-heading"
     >
       <div className="morning-brief-copy">
@@ -332,12 +335,12 @@ export function MorningBriefPanel({
           </div>
         </div>
         <div className="morning-brief-paragraphs">
-          {brief.paragraphs.map((paragraph) => (
+          {paragraphs.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
         </div>
-        <small>{publicBriefSourceLine(brief.sourceLine)}</small>
-        {analysisRunLabel ? (
+        {!compact ? <small>{publicBriefSourceLine(brief.sourceLine)}</small> : null}
+        {analysisRunLabel && !compact ? (
           <p className="morning-brief-ai-trace">
             <span>Analysespor</span>
             <span>{analysisRunLabel}</span>
@@ -379,57 +382,67 @@ export function MorningBriefPanel({
 export function CityPulseSignalPanel({
   articles = [],
   brief,
+  density = "normal",
   now = new Date(),
   situations = [],
 }: {
   articles?: Article[];
   brief?: BootstrapPayload["morningBrief"];
+  density?: "normal" | "compact";
   now?: Date;
   situations?: HomeSituationSummary[];
 }) {
+  const compact = density === "compact";
   const freshness = brief ? morningBriefFreshness(brief.generatedAt, now) : undefined;
   const signalHighlights = useMemo(
     () =>
       buildPublicNotificationSignalHighlights({
         articles,
         generatedAt: brief?.generatedAt ?? now.toISOString(),
-        limit: 3,
+        limit: compact ? 2 : 3,
         situations,
       }),
-    [articles, brief?.generatedAt, now, situations],
+    [articles, brief?.generatedAt, compact, now, situations],
   );
   return (
-    <section className="city-pulse-signal-panel" aria-labelledby="city-pulse-signal-heading">
+    <section
+      className={`city-pulse-signal-panel city-pulse-signal-panel-${density}`}
+      aria-labelledby="city-pulse-signal-heading"
+    >
       <div className="section-heading-row">
         <div>
           <p className="label">Varsel og analysespor</p>
-          <h2 id="city-pulse-signal-heading">Slik vurderes høyeffekt-signaler</h2>
+          <h2 id="city-pulse-signal-heading">
+            {compact ? "Høyeffekt-signaler" : "Slik vurderes høyeffekt-signaler"}
+          </h2>
         </div>
         <Link to="/varsler">
           Åpne varsler <ArrowIcon />
         </Link>
       </div>
-      <div className="city-pulse-signal-status">
-        <div>
-          <span>Morgenbrief</span>
-          <strong>{brief ? morningBriefModeLabel(brief.mode) : "Ikke lagret"}</strong>
+      {!compact ? (
+        <div className="city-pulse-signal-status">
+          <div>
+            <span>Morgenbrief</span>
+            <strong>{brief ? morningBriefModeLabel(brief.mode) : "Ikke lagret"}</strong>
+          </div>
+          <div>
+            <span>Siste analyse</span>
+            <strong>{brief?.aiRun ? formatTime(brief.aiRun.completedAt) : "Ikke lagret"}</strong>
+          </div>
+          <div>
+            <span>Brief-ferskhet</span>
+            <strong className={freshness ? `freshness-tone-${freshness.tone}` : undefined}>
+              {freshness?.label ?? "Ikke lagret"}
+            </strong>
+            {freshness?.detail ? <small>{freshness.detail}</small> : null}
+          </div>
+          <div>
+            <span>Varselregler</span>
+            <strong>{publicNotificationTriggerGuidance.length} offentlige kategorier</strong>
+          </div>
         </div>
-        <div>
-          <span>Siste analyse</span>
-          <strong>{brief?.aiRun ? formatTime(brief.aiRun.completedAt) : "Ikke lagret"}</strong>
-        </div>
-        <div>
-          <span>Brief-ferskhet</span>
-          <strong className={freshness ? `freshness-tone-${freshness.tone}` : undefined}>
-            {freshness?.label ?? "Ikke lagret"}
-          </strong>
-          {freshness?.detail ? <small>{freshness.detail}</small> : null}
-        </div>
-        <div>
-          <span>Varselregler</span>
-          <strong>{publicNotificationTriggerGuidance.length} offentlige kategorier</strong>
-        </div>
-      </div>
+      ) : null}
       <section className="city-pulse-signal-live" aria-labelledby="city-pulse-live-heading">
         <div className="city-pulse-signal-live-heading">
           <div>
@@ -463,19 +476,23 @@ export function CityPulseSignalPanel({
                       {notificationSeverityLabel(item.severity)} · {item.recencyLabel}
                     </span>
                     <strong>{item.title}</strong>
-                    <p>{item.body}</p>
+                    {!compact ? <p>{item.body}</p> : null}
                   </div>
                   <div className="city-pulse-signal-live-meta">
                     <div className={`city-pulse-signal-attention ${item.attention.tone}`}>
                       <strong>{item.attention.label}</strong>
-                      <small>{item.attention.detail}</small>
+                      {!compact ? <small>{item.attention.detail}</small> : null}
                     </div>
                     <StoryConfidenceBadge confidence={item.confidence} />
-                    {item.sourceLabels.length ? <em>{item.sourceLabels.join(" + ")}</em> : null}
-                    {item.reasons.slice(0, 2).map((reason) => (
-                      <small key={reason}>{reason}</small>
-                    ))}
-                    {item.matchedKeywords.length ? (
+                    {!compact && item.sourceLabels.length ? (
+                      <em>{item.sourceLabels.join(" + ")}</em>
+                    ) : null}
+                    {!compact
+                      ? item.reasons
+                          .slice(0, 2)
+                          .map((reason) => <small key={reason}>{reason}</small>)
+                      : null}
+                    {!compact && item.matchedKeywords.length ? (
                       <small>Treff: {item.matchedKeywords.slice(0, 3).join(", ")}</small>
                     ) : null}
                     {action}
@@ -490,15 +507,17 @@ export function CityPulseSignalPanel({
           </p>
         )}
       </section>
-      <div className="city-pulse-signal-guidance">
-        {publicNotificationTriggerGuidance.map((item) => (
-          <article key={item.kind}>
-            <span>{notificationSeverityLabel(item.severity)}</span>
-            <strong>{item.title}</strong>
-            <p>{item.detail}</p>
-          </article>
-        ))}
-      </div>
+      {!compact ? (
+        <div className="city-pulse-signal-guidance">
+          {publicNotificationTriggerGuidance.map((item) => (
+            <article key={item.kind}>
+              <span>{notificationSeverityLabel(item.severity)}</span>
+              <strong>{item.title}</strong>
+              <p>{item.detail}</p>
+            </article>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -514,62 +533,35 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
       }),
     [data.articles, data.morningBrief, data.situations, data.sourceHealth],
   );
-  const widgets = useMemo(() => {
-    const nextWidgets: DashboardWidgetDefinition[] = [];
-    nextWidgets.push({
-      id: "morning-brief",
-      title: "Morgenbrief",
-      description: "Dagens prioriterte bypuls.",
-      defaultSize: "full",
-      resizable: false,
-      children: (
+  return (
+    <section className="city-pulse-summary" aria-labelledby="city-pulse-summary-heading">
+      <div className="city-pulse-summary-heading">
+        <div>
+          <p className="label">Bypuls</p>
+          <h2 id="city-pulse-summary-heading">Kort oversikt</h2>
+        </div>
+        <Link to="/varsler">
+          Varsler <ArrowIcon />
+        </Link>
+      </div>
+      <div className="city-pulse-summary-grid">
         <MorningBriefPanel
           articles={data.articles}
           brief={morningBrief}
+          density="compact"
           situations={data.situations}
         />
-      ),
-    });
-    nextWidgets.push({
-      id: "signal-trace",
-      title: "Varsel og analysespor",
-      description: "Offentlig forklaring på høyeffekt-signaler.",
-      defaultSize: "full",
-      children: (
         <CityPulseSignalPanel
           articles={data.articles}
           brief={morningBrief}
+          density="compact"
           situations={data.situations}
         />
-      ),
-    });
-    if (data.situations.some((item) => item.status === "preliminary" || item.status === "active")) {
-      nextWidgets.push({
-        id: "situation-banner",
-        title: "Situasjon",
-        description: "Pågående eller foreløpig offentlig hendelse.",
-        defaultSize: "full",
-        resizable: false,
-        children: <SituationBanner situations={data.situations} />,
-      });
-    }
-    return nextWidgets;
-  }, [data.articles, data.situations, morningBrief]);
-
-  if (widgets.length === 0) return null;
-
-  return (
-    <DashboardGrid
-      ariaLabel="Bypulsmoduler"
-      label="City Pulse"
-      title="Dagens oversikt"
-      storageKey="nytt-city-pulse-dashboard-v1"
-      configMode="toggle"
-      showWidgetHeaders={false}
-      variant="city-pulse"
-      widgetChrome="bare"
-      widgets={widgets}
-    />
+      </div>
+      {data.situations.some((item) => item.status === "preliminary" || item.status === "active") ? (
+        <SituationBanner situations={data.situations} />
+      ) : null}
+    </section>
   );
 }
 
