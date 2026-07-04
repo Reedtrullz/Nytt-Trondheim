@@ -11,7 +11,6 @@ import {
 import { Link, useSearchParams } from "react-router-dom";
 import {
   buildPublicNotificationSignalHighlights,
-  buildMorningBrief,
   publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
@@ -523,40 +522,11 @@ export function CityPulseSignalPanel({
 }
 
 export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
-  const morningBrief = useMemo(
-    () =>
-      data.morningBrief ??
-      buildMorningBrief({
-        articles: data.articles,
-        situations: data.situations,
-        sourceHealth: data.sourceHealth,
-      }),
-    [data.articles, data.morningBrief, data.situations, data.sourceHealth],
+  const activeSituations = data.situations.filter(
+    (item) => item.status === "preliminary" || item.status === "active",
   );
-  return (
-    <section className="city-pulse-summary" aria-labelledby="city-pulse-summary-heading">
-      <div className="city-pulse-summary-heading">
-        <div>
-          <p className="label">Bypuls</p>
-          <h2 id="city-pulse-summary-heading">Kort oversikt</h2>
-        </div>
-        <Link to="/situasjoner">
-          Situasjonsrom <ArrowIcon />
-        </Link>
-      </div>
-      <div className="city-pulse-summary-grid">
-        <MorningBriefPanel
-          articles={data.articles}
-          brief={morningBrief}
-          density="compact"
-          situations={data.situations}
-        />
-      </div>
-      {data.situations.some((item) => item.status === "preliminary" || item.status === "active") ? (
-        <SituationBanner situations={data.situations} />
-      ) : null}
-    </section>
-  );
+  if (activeSituations.length === 0) return null;
+  return <SituationBanner situations={activeSituations} />;
 }
 
 function SourceCluster({ group }: { group: HomeArticleGroup }) {

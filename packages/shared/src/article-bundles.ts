@@ -124,10 +124,24 @@ const genericPlaceIncidentSignalRules = new Map<
     "bryllup_uro",
     { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 2, minDistinctiveOverlap: 1 },
   ],
+  ["street_order", { windowMs: 90 * 60 * 1000, minBodyOverlap: 2, minDistinctiveOverlap: 1 }],
   ["tyveri", { windowMs: nearDuplicateTextWindowMs, minBodyOverlap: 4, minDistinctiveOverlap: 2 }],
 ]);
 const genericPlaceTokens = new Set(["trondheim", "trøndelag", "trondelag"]);
 const nonIncidentPlaceTokens = new Set(["olavs"]);
+const centralTrondheimPlaceAliases = new Set([
+  "midtbyen",
+  "sentrum",
+  "trondheim sentrum",
+  "prinsensgate",
+  "prinsens gate",
+  "elgesetergate",
+  "elgesetergata",
+  "elgesetergaten",
+]);
+const centralTrondheimAreaPattern = /\b(?:midtbyen|sentrum|trondheim\s+sentrum)\b/iu;
+const centralTrondheimStreetPattern =
+  /\b(?:prinsens\s*gate|prinsensgate|elgeseter(?:gate|gata|gaten)|elgesetergate|elgesetergata)\b/iu;
 const genericIncidentTokens = new Set([
   ...genericPlaceTokens,
   "badeulykke",
@@ -209,6 +223,10 @@ const incidentSignals: Array<[string, RegExp]> = [
   ["slagsmal", /\b(slagsm[åa]l\w*|sl[åa]ss\w*|sloss\w*)\b/iu],
   ["vold", /\b(vold\w*|kroppsskade\w*|kritisk\s+skad\w*|siktet\s+for\s+grov)\b/iu],
   [
+    "street_order",
+    /\b(ro og orden|ordensforstyrrelse\w*|trusselsituasjon\w*|trussel\w*|bortvis\w*|mindre[åa]rig\w*|ungdom(?:men|mer|mene)?|viftet\w*|pinne\w*|forbipasserende|ruset|kontroll\s+p[åa]|har\s+kontroll)\b/iu,
+  ],
+  [
     "bryllup_uro",
     /\b(?=.*\bbryllup\w*\b)(?:ampert|kamp\w*|slagsm[åa]l\w*|sl[åa]ss\w*|sloss\w*|uenighet\w*|politiet|roet\s+seg)\b/iu,
   ],
@@ -285,12 +303,31 @@ function articlePlaceTokens(article: Article): Set<string> {
   );
   const placeTokens = tokens(placeValues.join(" "));
   const normalizedText = normalizeText([article.title, article.excerpt, ...placeValues].join(" "));
+  const normalizedPlaceValues = placeValues.map(normalizeText);
+  const hasExplicitCentralPlace = normalizedPlaceValues.some((place) =>
+    centralTrondheimPlaceAliases.has(place),
+  );
+  const hasSpecificNonCentralPlace = normalizedPlaceValues.some(
+    (place) =>
+      !centralTrondheimPlaceAliases.has(place) &&
+      !genericPlaceTokens.has(place) &&
+      !nonIncidentPlaceTokens.has(place) &&
+      tokens(place).size > 0,
+  );
   if (
     /\btrondheim\s+torg(?:et)?\b/iu.test(normalizedText) ||
     ((article.scope === "trondheim" || /\btrondheim\b/iu.test(normalizedText)) &&
       /\b(?:torvet|torget)\b/iu.test(normalizedText))
   ) {
     placeTokens.add("trondheim-torg");
+  }
+  if (
+    (article.scope === "trondheim" || /\btrondheim\b/iu.test(normalizedText)) &&
+    (centralTrondheimStreetPattern.test(normalizedText) ||
+      hasExplicitCentralPlace ||
+      (centralTrondheimAreaPattern.test(normalizedText) && !hasSpecificNonCentralPlace))
+  ) {
+    placeTokens.add("trondheim-sentrum");
   }
   placeValues.forEach((place) => {
     const normalized = normalizeText(place);
@@ -302,6 +339,9 @@ function articlePlaceTokens(article: Article): Set<string> {
     }
     if (["fanrem", "orkdal", "orkland"].includes(normalized)) {
       placeTokens.add("orkland-area");
+    }
+    if (centralTrondheimPlaceAliases.has(normalized)) {
+      placeTokens.add("trondheim-sentrum");
     }
   });
   genericPlaceTokens.forEach((token) => placeTokens.delete(token));
@@ -415,9 +455,37 @@ function hasSharedIncidentSignal(left: Article, right: Article): boolean {
   return sharedIncidentSignals(left, right).size > 0;
 }
 
+function compatibleStreetOrderSituationSignal(
+  left: Article,
+  right: Article,
+): ArticleCoverageDecisionSignal | undefined {
+  if (!left.situationId || !right.situationId || left.situationId === right.situationId) {
+    return undefined;
+  }
+  const rule = genericPlaceIncidentSignalRules.get("street_order");
+  if (!rule || publishedDistanceMs(left, right) > rule.windowMs) return undefined;
+  if (!sameBroadCategory(left, right) || !hasSharedPlace(left, right)) return undefined;
+  if (!sharedIncidentSignals(left, right).has("street_order")) return undefined;
+  const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
+  const distinctive = tokenSimilarity(
+    distinctiveIncidentTokens(articleText(left)),
+    distinctiveIncidentTokens(articleText(right)),
+  );
+  if (body.overlap < rule.minBodyOverlap || distinctive.overlap < rule.minDistinctiveOverlap) {
+    return undefined;
+  }
+  return {
+    kind: "generic_place_incident",
+    articleIds: [left.id, right.id],
+    detail: "street_order",
+    overlap: body.overlap,
+    score: body.score,
+  };
+}
+
 function articlesConflict(left: Article, right: Article): boolean {
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
-    return true;
+    return !compatibleStreetOrderSituationSignal(left, right);
   }
   return hasConflictingSpecificPlaces(left, right) && hasSharedIncidentSignal(left, right);
 }
@@ -491,7 +559,10 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
     });
   }
   if (left.situationId && left.situationId === right.situationId) return signals;
-  if (left.situationId && right.situationId) return [];
+  if (left.situationId && right.situationId) {
+    const compatibleStreetOrderSignal = compatibleStreetOrderSituationSignal(left, right);
+    return compatibleStreetOrderSignal ? [...signals, compatibleStreetOrderSignal] : [];
+  }
   const topics = sharedTopicSignals(left, right);
   const hasSportsResultTopic = [...topics].some(isSportsResultTopic);
   if (

@@ -210,22 +210,22 @@ describe("MorningBriefPanel", () => {
 });
 
 describe("CityPulseDashboard", () => {
-  it("keeps the public front page focused on briefing and situations", () => {
+  it("keeps public prime space focused on actionable situations", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <CityPulseDashboard data={bootstrap} />
       </MemoryRouter>,
     );
 
-    expect(html).toContain("city-pulse-summary");
-    expect(html).toContain("Bypuls");
-    expect(html).toContain("Kort oversikt");
-    expect(html).toContain("Morgenbrief");
     expect(html).toContain("Steinsprang, vegen er stengt");
     expect(html).toContain("Kildetillit: Bekreftet");
     expect(html).toContain("91 %");
-    expect(html).toContain("Situasjonsrom");
+    expect(html).toContain("Åpne situasjonsrom");
     expect(html).toContain("/situasjoner");
+    expect(html).not.toContain("city-pulse-summary");
+    expect(html).not.toContain("Bypuls");
+    expect(html).not.toContain("Kort oversikt");
+    expect(html).not.toContain("Morgenbrief");
     expect(html).not.toContain("dashboard-layout-city-pulse");
     expect(html).not.toContain("dashboard-widget-full");
     expect(html).not.toContain("Høyeffekt-signaler");
@@ -245,16 +245,14 @@ describe("CityPulseDashboard", () => {
     expect(html).not.toContain("Dashboard-oppsett");
   });
 
-  it("renders a deterministic morning brief fallback when no stored brief exists", () => {
+  it("renders nothing when there are no active or preliminary situations", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <CityPulseDashboard data={{ articles: [], situations: [], sourceHealth: [] }} />
       </MemoryRouter>,
     );
 
-    expect(html).toContain("Reservebrief");
-    expect(html).toContain("Morgenbildet er rolig");
-    expect(html).toContain("city-pulse-summary");
+    expect(html).toBe("");
   });
 });
 

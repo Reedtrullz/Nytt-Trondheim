@@ -284,6 +284,97 @@ describe("article coverage analysis", () => {
     ]);
   });
 
+  it("bundles close downtown order and threat updates that otherwise split into several rows", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "nrk-pinne",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Mann viftet med pinne mot folk i gata",
+          excerpt:
+            "Kl. 19.47 melder politiet at de har kontroll på en mann som har gått å viftet med en pinne mot forbipasserende i Elgesetergate i Trondheim. Mannen skal ha fremstått som ruset. Han blir kjørt til legevakta.",
+          publishedAt: "2026-07-04T17:50:00.000Z",
+          category: "Nyheter",
+          places: ["Trondheim", "Prinsensgate"],
+          location: { lat: 63.424, lng: 10.395, label: "Prinsensgate" },
+        }),
+        article({
+          id: "politiloggen-pinne",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Ro og orden: Trondheim, Prinsensgate",
+          excerpt:
+            "Patruljen har kontroll på en mann som viftet med en pinne mot forbipasserende i Elgesetergate. Mannen fremstår ruset og kjøres til legevakt.",
+          publishedAt: "2026-07-04T17:47:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim", "Prinsensgate"],
+          location: { lat: 63.424, lng: 10.395, label: "Prinsensgate" },
+          situationId: "politiloggen-prinsensgate-pinne",
+        }),
+        article({
+          id: "nrk-trussel",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Mulig trusselsituasjon i Midtbyen",
+          excerpt:
+            "Kl. 19.18 melder politiet at de har kontroll på flere ungdommer etter en mulig trusselsituasjon i Midtbyen i Trondheim. Alle de involverte er mindreårige og politiet har kontroll på dem.",
+          publishedAt: "2026-07-04T17:22:00.000Z",
+          category: "Krim",
+          places: ["Midtbyen", "Trondheim"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Midtbyen" },
+        }),
+        article({
+          id: "adressa-trussel",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Melding om mulig trusselsituasjon - flere mindreårige jenter",
+          excerpt:
+            "Politiet har kontroll på flere ungdommer i Midtbyen etter melding om en mulig trusselsituasjon. Alle involverte er mindreårige.",
+          publishedAt: "2026-07-04T17:18:00.000Z",
+          category: "Krim",
+          places: ["Midtbyen", "Trondheim"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Midtbyen" },
+        }),
+        article({
+          id: "politiloggen-trussel",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Andre hendelser: Trondheim, Sentrum",
+          excerpt:
+            "Politiet har kontroll på flere ungdommer etter en mulig trusselsituasjon i Midtbyen. Alle involverte er mindreårige. Politiet har snakket med de involverte og tre mindreårige blir bortvist fra stedet.",
+          publishedAt: "2026-07-04T17:18:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Sentrum"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Trondheim sentrum" },
+          situationId: "politiloggen-midtbyen-trussel",
+        }),
+      ],
+      "2026-07-04T18:00:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "incident",
+      confidence: "high",
+      memberArticleIds: expect.arrayContaining([
+        "nrk-pinne",
+        "politiloggen-pinne",
+        "nrk-trussel",
+        "adressa-trussel",
+        "politiloggen-trussel",
+      ]),
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "street_order",
+        }),
+      ]),
+      nearMisses: [],
+    });
+    expect(new Set(analysis.articles.map((item) => item.coverageBundle?.id))).toHaveLength(1);
+  });
+
   it("bundles serious violence reports with different source counts but the same victim context", () => {
     const analysis = analyzeArticleCoverage(
       [

@@ -332,14 +332,14 @@ test("filtered City Pulse modules use refreshed feed instead of stale bootstrap 
   await expect(page.getByText("Stale morgenbrief")).toHaveCount(0);
   await expect(page.getByText("Stale leder bildet")).toHaveCount(0);
   await expect(page.getByText("Stale Ras")).toHaveCount(0);
-  await expect(page.getByText("Morgenbildet dekker 1 ferske saker")).toBeVisible();
+  await expect(page.getByText("Morgenbildet dekker 1 ferske saker")).toHaveCount(0);
 
   const nearby = page.locator(".nearby-module");
   await expect(nearby.getByText("1 stedsfestede saker og situasjoner.")).toBeVisible();
   await expect(nearby.getByRole("button", { name: /Fersk trafikk ved Sluppen/ })).toBeVisible();
 });
 
-test("City Pulse pins the analyzed morning brief on the public frontpage", async ({ page }) => {
+test("City Pulse keeps the public frontpage free of morning brief chrome", async ({ page }) => {
   const article = sampleBootstrap.articles.find((item) => item.id === "a-road")!;
   const situation = sampleBootstrap.situations[0]!;
   const morningBrief: MorningBrief = {
@@ -398,17 +398,15 @@ test("City Pulse pins the analyzed morning brief on the public frontpage", async
   await page.goto("/");
 
   const brief = page.locator(".morning-brief");
-  await expect(brief.getByRole("heading", { name: "Morgenbrief" })).toBeVisible();
-  await expect(brief.getByText("Analysert brief").first()).toBeVisible();
-  await expect(brief.getByLabel("Morgenbrief-ferskhet")).toContainText("Eldre brief");
-  await expect(brief.getByText("Bypulsen starter med tre tydelige signaler")).toBeVisible();
-  await expect(brief).not.toContainText("DeepSeek");
-  await expect(brief).not.toContainText("deepseek-v4-flash");
-  await expect(brief.getByLabel("Morgenbrief-nøkkeltall")).toContainText("Transport leder bildet");
-  await expect(brief.getByLabel("Morgenbrief-nøkkeltall")).toContainText("6/7");
-  await expect(
-    page.getByLabel("Kort oversikt").getByRole("link", { name: /Situasjonsrom/ }),
-  ).toHaveAttribute("href", "/situasjoner");
+  await expect(brief).toHaveCount(0);
+  await expect(page.getByText("Kort oversikt")).toHaveCount(0);
+  await expect(page.getByText("Bypulsen starter med tre tydelige signaler")).toHaveCount(0);
+  const situationBanner = page.locator(".situation-banner");
+  await expect(situationBanner.getByRole("heading", { name: situation.title })).toBeVisible();
+  await expect(situationBanner.getByRole("link", { name: /Åpne situasjonsrom/ })).toHaveAttribute(
+    "href",
+    `/situasjoner/${situation.id}`,
+  );
   const publicSources = page.locator(".source-status");
   await expect(publicSources).toContainText("Delvis kildegrunnlag");
   await expect(publicSources).toContainText("2 kilder trenger tilsyn blant 7 åpne kilder.");
@@ -808,9 +806,8 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await expect(channelContext.getByRole("button", { name: "Vis alle kanaler" })).toHaveCount(0);
   await expectNoHorizontalPageOverflow(page);
 
-  await expect(
-    page.getByLabel("Kort oversikt").getByRole("heading", { name: "Morgenbrief" }),
-  ).toBeVisible();
+  await expect(page.getByLabel("Kort oversikt")).toHaveCount(0);
+  await expect(page.locator(".morning-brief")).toHaveCount(0);
   await expect(page.getByLabel("Bypulsmoduler")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Tilpass oppsett" })).toHaveCount(0);
 
