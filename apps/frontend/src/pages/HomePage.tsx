@@ -988,6 +988,7 @@ function NearbyRail({
   timeWindowFrom?: string;
   timeWindowLabel?: string;
 }) {
+  const [mapReady, setMapReady] = useState(false);
   const allNearby = useMemo(
     () =>
       nearbyStoryItemsForGroupsAndSituations(groups, data.situations, {
@@ -1015,6 +1016,19 @@ function NearbyRail({
   const civic = articles.filter((article) => article.source === "trondheim_kommune").slice(0, 2);
 
   useEffect(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback && idleWindow.cancelIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(() => setMapReady(true), { timeout: 2500 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+    const handle = window.setTimeout(() => setMapReady(true), 1200);
+    return () => window.clearTimeout(handle);
+  }, []);
+
+  useEffect(() => {
     setSelectedNearbyId((current) =>
       current && mapNearby.some((item) => item.id === current) ? current : nearby[0]?.id,
     );
@@ -1037,14 +1051,18 @@ function NearbyRail({
         </div>
         <MapTimeSlider value={timeWindow} onChange={onTimeWindowChange} />
         <MapClusterSummary summary={clusterSummary} />
-        <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
-          <NewsMap
-            items={mapNearby}
-            localFocus={localFocus}
-            selectedId={selectedNearby?.id}
-            onSelect={setSelectedNearbyId}
-          />
-        </Suspense>
+        {mapReady ? (
+          <Suspense fallback={<div className="nearby-map nearby-map-loading" aria-hidden="true" />}>
+            <NewsMap
+              items={mapNearby}
+              localFocus={localFocus}
+              selectedId={selectedNearby?.id}
+              onSelect={setSelectedNearbyId}
+            />
+          </Suspense>
+        ) : (
+          <div className="nearby-map nearby-map-loading" aria-hidden="true" />
+        )}
         {nearby.length > 0 ? (
           <>
             <ol className="nearby-list">

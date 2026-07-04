@@ -312,7 +312,7 @@ describe("private situation API", () => {
         captured.push(normalizedSql);
         if (normalizedSql.includes("FROM articles a LEFT JOIN saved_articles")) {
           expect(params?.slice(0, 2)).toEqual(["Reedtrullz", "trondheim"]);
-          expect(params?.[2]).toBe(101);
+          expect(params?.[2]).toBe(81);
           return { rows: [{ payload: article, saved: false }] };
         }
         if (normalizedSql.includes("FROM situations WHERE status IN")) {

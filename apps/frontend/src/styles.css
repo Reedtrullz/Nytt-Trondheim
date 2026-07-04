@@ -1934,6 +1934,8 @@ button {
   gap: 16px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.42);
+  content-visibility: auto;
+  contain-intrinsic-size: 220px;
 }
 
 .story-card-main {

@@ -147,6 +147,7 @@ export interface ArticleFilters {
   to?: string;
   cursor?: string;
   limit?: number;
+  sourceLimit?: number;
 }
 
 export interface SituationFilters {
@@ -1332,10 +1333,14 @@ function articlesFromCityPulseStoryPage(page: CityPulseStoryPage): Article[] {
 }
 
 function cityPulseStorySourceLimit(filters: ArticleFilters): number {
+  if (typeof filters.sourceLimit === "number") {
+    return Math.min(500, Math.max(1, filters.sourceLimit));
+  }
   return Math.min(500, Math.max(100, (filters.limit ?? 40) * 5));
 }
 
 const homeBootstrapStoryLimit = 20;
+const homeBootstrapSourceArticleLimit = 80;
 
 function articleOverlapsTrafficEvent(article: Article, event: TrafficMapEvent): boolean {
   const articleMs = Date.parse(article.publishedAt);
@@ -3800,6 +3805,7 @@ export class MemoryStore implements Store {
     const storyPage = await this.listCityPulseStories({
       scope: "trondheim",
       limit: homeBootstrapStoryLimit,
+      sourceLimit: homeBootstrapSourceArticleLimit,
     });
     const now = new Date();
     const situations = [...this.situations.values()]
@@ -5266,7 +5272,14 @@ export class PgStore implements Store {
 
   async getBootstrap(login: string): Promise<BootstrapPayload> {
     const [storyPage, situations, sourceHealth] = await Promise.all([
-      this.listCityPulseStories({ scope: "trondheim", limit: homeBootstrapStoryLimit }, login),
+      this.listCityPulseStories(
+        {
+          scope: "trondheim",
+          limit: homeBootstrapStoryLimit,
+          sourceLimit: homeBootstrapSourceArticleLimit,
+        },
+        login,
+      ),
       this.listHomeSituationSummaries(),
       this.listSourceHealth(),
     ]);
