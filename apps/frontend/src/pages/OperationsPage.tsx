@@ -11,6 +11,7 @@ import type {
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
+import { analysisModeSummary } from "./CommandBriefingPage.js";
 
 function time(value?: string) {
   return value
@@ -141,6 +142,7 @@ function commandTools({
   const readyPush = notificationTriggers?.pushStatus?.readyCandidates ?? 0;
   const blockedPush = notificationTriggers?.pushStatus?.blockedCandidates ?? 0;
   const sourceAttention = staleSources;
+  const briefingMode = analysisModeSummary(briefing?.latestAiRun, briefing?.morningBrief);
 
   return [
     {
@@ -149,7 +151,7 @@ function commandTools({
       href: "/command/brief",
       cta: "Åpne brief-revisjon",
       status: briefing?.morningBrief ? "Brief klar" : "Venter på brief",
-      detail: briefing?.latestAiRun?.model ?? "Viser analysespor når worker har kjørt.",
+      detail: briefing ? briefingMode.label : "Viser analysespor når worker har kjørt.",
       tone: briefing?.morningBrief ? "ok" : "idle",
     },
     {
@@ -503,6 +505,8 @@ function IntelligenceBridgeWidget({ briefing }: { briefing?: CommandCenterBriefi
     );
   }
 
+  const analysisMode = analysisModeSummary(briefing.latestAiRun, briefing.morningBrief);
+
   return (
     <div className="intelligence-bridge-widget">
       <div className="intelligence-bridge-meta">
@@ -513,8 +517,8 @@ function IntelligenceBridgeWidget({ briefing }: { briefing?: CommandCenterBriefi
         </article>
         <article>
           <span>Analyse</span>
-          <strong>{briefing.latestAiRun?.status ?? "Ikke registrert"}</strong>
-          <small>{briefing.latestAiRun?.model ?? "Ingen kjøring"}</small>
+          <strong>{analysisMode.label}</strong>
+          <small>{briefing.latestAiRun?.status ?? "Ikke registrert"}</small>
         </article>
         <article>
           <span>Tilsyn</span>
@@ -523,6 +527,11 @@ function IntelligenceBridgeWidget({ briefing }: { briefing?: CommandCenterBriefi
             {briefing.sourceHealthSummary.ok}/{briefing.sourceHealthSummary.total} kilder OK
           </small>
         </article>
+      </div>
+      <div className={`command-briefing-analysis-mode mode-${analysisMode.tone}`}>
+        <span>Analysemodus</span>
+        <strong>{analysisMode.label}</strong>
+        <p>{analysisMode.detail}</p>
       </div>
       {briefing.morningBrief ? (
         <ol className="intelligence-bridge-paragraphs">

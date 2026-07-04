@@ -24,6 +24,7 @@ import {
   PublicSourceStatusPanel,
   StoryConfidenceBadge,
   StoryEventBundleSummary,
+  StoryFeedTrustStrip,
   StoryVerificationProof,
   channelStoryCountsForCards,
   cityPulseDataForCurrentFeed,
@@ -31,6 +32,7 @@ import {
   mergeCityPulseStoryLists,
   morningBriefFreshness,
   storyFeedSummary,
+  storyFeedTrustStats,
 } from "./HomePage.js";
 import { groupHomeArticles } from "../homeArticleGroups.js";
 import type { HomeFilters } from "../homeFilters.js";
@@ -814,6 +816,75 @@ describe("storyFeedSummary", () => {
 
   it("keeps empty feed summaries honest", () => {
     expect(storyFeedSummary([])).toBe("Ingen bypulssaker i denne visningen.");
+  });
+});
+
+describe("StoryFeedTrustStrip", () => {
+  it("summarizes verification, clustering and source confidence for visible story cards", () => {
+    const coverageBundle = {
+      id: "coverage:incident:e6",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-02T07:30:00.000Z",
+    } as const;
+    const storyArticle = (overrides: Partial<Article> = {}) =>
+      ({
+        ...article,
+        ...overrides,
+      }) satisfies Article;
+    const cards = homeStoryCardsForGroups(
+      groupHomeArticles([
+        storyArticle({
+          id: "adressa-e6",
+          publicVerification: {
+            status: "verified",
+            label: "Verifisert",
+            detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+            officialSources: ["datex"],
+            reportingSources: ["adressa"],
+            situationId: "datex-e6",
+          },
+          coverageBundle,
+        }),
+        storyArticle({
+          id: "nrk-e6",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          coverageBundle,
+        }),
+        storyArticle({
+          id: "culture",
+          source: "vg",
+          sourceLabel: "VG",
+          title: "Konsert på Byscenen",
+          category: "Kultur",
+          url: "https://example.test/kultur",
+        }),
+      ]),
+    );
+
+    const stats = storyFeedTrustStats(cards);
+    const html = renderToStaticMarkup(<StoryFeedTrustStrip cards={cards} />);
+
+    expect(stats).toMatchObject({
+      articleCount: 3,
+      clusteredCount: 1,
+      sourceCount: 3,
+      storyCount: 2,
+      verifiedCount: 1,
+    });
+    expect(html).toContain("Kildebilde for bypulssaker");
+    expect(html).toContain("Verifisert");
+    expect(html).toContain("1/2");
+    expect(html).toContain("Samlet");
+    expect(html).toContain("3 artikler · 3 kilder");
+    expect(html).toContain("Kildetillit");
+    expect(html).toContain("bekreftet eller sannsynlig");
+  });
+
+  it("renders nothing for an empty story view", () => {
+    expect(renderToStaticMarkup(<StoryFeedTrustStrip cards={[]} />)).toBe("");
   });
 });
 

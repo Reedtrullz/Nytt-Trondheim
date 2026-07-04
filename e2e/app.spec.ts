@@ -114,6 +114,9 @@ test("frontpage uses bootstrap feed without immediate duplicate refreshes", asyn
   await expect(page.getByLabel("Sammendrag av bypulssaker")).toContainText(
     /bypulssaker samlet fra/,
   );
+  const trustStrip = page.getByLabel("Kildebilde for bypulssaker");
+  await expect(trustStrip).toContainText("Verifisert");
+  await expect(trustStrip).toContainText("Kildetillit");
   await expect(page.getByText("Oppdaterer saker...")).toHaveCount(0);
   expect(duplicateRefreshes).toEqual([]);
 });
@@ -3485,6 +3488,12 @@ test("owner can open the real situation index and operations status", async ({ p
   const intelligenceBridge = page.locator(".dashboard-widget", {
     has: page.getByRole("heading", { name: "Intelligence Bridge" }),
   });
+  await expect(intelligenceBridge.getByText("Analysemodus")).toBeVisible();
+  await expect(
+    intelligenceBridge
+      .getByText(/Provideranalyse brukt|Deterministisk reserve|Reserve uten lagret kjøring/)
+      .first(),
+  ).toBeVisible();
   await expect(
     intelligenceBridge.getByRole("link", { name: "Åpne brief-revisjon" }),
   ).toHaveAttribute("href", "/command/brief");

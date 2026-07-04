@@ -768,6 +768,65 @@ export function storyFeedSummary(cards: HomeStoryCard[]): string {
   return `${base} ${clusteredCount} ${clusterLabel} flere kilder eller oppdateringer.`;
 }
 
+export interface StoryFeedTrustStats {
+  articleCount: number;
+  clusteredCount: number;
+  confirmedOrLikelyCount: number;
+  sourceCount: number;
+  storyCount: number;
+  verifiedCount: number;
+}
+
+export function storyFeedTrustStats(cards: HomeStoryCard[]): StoryFeedTrustStats {
+  return {
+    articleCount: cards.reduce((sum, card) => sum + card.updateCount, 0),
+    clusteredCount: cards.filter((card) => card.isClustered).length,
+    confirmedOrLikelyCount: cards.filter(
+      (card) =>
+        card.sourceConfidence.level === "confirmed" || card.sourceConfidence.level === "likely",
+    ).length,
+    sourceCount: new Set(
+      cards.flatMap((card) =>
+        card.group.articles.map((article) => article.sourceLabel || article.source),
+      ),
+    ).size,
+    storyCount: cards.length,
+    verifiedCount: cards.filter((card) => card.verification).length,
+  };
+}
+
+function countOfTotalLabel(count: number, total: number): string {
+  return `${count}/${total}`;
+}
+
+export function StoryFeedTrustStrip({ cards }: { cards: HomeStoryCard[] }) {
+  if (cards.length === 0) return null;
+  const stats = storyFeedTrustStats(cards);
+  const sourceLabel = stats.sourceCount === 1 ? "kilde" : "kilder";
+  const articleLabel = stats.articleCount === 1 ? "artikkel" : "artikler";
+  return (
+    <section className="story-feed-trust" aria-label="Kildebilde for bypulssaker">
+      <article>
+        <span>Verifisert</span>
+        <strong>{countOfTotalLabel(stats.verifiedCount, stats.storyCount)}</strong>
+        <small>offisiell + redaksjonell kilde</small>
+      </article>
+      <article>
+        <span>Samlet</span>
+        <strong>{stats.clusteredCount}</strong>
+        <small>
+          {stats.articleCount} {articleLabel} · {stats.sourceCount} {sourceLabel}
+        </small>
+      </article>
+      <article>
+        <span>Kildetillit</span>
+        <strong>{countOfTotalLabel(stats.confirmedOrLikelyCount, stats.storyCount)}</strong>
+        <small>bekreftet eller sannsynlig</small>
+      </article>
+    </section>
+  );
+}
+
 type ChannelStoryCounts = Record<ArticleCategoryFilter, number>;
 
 function emptyChannelStoryCounts(): ChannelStoryCounts {
@@ -2130,6 +2189,7 @@ export function HomePage({
               {storyFeedSummary(displayedStoryCards)}
             </p>
           ) : null}
+          <StoryFeedTrustStrip cards={displayedStoryCards} />
           {feedError ? (
             <p className="feed-state error">Kunne ikke hente saker: {feedError}</p>
           ) : null}

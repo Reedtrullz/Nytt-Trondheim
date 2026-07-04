@@ -1403,11 +1403,46 @@ button {
 
 .story-feed-summary {
   max-width: 680px;
-  margin: 8px 0 23px;
+  margin: 8px 0 10px;
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.35;
+}
+
+.story-feed-trust {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 23px;
+}
+
+.story-feed-trust article {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.story-feed-trust span,
+.story-feed-trust small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.story-feed-trust span {
+  display: block;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.story-feed-trust strong {
+  display: block;
+  margin: 4px 0 2px;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .lead-story {
@@ -10580,6 +10615,10 @@ button {
   }
 
   .dashboard-layout-config ol {
+    grid-template-columns: 1fr;
+  }
+
+  .story-feed-trust {
     grid-template-columns: 1fr;
   }
 

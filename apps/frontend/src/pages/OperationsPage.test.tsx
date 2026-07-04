@@ -263,6 +263,9 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("Intelligence Bridge");
     expect(html).toContain("Morgenbrief, analysespor");
     expect(html).toContain("ai_assisted");
+    expect(html).toContain("Analysemodus");
+    expect(html).toContain("Provideranalyse brukt");
+    expect(html).toContain("deepseek-v4-flash fullførte");
     expect(html).toContain("deepseek-v4-flash");
     expect(html).toContain("Kildehelse viser ett tilsynspunkt.");
     expect(html).toContain("/command/brief");
@@ -307,6 +310,45 @@ describe("OperationsDashboard", () => {
     expect(html).toContain("1 trenger tilsyn");
     expect(html).toContain("Auth Gate");
     expect(html).toContain("Eierstyrt");
+  });
+
+  it("makes deterministic analysis mode visible in the command matrix", () => {
+    const deterministicBriefing: CommandCenterBriefingPayload = {
+      ...briefing,
+      morningBrief: {
+        ...briefing.morningBrief!,
+        mode: "deterministic",
+        sourceLine: "Deterministisk reserve · 1/2 kilder OK",
+        aiRun: {
+          provider: "deterministic",
+          model: "none",
+          status: "disabled",
+          completedAt: "2026-06-02T06:04:00.000Z",
+        },
+      },
+      latestAiRun: {
+        id: "ai:deterministic",
+        provider: "deterministic",
+        model: "none",
+        status: "disabled",
+        startedAt: "2026-06-02T06:03:00.000Z",
+        completedAt: "2026-06-02T06:04:00.000Z",
+        articleCount: 24,
+        error: "DEEPSEEK_ANALYSIS_ENABLED er ikke satt til true; deterministisk analyse brukes.",
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      <OperationsDashboard status={status} briefing={deterministicBriefing} />,
+    );
+
+    expect(html).toContain("Intelligence Bridge");
+    expect(html).toContain("Analysemodus");
+    expect(html).toContain("Deterministisk reserve");
+    expect(html).toContain("Provideranalyse er avslått");
+    expect(html).toContain("regelbasert clustering");
+    expect(html).toContain("Brief klar");
+    expect(html).not.toContain("DeepSeek ·");
   });
 
   it("does not imply zero failures before worker metrics exist", () => {
