@@ -202,55 +202,101 @@ export async function loadAuthenticatedShellData(client: AuthenticatedShellApi =
   return { sessionPayload, bootstrapPayload };
 }
 
+export function canRenderAuthenticatedRoutes({
+  session,
+  sessionLoading,
+  sessionError,
+}: {
+  session?: SessionPayload;
+  sessionLoading: boolean;
+  sessionError?: string;
+}) {
+  return Boolean(session && !sessionLoading && !sessionError);
+}
+
+function authenticatedLoadError(reason: unknown) {
+  if (reason instanceof ApiError && reason.status === 429) {
+    return "For mange forespørsler. Prøv igjen om litt.";
+  }
+  return reason instanceof Error ? reason.message : "Forespørselen feilet";
+}
+
 function LegacyCommandRedirect({ to }: { to: string }) {
   const location = useLocation();
   return <Navigate to={`${to}${location.search}${location.hash}`} replace />;
 }
 
+function HomeRoute({
+  data,
+  loading,
+  error,
+  canSave,
+  onRetry,
+}: {
+  data?: BootstrapPayload;
+  loading: boolean;
+  error?: string;
+  canSave: boolean;
+  onRetry: () => void;
+}) {
+  if (data) return <HomePage initialData={data} canSave={canSave} />;
+  if (loading) return <LoadingPage message="Henter siste nytt..." />;
+  return (
+    <main className="fatal-error" role="alert">
+      <p>{error ?? "Kunne ikke hente siste nytt."}</p>
+      <button type="button" onClick={onRetry}>
+        Prøv igjen
+      </button>
+    </main>
+  );
+}
+
 function AuthenticatedApp() {
   const [data, setData] = useState<BootstrapPayload>();
   const [session, setSession] = useState<SessionPayload>();
-  const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState<string>();
+  const [bootstrapError, setBootstrapError] = useState<string>();
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [bootstrapLoading, setBootstrapLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let ignore = false;
-    setLoading(true);
-    setError(undefined);
-    const sessionRequest = api.session().then((sessionPayload) => {
-      if (!ignore) {
-        setSession(sessionPayload);
-      }
-      return sessionPayload;
-    });
-    const bootstrapRequest = api.bootstrap().then((bootstrapPayload) => {
-      if (!ignore) {
-        setData(bootstrapPayload);
-      }
-      return bootstrapPayload;
-    });
-    Promise.all([sessionRequest, bootstrapRequest])
-      .then(([sessionPayload, bootstrapPayload]) => {
-        if (!ignore) {
-          setSession(sessionPayload);
-          setData(bootstrapPayload);
-        }
+    setSessionLoading(true);
+    setBootstrapLoading(true);
+    setSessionError(undefined);
+    setBootstrapError(undefined);
+    setSession(undefined);
+    setData(undefined);
+
+    api
+      .session()
+      .then((sessionPayload) => {
+        if (!ignore) setSession(sessionPayload);
       })
-      .catch((reason: Error) => {
+      .catch((reason: unknown) => {
         if (!ignore) {
-          setData(undefined);
           setSession(undefined);
-          setError(
-            reason instanceof ApiError && reason.status === 429
-              ? "For mange forespørsler. Prøv igjen om litt."
-              : reason.message,
-          );
+          setData(undefined);
+          setSessionError(authenticatedLoadError(reason));
         }
       })
       .finally(() => {
-        if (!ignore) setLoading(false);
+        if (!ignore) setSessionLoading(false);
       });
+
+    api
+      .bootstrap()
+      .then((bootstrapPayload) => {
+        if (!ignore) setData(bootstrapPayload);
+      })
+      .catch((reason: unknown) => {
+        if (!ignore) setBootstrapError(authenticatedLoadError(reason));
+      })
+      .finally(() => {
+        if (!ignore) setBootstrapLoading(false);
+      });
+
     return () => {
       ignore = true;
     };
@@ -259,28 +305,44 @@ function AuthenticatedApp() {
   const freshnessLabel = headerFreshnessLabel(data?.sourceHealth ?? []);
   const isOwner = session?.user.role === "owner";
   const ownerOnly = (children: ReactNode) => <OwnerOnly isOwner={isOwner}>{children}</OwnerOnly>;
+  const canRenderRoutes = canRenderAuthenticatedRoutes({
+    session,
+    sessionLoading,
+    sessionError,
+  });
 
   return (
     <>
       {session ? <Header freshnessLabel={freshnessLabel} user={session.user} /> : null}
-      {loading ? <LoadingPage message="Henter siste nytt..." /> : null}
-      {!loading && error ? (
+      {sessionLoading ? <LoadingPage message="Henter innlogging..." /> : null}
+      {!sessionLoading && sessionError ? (
         <main className="fatal-error" role="alert">
-          <p>{error}</p>
+          <p>{sessionError}</p>
           <button type="button" onClick={() => setAttempt((value) => value + 1)}>
             Prøv igjen
           </button>
         </main>
       ) : null}
-      {!loading && data && session ? (
+      {canRenderRoutes && session ? (
         <Suspense fallback={<LoadingPage message="Henter siden..." />}>
           <Routes>
-            <Route path="/" element={<HomePage initialData={data} canSave={isOwner} />} />
+            <Route
+              path="/"
+              element={
+                <HomeRoute
+                  data={data}
+                  loading={bootstrapLoading}
+                  error={bootstrapError}
+                  canSave={isOwner}
+                  onRetry={() => setAttempt((value) => value + 1)}
+                />
+              }
+            />
             <Route path="/situasjoner" element={<SituationsPage canSeePrivate={isOwner} />} />
             <Route path="/situasjoner/:id" element={<SituationPage canManage={isOwner} />} />
             <Route path="/trafikk" element={<TrafficMapPage />} />
             <Route path="/vaer" element={<WeatherPage />} />
-            <Route path="/sport" element={<SportPage initialArticles={data.articles} />} />
+            <Route path="/sport" element={<SportPage initialArticles={data?.articles ?? []} />} />
             <Route path="/varsler" element={<NotificationSettingsPage />} />
             <Route path="/lagret" element={ownerOnly(<SavedPage />)} />
             <Route path="/command" element={ownerOnly(<OperationsPage />)} />

@@ -10581,6 +10581,12 @@ button {
   top: 96px;
 }
 
+.sport-bracket-panel,
+.sport-table-grid {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 520px;
+}
+
 .sport-news-list {
   display: grid;
   gap: 10px;
@@ -11767,6 +11773,10 @@ button {
 
   .sport-match {
     min-height: 0;
+  }
+
+  .sport-news-panel {
+    position: static;
   }
 
   .sport-match-line {

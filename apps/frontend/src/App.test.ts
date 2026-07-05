@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BootstrapPayload, SessionPayload } from "@nytt/shared";
-import { loadAuthenticatedShellData } from "./App.js";
+import { canRenderAuthenticatedRoutes, loadAuthenticatedShellData } from "./App.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -43,5 +43,49 @@ describe("authenticated app shell loading", () => {
     bootstrap.resolve(bootstrapPayload);
 
     await expect(result).resolves.toEqual({ sessionPayload, bootstrapPayload });
+  });
+
+  it("lets authenticated routes render without waiting for bootstrap data", () => {
+    const sessionPayload: SessionPayload = {
+      user: {
+        id: "viewer-one",
+        login: "viewer",
+        displayName: "Viewer",
+        role: "viewer",
+        status: "active",
+      },
+      csrfToken: "csrf-token",
+    };
+
+    expect(
+      canRenderAuthenticatedRoutes({
+        session: sessionPayload,
+        sessionLoading: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps authenticated routes closed while the session is unresolved or failed", () => {
+    expect(
+      canRenderAuthenticatedRoutes({
+        sessionLoading: true,
+      }),
+    ).toBe(false);
+    expect(
+      canRenderAuthenticatedRoutes({
+        session: {
+          user: {
+            id: "viewer-one",
+            login: "viewer",
+            displayName: "Viewer",
+            role: "viewer",
+            status: "active",
+          },
+          csrfToken: "csrf-token",
+        },
+        sessionLoading: false,
+        sessionError: "Innlogging kreves",
+      }),
+    ).toBe(false);
   });
 });
