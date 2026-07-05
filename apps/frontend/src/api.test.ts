@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api.js";
 import { fetchPublicTransportMap } from "./api/publicTransportMap.js";
 import { fetchTravelPlan } from "./api/travelPlan.js";
+import { fetchWeatherPreparedness } from "./api/weatherPreparedness.js";
 
 describe("frontend source item API helpers", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -223,6 +225,69 @@ describe("frontend source item API helpers", () => {
       "/api/operations/notification-triggers?kinds=public_safety%2Ctraffic_disruption&severities=critical%2Cwarning&traceStates=raw_evidence%2Csource_audit&q=r%C3%B8yk&limit=20",
       expect.objectContaining({ credentials: "include" }),
     );
+  });
+
+  it("requests weather preparedness with included credentials and abort signal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        generatedAt: "2026-07-05T08:00:00.000Z",
+        current: {
+          summary: "MET Locationforecast: skyet nå",
+          updatedAt: "2026-07-05T08:00:00.000Z",
+        },
+        hourly: [],
+        risks: [],
+        actions: [],
+        authority: { emergencyAlertStatus: "", civilDefenceDetail: "", links: [] },
+        impactGroups: [],
+        warnings: [],
+        roadWeather: [],
+        mapLayers: [],
+        sources: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await fetchWeatherPreparedness({ signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/weather/preparedness",
+      expect.objectContaining({
+        credentials: "include",
+        signal: controller.signal,
+      }),
+    );
+  });
+
+  it("redirects weather preparedness 401s to login", async () => {
+    const fakeWindow = { location: { href: "" } };
+    vi.stubGlobal("window", fakeWindow);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+
+    await expect(fetchWeatherPreparedness()).rejects.toThrow("Innlogging kreves");
+    expect(fakeWindow.location.href).toBe("/logg-inn");
+  });
+
+  it("preserves weather preparedness JSON error messages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "MET svarer ikke akkurat nå." }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(fetchWeatherPreparedness()).rejects.toThrow("MET svarer ikke akkurat nå.");
+  });
+
+  it("lets weather preparedness aborts surface to the page retry flow", async () => {
+    const abort = new DOMException("Aborted", "AbortError");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abort));
+
+    await expect(fetchWeatherPreparedness()).rejects.toBe(abort);
   });
 
   it("requests notification settings and delivery history", async () => {

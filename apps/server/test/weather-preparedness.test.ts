@@ -66,22 +66,26 @@ function officialEvent(overrides: Partial<OfficialEvent>): OfficialEvent {
   };
 }
 
-const roadWeather: RoadWeatherObservation[] = [
-  {
+function roadWeatherObservation(
+  overrides: Partial<RoadWeatherObservation> = {},
+): RoadWeatherObservation {
+  const timestamp = new Date(Date.now() - 60_000).toISOString();
+  return {
     id: "datex-weather:e6-tonstad",
     source: "datex_weather",
     stationId: "e6-tonstad",
     stationName: "E6 Tonstad",
-    observedAt: "2026-06-01T08:03:00.000Z",
-    updatedAt: "2026-06-01T08:04:00.000Z",
+    observedAt: timestamp,
+    updatedAt: timestamp,
     geometry: { type: "Point", coordinates: [10.39, 63.36] },
     airTemperatureC: 7,
     roadSurfaceTemperatureC: 1.5,
     precipitationMm: 1.8,
     windSpeedMps: 6,
     rawSummary: "Våt vegbane og fare for glatt føre i høyden",
-  },
-];
+    ...overrides,
+  };
+}
 
 const metLocationforecastPayload = {
   properties: {
@@ -104,6 +108,34 @@ const metLocationforecastPayload = {
           next_1_hours: {
             summary: { symbol_code: "rain" },
             details: { precipitation_amount: 1.1 },
+          },
+        },
+      },
+    ],
+  },
+};
+
+const dryMetLocationforecastPayload = {
+  properties: {
+    meta: { updated_at: "2026-06-01T08:00:00.000Z" },
+    timeseries: [
+      {
+        time: "2026-06-01T08:00:00.000Z",
+        data: {
+          instant: { details: { air_temperature: 7.4, wind_speed: 2.1 } },
+          next_1_hours: {
+            summary: { symbol_code: "clearsky_day" },
+            details: { precipitation_amount: 0 },
+          },
+        },
+      },
+      {
+        time: "2026-06-01T09:00:00.000Z",
+        data: {
+          instant: { details: { air_temperature: 8, wind_speed: 2.5 } },
+          next_1_hours: {
+            summary: { symbol_code: "clearsky_day" },
+            details: { precipitation_amount: 0 },
           },
         },
       },
@@ -153,7 +185,7 @@ describe("weather preparedness API", () => {
         detail: "Økt vannføring og lokale oversvømmelser.",
       }),
     ]);
-    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue(roadWeather);
+    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue([roadWeatherObservation()]);
     vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
 
     const response = await request(app).get("/api/weather/preparedness").expect(200);
@@ -168,6 +200,14 @@ describe("weather preparedness API", () => {
       }),
     );
     expect(response.body.current.summary).toContain("MET Locationforecast");
+    expect(response.body.forecast.zones).toHaveLength(4);
+    expect(response.body.quality.products).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ locationId: "sentrum", product: "locationforecast" }),
+        expect.objectContaining({ locationId: "sentrum", product: "nowcast" }),
+      ]),
+    );
+    expect(response.body.roadWeather).toHaveLength(1);
     expect(listOfficialEvents.mock.calls[0]?.[0]).not.toHaveProperty("limit");
     expect(response.body.risks.map((risk: { label: string }) => risk.label)).toEqual([
       "Nedbør",
@@ -407,5 +447,168 @@ describe("weather preparedness API", () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(response.body.current.summary).toBe("MET Locationforecast: midlertidig utilgjengelig");
+    expect(response.body.quality).toMatchObject({
+      dataStatus: "unavailable",
+      cacheStatus: "fallback",
+    });
+  });
+
+  it("treats malformed MET 200 payloads as unavailable instead of fresh forecast data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ Expires: "Mon, 01 Jun 2030 08:30:00 GMT" }),
+        json: async () => ({ properties: { timeseries: [] } }),
+      }),
+    );
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+    const response = await request(app).get("/api/weather/preparedness").expect(200);
+
+    expect(response.body.current).toMatchObject({
+      summary: "MET Locationforecast: midlertidig utilgjengelig",
+      dataStatus: "unavailable",
+    });
+    expect(response.body.quality).toMatchObject({
+      dataStatus: "unavailable",
+      cacheStatus: "fallback",
+    });
+    expect(response.body.quality.products).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          product: "locationforecast",
+          dataStatus: "unavailable",
+          detail: expect.stringContaining("mangler gyldig timeserie"),
+        }),
+      ]),
+    );
+  });
+
+  it("keeps Locationforecast usable when MET Nowcast is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: unknown) => {
+        if (String(url).includes("/nowcast/")) {
+          return Promise.reject(new DOMException("Nowcast timed out", "AbortError"));
+        }
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ Expires: "Mon, 01 Jun 2020 08:30:00 GMT" }),
+          json: async () => metLocationforecastPayload,
+        });
+      }),
+    );
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+    const response = await request(app).get("/api/weather/preparedness").expect(200);
+
+    expect(response.body.current).toMatchObject({
+      summary: "MET Locationforecast: regnbyger nå",
+      dataStatus: "partial",
+      sourceLabel: "MET Locationforecast",
+    });
+    expect(response.body.quality).toMatchObject({
+      dataStatus: "partial",
+      cacheStatus: "fallback",
+    });
+    expect(response.body.quality.products).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ product: "locationforecast", dataStatus: "ok" }),
+        expect.objectContaining({ product: "nowcast", dataStatus: "unavailable" }),
+      ]),
+    );
+  });
+
+  it("keeps severe road-weather telemetry scoped to road and transport context", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ Expires: "Mon, 01 Jun 2020 08:30:00 GMT" }),
+        json: async () => dryMetLocationforecastPayload,
+      }),
+    );
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue([
+      roadWeatherObservation({
+        roadSurfaceTemperatureC: -1,
+        precipitationMm: 2,
+        windSpeedMps: 3,
+        rawSummary: "Is og glatt føre på utsatt strekning",
+      }),
+    ]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+    const response = await request(app).get("/api/weather/preparedness").expect(200);
+
+    expect(
+      response.body.risks.find((risk: { label: string }) => risk.label === "Føre"),
+    ).toMatchObject({
+      level: "severe",
+      source: "Statens vegvesen DATEX",
+    });
+    expect(
+      response.body.risks.find((risk: { label: string }) => risk.label === "Strøm/tele"),
+    ).toMatchObject({
+      level: "normal",
+      status: "Normal egenberedskap",
+    });
+    expect(response.body.actions.map((action: { id: string }) => action.id)).not.toContain(
+      "neighbours",
+    );
+    expect(
+      response.body.impactGroups.find((group: { group: string }) => group.group === "Transport"),
+    ).toMatchObject({ level: "severe" });
+    expect(
+      response.body.impactGroups.find(
+        (group: { group: string }) => group.group === "Skole/arrangement",
+      ),
+    ).toMatchObject({ level: "normal" });
+  });
+
+  it("keeps stale DATEX road-weather rows out of confident forecast context", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ Expires: "Mon, 01 Jun 2020 08:30:00 GMT" }),
+        json: async () => metLocationforecastPayload,
+      }),
+    );
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listRoadWeatherObservations").mockResolvedValue([
+      roadWeatherObservation({
+        observedAt: "2026-01-01T08:03:00.000Z",
+        updatedAt: "2026-01-01T08:04:00.000Z",
+      }),
+    ]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+    const response = await request(app).get("/api/weather/preparedness").expect(200);
+
+    expect(response.body.roadWeather).toEqual([]);
+    expect(response.body.quality).toMatchObject({
+      roadWeatherFreshCount: 0,
+      roadWeatherStaleCount: 1,
+    });
+    expect(
+      response.body.risks.find((risk: { label: string }) => risk.label === "Føre"),
+    ).toMatchObject({
+      dataStatus: "stale",
+      freshness: "Kun eldre stasjonsdata",
+    });
   });
 });

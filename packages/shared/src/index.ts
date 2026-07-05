@@ -15,4 +15,5 @@ export * from "./notification-triggers.js";
 export * from "./traffic-map.js";
 export * from "./public-transport.js";
 export * from "./weather.js";
+export * from "./weather-risk.js";
 export * from "./world-cup.js";

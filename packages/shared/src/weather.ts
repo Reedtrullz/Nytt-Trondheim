@@ -2,6 +2,9 @@ import type { MapFeature, SourceHealth } from "./types.js";
 import type { RoadWeatherObservation } from "./traffic-map.js";
 
 export type WeatherRiskLevel = "normal" | "watch" | "warning" | "severe";
+export type WeatherDataStatus = "ok" | "partial" | "stale" | "unavailable";
+export type WeatherCacheStatus = "hit" | "miss" | "fallback";
+export type WeatherForecastProduct = "locationforecast" | "nowcast";
 
 export type WeatherRiskKey =
   | "precipitation"
@@ -19,14 +22,18 @@ export interface WeatherCurrentSummary {
   windDirectionDeg?: number;
   precipitationNextHourMm?: number;
   symbolCode?: string;
+  dataStatus?: WeatherDataStatus;
+  sourceLabel?: string;
 }
 
 export interface WeatherHourlyPoint {
   time: string;
   airTemperatureC?: number;
   windSpeedMps?: number;
+  windDirectionDeg?: number;
   precipitationMm?: number;
   symbolCode?: string;
+  sourceProduct?: WeatherForecastProduct;
 }
 
 export interface WeatherRiskItem {
@@ -38,6 +45,8 @@ export interface WeatherRiskItem {
   confidence: string;
   nextChange: string;
   detail: string;
+  dataStatus?: WeatherDataStatus;
+  freshness?: string;
 }
 
 export interface WeatherPreparednessAction {
@@ -75,6 +84,10 @@ export interface WeatherWarningSummary {
   title: string;
   area: string;
   level: string;
+  severityRank?: number;
+  eventType?: string;
+  state?: string;
+  validFrom?: string;
   validUntil: string;
   url: string;
   geometry?: MapFeature["geometry"];
@@ -88,8 +101,59 @@ export interface WeatherMapLayer {
   detail: string;
 }
 
+export interface WeatherForecastLocation {
+  id: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+  description: string;
+}
+
+export interface WeatherForecastMetadata {
+  source: "met";
+  product: WeatherForecastProduct;
+  locationId: string;
+  fetchedAt: string;
+  updatedAt?: string;
+  expiresAt?: string;
+  cacheStatus: WeatherCacheStatus;
+  dataStatus: WeatherDataStatus;
+  detail: string;
+}
+
+export interface WeatherForecastZone {
+  location: WeatherForecastLocation;
+  current: WeatherCurrentSummary;
+  hourly: WeatherHourlyPoint[];
+  nowcast: WeatherHourlyPoint[];
+  metadata: WeatherForecastMetadata[];
+  dataStatus: WeatherDataStatus;
+  summary: string;
+}
+
+export interface WeatherForecastOverview {
+  primaryLocationId: string;
+  generatedAt: string;
+  zones: WeatherForecastZone[];
+  sourceDetail: string;
+}
+
+export interface WeatherQualitySummary {
+  dataStatus: WeatherDataStatus;
+  cacheStatus: WeatherCacheStatus;
+  fetchedAt: string;
+  expiresAt?: string;
+  detail: string;
+  products: WeatherForecastMetadata[];
+  roadWeatherFreshCount: number;
+  roadWeatherStaleCount: number;
+}
+
 export interface WeatherPreparednessPayload {
   generatedAt: string;
+  location?: WeatherForecastLocation;
+  forecast?: WeatherForecastOverview;
+  quality?: WeatherQualitySummary;
   current: WeatherCurrentSummary;
   hourly: WeatherHourlyPoint[];
   risks: WeatherRiskItem[];

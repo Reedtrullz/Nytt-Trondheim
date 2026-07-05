@@ -1,3 +1,4 @@
+import { roadWeatherObservationLevel, roadWeatherObservationStatus } from "@nytt/shared";
 import type {
   RoadWeatherObservation,
   WeatherImpactGroup,
@@ -49,40 +50,8 @@ const consequenceRadiusMeters: Record<WeatherRiskLevel, number> = {
   severe: 2_300,
 };
 
-export function roadWeatherLevel(observation: RoadWeatherObservation): WeatherRiskLevel {
-  const roadTemperature = observation.roadSurfaceTemperatureC;
-  const precipitation = observation.precipitationMm ?? 0;
-  const visibility = observation.visibilityMeters;
-  const wind = observation.windSpeedMps ?? 0;
-  const summary = observation.rawSummary?.toLocaleLowerCase("nb") ?? "";
-
-  if (
-    (typeof roadTemperature === "number" && roadTemperature <= 0 && precipitation > 0) ||
-    (typeof visibility === "number" && visibility < 200) ||
-    wind >= 17 ||
-    /is|glatt|stengt|fare/.test(summary)
-  ) {
-    return "severe";
-  }
-  if (
-    (typeof roadTemperature === "number" && roadTemperature <= 2) ||
-    precipitation >= 1 ||
-    (typeof visibility === "number" && visibility < 600) ||
-    wind >= 10
-  ) {
-    return "warning";
-  }
-  if (precipitation > 0 || wind >= 7) return "watch";
-  return "normal";
-}
-
-export function roadWeatherStatus(observation: RoadWeatherObservation): string {
-  const level = roadWeatherLevel(observation);
-  if (level === "severe") return "Krevende føre";
-  if (level === "warning") return "Følg med på føre";
-  if (level === "watch") return "Vær i endring";
-  return "Normale målinger";
-}
+export const roadWeatherLevel = roadWeatherObservationLevel;
+export const roadWeatherStatus = roadWeatherObservationStatus;
 
 export function weatherRoadStations(
   roadWeather: RoadWeatherObservation[] = [],

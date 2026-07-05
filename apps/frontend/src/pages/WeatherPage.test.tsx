@@ -47,7 +47,11 @@ vi.mock("react-leaflet", () => ({
   }),
 }));
 
-import { WeatherPreparednessMap, weatherPreparednessSourceLine } from "./WeatherPage.js";
+import {
+  WeatherPreparednessMap,
+  displayWeatherConditionSummary,
+  weatherPreparednessSourceLine,
+} from "./WeatherPage.js";
 
 const payload = {
   generatedAt: "2026-06-01T08:00:00.000Z",
@@ -160,5 +164,35 @@ describe("WeatherPreparednessMap", () => {
         ],
       }),
     ).toBe("Kilder: MET, NVE/Varsom, Statens vegvesen DATEX, DSB");
+  });
+
+  it("keeps unknown prose out of the source line fallback", () => {
+    expect(
+      weatherPreparednessSourceLine({
+        ...payload,
+        current: {
+          summary: "Regnbyger nå",
+          updatedAt: "2026-06-01T08:00:00.000Z",
+          dataStatus: "unavailable",
+        },
+        risks: [],
+        actions: [],
+        authority: { emergencyAlertStatus: "", civilDefenceDetail: "", links: [] },
+        impactGroups: [],
+        warnings: [],
+        mapLayers: [],
+        roadWeather: [],
+        sources: [],
+      }),
+    ).toBe("Kildegrunnlag ikke bekreftet ennå");
+  });
+
+  it("shows weather condition text without the MET product prefix", () => {
+    expect(displayWeatherConditionSummary("MET Locationforecast: regnbyger nå")).toBe(
+      "Regnbyger nå",
+    );
+    expect(displayWeatherConditionSummary("MET Locationforecast + Nowcast: lett regn nå")).toBe(
+      "Lett regn nå",
+    );
   });
 });

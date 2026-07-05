@@ -2306,7 +2306,7 @@ test("bootstrap 429 shows retryable error without stale loading", async ({ page 
   await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
 });
 
-test("weather page presents the preparedness desk with source-labeled official guidance", async ({
+test("weather page presents a forecast-first local weather tool with source-labeled guidance", async ({
   page,
 }) => {
   await page.route("**/api/weather/preparedness", async (route) => {
@@ -2315,12 +2315,22 @@ test("weather page presents the preparedness desk with source-labeled official g
       contentType: "application/json",
       body: JSON.stringify({
         generatedAt: "2026-06-01T08:05:00.000Z",
+        location: {
+          id: "sentrum",
+          label: "Sentrum",
+          latitude: 63.4305,
+          longitude: 10.3951,
+          description: "Midtbyen, Solsiden og sentrale Trondheim.",
+        },
         current: {
           summary: "MET Locationforecast: regnbyger nå",
           updatedAt: "2026-06-01T08:00:00.000Z",
           airTemperatureC: 7,
           windSpeedMps: 8,
           precipitationNextHourMm: 2.4,
+          symbolCode: "rain",
+          sourceLabel: "MET Locationforecast",
+          dataStatus: "ok",
         },
         risks: [
           {
@@ -2489,7 +2499,154 @@ test("weather page presents the preparedness desk with source-labeled official g
             url: "https://varsom.no",
           },
         ],
-        hourly: [],
+        hourly: [
+          {
+            time: "2026-06-01T08:00:00.000Z",
+            airTemperatureC: 7,
+            windSpeedMps: 8,
+            precipitationMm: 2.4,
+            symbolCode: "rain",
+            sourceProduct: "nowcast",
+          },
+          {
+            time: "2026-06-01T09:00:00.000Z",
+            airTemperatureC: 8,
+            windSpeedMps: 7,
+            precipitationMm: 1.5,
+            symbolCode: "rain",
+            sourceProduct: "nowcast",
+          },
+          {
+            time: "2026-06-01T10:00:00.000Z",
+            airTemperatureC: 9,
+            windSpeedMps: 6,
+            precipitationMm: 0.4,
+            symbolCode: "cloudy",
+            sourceProduct: "locationforecast",
+          },
+        ],
+        forecast: {
+          primaryLocationId: "sentrum",
+          zones: [
+            {
+              location: {
+                id: "sentrum",
+                label: "Sentrum",
+                latitude: 63.4305,
+                longitude: 10.3951,
+                description: "Midtbyen, Solsiden og sentrale Trondheim.",
+              },
+              current: {
+                summary: "MET Locationforecast: regnbyger nå",
+                updatedAt: "2026-06-01T08:00:00.000Z",
+                airTemperatureC: 7,
+                windSpeedMps: 8,
+                precipitationNextHourMm: 2.4,
+                symbolCode: "rain",
+                sourceLabel: "MET Nowcast + Locationforecast",
+                dataStatus: "ok",
+              },
+              hourly: [
+                {
+                  time: "2026-06-01T08:00:00.000Z",
+                  airTemperatureC: 7,
+                  windSpeedMps: 8,
+                  precipitationMm: 2.4,
+                  symbolCode: "rain",
+                  sourceProduct: "nowcast",
+                },
+                {
+                  time: "2026-06-01T09:00:00.000Z",
+                  airTemperatureC: 8,
+                  windSpeedMps: 7,
+                  precipitationMm: 1.5,
+                  symbolCode: "rain",
+                  sourceProduct: "nowcast",
+                },
+                {
+                  time: "2026-06-01T10:00:00.000Z",
+                  airTemperatureC: 9,
+                  windSpeedMps: 6,
+                  precipitationMm: 0.4,
+                  symbolCode: "cloudy",
+                  sourceProduct: "locationforecast",
+                },
+              ],
+              dataStatus: "ok",
+              updatedAt: "2026-06-01T08:00:00.000Z",
+              products: [],
+            },
+            {
+              location: {
+                id: "byasen",
+                label: "Byåsen/Bymarka",
+                latitude: 63.41,
+                longitude: 10.29,
+                description: "Byåsen, Bymarka og vestlige høyder.",
+              },
+              current: {
+                summary: "MET Locationforecast: opphold nå",
+                updatedAt: "2026-06-01T08:00:00.000Z",
+                airTemperatureC: 4,
+                windSpeedMps: 5,
+                precipitationNextHourMm: 0.1,
+                symbolCode: "cloudy",
+                sourceLabel: "MET Locationforecast",
+                dataStatus: "partial",
+              },
+              hourly: [
+                {
+                  time: "2026-06-01T08:00:00.000Z",
+                  airTemperatureC: 4,
+                  windSpeedMps: 5,
+                  precipitationMm: 0.1,
+                  symbolCode: "cloudy",
+                  sourceProduct: "locationforecast",
+                },
+                {
+                  time: "2026-06-01T09:00:00.000Z",
+                  airTemperatureC: 5,
+                  windSpeedMps: 5,
+                  precipitationMm: 0,
+                  symbolCode: "cloudy",
+                  sourceProduct: "locationforecast",
+                },
+              ],
+              dataStatus: "partial",
+              updatedAt: "2026-06-01T08:00:00.000Z",
+              products: [],
+            },
+          ],
+          products: [],
+        },
+        quality: {
+          generatedAt: "2026-06-01T08:05:00.000Z",
+          cacheStatus: "miss",
+          dataStatus: "ok",
+          products: [
+            {
+              source: "met",
+              product: "locationforecast",
+              locationId: "sentrum",
+              fetchedAt: "2026-06-01T08:05:00.000Z",
+              updatedAt: "2026-06-01T08:00:00.000Z",
+              cacheStatus: "miss",
+              dataStatus: "ok",
+              detail: "Hentet fra MET Locationforecast.",
+            },
+            {
+              source: "met",
+              product: "nowcast",
+              locationId: "sentrum",
+              fetchedAt: "2026-06-01T08:05:00.000Z",
+              updatedAt: "2026-06-01T08:00:00.000Z",
+              cacheStatus: "miss",
+              dataStatus: "ok",
+              detail: "Hentet fra MET Nowcast.",
+            },
+          ],
+          detail: "MET-prognose er fersk.",
+        },
         roadWeather: [
           {
             id: "datex-weather:e6-tonstad",
@@ -2519,20 +2676,125 @@ test("weather page presents the preparedness desk with source-labeled official g
 
   await page.goto("/vaer");
 
-  await expect(page.getByRole("heading", { name: "Hva betyr været nå?" })).toBeVisible();
-  await expect(page.getByText("MET Locationforecast: regnbyger nå")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Vær", level: 1 })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByRole("heading", { name: "Nå", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Regnbyger nå" })).toBeVisible();
+  await expect(page.getByText("MET Locationforecast: regnbyger nå")).toHaveCount(0);
+  const byasenButton = page.getByRole("button", { name: /Byåsen\/Bymarka/ });
+  await expect(byasenButton).toHaveAttribute("aria-pressed", "false");
+  await byasenButton.click();
+  await expect(byasenButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "Opphold nå" })).toBeVisible();
+  await expect(page.getByText("Neste 6 timer")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Neste døgn" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Nedbør" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Flom/skred" })).toBeVisible();
   await expect(page.getByText("MET farevarsel + Trondheim klimatilpasning")).toBeVisible();
-  await expect(page.getByText("Nytt er ikke koblet til Nødvarsel")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Værkart for Trondheim" })).toBeVisible();
   await expect(page.getByText("Vegværstasjoner", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Aktive lag: varsler, vegvær, konsekvenser · Kartverket"),
+  ).toBeVisible();
   await expect(page.getByText("Tegnes i kart")).toBeVisible();
   await expect(page.locator(".weather-warning-area")).toHaveCount(1);
   await expect(page.locator(".road-context-marker-weather")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "Hvem påvirkes?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Varsler og konsekvenser" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Innbyggere" })).toBeVisible();
+  await page.getByText("Kilder og datagrunnlag").click();
+  await expect(page.getByText("Fersk").first()).toBeVisible();
+  await expect(page.getByText("Nytt er ikke koblet til Nødvarsel")).toBeVisible();
   await expect(page.getByText("Sivilforsvaret støtter politi, brann, helse")).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoHorizontalPageOverflow(page);
+  const forecastTop = await page.getByText("Neste 6 timer").evaluate((node) => {
+    return node.getBoundingClientRect().top;
+  });
+  const mapTop = await page
+    .getByRole("heading", { name: "Værkart for Trondheim" })
+    .evaluate((node) => {
+      return node.getBoundingClientRect().top;
+    });
+  expect(forecastTop).toBeLessThan(mapTop);
+});
+
+test("weather page shows a useful retry state when the weather API fails once", async ({
+  page,
+}) => {
+  let attempts = 0;
+  let shouldFail = true;
+  await page.route("**/api/weather/preparedness", async (route) => {
+    attempts += 1;
+    if (shouldFail) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Værdata er midlertidig utilgjengelig." }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: "2026-06-01T08:05:00.000Z",
+        location: {
+          id: "sentrum",
+          label: "Sentrum",
+          latitude: 63.4305,
+          longitude: 10.3951,
+          description: "Midtbyen og sentrale Trondheim.",
+        },
+        current: {
+          summary: "MET Locationforecast: opphold nå",
+          updatedAt: "2026-06-01T08:00:00.000Z",
+          airTemperatureC: 11,
+          windSpeedMps: 2,
+          precipitationNextHourMm: 0,
+          symbolCode: "clearsky_day",
+          sourceLabel: "MET Locationforecast",
+          dataStatus: "ok",
+        },
+        hourly: [
+          {
+            time: "2026-06-01T08:00:00.000Z",
+            airTemperatureC: 11,
+            windSpeedMps: 2,
+            precipitationMm: 0,
+            symbolCode: "clearsky_day",
+            sourceProduct: "locationforecast",
+          },
+        ],
+        risks: [],
+        actions: [],
+        authority: { emergencyAlertStatus: "", civilDefenceDetail: "", links: [] },
+        impactGroups: [],
+        warnings: [],
+        roadWeather: [],
+        mapLayers: [],
+        sources: [],
+        quality: {
+          generatedAt: "2026-06-01T08:05:00.000Z",
+          cacheStatus: "miss",
+          dataStatus: "ok",
+          products: [],
+          detail: "MET-prognose er fersk.",
+        },
+      }),
+    });
+  });
+
+  await page.goto("/vaer");
+  await expect(page.getByRole("alert")).toContainText("Værdata er midlertidig utilgjengelig.");
+  await expect(page.getByText("Henter værberedskap...")).toHaveCount(0);
+
+  shouldFail = false;
+  await page.getByRole("button", { name: "Prøv igjen" }).click();
+  await expect(page.getByRole("heading", { name: "Opphold nå" })).toBeVisible();
+  expect(attempts).toBeGreaterThanOrEqual(2);
 });
 
 test("searching from trafikk navigates home and shows filtered results", async ({ page }) => {
@@ -3528,6 +3790,10 @@ test("primary surfaces have no automatically detectable accessibility violations
   ).toBeVisible();
   const incident = await new AxeBuilder({ page }).analyze();
   expect(incident.violations).toEqual([]);
+  await page.goto("/vaer");
+  await expect(page.getByRole("heading", { name: "Vær", level: 1 })).toBeVisible();
+  const weather = await new AxeBuilder({ page }).analyze();
+  expect(weather.violations).toEqual([]);
 });
 
 test("owner manages private situation workspace and creates an export", async ({ page }) => {
