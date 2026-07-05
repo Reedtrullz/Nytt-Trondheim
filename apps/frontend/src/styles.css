@@ -9489,6 +9489,12 @@ button {
   gap: 8px;
 }
 
+.departure-board-scope {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .departure-board-actions button,
 .departure-board-actions a {
   display: inline-flex;
@@ -9509,6 +9515,49 @@ button {
   cursor: wait;
 }
 
+.departure-board-scope button.selected {
+  border-color: color-mix(in srgb, var(--green) 44%, var(--line));
+  color: var(--green);
+  background: color-mix(in srgb, var(--paper) 84%, var(--green) 16%);
+}
+
+.selected-departure-callout {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: #fbfbf8;
+}
+
+.selected-departure-callout.matched {
+  border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+  background: color-mix(in srgb, var(--paper) 88%, var(--green) 12%);
+}
+
+.selected-departure-callout strong,
+.selected-departure-callout span {
+  display: block;
+  min-width: 0;
+}
+
+.selected-departure-callout strong {
+  color: var(--ink);
+}
+
+.selected-departure-callout span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.selected-departure-callout time {
+  flex: 0 0 auto;
+  font: 28px/1 var(--serif);
+}
+
 .departure-board-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -9523,6 +9572,11 @@ button {
   padding: 10px;
   border: 1px solid var(--line);
   background: #fff;
+}
+
+.departure-row.matched {
+  border-color: color-mix(in srgb, var(--green) 46%, var(--line));
+  background: color-mix(in srgb, #fff 88%, var(--green) 12%);
 }
 
 .departure-row-main,
@@ -9552,6 +9606,17 @@ button {
 .departure-line {
   color: var(--blue);
   background: color-mix(in srgb, #fff 88%, var(--blue) 12%);
+}
+
+.departure-row-marker {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 6px;
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .departure-row-main strong {
@@ -12459,6 +12524,11 @@ button {
 
   .departure-board-actions {
     justify-content: flex-start;
+  }
+
+  .selected-departure-callout {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .departure-board-grid {

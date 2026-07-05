@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api.js";
+import { fetchPublicTransportDepartureBoard } from "./api/publicTransportDepartures.js";
 import { fetchPublicTransportMap } from "./api/publicTransportMap.js";
 import { fetchTravelPlan } from "./api/travelPlan.js";
 import { fetchWeatherPreparedness } from "./api/weatherPreparedness.js";
@@ -428,6 +429,36 @@ describe("frontend source item API helpers", () => {
     expect(params.get("from")).toBe("Munkegata / Dronningens gate");
     expect(params.get("to")).toBe("Lade, Trondheim");
     expect(params.get("departAt")).toBe("2026-07-05T08:30:00+02:00");
+  });
+
+  it("requests public transport departures around an explicit center", async () => {
+    const payload = {
+      status: "ok",
+      detail: "Entur viser konkrete avganger nær valgt område.",
+      areaLabel: "Valgt område",
+      center: { lat: 63.4305, lon: 10.3951 },
+      stops: [],
+      departures: [],
+      sources: [],
+      generatedAt: "2026-07-05T08:30:00.000Z",
+      handoffUrl: "https://www.atb.no/reiseplanlegger/",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchPublicTransportDepartureBoard({
+        center: { lat: 63.4305, lon: 10.3951 },
+        radiusMeters: 900,
+        stopLimit: 3,
+        departureLimit: 7,
+      }),
+    ).resolves.toEqual(payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/map/public-transport/departures?lat=63.4305&lon=10.3951&radiusMeters=900&stopLimit=3&departureLimit=7",
+      expect.objectContaining({ credentials: "include" }),
+    );
   });
 
   it("requests raw operations inspector data with typed filters", async () => {

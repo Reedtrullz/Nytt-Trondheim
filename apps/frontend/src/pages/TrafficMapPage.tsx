@@ -12,6 +12,7 @@ import type {
   TrafficMapEvent,
   TravelPlanItinerary,
   TravelPlanItineraryLabel,
+  TravelPlanLeg,
   TravelPlanLegMode,
   TravelPlanPayload,
 } from "@nytt/shared";
@@ -71,7 +72,24 @@ interface TrafficTimeWindow {
   to?: string;
 }
 
+type DepartureBoardScope = "default" | "origin";
+
+interface DepartureBoardContext {
+  scope: DepartureBoardScope;
+  label: string;
+  center?: { lat: number; lon: number };
+}
+
+interface SelectedDepartureMatch {
+  leg: TravelPlanLeg;
+  departure?: PublicTransportDeparture;
+}
+
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
+const defaultDepartureBoardContext: DepartureBoardContext = {
+  scope: "default",
+  label: "Trondheim sentrum",
+};
 const tiles = "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png";
 const severityRank: Record<TrafficEventSeverity, number> = {
   low: 1,
@@ -295,15 +313,44 @@ export function routePositions(plan: TravelPlanPayload): [number, number][] {
   return latLngsFromLineString(plan.route.geometry);
 }
 
+function selectedItineraryForPlan(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): TravelPlanItinerary | undefined {
+  return (
+    plan?.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
+    plan?.itineraries[0]
+  );
+}
+
+export function departureBoardContextFromPlan(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): DepartureBoardContext | undefined {
+  if (!plan) return undefined;
+  const boardingLeg = firstBoardingLeg(selectedItineraryForPlan(plan, selectedItineraryId));
+  const [lon, lat] = boardingLeg?.from.coordinate ?? plan.origin.coordinate;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+  return {
+    scope: "origin",
+    label:
+      boardingLeg?.from.stopName ??
+      boardingLeg?.from.name ??
+      plan.origin.label ??
+      plan.origin.query ??
+      "Valgt startpunkt",
+    center: { lat, lon },
+  };
+}
+
 function selectedItineraryPositions(
   plan: TravelPlanPayload,
   selectedItineraryId?: string,
 ): [number, number][] {
-  const selectedItinerary =
-    plan.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
-    plan.itineraries[0];
   const positions =
-    selectedItinerary?.legs.flatMap((leg) => latLngsFromLineString(leg.geometry)) ?? [];
+    selectedItineraryForPlan(plan, selectedItineraryId)?.legs.flatMap((leg) =>
+      latLngsFromLineString(leg.geometry),
+    ) ?? [];
   return positions.length >= 2 ? positions : routePositions(plan);
 }
 
@@ -324,6 +371,82 @@ function strongestRouteImpact(plan: TravelPlanPayload): TrafficEventSeverity | u
   return [...plan.trafficImpacts].sort(
     (left, right) => severityRank[right.severity] - severityRank[left.severity],
   )[0]?.severity;
+}
+
+function normaliseTransitText(value?: string): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function transitTextMatches(left?: string, right?: string): boolean {
+  const normalisedLeft = normaliseTransitText(left);
+  const normalisedRight = normaliseTransitText(right);
+  if (!normalisedLeft || !normalisedRight) return false;
+  return normalisedLeft === normalisedRight || normalisedLeft.includes(normalisedRight);
+}
+
+function firstBoardingLeg(itinerary?: TravelPlanItinerary): TravelPlanLeg | undefined {
+  return itinerary?.legs.find((leg) => {
+    if (leg.mode === "walk") return false;
+    return Boolean(leg.publicCode || leg.lineId || leg.from.stopId || leg.from.stopName);
+  });
+}
+
+function scoreDepartureForLeg(departure: PublicTransportDeparture, leg: TravelPlanLeg): number {
+  let score = 0;
+  if (departure.mode === leg.mode) score += 1;
+  if (leg.lineId && departure.lineId === leg.lineId) score += 5;
+  if (leg.publicCode && departure.publicCode === leg.publicCode) score += 4;
+  if (leg.from.stopId && departure.stopId === leg.from.stopId) score += 5;
+  if (
+    transitTextMatches(departure.stopName, leg.from.stopName) ||
+    transitTextMatches(departure.stopName, leg.from.name)
+  ) {
+    score += 3;
+  }
+  if (
+    transitTextMatches(departure.destinationName, leg.to.stopName) ||
+    transitTextMatches(departure.destinationName, leg.to.name)
+  ) {
+    score += 2;
+  }
+
+  const legStart = Date.parse(leg.expectedStartTime || leg.aimedStartTime);
+  const departureStart = Date.parse(departure.expectedDepartureTime);
+  if (Number.isFinite(legStart) && Number.isFinite(departureStart)) {
+    const diffSeconds = Math.abs(departureStart - legStart) / 1000;
+    if (diffSeconds <= 10 * 60) score += 4;
+    else if (diffSeconds <= 20 * 60) score += 2;
+    else if (diffSeconds > 45 * 60) score -= 3;
+  }
+
+  return score;
+}
+
+export function selectedDepartureMatch(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+  board?: PublicTransportDepartureBoardPayload,
+): SelectedDepartureMatch | undefined {
+  const leg = firstBoardingLeg(selectedItineraryForPlan(plan, selectedItineraryId));
+  if (!leg) return undefined;
+  let best: PublicTransportDeparture | undefined;
+  let bestScore = 0;
+  for (const departure of board?.departures ?? []) {
+    const score = scoreDepartureForLeg(departure, leg);
+    if (score > bestScore) {
+      best = departure;
+      bestScore = score;
+    }
+  }
+  return {
+    leg,
+    departure: bestScore >= 7 ? best : undefined,
+  };
 }
 
 export function travelPlanDecision(plan?: TravelPlanPayload): {
@@ -902,28 +1025,61 @@ function DepartureBoardPanel({
   board,
   loading,
   error,
+  context,
+  routeOriginContext,
+  selectedDeparture,
   onReload,
+  onContextChange,
 }: {
   board?: PublicTransportDepartureBoardPayload;
   loading: boolean;
   error?: string;
+  context: DepartureBoardContext;
+  routeOriginContext?: DepartureBoardContext;
+  selectedDeparture?: SelectedDepartureMatch;
   onReload: () => void;
+  onContextChange: (context: DepartureBoardContext) => void;
 }) {
   const safeHandoff = safeExternalUrl(board?.handoffUrl ?? "https://www.atb.no/reiseplanlegger/");
   const displayedDepartures = Array.isArray(board?.departures) ? board.departures.slice(0, 8) : [];
+  const contextDescription =
+    context.scope === "origin"
+      ? `${context.label}: neste avganger fra holdeplasser ved startpunktet.`
+      : board
+        ? `${board.areaLabel}: neste avganger fra holdeplasser i nærheten.`
+        : "Neste avganger fra Trondheim sentrum lastes inn.";
+  const matchedDeparture = selectedDeparture?.departure;
   return (
     <section className="departure-board-panel" aria-labelledby="departure-board-heading">
       <header>
         <div>
           <p className="label">Kollektiv nå</p>
           <h2 id="departure-board-heading">Avganger nå</h2>
-          <p>
-            {board
-              ? `${board.areaLabel}: neste avganger fra holdeplasser i nærheten.`
-              : "Neste avganger fra Trondheim sentrum lastes inn."}
-          </p>
+          <p>{contextDescription}</p>
         </div>
         <div className="departure-board-actions">
+          <div className="departure-board-scope" aria-label="Velg avgangsområde">
+            <button
+              type="button"
+              className={context.scope === "default" ? "selected" : undefined}
+              aria-pressed={context.scope === "default"}
+              onClick={() => onContextChange(defaultDepartureBoardContext)}
+              disabled={loading && context.scope === "default"}
+            >
+              Sentrum
+            </button>
+            {routeOriginContext ? (
+              <button
+                type="button"
+                className={context.scope === "origin" ? "selected" : undefined}
+                aria-pressed={context.scope === "origin"}
+                onClick={() => onContextChange(routeOriginContext)}
+                disabled={loading && context.scope === "origin"}
+              >
+                Startpunkt
+              </button>
+            ) : null}
+          </div>
           <button type="button" onClick={onReload} disabled={loading}>
             {loading ? "Oppdaterer ..." : "Oppdater"}
           </button>
@@ -944,40 +1100,72 @@ function DepartureBoardPanel({
         <p className="route-planner-status warning">{board.detail}</p>
       ) : null}
       {board?.status === "empty" ? <p className="route-planner-status">{board.detail}</p> : null}
+      {selectedDeparture ? (
+        <article
+          className={`selected-departure-callout${matchedDeparture ? " matched" : ""}`}
+          aria-label="Valgt reiseforslag"
+        >
+          <div>
+            <p className="label">Valgt reiseforslag</p>
+            <strong>
+              {modeLabel(selectedDeparture.leg.mode)}
+              {selectedDeparture.leg.publicCode
+                ? ` ${selectedDeparture.leg.publicCode}`
+                : ""} fra {selectedDeparture.leg.from.stopName ?? selectedDeparture.leg.from.name}
+            </strong>
+            <span>
+              {matchedDeparture
+                ? `Matcher avgang mot ${matchedDeparture.destinationName}.`
+                : "Ingen sikker match i avgangslisten. Sjekk linje og holdeplass hos AtB/Entur."}
+            </span>
+          </div>
+          {matchedDeparture ? (
+            <time dateTime={matchedDeparture.expectedDepartureTime}>
+              {formatTravelDateTime(matchedDeparture.expectedDepartureTime)}
+            </time>
+          ) : null}
+        </article>
+      ) : null}
       {displayedDepartures.length ? (
         <div className="departure-board-grid">
-          {displayedDepartures.map((departure) => (
-            <article key={departure.id} className="departure-row">
-              <div className="departure-row-main">
-                <span className="departure-line">{departureLineLabel(departure)}</span>
-                <strong>{departure.destinationName}</strong>
-                <small>
-                  {departure.stopName}
-                  {departure.quayPublicCode ? ` · ${departure.quayPublicCode}` : ""}
-                  {departure.stopDistanceMeters !== undefined
-                    ? ` · ${formatDistance(departure.stopDistanceMeters)} unna`
-                    : ""}
-                </small>
-              </div>
-              <div className="departure-row-time">
-                <time dateTime={departure.expectedDepartureTime}>
-                  {formatTravelDateTime(departure.expectedDepartureTime)}
-                </time>
-                <span className={`departure-status ${departureStatusClass(departure)}`}>
-                  {departureStatusLabel(departure)}
-                </span>
-              </div>
-              {departure.notices.length ? (
-                <div className="departure-notices" aria-label="Avvik for avgangen">
-                  {departure.notices.slice(0, 2).map((notice) => (
-                    <span key={notice.id} className={`departure-notice ${notice.severity}`}>
-                      {notice.title}
-                    </span>
-                  ))}
+          {displayedDepartures.map((departure) => {
+            const selected = matchedDeparture?.id === departure.id;
+            return (
+              <article key={departure.id} className={`departure-row${selected ? " matched" : ""}`}>
+                <div className="departure-row-main">
+                  <span className="departure-line">{departureLineLabel(departure)}</span>
+                  <strong>{departure.destinationName}</strong>
+                  <small>
+                    {departure.stopName}
+                    {departure.quayPublicCode ? ` · ${departure.quayPublicCode}` : ""}
+                    {departure.stopDistanceMeters !== undefined
+                      ? ` · ${formatDistance(departure.stopDistanceMeters)} unna`
+                      : ""}
+                  </small>
+                  {selected ? (
+                    <span className="departure-row-marker">Valgt reiseforslag</span>
+                  ) : null}
                 </div>
-              ) : null}
-            </article>
-          ))}
+                <div className="departure-row-time">
+                  <time dateTime={departure.expectedDepartureTime}>
+                    {formatTravelDateTime(departure.expectedDepartureTime)}
+                  </time>
+                  <span className={`departure-status ${departureStatusClass(departure)}`}>
+                    {departureStatusLabel(departure)}
+                  </span>
+                </div>
+                {departure.notices.length ? (
+                  <div className="departure-notices" aria-label="Avvik for avgangen">
+                    {departure.notices.slice(0, 2).map((notice) => (
+                      <span key={notice.id} className={`departure-notice ${notice.severity}`}>
+                        {notice.title}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
       ) : null}
       <footer>
@@ -1168,20 +1356,25 @@ export function TrafficMapPage() {
   const [travelPlanLoading, setTravelPlanLoading] = useState(false);
   const [travelPlanError, setTravelPlanError] = useState<string>();
   const [departureBoard, setDepartureBoard] = useState<PublicTransportDepartureBoardPayload>();
+  const [departureBoardContext, setDepartureBoardContext] = useState<DepartureBoardContext>(
+    defaultDepartureBoardContext,
+  );
   const [departureBoardLoading, setDepartureBoardLoading] = useState(false);
   const [departureBoardError, setDepartureBoardError] = useState<string>();
   const travelPlanRequestIdRef = useRef(0);
   const travelPlanAbortRef = useRef<AbortController | undefined>(undefined);
   const departureBoardAbortRef = useRef<AbortController | undefined>(undefined);
 
-  const reloadDepartureBoard = useCallback(() => {
+  const loadDepartureBoard = useCallback((context: DepartureBoardContext) => {
     departureBoardAbortRef.current?.abort();
     const controller = new AbortController();
     departureBoardAbortRef.current = controller;
+    setDepartureBoardContext(context);
+    setDepartureBoard(undefined);
     setDepartureBoardLoading(true);
     setDepartureBoardError(undefined);
     fetchPublicTransportDepartureBoard(
-      { radiusMeters: 1_200, stopLimit: 4, departureLimit: 12 },
+      { center: context.center, radiusMeters: 1_200, stopLimit: 4, departureLimit: 12 },
       { signal: controller.signal },
     )
       .then((payload) => {
@@ -1201,13 +1394,17 @@ export function TrafficMapPage() {
       });
   }, []);
 
+  const reloadDepartureBoard = useCallback(() => {
+    loadDepartureBoard(departureBoardContext);
+  }, [departureBoardContext, loadDepartureBoard]);
+
   useEffect(() => {
-    reloadDepartureBoard();
+    loadDepartureBoard(defaultDepartureBoardContext);
     return () => {
       travelPlanAbortRef.current?.abort();
       departureBoardAbortRef.current?.abort();
     };
-  }, [reloadDepartureBoard]);
+  }, [loadDepartureBoard]);
 
   useEffect(() => {
     setSelectedPreset(trafficFilters.preset);
@@ -1218,7 +1415,7 @@ export function TrafficMapPage() {
     setSelectedEventId(undefined);
   }, [trafficFilters]);
 
-  function invalidateTravelPlan(): number {
+  function invalidateTravelPlan(options: { resetDepartureBoard?: boolean } = {}): number {
     const requestId = travelPlanRequestIdRef.current + 1;
     travelPlanRequestIdRef.current = requestId;
     travelPlanAbortRef.current?.abort();
@@ -1226,6 +1423,9 @@ export function TrafficMapPage() {
     setTravelPlan(undefined);
     setSelectedItineraryId(undefined);
     setTravelPlanLoading(false);
+    if (options.resetDepartureBoard) {
+      loadDepartureBoard(defaultDepartureBoardContext);
+    }
     return requestId;
   }
 
@@ -1233,7 +1433,7 @@ export function TrafficMapPage() {
     setter(value);
     setTravelPlanError(undefined);
     if (travelPlanLoading || travelPlan) {
-      invalidateTravelPlan();
+      invalidateTravelPlan({ resetDepartureBoard: true });
     }
   }
 
@@ -1241,7 +1441,7 @@ export function TrafficMapPage() {
     setTimePreset(value);
     setTravelPlanError(undefined);
     if (travelPlanLoading || travelPlan) {
-      invalidateTravelPlan();
+      invalidateTravelPlan({ resetDepartureBoard: true });
     }
   }
 
@@ -1363,6 +1563,14 @@ export function TrafficMapPage() {
         })),
     [trafficViewModel.rankedEvents, visibleEventIds, data?.corridorImpacts],
   );
+  const routeOriginDepartureBoardContext = useMemo(
+    () => departureBoardContextFromPlan(travelPlan, selectedItineraryId),
+    [selectedItineraryId, travelPlan],
+  );
+  const selectedDeparture = useMemo(
+    () => selectedDepartureMatch(travelPlan, selectedItineraryId, departureBoard),
+    [departureBoard, selectedItineraryId, travelPlan],
+  );
 
   const highlightedEventIds = useMemo(() => {
     const highlightedIds = new Set<string>();
@@ -1467,9 +1675,21 @@ export function TrafficMapPage() {
     });
   }, [handleContextLayersChange, visibleContextLayers]);
 
+  function handleSelectItinerary(itineraryId: string): void {
+    setSelectedItineraryId(itineraryId);
+    const context = departureBoardContextFromPlan(travelPlan, itineraryId);
+    if (context) {
+      loadDepartureBoard(context);
+    }
+  }
+
   async function handleTravelPlanSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const requestId = invalidateTravelPlan();
+    const requestId = invalidateTravelPlan({
+      resetDepartureBoard: Boolean(
+        travelPlanLoading || travelPlan || departureBoardContext.scope === "origin",
+      ),
+    });
 
     const from = originInput.trim();
     const to = destinationInput.trim();
@@ -1490,6 +1710,10 @@ export function TrafficMapPage() {
       if (travelPlanRequestIdRef.current !== requestId) return;
       setTravelPlan(payload);
       setSelectedItineraryId(payload.itineraries[0]?.id);
+      const originContext = departureBoardContextFromPlan(payload, payload.itineraries[0]?.id);
+      if (originContext) {
+        loadDepartureBoard(originContext);
+      }
       showPublicTransportDisruptions();
     } catch (reason) {
       if (travelPlanRequestIdRef.current === requestId) {
@@ -1518,7 +1742,7 @@ export function TrafficMapPage() {
         onOriginChange={(value) => handleTravelInputChange(value, setOriginInput)}
         onDestinationChange={(value) => handleTravelInputChange(value, setDestinationInput)}
         onTimePresetChange={handleTravelTimePresetChange}
-        onSelectItinerary={setSelectedItineraryId}
+        onSelectItinerary={handleSelectItinerary}
         onSubmit={(event) => void handleTravelPlanSubmit(event)}
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}
@@ -1527,7 +1751,11 @@ export function TrafficMapPage() {
         board={departureBoard}
         loading={departureBoardLoading}
         error={departureBoardError}
+        context={departureBoardContext}
+        routeOriginContext={routeOriginDepartureBoardContext}
+        selectedDeparture={selectedDeparture}
         onReload={reloadDepartureBoard}
+        onContextChange={loadDepartureBoard}
       />
       <TrafficNowSummary cards={summaryCardsForDisplay} />
       <TrafficDataDisclosure

@@ -1958,6 +1958,58 @@ test("traffic map shows useful default public transport departures", async ({ pa
 test("traffic map travel planner shows route-specific traffic and public transport advice", async ({
   page,
 }) => {
+  const departureRequestUrls: URL[] = [];
+  await page.route("**/api/map/public-transport/departures**", async (route) => {
+    const url = new URL(route.request().url());
+    departureRequestUrls.push(url);
+    if (url.searchParams.get("lat") !== "63.4305" || url.searchParams.get("lon") !== "10.3951") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "ok",
+        detail: "Entur viser konkrete avganger nær valgt område.",
+        areaLabel: "Valgt område",
+        center: { lat: 63.4305, lon: 10.3951 },
+        stops: [],
+        departures: [
+          {
+            id: "departure:3",
+            stopId: "NSR:StopPlace:41613",
+            stopName: "Munkegata",
+            stopDistanceMeters: 42,
+            quayPublicCode: "M1",
+            mode: "bus",
+            lineId: "ATB:Line:3",
+            publicCode: "3",
+            lineName: "Lade - Hallset",
+            destinationName: "Leangen",
+            aimedDepartureTime: "2026-06-01T09:10:00.000Z",
+            expectedDepartureTime: "2026-06-01T09:10:00.000Z",
+            delaySeconds: 0,
+            realtime: true,
+            cancelled: false,
+            notices: [],
+            handoffUrl: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        sources: [
+          {
+            source: "entur_service_alerts",
+            label: "Entur avvik",
+            state: "ok",
+            detail: "Ingen aktive avvik",
+          },
+        ],
+        generatedAt: "2026-06-01T09:06:00.000Z",
+        handoffUrl: "https://www.atb.no/reiseplanlegger/",
+      }),
+    });
+  });
+
   await page.route("**/api/map/travel-plan?**", async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("from")).toBe("Munkegata");
@@ -2126,9 +2178,26 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(routeAssessment.getByText("Kjøretøy nær ruten", { exact: true })).toBeVisible();
   await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
   await expect(page.getByText("Beste nå")).toBeVisible();
-  await expect(page.getByText("Buss 3")).toBeVisible();
+  await expect(
+    page.getByLabel("Planlegg reisen").getByText("Buss 3", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /vises på kart/i })).toBeVisible();
   await expect(page.getByText("Forsinkelse på linje 3")).toBeVisible();
+  const board = page.getByRole("region", { name: "Avganger nå" });
+  await expect(board).toContainText("Munkegata: neste avganger fra holdeplasser ved startpunktet.");
+  await expect(board.getByRole("button", { name: "Startpunkt" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const selectedDeparture = board.getByLabel("Valgt reiseforslag");
+  await expect(selectedDeparture).toContainText("Buss 3 fra Munkegata");
+  await expect(selectedDeparture).toContainText("Matcher avgang mot Leangen");
+  expect(
+    departureRequestUrls.some(
+      (url) =>
+        url.searchParams.get("lat") === "63.4305" && url.searchParams.get("lon") === "10.3951",
+    ),
+  ).toBe(true);
   await expect(
     page.getByText("Nytt vurderer reiserisiko, ikke billetter eller garanti."),
   ).toBeVisible();

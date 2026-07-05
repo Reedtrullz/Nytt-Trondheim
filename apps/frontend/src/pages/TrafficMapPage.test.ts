@@ -1,4 +1,4 @@
-import type { TravelPlanPayload } from "@nytt/shared";
+import type { PublicTransportDepartureBoardPayload, TravelPlanPayload } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react-leaflet", () => ({
@@ -23,9 +23,11 @@ vi.mock("react-leaflet", () => ({
 }));
 
 import {
+  departureBoardContextFromPlan,
   departureTimeForPreset,
   formatTravelDateTime,
   routePositions,
+  selectedDepartureMatch,
   timeWindowForPreset,
   travelPlanDecision,
 } from "./TrafficMapPage.js";
@@ -59,6 +61,119 @@ const plan: TravelPlanPayload = {
   generatedAt: "2026-06-01T16:42:00.000Z",
 };
 
+const planWithItinerary: TravelPlanPayload = {
+  ...plan,
+  itineraries: [
+    {
+      id: "itinerary-1",
+      decision: "good",
+      decisionReason: "Normal reise.",
+      labels: ["best_now"],
+      departureTime: "2026-06-01T09:10:00.000Z",
+      arrivalTime: "2026-06-01T09:27:00.000Z",
+      durationSeconds: 1020,
+      transferCount: 0,
+      walkTimeSeconds: 180,
+      realtime: true,
+      modes: ["bus"],
+      disruptionCount: 0,
+      handoffUrl: "https://www.atb.no/reiseplanlegger/",
+      legs: [
+        {
+          id: "leg-bus-3",
+          mode: "bus",
+          from: {
+            name: "Munkegata",
+            stopName: "Munkegata",
+            stopId: "NSR:StopPlace:41613",
+            coordinate: [10.3951, 63.4305],
+          },
+          to: {
+            name: "Leangen",
+            stopName: "Leangen",
+            coordinate: [10.464, 63.433],
+          },
+          aimedStartTime: "2026-06-01T09:10:00.000Z",
+          expectedStartTime: "2026-06-01T09:10:00.000Z",
+          aimedEndTime: "2026-06-01T09:27:00.000Z",
+          expectedEndTime: "2026-06-01T09:27:00.000Z",
+          durationSeconds: 1020,
+          distanceMeters: 4850,
+          realtime: true,
+          cancelled: false,
+          replacementTransport: false,
+          lineId: "ATB:Line:3",
+          publicCode: "3",
+          lineName: "Lade - Hallset",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.3951, 63.4305],
+              [10.464, 63.433],
+            ],
+          },
+          notices: [],
+        },
+      ],
+    },
+  ],
+  journeyPlanner: {
+    status: "ok",
+    detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+    requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+    source: "Entur Journey Planner",
+  },
+};
+
+const departureBoard: PublicTransportDepartureBoardPayload = {
+  status: "ok",
+  detail: "Entur viser konkrete avganger nær valgt område.",
+  areaLabel: "Valgt område",
+  center: { lat: 63.4305, lon: 10.3951 },
+  stops: [],
+  departures: [
+    {
+      id: "departure:3",
+      stopId: "NSR:StopPlace:41613",
+      stopName: "Munkegata",
+      stopDistanceMeters: 80,
+      mode: "bus",
+      lineId: "ATB:Line:3",
+      publicCode: "3",
+      lineName: "Lade - Hallset",
+      destinationName: "Leangen",
+      aimedDepartureTime: "2026-06-01T09:10:00.000Z",
+      expectedDepartureTime: "2026-06-01T09:10:00.000Z",
+      delaySeconds: 0,
+      realtime: true,
+      cancelled: false,
+      notices: [],
+      handoffUrl: "https://www.atb.no/reiseplanlegger/",
+    },
+    {
+      id: "departure:71",
+      stopId: "NSR:StopPlace:99999",
+      stopName: "Prinsens gate",
+      stopDistanceMeters: 180,
+      mode: "bus",
+      lineId: "ATB:Line:71",
+      publicCode: "71",
+      lineName: "MelhusSkyss-Trondheim",
+      destinationName: "Dora",
+      aimedDepartureTime: "2026-06-01T09:11:00.000Z",
+      expectedDepartureTime: "2026-06-01T09:11:00.000Z",
+      delaySeconds: 0,
+      realtime: true,
+      cancelled: false,
+      notices: [],
+      handoffUrl: "https://www.atb.no/reiseplanlegger/",
+    },
+  ],
+  sources: [],
+  generatedAt: "2026-06-01T09:06:00.000Z",
+  handoffUrl: "https://www.atb.no/reiseplanlegger/",
+};
+
 describe("TrafficMapPage route overlay helpers", () => {
   it("keeps the default now preset scoped to active incidents", () => {
     expect(timeWindowForPreset("now")).toEqual({ states: ["active"] });
@@ -69,6 +184,41 @@ describe("TrafficMapPage route overlay helpers", () => {
       [63.39, 10.39],
       [63.4, 10.41],
     ]);
+  });
+
+  it("uses the travel plan origin as an explicit departure-board center", () => {
+    expect(departureBoardContextFromPlan(plan)).toEqual({
+      scope: "origin",
+      label: "Start",
+      center: { lat: 63.39, lon: 10.39 },
+    });
+  });
+
+  it("uses the selected itinerary boarding stop when building a departure-board center", () => {
+    expect(departureBoardContextFromPlan(planWithItinerary, "itinerary-1")).toEqual({
+      scope: "origin",
+      label: "Munkegata",
+      center: { lat: 63.4305, lon: 10.3951 },
+    });
+  });
+
+  it("matches a selected itinerary to the concrete nearby departure row", () => {
+    expect(selectedDepartureMatch(planWithItinerary, "itinerary-1", departureBoard)).toMatchObject({
+      leg: { id: "leg-bus-3" },
+      departure: { id: "departure:3" },
+    });
+  });
+
+  it("keeps the selected itinerary callout conservative when no departure row matches", () => {
+    expect(
+      selectedDepartureMatch(planWithItinerary, "itinerary-1", {
+        ...departureBoard,
+        departures: [departureBoard.departures[1]!],
+      }),
+    ).toMatchObject({
+      leg: { id: "leg-bus-3" },
+      departure: undefined,
+    });
   });
 
   it("builds travel departure presets in Oslo time", () => {
