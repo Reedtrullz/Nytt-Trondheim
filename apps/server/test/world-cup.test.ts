@@ -28,14 +28,14 @@ const scoreboardFixture = {
             {
               id: "4789",
               homeAway: "home",
-              score: "1",
+              score: 1,
               winner: false,
               team: { id: "4789", displayName: "Ivory Coast", abbreviation: "CIV" },
             },
             {
               id: "464",
               homeAway: "away",
-              score: "2",
+              score: 2,
               winner: true,
               team: { id: "464", displayName: "Norway", abbreviation: "NOR" },
             },
@@ -178,8 +178,22 @@ describe("World Cup dashboard", () => {
     );
 
     expect(payload.sourceMode).toBe("live");
+    expect(payload.generatedAt).toBe("2026-07-02T18:50:00.000Z");
+    expect(payload.dataUpdatedAt).toBe("2026-07-02T18:50:00.000Z");
     expect(payload.nextRefreshSeconds).toBe(75);
     expect(payload.sourceDetail).not.toContain("competitors");
+    expect(payload.localTeams).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "norway-men",
+          label: "Norge menn",
+          next: "Brasil - Norge",
+        }),
+        expect.objectContaining({ id: "rosenborg-men", label: "RBK herrer" }),
+        expect.objectContaining({ id: "rosenborg-women", label: "RBK kvinner" }),
+        expect.objectContaining({ id: "ranheim-men", label: "Ranheim herrer" }),
+      ]),
+    );
     expect(payload.matches).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -229,6 +243,8 @@ describe("World Cup dashboard", () => {
 
     expect(payload.sourceMode).toBe("fallback");
     expect(payload.sourceLabel).toBe("Kuratert VM-snapshot");
+    expect(payload.generatedAt).toBe("2026-07-02T18:50:00.000Z");
+    expect(payload.dataUpdatedAt).toBe("2026-07-01T10:30:00.000Z");
     expect(payload.sourceDetail).toContain("network timeout");
     expect(payload.matches.length).toBeGreaterThan(0);
   });

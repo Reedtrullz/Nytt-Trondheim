@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   fallbackWorldCupDashboard,
   type Article,
+  type FootballTeamFocus,
   type WorldCupDashboardPayload,
   type WorldCupGroupTable,
   type WorldCupMatch,
@@ -75,8 +76,25 @@ function dataAgeHours(now: Date, generatedAt: string): number | undefined {
   return Math.max(0, Math.round((now.getTime() - generatedDate.getTime()) / 36_000) / 100);
 }
 
+function worldCupDataUpdatedAt(worldCup: WorldCupDashboardPayload): string {
+  return worldCup.dataUpdatedAt ?? worldCup.generatedAt;
+}
+
+function isFallbackStale(worldCup: WorldCupDashboardPayload, now: Date): boolean {
+  if (worldCup.sourceMode !== "fallback") return false;
+  const age = dataAgeHours(now, worldCupDataUpdatedAt(worldCup));
+  return age === undefined || age >= 12;
+}
+
+function isOutdatedScheduledMatch(match: WorldCupMatch, now: Date): boolean {
+  if (match.status === "finished") return false;
+  const kickoffMs = Date.parse(match.kickoff ?? "");
+  if (Number.isNaN(kickoffMs)) return false;
+  return kickoffMs < now.getTime() - 2 * 60 * 60 * 1000;
+}
+
 function worldCupStatusLabel(worldCup: WorldCupDashboardPayload, now: Date): string {
-  const age = dataAgeHours(now, worldCup.generatedAt);
+  const age = dataAgeHours(now, worldCupDataUpdatedAt(worldCup));
   if (worldCup.sourceMode === "live") {
     if (age === undefined) return "Livefeed aktiv";
     if (age < 0.25) return "Livefeed oppdatert nå";
@@ -103,12 +121,142 @@ function articleHref(article: Article): string | undefined {
   return safeExternalUrl(article.url);
 }
 
-function MatchCard({ match }: { match: WorldCupMatch }) {
+function articleSearchText(article: Article): string {
+  return [
+    article.title,
+    article.excerpt,
+    article.sourceLabel,
+    ...(article.topics ?? []),
+    ...(article.places ?? []),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function hasTerm(text: string, terms: string[]): boolean {
+  return terms.some((term) => {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}([^\\p{L}\\p{N}]|$)`, "iu").test(text);
+  });
+}
+
+function isTeamArticle(team: FootballTeamFocus, article: Article): boolean {
+  const text = articleSearchText(article);
+  switch (team.id) {
+    case "norway-men":
+      return hasTerm(text, ["norge", "landslaget", "haaland", "håland", "odegaard", "ødegård"]);
+    case "rosenborg-men":
+      return (
+        (article.topics?.includes("rosenborg") === true ||
+          hasTerm(text, ["rbk", "rosenborg", "lerkendal"])) &&
+        !isRosenborgWomenArticle(text)
+      );
+    case "rosenborg-women":
+      return isRosenborgWomenArticle(text);
+    case "ranheim-men":
+      return hasTerm(text, ["ranheim"]);
+  }
+}
+
+function isRosenborgWomenArticle(text: string): boolean {
+  return hasTerm(text, ["rbk kvinner", "rosenborg kvinner", "toppserien", "kvinnelaget"]);
+}
+
+function teamArticleLink(team: FootballTeamFocus): string {
+  const params = new URLSearchParams({ category: "Sport" });
+  if (team.articleTopic) {
+    params.set("topic", team.articleTopic);
+  } else {
+    params.set("q", team.articleQuery);
+  }
+  return `/?${params.toString()}`;
+}
+
+function SportSectionNav() {
   return (
-    <article className={`sport-match sport-match-${match.status}`}>
+    <nav className="sport-section-nav" aria-label="Sportseksjoner">
+      <a href="#sport-local-teams">Lokale lag</a>
+      <a href="#sport-today">I dag</a>
+      <a href="#sport-matches">Kamper</a>
+      <a href="#sport-bracket">Sluttspill</a>
+      <a href="#sport-tables">Tabeller</a>
+      <a href="#sport-sources">Kilder</a>
+    </nav>
+  );
+}
+
+function LocalTeamFocusPanel({
+  teams,
+  articles,
+}: {
+  teams: FootballTeamFocus[];
+  articles: Article[];
+}) {
+  return (
+    <section
+      id="sport-local-teams"
+      className="sport-panel sport-team-panel"
+      aria-labelledby="sport-local-teams-heading"
+    >
+      <header className="sport-panel-heading">
+        <div>
+          <p className="label">Trondheim-fotball</p>
+          <h2 id="sport-local-teams-heading">Lag å følge</h2>
+        </div>
+        <span>Lokale saker + VM-spor</span>
+      </header>
+      <div className="sport-team-grid">
+        {teams.map((team) => {
+          const matchingArticles = articles.filter((article) => isTeamArticle(team, article));
+          const latestArticle = matchingArticles[0];
+          return (
+            <article
+              key={team.id}
+              className={`sport-team-card${team.featured ? " sport-team-card-featured" : ""}`}
+            >
+              <header>
+                <span>{team.competition}</span>
+                <strong>{team.shortLabel}</strong>
+              </header>
+              <h3>{team.label}</h3>
+              <p className="sport-team-status">{team.status}</p>
+              <p>{team.next}</p>
+              <small>{team.detail}</small>
+              <footer>
+                <span>{team.region}</span>
+                <span>
+                  {matchingArticles.length > 0
+                    ? `${matchingArticles.length} saker i Nytt`
+                    : team.sourceLabel}
+                </span>
+              </footer>
+              {latestArticle ? (
+                <p className="sport-team-latest">
+                  Siste: {latestArticle.title} ({formatArticleTime(latestArticle.publishedAt)})
+                </p>
+              ) : null}
+              <Link to={teamArticleLink(team)}>
+                Se saker
+                <ArrowIcon />
+              </Link>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function MatchCard({ match, now }: { match: WorldCupMatch; now: Date }) {
+  const stale = isOutdatedScheduledMatch(match, now);
+  const label = stale ? "Må sjekkes" : statusLabel(match.status);
+  return (
+    <article
+      className={`sport-match sport-match-${match.status}${stale ? " sport-match-stale" : ""}`}
+    >
       <header>
         <span className="sport-match-status">
-          {match.stage} · {statusLabel(match.status)}
+          {match.stage} · {label}
         </span>
         <time dateTime={match.kickoff}>{formatKickoff(match.kickoff)}</time>
       </header>
@@ -118,6 +266,11 @@ function MatchCard({ match }: { match: WorldCupMatch }) {
         <strong>{match.away}</strong>
       </div>
       {match.penaltyResult ? <p className="sport-match-penalty">{match.penaltyResult}</p> : null}
+      {stale ? (
+        <p className="sport-match-warning">
+          Tidspunktet er passert i datagrunnlaget. Sjekk offisiell kilde før du bruker raden.
+        </p>
+      ) : null}
       <p>{match.note}</p>
       <p className="sport-match-consequence">{match.consequence}</p>
       <small>
@@ -138,11 +291,15 @@ function SportDataStatus({
   loading?: boolean;
   error?: string;
 }) {
-  const age = dataAgeHours(now, worldCup.generatedAt);
-  const ageLabel = age === undefined ? "Alder ukjent" : `${age.toLocaleString("nb-NO")} t gammel`;
+  const dataAge = dataAgeHours(now, worldCupDataUpdatedAt(worldCup));
+  const checkedAge = dataAgeHours(now, worldCup.generatedAt);
+  const dataAgeLabel =
+    dataAge === undefined ? "Alder ukjent" : `${dataAge.toLocaleString("nb-NO")} t gammel`;
+  const checkedAgeLabel =
+    checkedAge === undefined ? "Alder ukjent" : `${checkedAge.toLocaleString("nb-NO")} t siden`;
 
   return (
-    <section className="sport-data-status" aria-label="Datastatus">
+    <section id="sport-sources" className="sport-data-status" aria-label="Datastatus">
       <article>
         <span>VM-kamper</span>
         <strong>{loading ? "Oppdaterer..." : worldCupStatusLabel(worldCup, now)}</strong>
@@ -153,27 +310,49 @@ function SportDataStatus({
         </p>
       </article>
       <article>
-        <span>Sist oppdatert</span>
+        <span>Datasett</span>
+        <strong>{formatKickoff(worldCupDataUpdatedAt(worldCup))}</strong>
+        <p>{dataAgeLabel}.</p>
+      </article>
+      <article>
+        <span>Kontrollert</span>
         <strong>{formatKickoff(worldCup.generatedAt)}</strong>
-        <p>{ageLabel}.</p>
+        <p>{checkedAgeLabel}.</p>
       </article>
       <article>
         <span>Kilde</span>
         <strong>{worldCup.sourceLabel}</strong>
         <p>{error ?? worldCup.sourceDetail}</p>
       </article>
-      <article>
-        <span>Lokale saker</span>
-        <strong>Fra Nytt</strong>
-        <p>Hentes fra lokale sportssaker i Trøndelag.</p>
-      </article>
+    </section>
+  );
+}
+
+function SportSourceNotice({ worldCup, now }: { worldCup: WorldCupDashboardPayload; now: Date }) {
+  if (!isFallbackStale(worldCup, now)) return null;
+  const sourceHref = safeExternalUrl(worldCup.sourceUrl);
+  return (
+    <section className="sport-source-notice" aria-label="VM-data må kontrolleres">
+      <div>
+        <strong>VM-data er fallback og må kontrolleres</strong>
+        <p>
+          Datasettet er fra {formatKickoff(worldCupDataUpdatedAt(worldCup))}. Nytt viser lokale
+          sportssaker, men kampstatus og tidspunkt bør sjekkes hos offisiell kilde.
+        </p>
+      </div>
+      {sourceHref ? (
+        <a href={sourceHref} target="_blank" rel="noreferrer noopener">
+          Sjekk kampoversikt
+          <ArrowIcon />
+        </a>
+      ) : null}
     </section>
   );
 }
 
 function TournamentPhaseStrip({ phases }: { phases: WorldCupDashboardPayload["phases"] }) {
   return (
-    <section className="sport-phase-strip" aria-label="Turneringsfase">
+    <section id="sport-phases" className="sport-phase-strip" aria-label="Turneringsfase">
       {phases.map((phase) => (
         <article key={phase.id}>
           <span>{phase.label}</span>
@@ -336,35 +515,42 @@ export function WorldCupSportDashboard({
 }: WorldCupSportDashboardProps) {
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("featured");
   const matches = worldCup.matches;
-  const featuredMatches = useMemo(
-    () => matches.filter((match) => match.featured || match.status === "live"),
-    [matches],
+  const currentMatches = useMemo(
+    () => matches.filter((match) => !isOutdatedScheduledMatch(match, now)),
+    [matches, now],
   );
+  const featuredMatches = useMemo(() => {
+    const direct = currentMatches.filter((match) => match.featured || match.status === "live");
+    return direct.length > 0 ? direct : currentMatches.slice(0, 3);
+  }, [currentMatches]);
   const visibleMatches = useMemo(() => {
     if (matchFilter === "norway") return matches.filter((match) => match.norwayFocus);
     if (matchFilter === "featured") return featuredMatches;
     return matches;
   }, [featuredMatches, matchFilter, matches]);
   const finishedCount = matches.filter((match) => match.status === "finished").length;
-  const liveCount = matches.filter((match) => match.status === "live").length;
-  const upcomingCount = matches.filter((match) => match.status === "upcoming").length;
-  const nextNorwayMatch = matches.find((match) => match.norwayFocus && match.status !== "finished");
+  const liveCount = currentMatches.filter((match) => match.status === "live").length;
+  const upcomingCount = currentMatches.filter((match) => match.status === "upcoming").length;
+  const nextNorwayMatch = currentMatches.find(
+    (match) => match.norwayFocus && match.status !== "finished",
+  );
+  const localTeams = worldCup.localTeams ?? fallbackWorldCupDashboard.localTeams;
 
   return (
     <main className="sport-page">
       <section className="sport-hero" aria-labelledby="sport-title">
         <div>
-          <p className="label">Sport · VM 2026</p>
-          <h1 id="sport-title">VM 2026</h1>
+          <p className="label">Sport · Trondheim-fotball + VM 2026</p>
+          <h1 id="sport-title">Fotballoversikt</h1>
           <p>
-            Sluttspill, Norge-spor, tabeller og lokale sportssaker samlet på ett sted. Kampdata
-            oppdateres automatisk når livefeeden er tilgjengelig.
+            Norge i VM, RBK herrer, RBK kvinner og Ranheim samlet først. Kampdata oppdateres når
+            livefeeden er tilgjengelig, mens lokale klubbkort bygger på Nytt-saker.
           </p>
         </div>
         <div className="sport-hero-meta" aria-label="VM-kilder">
           <span>
-            {worldCup.sourceMode === "live" ? "Live" : "Fallback"} · sist oppdatert{" "}
-            {formatKickoff(worldCup.generatedAt)}
+            {worldCup.sourceMode === "live" ? "Live" : "Fallback"} · datasett{" "}
+            {formatKickoff(worldCupDataUpdatedAt(worldCup))}
           </span>
           {worldCup.sourceLinks.map((link) => (
             <ExternalLink key={link.href} link={link} />
@@ -372,15 +558,11 @@ export function WorldCupSportDashboard({
         </div>
       </section>
 
-      <SportDataStatus
-        worldCup={worldCup}
-        now={now}
-        loading={loadingWorldCup}
-        error={worldCupError}
-      />
-      <TournamentPhaseStrip phases={worldCup.phases} />
+      <SportSourceNotice worldCup={worldCup} now={now} />
+      <SportSectionNav />
+      <LocalTeamFocusPanel teams={localTeams} articles={articles} />
 
-      <section className="sport-summary-grid" aria-label="VM-status">
+      <section id="sport-today" className="sport-summary-grid" aria-label="VM-status">
         <article className="sport-summary-card sport-summary-card-norway">
           <span>Norge nå</span>
           <strong>{nextNorwayMatch ? formatKickoff(nextNorwayMatch.kickoff) : "Ikke satt"}</strong>
@@ -410,11 +592,15 @@ export function WorldCupSportDashboard({
       <NorwayPathPanel path={worldCup.norwayPath} />
 
       <section className="sport-workspace">
-        <section className="sport-panel sport-match-panel" aria-labelledby="sport-next-heading">
+        <section
+          id="sport-matches"
+          className="sport-panel sport-match-panel"
+          aria-labelledby="sport-next-heading"
+        >
           <header className="sport-panel-heading">
             <div>
               <p className="label">Kampvindu</p>
-              <h2 id="sport-next-heading">Neste kamper</h2>
+              <h2 id="sport-next-heading">Aktuelle VM-kamper</h2>
             </div>
             <div className="sport-segmented" aria-label="Kampfilter">
               <button
@@ -445,7 +631,7 @@ export function WorldCupSportDashboard({
           </header>
           <div className="sport-match-list">
             {visibleMatches.length > 0 ? (
-              visibleMatches.map((match) => <MatchCard key={match.id} match={match} />)
+              visibleMatches.map((match) => <MatchCard key={match.id} match={match} now={now} />)
             ) : (
               <p className="sport-news-state">Ingen kamper i dette filteret akkurat nå.</p>
             )}
@@ -467,7 +653,11 @@ export function WorldCupSportDashboard({
         </aside>
       </section>
 
-      <section className="sport-bracket-panel" aria-labelledby="sport-bracket-heading">
+      <section
+        id="sport-bracket"
+        className="sport-bracket-panel"
+        aria-labelledby="sport-bracket-heading"
+      >
         <header className="sport-panel-heading">
           <div>
             <p className="label">Bracket</p>
@@ -478,11 +668,19 @@ export function WorldCupSportDashboard({
         <BracketStatusTable matches={matches} />
       </section>
 
-      <section className="sport-table-grid" aria-label="VM-tabeller">
+      <section id="sport-tables" className="sport-table-grid" aria-label="VM-tabeller">
         {worldCup.groups.map((table) => (
           <GroupTableCard key={table.id} table={table} />
         ))}
       </section>
+
+      <TournamentPhaseStrip phases={worldCup.phases} />
+      <SportDataStatus
+        worldCup={worldCup}
+        now={now}
+        loading={loadingWorldCup}
+        error={worldCupError}
+      />
     </main>
   );
 }
@@ -542,9 +740,9 @@ export function SportPage({ initialArticles = [] }: SportPageProps) {
     setLoadingArticles(true);
     setArticleError(undefined);
     api
-      .articles({ category: "Sport", scope: "trondelag", limit: 8 })
+      .articles({ category: "Sport", scope: "trondelag", limit: 12 })
       .then((page) => {
-        if (!ignore) setArticles(page.items.slice(0, 8));
+        if (!ignore) setArticles(page.items.slice(0, 12));
       })
       .catch((reason: unknown) => {
         if (!ignore) {

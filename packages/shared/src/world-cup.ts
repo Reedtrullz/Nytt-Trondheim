@@ -6,6 +6,28 @@ export interface WorldCupSourceLink {
   href: string;
 }
 
+export type FootballTeamFocusId =
+  | "norway-men"
+  | "rosenborg-men"
+  | "rosenborg-women"
+  | "ranheim-men";
+
+export interface FootballTeamFocus {
+  id: FootballTeamFocusId;
+  label: string;
+  shortLabel: string;
+  competition: string;
+  region: string;
+  status: string;
+  next: string;
+  detail: string;
+  sourceLabel: string;
+  sourceUrl: string;
+  articleQuery: string;
+  articleTopic?: string;
+  featured?: boolean;
+}
+
 export interface WorldCupPhase {
   id: string;
   label: string;
@@ -58,12 +80,14 @@ export interface WorldCupMatch {
 
 export interface WorldCupDashboardPayload {
   generatedAt: string;
+  dataUpdatedAt: string;
   sourceMode: WorldCupSourceMode;
   sourceLabel: string;
   sourceUrl: string;
   sourceDetail: string;
   nextRefreshSeconds: number;
   sourceLinks: WorldCupSourceLink[];
+  localTeams: FootballTeamFocus[];
   phases: WorldCupPhase[];
   norwayPath: WorldCupPathStep[];
   groups: WorldCupGroupTable[];
@@ -95,14 +119,74 @@ export const worldCupSourceLinks: WorldCupSourceLink[] = [
 
 export const fallbackWorldCupSnapshotUpdatedAt = "2026-07-01T10:30:00.000Z";
 
+export const footballTeamFocus: FootballTeamFocus[] = [
+  {
+    id: "norway-men",
+    label: "Norge menn",
+    shortLabel: "Norge",
+    competition: "VM 2026",
+    region: "Landslaget",
+    status: "VM-sluttspill",
+    next: "Brasil - Norge",
+    detail: "Norge-sporet oppdateres fra VM-data når livefeeden svarer.",
+    sourceLabel: "FIFA/ESPN",
+    sourceUrl: worldCupSourceLinks[1]?.href ?? "https://www.fifa.com/",
+    articleQuery: "Norge landslaget VM",
+    featured: true,
+  },
+  {
+    id: "rosenborg-men",
+    label: "RBK herrer",
+    shortLabel: "RBK",
+    competition: "Eliteserien",
+    region: "Lerkendal",
+    status: "Lokal hovedprioritet",
+    next: "Følg kamp, trener og overgangssaker",
+    detail: "Nytt bruker lokale sportssaker som kilde inntil terminliste/API er koblet på.",
+    sourceLabel: "Nytt lokale saker",
+    sourceUrl: "https://nytt.reidar.tech/?category=Sport&topic=rosenborg",
+    articleQuery: "RBK Rosenborg",
+    articleTopic: "rosenborg",
+    featured: true,
+  },
+  {
+    id: "rosenborg-women",
+    label: "RBK kvinner",
+    shortLabel: "RBK K",
+    competition: "Toppserien",
+    region: "Koteng/Lerkendal",
+    status: "Egen lokal fotballstrøm",
+    next: "Se etter Toppserien og RBK kvinner",
+    detail: "Skill kvinnelaget tydelig når artiklene nevner RBK kvinner eller Toppserien.",
+    sourceLabel: "Nytt lokale saker",
+    sourceUrl: "https://nytt.reidar.tech/?category=Sport&q=RBK%20kvinner",
+    articleQuery: "RBK kvinner Toppserien",
+  },
+  {
+    id: "ranheim-men",
+    label: "Ranheim herrer",
+    shortLabel: "Ranheim",
+    competition: "1. divisjon",
+    region: "Ranheim",
+    status: "Lokalt kamp- og tabellfokus",
+    next: "Følg resultater og kampreaksjoner",
+    detail: "Ranheim prioriteres som egen lokal klubb selv uten autoritativ terminliste i v1.",
+    sourceLabel: "Nytt lokale saker",
+    sourceUrl: "https://nytt.reidar.tech/?category=Sport&q=Ranheim",
+    articleQuery: "Ranheim fotball",
+  },
+];
+
 export const fallbackWorldCupDashboard: WorldCupDashboardPayload = {
   generatedAt: fallbackWorldCupSnapshotUpdatedAt,
+  dataUpdatedAt: fallbackWorldCupSnapshotUpdatedAt,
   sourceMode: "fallback",
   sourceLabel: "Kuratert VM-snapshot",
   sourceUrl: worldCupSourceLinks[1]?.href ?? "https://www.fifa.com/",
   sourceDetail: "Kuratert fallback når livefeeden ikke svarer.",
   nextRefreshSeconds: 300,
   sourceLinks: worldCupSourceLinks,
+  localTeams: footballTeamFocus,
   phases: [
     {
       id: "groups",

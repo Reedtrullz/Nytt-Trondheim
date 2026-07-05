@@ -2836,7 +2836,7 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
     const url = new URL(route.request().url());
     if (url.searchParams.get("category") === "Sport") {
       expect(url.searchParams.get("scope")).toBe("trondelag");
-      expect(url.searchParams.get("limit")).toBe("8");
+      expect(url.searchParams.get("limit")).toBe("12");
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -2853,6 +2853,7 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
       body: JSON.stringify({
         ...fallbackWorldCupDashboard,
         generatedAt: "2026-07-02T10:40:00.000Z",
+        dataUpdatedAt: "2026-07-02T10:40:00.000Z",
         sourceMode: "live",
         sourceLabel: "ESPN livefeed",
         sourceDetail: "Kampstatus og tabeller normalisert fra ESPN.",
@@ -2862,8 +2863,14 @@ test("sport page shows a World Cup desk with local sport stories", async ({ page
 
   await page.goto("/sport");
 
-  await expect(page.getByRole("heading", { name: "VM 2026" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Neste kamper" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fotballoversikt" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lag å følge" })).toBeVisible();
+  await expect(page.locator(".sport-team-panel")).toContainText("Norge menn");
+  await expect(page.locator(".sport-team-panel")).toContainText("RBK herrer");
+  await expect(page.locator(".sport-team-panel")).toContainText("RBK kvinner");
+  await expect(page.locator(".sport-team-panel")).toContainText("Ranheim herrer");
+  await expect(page.locator(".sport-team-panel")).toContainText("1 saker i Nytt");
+  await expect(page.getByRole("heading", { name: "Aktuelle VM-kamper" })).toBeVisible();
   const nextMatches = page.locator(".sport-match-panel");
   await expect(nextMatches).toContainText("Elfenbenskysten");
   await expect(nextMatches).toContainText("Norge");
@@ -2909,7 +2916,8 @@ test("frontpage and sport stay responsive on phone and tablet viewports", async 
     await expectNoHorizontalPageOverflow(page);
 
     await page.goto("/sport");
-    await expect(page.getByRole("heading", { name: "VM 2026" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fotballoversikt" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Lag å følge" })).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
   }
 });
@@ -3230,7 +3238,7 @@ test("viewer shell keeps command center tools out of the public traffic map", as
     { path: "/", heading: "Siste nytt i Trondheim" },
     { path: "/trafikk", heading: "Trafikkbildet nå" },
     { path: "/vaer", heading: "Vær" },
-    { path: "/sport", heading: "VM 2026" },
+    { path: "/sport", heading: "Fotballoversikt" },
     { path: "/situasjoner", heading: "Trondheim situasjonskart" },
   ]) {
     await page.goto(route.path);

@@ -1,6 +1,8 @@
 import {
   fallbackWorldCupDashboard,
+  footballTeamFocus,
   worldCupSourceLinks,
+  type FootballTeamFocus,
   type WorldCupDashboardPayload,
   type WorldCupGroupTable,
   type WorldCupMatch,
@@ -124,12 +126,14 @@ export function normalizeWorldCupDashboard(
   const hasLiveMatch = matches.some((match) => match.status === "live");
   return {
     generatedAt: generatedAt.toISOString(),
+    dataUpdatedAt: generatedAt.toISOString(),
     sourceMode: "live",
     sourceLabel: "ESPN livefeed",
     sourceUrl: espnScoreboardUrl,
     sourceDetail: "Kampstatus og tabeller normalisert fra ESPN uten råpayload i API-svaret.",
     nextRefreshSeconds: hasLiveMatch ? liveRefreshSeconds : defaultRefreshSeconds,
     sourceLinks: worldCupSourceLinks,
+    localTeams: buildFootballTeamFocus(matches),
     phases: buildPhases(matches),
     norwayPath: buildNorwayPath(matches),
     groups: groups.length > 0 ? groups : fallbackWorldCupDashboard.groups,
@@ -141,6 +145,7 @@ function fallbackDashboard(now: Date, error: unknown): WorldCupDashboardPayload 
   return {
     ...fallbackWorldCupDashboard,
     generatedAt: now.toISOString(),
+    dataUpdatedAt: fallbackWorldCupDashboard.dataUpdatedAt,
     sourceMode: "fallback" satisfies WorldCupSourceMode,
     sourceDetail: `Livefeed utilgjengelig: ${errorMessage(error)}. Viser kuratert fallback.`,
   };
@@ -234,7 +239,7 @@ function normalizeCompetitor(value: unknown): NormalizedCompetitor | undefined {
     stringValue(team?.shortDisplayName) ??
     stringValue(team?.name);
   if (!displayName) return undefined;
-  const scoreValue = Number(stringValue(competitor.score));
+  const scoreValue = numberValue(competitor.score);
   const abbreviation = stringValue(team?.abbreviation);
   const homeAway = stringValue(competitor.homeAway);
   const winner = booleanValue(competitor.winner);
@@ -406,6 +411,39 @@ function buildNorwayPath(matches: WorldCupMatch[]) {
     });
   }
   return steps.length > 0 ? steps : fallbackWorldCupDashboard.norwayPath;
+}
+
+function buildFootballTeamFocus(matches: WorldCupMatch[]): FootballTeamFocus[] {
+  const norwayMatches = matches
+    .filter((match) => match.norwayFocus)
+    .sort((left, right) => Date.parse(left.kickoff ?? "") - Date.parse(right.kickoff ?? ""));
+  const previous = [...norwayMatches].reverse().find((match) => match.status === "finished");
+  const next = norwayMatches.find((match) => match.status !== "finished");
+
+  return footballTeamFocus.map((team) => {
+    if (team.id !== "norway-men") return team;
+    if (next) {
+      return {
+        ...team,
+        status: next.stage,
+        next: `${next.home} - ${next.away}`,
+        detail: `${next.note} ${next.consequence}`,
+        sourceLabel: next.source,
+        sourceUrl: worldCupSourceLinks[1]?.href ?? team.sourceUrl,
+      };
+    }
+    if (previous) {
+      return {
+        ...team,
+        status: "Siste VM-kamp",
+        next: `${previous.home} ${previous.result ?? "-"} ${previous.away}`,
+        detail: previous.consequence,
+        sourceLabel: previous.source,
+        sourceUrl: worldCupSourceLinks[1]?.href ?? team.sourceUrl,
+      };
+    }
+    return team;
+  });
 }
 
 function statusFromEvent(
