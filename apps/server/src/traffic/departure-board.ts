@@ -3,6 +3,7 @@ import type {
   PublicTransportDepartureBoardPayload,
   PublicTransportDepartureNotice,
   PublicTransportDepartureStop,
+  PublicTransportServiceAlert,
   PublicTransportVehicleMode,
   SourceHealth,
 } from "@nytt/shared";
@@ -124,6 +125,120 @@ function delaySeconds(aimedDepartureTime: string, expectedDepartureTime: string)
   const expected = Date.parse(expectedDepartureTime);
   if (!Number.isFinite(aimed) || !Number.isFinite(expected)) return 0;
   return Math.round((expected - aimed) / 1000);
+}
+
+function normalizedToken(value: string | undefined): string | undefined {
+  const token = value
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("nb")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return token || undefined;
+}
+
+function normalizedTokens(values: Array<string | undefined>): Set<string> {
+  return new Set(values.flatMap((value) => normalizedToken(value) ?? []));
+}
+
+function tokenSetsOverlap(left: Set<string>, right: Set<string>): boolean {
+  for (const token of left) {
+    if (right.has(token)) return true;
+  }
+  return false;
+}
+
+function alertMatchesDeparture(
+  alert: PublicTransportServiceAlert,
+  departure: PublicTransportDeparture,
+): boolean {
+  if (departure.lineId && alert.affectedLineRefs?.includes(departure.lineId)) return true;
+  if (departure.stopId && alert.affectedStopIds?.includes(departure.stopId)) return true;
+  if (departure.quayId && alert.affectedStopIds?.includes(departure.quayId)) return true;
+
+  const departureLineTokens = normalizedTokens([
+    departure.publicCode,
+    departure.lineName,
+    departure.lineId,
+  ]);
+  const alertLineTokens = normalizedTokens([
+    ...(alert.affectedLineRefs ?? []),
+    ...(alert.affectedLineNames ?? []),
+  ]);
+  if (tokenSetsOverlap(departureLineTokens, alertLineTokens)) return true;
+
+  const departureStopTokens = normalizedTokens([departure.stopName, departure.quayName]);
+  const alertStopTokens = normalizedTokens([
+    ...(alert.affectedStopIds ?? []),
+    ...(alert.affectedStopNames ?? []),
+  ]);
+  return tokenSetsOverlap(departureStopTokens, alertStopTokens);
+}
+
+function departureNoticeFromServiceAlert(
+  alert: PublicTransportServiceAlert,
+): PublicTransportDepartureNotice {
+  const severity = String(alert.severity ?? "").toLocaleLowerCase("nb");
+  const title = alert.summary;
+  const warning =
+    severity === "severe" ||
+    severity === "verysevere" ||
+    severity === "critical" ||
+    /(innstilt|stengt|forsink|avvik|brudd|replacement|erstatning)/i.test(title);
+  return {
+    id: `stored-alert:${alert.id}`,
+    title,
+    detail: alert.advice ?? alert.description,
+    severity: warning ? "warning" : "info",
+  };
+}
+
+function departureWithServiceAlerts(
+  departure: PublicTransportDeparture,
+  alerts: PublicTransportServiceAlert[],
+): PublicTransportDeparture {
+  const matchedAlerts = alerts
+    .filter((alert) => alertMatchesDeparture(alert, departure))
+    .slice(0, 3);
+  if (!matchedAlerts.length) return departure;
+  const existingNoticeIds = new Set(departure.notices.map((notice) => notice.id));
+  const notices = [...departure.notices];
+  for (const alert of matchedAlerts) {
+    const notice = departureNoticeFromServiceAlert(alert);
+    if (!existingNoticeIds.has(notice.id)) {
+      notices.push(notice);
+      existingNoticeIds.add(notice.id);
+    }
+  }
+  return { ...departure, notices };
+}
+
+export function enrichDepartureBoardWithServiceAlerts(
+  board: PublicTransportDepartureBoardPayload,
+  alerts: PublicTransportServiceAlert[],
+): PublicTransportDepartureBoardPayload {
+  if (!alerts.length || !board.departures.length) return board;
+  const departures = board.departures.map((departure) =>
+    departureWithServiceAlerts(departure, alerts),
+  );
+  const departuresById = new Map(departures.map((departure) => [departure.id, departure]));
+  const addedServiceAlertNotice = departures.some((departure) =>
+    departure.notices.some((notice) => notice.id.startsWith("stored-alert:")),
+  );
+  return {
+    ...board,
+    detail: addedServiceAlertNotice
+      ? `${board.detail} Aktive Entur-avvik er matchet mot relevante avganger.`
+      : board.detail,
+    departures,
+    stops: board.stops.map((stop) => ({
+      ...stop,
+      departures: stop.departures.map(
+        (departure) =>
+          departuresById.get(departure.id) ?? departureWithServiceAlerts(departure, alerts),
+      ),
+    })),
+  };
 }
 
 function departureFromRaw(

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import {
   clearEnturDepartureBoardCache,
+  enrichDepartureBoardWithServiceAlerts,
   publicTransportDepartureBoardFromEntur,
 } from "../src/traffic/departure-board.js";
 import {
@@ -72,6 +73,20 @@ const sourceHealth = [
   { source: "entur_vehicle_positions", label: "Entur kjøretøy", state: "ok", detail: "1 buss" },
   { source: "entur_service_alerts", label: "Entur avvik", state: "ok", detail: "1 avvik" },
 ] satisfies SourceHealth[];
+
+const line71Alert = {
+  id: "entur-service-alert:ATB:line-71-delay",
+  source: "entur_service_alerts",
+  codespaceId: "ATB",
+  situationNumber: "line-71-delay",
+  severity: "severe",
+  summary: "Forsinkelser på linje 71",
+  description: "Forsinkelser etter trafikale problemer.",
+  updatedAt: "2026-07-05T16:10:00.000Z",
+  state: "active",
+  affectedLineRefs: ["ATB:Line:71"],
+  affectedLineNames: ["71"],
+} satisfies PublicTransportServiceAlert;
 
 afterEach(() => {
   clearEnturJourneyCache();
@@ -336,6 +351,19 @@ describe("traffic travel planner API", () => {
         }),
       ],
     });
+
+    const enriched = enrichDepartureBoardWithServiceAlerts(payload, [line71Alert]);
+    expect(enriched.detail).toContain("Aktive Entur-avvik");
+    expect(enriched.departures[0]?.notices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "Forsinkelser på linje 71", severity: "warning" }),
+      ]),
+    );
+    expect(enriched.stops[0]?.departures[0]?.notices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "Forsinkelser på linje 71", severity: "warning" }),
+      ]),
+    );
   });
 
   it("returns a default Trondheim departure board without persisting Entur trip data", async () => {
@@ -372,6 +400,7 @@ describe("traffic travel planner API", () => {
 
     const { app, store } = await testApp();
     vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+    vi.spyOn(store, "listPublicTransportServiceAlerts").mockResolvedValue([line71Alert]);
     const agent = request.agent(app);
     await agent.get("/api/session").expect(200);
 
@@ -380,7 +409,8 @@ describe("traffic travel planner API", () => {
 
     expect(first.body).toMatchObject({
       status: "ok",
-      detail: "Entur viser konkrete avganger nær valgt område.",
+      detail:
+        "Entur viser konkrete avganger nær valgt område. Aktive Entur-avvik er matchet mot relevante avganger.",
       areaLabel: "Trondheim sentrum",
       departures: [
         expect.objectContaining({
@@ -390,7 +420,10 @@ describe("traffic travel planner API", () => {
           destinationName: "Dora",
           delaySeconds: 168,
           realtime: true,
-          notices: [expect.objectContaining({ title: "Endret rute" })],
+          notices: [
+            expect.objectContaining({ title: "Endret rute" }),
+            expect.objectContaining({ title: "Forsinkelser på linje 71" }),
+          ],
         }),
       ],
     });

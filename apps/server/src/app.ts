@@ -86,7 +86,11 @@ import { MemoryStore, PgStore, type Store } from "./store.js";
 import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
 import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
-import { fetchEnturDepartureBoard, unavailableDepartureBoard } from "./traffic/departure-board.js";
+import {
+  enrichDepartureBoardWithServiceAlerts,
+  fetchEnturDepartureBoard,
+  unavailableDepartureBoard,
+} from "./traffic/departure-board.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
 import {
@@ -121,6 +125,24 @@ const publicTransportSourceIdSet = new Set<string>([
 ]);
 const defaultPublicTransportBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
 const defaultWeatherBounds = { north: 63.55, south: 63.3, east: 10.65, west: 10.2 };
+
+function boundsAroundPublicTransportCenter(
+  center: { lat: number; lon: number } | undefined,
+  radiusMeters: number | undefined,
+) {
+  if (!center) return defaultPublicTransportBounds;
+  const paddingMeters = Math.max(radiusMeters ?? 1_200, 1_200) + 500;
+  const latDelta = paddingMeters / 111_320;
+  const lonDelta =
+    paddingMeters / (111_320 * Math.max(0.2, Math.cos((center.lat * Math.PI) / 180)));
+  return {
+    north: center.lat + latDelta,
+    south: center.lat - latDelta,
+    east: center.lon + lonDelta,
+    west: center.lon - lonDelta,
+  };
+}
+
 const workerStaleAfterSeconds = 2 * 60 * 60;
 const backupStaleAfterSeconds = 36 * 60 * 60;
 const restoreCheckStaleAfterSeconds = 8 * 24 * 60 * 60;
@@ -1449,27 +1471,36 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/map/public-transport/departures", async (req, res, next) => {
     try {
       const query = publicTransportDepartureBoardQuerySchema.parse(req.query);
-      const sources = (await store.listSourceHealth()).filter((source) =>
-        publicTransportSourceIdSet.has(source.source),
-      );
       const center =
         query.lat !== undefined && query.lon !== undefined
           ? { lat: query.lat, lon: query.lon }
           : undefined;
       const areaLabel = center ? "Valgt område" : undefined;
+      const alertBounds = boundsAroundPublicTransportCenter(center, query.radiusMeters);
+      const [sources, alerts] = await Promise.all([
+        store
+          .listSourceHealth()
+          .then((sourceHealth) =>
+            sourceHealth.filter((source) => publicTransportSourceIdSet.has(source.source)),
+          ),
+        store.listPublicTransportServiceAlerts({
+          states: ["active"],
+          bounds: alertBounds,
+          limit: 80,
+        }),
+      ]);
       try {
-        res.json(
-          await fetchEnturDepartureBoard({
-            clientName: config.enturClientName ?? "reidar-nytt-trondheim",
-            center,
-            areaLabel,
-            radiusMeters: query.radiusMeters,
-            stopLimit: query.stopLimit,
-            departureLimit: query.departureLimit,
-            startTime: query.startTime ? new Date(query.startTime) : undefined,
-            sources,
-          }),
-        );
+        const board = await fetchEnturDepartureBoard({
+          clientName: config.enturClientName ?? "reidar-nytt-trondheim",
+          center,
+          areaLabel,
+          radiusMeters: query.radiusMeters,
+          stopLimit: query.stopLimit,
+          departureLimit: query.departureLimit,
+          startTime: query.startTime ? new Date(query.startTime) : undefined,
+          sources,
+        });
+        res.json(enrichDepartureBoardWithServiceAlerts(board, alerts));
       } catch {
         res.json(unavailableDepartureBoard({ center, areaLabel, sources }));
       }
