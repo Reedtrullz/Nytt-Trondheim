@@ -189,6 +189,33 @@ export interface TravelPlanPlace {
   coordinate: [number, number];
 }
 
+export type TravelPlaceSuggestionKind =
+  | "stop"
+  | "stop_group"
+  | "address"
+  | "street"
+  | "poi"
+  | "place"
+  | "unknown";
+
+export interface TravelPlaceSuggestion {
+  id: string;
+  label: string;
+  query: string;
+  kind: TravelPlaceSuggestionKind;
+  coordinate: [number, number];
+  locality?: string;
+  source: "Entur Geocoder";
+}
+
+export interface TravelPlaceSuggestionPayload {
+  query: string;
+  status: "ok" | "empty" | "unavailable";
+  detail: string;
+  suggestions: TravelPlaceSuggestion[];
+  generatedAt: string;
+}
+
 export interface TravelPlanRoute {
   source: "osrm" | "direct";
   geometry: LineString;

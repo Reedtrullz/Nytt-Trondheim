@@ -9742,6 +9742,80 @@ button {
   font: inherit;
 }
 
+.route-place-input {
+  position: relative;
+  min-width: 0;
+}
+
+.route-suggestion-selected,
+.route-suggestion-status {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.route-suggestion-selected {
+  color: var(--green);
+  font-weight: 750;
+}
+
+.route-suggestion-status.warning {
+  color: var(--terracotta);
+}
+
+.route-suggestion-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.route-planner-form .route-suggestion-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  color: var(--ink);
+  border: 1px solid transparent;
+  background: #fff;
+  text-align: left;
+}
+
+.route-planner-form .route-suggestion-list button:hover,
+.route-planner-form .route-suggestion-list button:focus-visible {
+  border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
+  background: color-mix(in srgb, #fff 88%, var(--blue) 12%);
+  outline: none;
+}
+
+.route-suggestion-list span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.route-suggestion-list strong {
+  display: block;
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.route-suggestion-list small {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 42%, var(--line));
+  font-size: 11px;
+  font-weight: 850;
+}
+
 .route-input-tools {
   display: flex;
   flex-wrap: wrap;

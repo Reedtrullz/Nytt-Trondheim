@@ -42,6 +42,7 @@ import {
   situationPublicVisibility,
   taskInputSchema,
   trafficMapQuerySchema,
+  travelPlaceSuggestionQuerySchema,
   travelPlanQuerySchema,
   userGrantSchema,
   userUpdateSchema,
@@ -105,6 +106,10 @@ import {
   routeBounds,
   TravelPlanRequestError,
 } from "./traffic/travel-plan.js";
+import {
+  fetchEnturTravelPlaceSuggestions,
+  unavailableTravelPlaceSuggestions,
+} from "./traffic/travel-suggestions.js";
 import { buildTrafficBrief } from "./traffic/traffic-brief.js";
 import { loadWeatherPreparedness } from "./weather/preparedness.js";
 
@@ -1337,10 +1342,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const query = travelPlanQuerySchema.parse(req.query);
       const login = currentLogin(req);
       const departureTime = resolveTravelPlanDepartureTime(query.departAt);
-      const { origin, destination, route } = await resolveTravelPlanPlacesAndRoute(
-        query.from,
-        query.to,
-      );
+      const resolved = await resolveTravelPlanPlacesAndRoute(query.from, query.to);
+      const origin = query.fromLabel
+        ? { ...resolved.origin, query: query.fromLabel, label: query.fromLabel }
+        : resolved.origin;
+      const destination = query.toLabel
+        ? { ...resolved.destination, query: query.toLabel, label: query.toLabel }
+        : resolved.destination;
+      const route = resolved.route;
       const bounds = routeBounds(route);
       const publicTransportModes: PublicTransportVehicle["mode"][] = [
         "bus",
@@ -1421,6 +1430,25 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           sourceHealth,
         }),
       );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/map/travel-suggestions", async (req, res, next) => {
+    try {
+      const query = travelPlaceSuggestionQuerySchema.parse(req.query);
+      try {
+        res.json(
+          await fetchEnturTravelPlaceSuggestions({
+            query: query.q,
+            limit: query.limit,
+            clientName: config.enturClientName ?? "reidar-nytt-trondheim",
+          }),
+        );
+      } catch {
+        res.json(unavailableTravelPlaceSuggestions({ query: query.q }));
+      }
     } catch (error) {
       next(error);
     }

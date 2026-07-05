@@ -1273,10 +1273,19 @@ export type PublicTransportDepartureBoardQueryInput = z.infer<
 export const travelPlanQuerySchema = z.object({
   from: z.string().trim().min(2).max(160),
   to: z.string().trim().min(2).max(160),
+  fromLabel: z.string().trim().min(2).max(160).optional(),
+  toLabel: z.string().trim().min(2).max(160).optional(),
   departAt: z.string().datetime({ offset: true }).optional(),
 });
 
 export type TravelPlanQueryInput = z.infer<typeof travelPlanQuerySchema>;
+
+export const travelPlaceSuggestionQuerySchema = z.object({
+  q: z.string().trim().min(2).max(80),
+  limit: z.coerce.number().int().min(1).max(8).default(6),
+});
+
+export type TravelPlaceSuggestionQueryInput = z.infer<typeof travelPlaceSuggestionQuerySchema>;
 
 export const trafficMapQuerySchema = z
   .object({

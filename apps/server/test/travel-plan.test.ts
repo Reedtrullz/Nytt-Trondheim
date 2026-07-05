@@ -14,6 +14,10 @@ import {
   clearEnturJourneyCache,
   fetchEnturJourneyItineraries,
 } from "../src/traffic/travel-plan.js";
+import {
+  clearEnturTravelSuggestionCache,
+  travelPlaceSuggestionsFromEntur,
+} from "../src/traffic/travel-suggestions.js";
 import type {
   PublicTransportServiceAlert,
   PublicTransportVehicle,
@@ -91,6 +95,7 @@ const line71Alert = {
 afterEach(() => {
   clearEnturJourneyCache();
   clearEnturDepartureBoardCache();
+  clearEnturTravelSuggestionCache();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -274,7 +279,145 @@ function enturDepartureBoardResponse(
   });
 }
 
+function enturGeocoderPayload() {
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [10.393742, 63.432883] },
+        properties: {
+          id: "NSR:StopPlace:63277",
+          names: { default: "Munkegata", display: "Munkegata, Trondheim" },
+          layer: "stopPlace",
+          source: "nsr",
+          address: { locality: "Trondheim", county: "Trøndelag", countryCode: "no" },
+          transportModes: [{ mode: "bus" }],
+        },
+      },
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [10.394221, 63.431381] },
+        properties: {
+          id: "KVE:TopographicPlace:5001-Munkegata",
+          names: { default: "Munkegata", display: "Munkegata, Trondheim" },
+          layer: "address",
+          source: "kartverket-matrikkelenadresse",
+          address: { locality: "Trondheim", county: "Trøndelag", countryCode: "no" },
+          categories: ["street"],
+        },
+      },
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [10.76794, 59.90834] },
+        properties: {
+          id: "NSR:StopPlace:62017",
+          names: { default: "Munkegata", display: "Munkegata, Oslo" },
+          layer: "stopPlace",
+          source: "nsr",
+          address: { locality: "Oslo", county: "Oslo", countryCode: "no" },
+        },
+      },
+    ],
+  };
+}
+
+function enturGeocoderResponse(): Response {
+  return Response.json(enturGeocoderPayload());
+}
+
 describe("traffic travel planner API", () => {
+  it("parses Entur Geocoder suggestions and filters places outside Trøndelag", () => {
+    const payload = travelPlaceSuggestionsFromEntur({
+      payload: enturGeocoderPayload(),
+      query: "Munkegata",
+      limit: 6,
+      generatedAt: new Date("2026-07-05T18:00:00.000Z"),
+    });
+
+    expect(payload).toMatchObject({
+      query: "Munkegata",
+      status: "ok",
+      detail: "Entur foreslår stopp og steder i Trøndelag.",
+      generatedAt: "2026-07-05T18:00:00.000Z",
+      suggestions: [
+        expect.objectContaining({
+          id: "NSR:StopPlace:63277",
+          label: "Munkegata, Trondheim",
+          kind: "stop",
+          locality: "Trondheim",
+          coordinate: [10.393742, 63.432883],
+          source: "Entur Geocoder",
+        }),
+        expect.objectContaining({
+          id: "KVE:TopographicPlace:5001-Munkegata",
+          kind: "address",
+          coordinate: [10.394221, 63.431381],
+        }),
+      ],
+    });
+    expect(payload.suggestions.map((suggestion) => suggestion.label)).not.toContain(
+      "Munkegata, Oslo",
+    );
+  });
+
+  it("returns cached Entur travel suggestions without persisting traveller context", async () => {
+    let enturRequestCount = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      );
+      expect(url.href).toContain("/geocoder/v3/autocomplete");
+      expect(url.searchParams.get("q")).toBe("Munkegata");
+      expect(url.searchParams.get("limit")).toBe("18");
+      expect(url.searchParams.get("bbox")).toBe("8,62.2,12.4,64.7");
+      expect((init?.headers as Record<string, string>)["ET-Client-Name"]).toBe(
+        "reidar-nytt-trondheim",
+      );
+      enturRequestCount += 1;
+      return enturGeocoderResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { app, store } = await testApp();
+    const listSourceItems = vi.spyOn(store, "listSourceItems");
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const first = await agent.get("/api/map/travel-suggestions?q=Munkegata").expect(200);
+    const second = await agent.get("/api/map/travel-suggestions?q=Munkegata").expect(200);
+
+    expect(first.body).toMatchObject({
+      status: "ok",
+      suggestions: expect.arrayContaining([
+        expect.objectContaining({ label: "Munkegata, Trondheim" }),
+      ]),
+    });
+    expect(second.body.suggestions).toEqual(first.body.suggestions);
+    expect(enturRequestCount).toBe(1);
+    expect(listSourceItems).not.toHaveBeenCalled();
+  });
+
+  it("keeps travel suggestions useful when Entur autocomplete fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ errors: [{ message: "rate limited" }] }, { status: 429 })),
+    );
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent.get("/api/map/travel-suggestions?q=Munkegata").expect(200);
+
+    expect(response.body).toMatchObject({
+      query: "Munkegata",
+      status: "unavailable",
+      detail:
+        "Entur stedsøk er ikke tilgjengelig akkurat nå. Skriv inn adresse, stopp eller koordinater.",
+      suggestions: [],
+    });
+  });
+
   it("parses an Entur departure board with delays, cancellations and notices", () => {
     const payload = publicTransportDepartureBoardFromEntur({
       payload: {
@@ -1220,7 +1363,7 @@ describe("traffic travel planner API", () => {
     await agent.get("/api/session").expect(200);
 
     const outside = await agent.get("/api/map/travel-plan?from=0,0&to=10.464,63.433").expect(400);
-    expect(outside.body.error).toBe("Koordinater må være i Trondheim-området.");
+    expect(outside.body.error).toBe("Koordinater må være i Trøndelag-området.");
 
     const staleDeparture = encodeURIComponent("2026-01-01T10:00:00.000Z");
     const stale = await agent

@@ -155,8 +155,54 @@ async function mockTrafficDepartureBoard(page: Page): Promise<void> {
   });
 }
 
+async function mockTravelPlaceSuggestions(page: Page): Promise<void> {
+  await page.route("**/api/map/travel-suggestions**", async (route) => {
+    const url = new URL(route.request().url());
+    const query = url.searchParams.get("q") ?? "";
+    const suggestions = query.toLocaleLowerCase("nb").includes("munkegata")
+      ? [
+          {
+            id: "NSR:StopPlace:63277",
+            label: "Munkegata, Trondheim",
+            query: "Munkegata, Trondheim",
+            kind: "stop",
+            coordinate: [10.393742, 63.432883],
+            locality: "Trondheim",
+            source: "Entur Geocoder",
+          },
+        ]
+      : query.toLocaleLowerCase("nb").includes("leangen")
+        ? [
+            {
+              id: "NSR:StopPlace:44051",
+              label: "Leangen, Trondheim",
+              query: "Leangen, Trondheim",
+              kind: "stop",
+              coordinate: [10.464, 63.433],
+              locality: "Trondheim",
+              source: "Entur Geocoder",
+            },
+          ]
+        : [];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        query,
+        status: suggestions.length ? "ok" : "empty",
+        detail: suggestions.length
+          ? "Entur foreslår stopp og steder i Trøndelag."
+          : "Ingen Entur-steder funnet i Trøndelag for søket.",
+        suggestions,
+        generatedAt: "2026-07-05T16:20:00.000Z",
+      }),
+    });
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await mockTrafficDepartureBoard(page);
+  await mockTravelPlaceSuggestions(page);
 });
 
 test("Situation Room explains provenance and keeps private map controls distinct", async ({
@@ -1982,6 +2028,87 @@ test("traffic map can reverse a planned route without retyping", async ({ page }
 
   await expect(page.getByLabel("Hvor er du?")).toHaveValue("Lade Arena");
   await expect(page.getByLabel("Hvor skal du?")).toHaveValue("Munkegata");
+});
+
+test("traffic map can use Entur route input suggestions without re-geocoding labels", async ({
+  page,
+}) => {
+  const travelPlanRequestUrls: URL[] = [];
+  await page.route("**/api/map/travel-plan?**", async (route) => {
+    const url = new URL(route.request().url());
+    travelPlanRequestUrls.push(url);
+    expect(url.searchParams.get("from")).toBe("63.43288, 10.39374");
+    expect(url.searchParams.get("to")).toBe("63.43300, 10.46400");
+    expect(url.searchParams.get("fromLabel")).toBe("Munkegata, Trondheim");
+    expect(url.searchParams.get("toLabel")).toBe("Leangen, Trondheim");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        origin: {
+          query: "Munkegata, Trondheim",
+          label: "Munkegata, Trondheim",
+          coordinate: [10.393742, 63.432883],
+        },
+        destination: {
+          query: "Leangen, Trondheim",
+          label: "Leangen, Trondheim",
+          coordinate: [10.464, 63.433],
+        },
+        route: {
+          source: "direct",
+          distanceMeters: 4850,
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.393742, 63.432883],
+              [10.464, 63.433],
+            ],
+          },
+          detail: "Direkte korridor.",
+        },
+        trafficImpacts: [],
+        publicTransportSuggestions: [
+          {
+            id: "atb-entur-planner",
+            kind: "planning_link",
+            title: "Sjekk avganger hos AtB/Entur",
+            detail:
+              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+            source: "AtB/Entur",
+            href: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        itineraries: [],
+        journeyPlanner: {
+          status: "empty",
+          detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+          requestedDepartureTime: "2026-07-05T16:20:00.000Z",
+          source: "Entur Journey Planner",
+        },
+        sources: [],
+        generatedAt: "2026-07-05T16:20:00.000Z",
+      }),
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await expect(page.getByRole("option", { name: /Munkegata, Trondheim/ })).toBeVisible();
+  await page.getByRole("option", { name: /Munkegata, Trondheim/ }).click();
+  await expect(page.getByLabel("Hvor er du?")).toHaveValue("Munkegata, Trondheim");
+  await expect(page.getByText("Bruker holdeplass fra Entur")).toBeVisible();
+
+  await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await expect(page.getByRole("option", { name: /Leangen, Trondheim/ })).toBeVisible();
+  await page.getByRole("option", { name: /Leangen, Trondheim/ }).click();
+  await expect(page.getByLabel("Hvor skal du?")).toHaveValue("Leangen, Trondheim");
+  expect(travelPlanRequestUrls).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+
+  await expect(page.getByText("Munkegata, Trondheim → Leangen, Trondheim")).toBeVisible();
+  expect(travelPlanRequestUrls).toHaveLength(1);
 });
 
 test("traffic map can use browser location as the route origin and nearby stop board", async ({

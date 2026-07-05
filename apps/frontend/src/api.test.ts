@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api.js";
 import { fetchPublicTransportDepartureBoard } from "./api/publicTransportDepartures.js";
 import { fetchPublicTransportMap } from "./api/publicTransportMap.js";
-import { fetchTravelPlan } from "./api/travelPlan.js";
+import { fetchTravelPlaceSuggestions, fetchTravelPlan } from "./api/travelPlan.js";
 import { fetchWeatherPreparedness } from "./api/weatherPreparedness.js";
 
 describe("frontend source item API helpers", () => {
@@ -418,6 +418,8 @@ describe("frontend source item API helpers", () => {
       fetchTravelPlan({
         from: "Munkegata / Dronningens gate",
         to: "Lade, Trondheim",
+        fromLabel: "Munkegata, Trondheim",
+        toLabel: "Lade Arena",
         departAt: "2026-07-05T08:30:00+02:00",
       }),
     ).resolves.toEqual(payload);
@@ -428,7 +430,40 @@ describe("frontend source item API helpers", () => {
     const params = new URLSearchParams(String(url).split("?")[1]);
     expect(params.get("from")).toBe("Munkegata / Dronningens gate");
     expect(params.get("to")).toBe("Lade, Trondheim");
+    expect(params.get("fromLabel")).toBe("Munkegata, Trondheim");
+    expect(params.get("toLabel")).toBe("Lade Arena");
     expect(params.get("departAt")).toBe("2026-07-05T08:30:00+02:00");
+  });
+
+  it("requests Entur-backed travel place suggestions with credentials", async () => {
+    const payload = {
+      query: "Munkegata",
+      status: "ok",
+      detail: "Entur foreslår stopp og steder i Trøndelag.",
+      suggestions: [
+        {
+          id: "NSR:StopPlace:63277",
+          label: "Munkegata, Trondheim",
+          query: "Munkegata, Trondheim",
+          kind: "stop",
+          coordinate: [10.393742, 63.432883],
+          locality: "Trondheim",
+          source: "Entur Geocoder",
+        },
+      ],
+      generatedAt: "2026-07-05T08:30:00.000Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchTravelPlaceSuggestions({ q: "Munkegata / sentrum", limit: 4 }),
+    ).resolves.toEqual(payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/map/travel-suggestions?q=Munkegata+%2F+sentrum&limit=4",
+      expect.objectContaining({ credentials: "include" }),
+    );
   });
 
   it("requests public transport departures around an explicit center", async () => {

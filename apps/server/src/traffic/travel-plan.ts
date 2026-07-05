@@ -51,11 +51,11 @@ const ROUTE_PADDING_METERS = 2_500;
 const ROUTE_TRAFFIC_BUFFER_METERS = 1_500;
 const ROUTE_TRANSIT_BUFFER_METERS = 1_200;
 const ENTUR_JOURNEY_PLANNER_ENDPOINT = "https://api.entur.io/journey-planner/v3/graphql";
-const TRONDHEIM_SERVICE_BOUNDS = {
-  north: 63.62,
-  south: 63.25,
-  east: 10.85,
-  west: 10.05,
+const TRONDELAG_TRAVEL_BOUNDS = {
+  north: 64.7,
+  south: 62.2,
+  east: 12.4,
+  west: 8.0,
 } satisfies Bounds;
 
 const sourceIds = new Set<TrafficMapSourceStatus["source"]>([
@@ -143,11 +143,11 @@ function parseCoordinateInput(query: string): Coordinate | undefined {
     (coordinate): coordinate is Coordinate => Boolean(coordinate),
   );
   const inServiceArea = candidates.filter((coordinate) =>
-    coordinateInBounds(coordinate, TRONDHEIM_SERVICE_BOUNDS),
+    coordinateInBounds(coordinate, TRONDELAG_TRAVEL_BOUNDS),
   );
   if (inServiceArea.length === 1) return inServiceArea[0];
   if (candidates.length > 0) {
-    throw new TravelPlanRequestError("Koordinater må være i Trondheim-området.");
+    throw new TravelPlanRequestError("Koordinater må være i Trøndelag-området.");
   }
   return undefined;
 }
@@ -183,7 +183,10 @@ async function geocodeTravelPlanPlaceUncached(query: string): Promise<TravelPlan
   url.searchParams.set("limit", "1");
   url.searchParams.set("accept-language", "nb");
   url.searchParams.set("countrycodes", "no");
-  url.searchParams.set("viewbox", "10.05,63.62,10.85,63.25");
+  url.searchParams.set(
+    "viewbox",
+    `${TRONDELAG_TRAVEL_BOUNDS.west},${TRONDELAG_TRAVEL_BOUNDS.north},${TRONDELAG_TRAVEL_BOUNDS.east},${TRONDELAG_TRAVEL_BOUNDS.south}`,
+  );
   url.searchParams.set("bounded", "1");
   url.searchParams.set("q", `${query.trim()}, Trondheim, Norway`);
 
@@ -195,7 +198,7 @@ async function geocodeTravelPlanPlaceUncached(query: string): Promise<TravelPlan
   const lon = typeof first?.lon === "string" ? Number(first.lon) : Number(first?.lon);
   const resolved = finiteCoordinate(lon, lat);
   if (!first || !resolved) {
-    throw new TravelPlanRequestError(`Fant ikke "${query}" i Trondheim-området.`);
+    throw new TravelPlanRequestError(`Fant ikke "${query}" i Trøndelag-området.`);
   }
   return {
     query,
@@ -674,7 +677,7 @@ function legGeometry(
 ) {
   const points = text(object(leg.pointsOnLink)?.points);
   const decoded = decodePolyline(points).filter((coordinate) =>
-    coordinateInBounds(coordinate, TRONDHEIM_SERVICE_BOUNDS),
+    coordinateInBounds(coordinate, TRONDELAG_TRAVEL_BOUNDS),
   );
   return lineStringForCoordinates(decoded.length >= 2 ? decoded : [from.coordinate, to.coordinate]);
 }

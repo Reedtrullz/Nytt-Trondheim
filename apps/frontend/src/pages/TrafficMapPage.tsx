@@ -10,6 +10,7 @@ import type {
   TrafficEventState,
   TrafficEventSeverity,
   TrafficMapEvent,
+  TravelPlaceSuggestion,
   TravelPlanItinerary,
   TravelPlanItineraryLabel,
   TravelPlanLeg,
@@ -35,7 +36,7 @@ import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { TrafficLegend } from "../components/map/TrafficLegend.js";
 import { TrafficNowSummary } from "../components/map/TrafficNowSummary.js";
 import { fetchPublicTransportDepartureBoard } from "../api/publicTransportDepartures.js";
-import { fetchTravelPlan } from "../api/travelPlan.js";
+import { fetchTravelPlaceSuggestions, fetchTravelPlan } from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
 import {
@@ -94,6 +95,8 @@ interface SelectedDepartureStatus {
   detail: string;
   severity: SelectedDepartureStatusSeverity;
 }
+
+type RouteInputKind = "origin" | "destination";
 
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
 const defaultDepartureBoardContext: DepartureBoardContext = {
@@ -1347,6 +1350,147 @@ function TrafficDataDisclosure({
   );
 }
 
+function suggestionKindLabel(kind: TravelPlaceSuggestion["kind"]): string {
+  switch (kind) {
+    case "stop":
+      return "Holdeplass";
+    case "stop_group":
+      return "Stoppområde";
+    case "address":
+      return "Adresse";
+    case "street":
+      return "Gate";
+    case "poi":
+      return "Sted";
+    case "place":
+      return "Område";
+    default:
+      return "Forslag";
+  }
+}
+
+function travelSuggestionQuery(suggestion: TravelPlaceSuggestion): string {
+  const [lon, lat] = suggestion.coordinate;
+  return formatCoordinateInput({ lat, lon });
+}
+
+function RoutePlaceInput({
+  id,
+  label,
+  value,
+  placeholder,
+  describedBy,
+  hasError,
+  selectedSuggestion,
+  onChange,
+  onSelectSuggestion,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  describedBy: string;
+  hasError: boolean;
+  selectedSuggestion?: TravelPlaceSuggestion;
+  onChange: (value: string) => void;
+  onSelectSuggestion: (suggestion: TravelPlaceSuggestion) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<TravelPlaceSuggestion[]>([]);
+  const [status, setStatus] = useState<"idle" | "loading" | "empty" | "error">("idle");
+  const requestRef = useRef(0);
+  const listId = `${id}-suggestions`;
+  const trimmedValue = value.trim();
+  const selectedIsCurrent = selectedSuggestion?.label === value;
+
+  useEffect(() => {
+    const requestId = requestRef.current + 1;
+    requestRef.current = requestId;
+    if (trimmedValue.length < 2 || selectedIsCurrent) {
+      setSuggestions([]);
+      setStatus("idle");
+      return undefined;
+    }
+
+    setStatus("loading");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      fetchTravelPlaceSuggestions({ q: trimmedValue, limit: 6 }, { signal: controller.signal })
+        .then((payload) => {
+          if (requestRef.current !== requestId) return;
+          setSuggestions(payload.suggestions);
+          setStatus(payload.suggestions.length ? "idle" : "empty");
+        })
+        .catch(() => {
+          if (requestRef.current !== requestId || controller.signal.aborted) return;
+          setSuggestions([]);
+          setStatus("error");
+        });
+    }, 220);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [selectedIsCurrent, trimmedValue]);
+
+  return (
+    <div className="route-place-input">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-describedby={describedBy}
+        aria-invalid={hasError}
+        aria-autocomplete="list"
+        aria-controls={listId}
+        aria-expanded={suggestions.length > 0}
+        role="combobox"
+      />
+      {selectedSuggestion ? (
+        <p className="route-suggestion-selected">
+          Bruker {suggestionKindLabel(selectedSuggestion.kind).toLowerCase()} fra Entur
+        </p>
+      ) : null}
+      {status === "loading" ? (
+        <p className="route-suggestion-status" role="status">
+          Henter stedsforslag ...
+        </p>
+      ) : null}
+      {status === "empty" ? (
+        <p className="route-suggestion-status">Ingen Entur-forslag i Trøndelag.</p>
+      ) : null}
+      {status === "error" ? (
+        <p className="route-suggestion-status warning">
+          Stedsforslag er utilgjengelige. Du kan fortsatt skrive manuelt.
+        </p>
+      ) : null}
+      {suggestions.length ? (
+        <div id={listId} className="route-suggestion-list" role="listbox">
+          {suggestions.map((suggestion) => (
+            <button
+              key={`${suggestion.id}:${suggestion.coordinate.join(",")}`}
+              type="button"
+              role="option"
+              aria-selected={selectedSuggestion?.id === suggestion.id}
+              onClick={() => onSelectSuggestion(suggestion)}
+            >
+              <span>
+                <strong>{suggestion.label}</strong>
+                {suggestion.locality && !suggestion.label.includes(suggestion.locality)
+                  ? ` · ${suggestion.locality}`
+                  : ""}
+              </span>
+              <small>{suggestionKindLabel(suggestion.kind)}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TravelPlannerPanel({
   originInput,
   destinationInput,
@@ -1355,12 +1499,15 @@ function TravelPlannerPanel({
   travelPlanLoading,
   travelPlanError,
   selectedItineraryId,
+  selectedOriginSuggestion,
+  selectedDestinationSuggestion,
   publicTransportDisruptionsVisible,
   publicTransportVehiclesVisible,
   locationStatus,
   locationMessage,
   onOriginChange,
   onDestinationChange,
+  onSuggestionSelect,
   onDestinationPresetSelect,
   onSwapRoute,
   onTimePresetChange,
@@ -1377,12 +1524,15 @@ function TravelPlannerPanel({
   travelPlanLoading: boolean;
   travelPlanError?: string;
   selectedItineraryId?: string;
+  selectedOriginSuggestion?: TravelPlaceSuggestion;
+  selectedDestinationSuggestion?: TravelPlaceSuggestion;
   publicTransportDisruptionsVisible: boolean;
   publicTransportVehiclesVisible: boolean;
   locationStatus: LocationRequestStatus;
   locationMessage?: string;
   onOriginChange: (value: string) => void;
   onDestinationChange: (value: string) => void;
+  onSuggestionSelect: (kind: RouteInputKind, suggestion: TravelPlaceSuggestion) => void;
   onDestinationPresetSelect: (preset: DestinationPreset) => void;
   onSwapRoute: () => void;
   onTimePresetChange: (value: TravelTimePreset) => void;
@@ -1423,14 +1573,16 @@ function TravelPlannerPanel({
       <div className="travel-planner-workbench">
         <form className="route-planner-form route-planner-form-primary" onSubmit={onSubmit}>
           <div>
-            <label htmlFor="travel-origin">Hvor er du?</label>
-            <input
+            <RoutePlaceInput
               id="travel-origin"
+              label="Hvor er du?"
               value={originInput}
-              onChange={(event) => onOriginChange(event.target.value)}
               placeholder="F.eks. Munkegata eller 63.43, 10.39"
-              aria-describedby="travel-plan-result"
-              aria-invalid={Boolean(travelPlanError)}
+              describedBy="travel-plan-result"
+              hasError={Boolean(travelPlanError)}
+              selectedSuggestion={selectedOriginSuggestion}
+              onChange={onOriginChange}
+              onSelectSuggestion={(suggestion) => onSuggestionSelect("origin", suggestion)}
             />
             <div className="route-input-tools">
               <button
@@ -1449,14 +1601,16 @@ function TravelPlannerPanel({
             </div>
           </div>
           <div>
-            <label htmlFor="travel-destination">Hvor skal du?</label>
-            <input
+            <RoutePlaceInput
               id="travel-destination"
+              label="Hvor skal du?"
               value={destinationInput}
-              onChange={(event) => onDestinationChange(event.target.value)}
               placeholder="F.eks. Leangen"
-              aria-describedby="travel-plan-result"
-              aria-invalid={Boolean(travelPlanError)}
+              describedBy="travel-plan-result"
+              hasError={Boolean(travelPlanError)}
+              selectedSuggestion={selectedDestinationSuggestion}
+              onChange={onDestinationChange}
+              onSelectSuggestion={(suggestion) => onSuggestionSelect("destination", suggestion)}
             />
             <div className="route-destination-presets" role="group" aria-label="Vanlige reisemål">
               <span className="route-destination-presets-title">Vanlige mål</span>
@@ -1532,6 +1686,9 @@ export function TrafficMapPage() {
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
   const [originInput, setOriginInput] = useState("");
   const [destinationInput, setDestinationInput] = useState("");
+  const [selectedOriginSuggestion, setSelectedOriginSuggestion] = useState<TravelPlaceSuggestion>();
+  const [selectedDestinationSuggestion, setSelectedDestinationSuggestion] =
+    useState<TravelPlaceSuggestion>();
   const [timePreset, setTimePreset] = useState<TravelTimePreset>("now");
   const [locationStatus, setLocationStatus] = useState<LocationRequestStatus>("idle");
   const [locationMessage, setLocationMessage] = useState<string>();
@@ -1631,10 +1788,36 @@ export function TrafficMapPage() {
   function handleOriginInputChange(value: string): void {
     setLocationStatus("idle");
     setLocationMessage(undefined);
+    setSelectedOriginSuggestion(undefined);
     handleTravelInputChange(value, setOriginInput);
   }
 
+  function handleDestinationInputChange(value: string): void {
+    setSelectedDestinationSuggestion(undefined);
+    handleTravelInputChange(value, setDestinationInput);
+  }
+
+  function handleTravelSuggestionSelect(
+    kind: RouteInputKind,
+    suggestion: TravelPlaceSuggestion,
+  ): void {
+    setTravelPlanError(undefined);
+    if (kind === "origin") {
+      setLocationStatus("idle");
+      setLocationMessage(undefined);
+      setSelectedOriginSuggestion(suggestion);
+      setOriginInput(suggestion.label);
+    } else {
+      setSelectedDestinationSuggestion(suggestion);
+      setDestinationInput(suggestion.label);
+    }
+    if (travelPlanLoading || travelPlan) {
+      invalidateTravelPlan({ resetDepartureBoard: true });
+    }
+  }
+
   function handleDestinationPresetSelect(preset: DestinationPreset): void {
+    setSelectedDestinationSuggestion(undefined);
     handleTravelInputChange(preset.query, setDestinationInput);
   }
 
@@ -1644,6 +1827,8 @@ export function TrafficMapPage() {
     setTravelPlanError(undefined);
     setOriginInput(destinationInput);
     setDestinationInput(originInput);
+    setSelectedOriginSuggestion(selectedDestinationSuggestion);
+    setSelectedDestinationSuggestion(selectedOriginSuggestion);
     if (travelPlanLoading || travelPlan) {
       invalidateTravelPlan({ resetDepartureBoard: true });
     }
@@ -1908,6 +2093,7 @@ export function TrafficMapPage() {
 
         const nextOrigin = formatCoordinateInput({ lat, lon });
         setOriginInput(nextOrigin);
+        setSelectedOriginSuggestion(undefined);
         setTravelPlanError(undefined);
         if (travelPlanLoading || travelPlan) {
           invalidateTravelPlan();
@@ -1948,8 +2134,16 @@ export function TrafficMapPage() {
       ),
     });
 
-    const from = originInput.trim();
-    const to = destinationInput.trim();
+    const originSuggestion =
+      selectedOriginSuggestion?.label === originInput ? selectedOriginSuggestion : undefined;
+    const destinationSuggestion =
+      selectedDestinationSuggestion?.label === destinationInput
+        ? selectedDestinationSuggestion
+        : undefined;
+    const from = originSuggestion ? travelSuggestionQuery(originSuggestion) : originInput.trim();
+    const to = destinationSuggestion
+      ? travelSuggestionQuery(destinationSuggestion)
+      : destinationInput.trim();
     if (!from || !to) {
       setTravelPlanError("Skriv inn både start og mål.");
       return;
@@ -1961,7 +2155,13 @@ export function TrafficMapPage() {
     setTravelPlanError(undefined);
     try {
       const payload = await fetchTravelPlan(
-        { from, to, departAt: departureTimeForPreset(timePreset) },
+        {
+          from,
+          to,
+          ...(originSuggestion ? { fromLabel: originSuggestion.label } : {}),
+          ...(destinationSuggestion ? { toLabel: destinationSuggestion.label } : {}),
+          departAt: departureTimeForPreset(timePreset),
+        },
         { signal: controller.signal },
       );
       if (travelPlanRequestIdRef.current !== requestId) return;
@@ -1994,12 +2194,15 @@ export function TrafficMapPage() {
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
         selectedItineraryId={selectedItineraryId}
+        selectedOriginSuggestion={selectedOriginSuggestion}
+        selectedDestinationSuggestion={selectedDestinationSuggestion}
         publicTransportDisruptionsVisible={visibleContextLayers.publicTransportDisruptions}
         publicTransportVehiclesVisible={visibleContextLayers.publicTransportVehicles}
         locationStatus={locationStatus}
         locationMessage={locationMessage}
         onOriginChange={handleOriginInputChange}
-        onDestinationChange={(value) => handleTravelInputChange(value, setDestinationInput)}
+        onDestinationChange={handleDestinationInputChange}
+        onSuggestionSelect={handleTravelSuggestionSelect}
         onDestinationPresetSelect={handleDestinationPresetSelect}
         onSwapRoute={handleSwapRouteInputs}
         onTimePresetChange={handleTravelTimePresetChange}
