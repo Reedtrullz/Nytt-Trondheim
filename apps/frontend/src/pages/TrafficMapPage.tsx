@@ -408,6 +408,20 @@ function firstBoardingLeg(itinerary?: TravelPlanItinerary): TravelPlanLeg | unde
   });
 }
 
+function legDepartureTime(leg?: TravelPlanLeg): string | undefined {
+  return leg?.expectedStartTime || leg?.aimedStartTime;
+}
+
+function legLineLabel(leg?: TravelPlanLeg): string {
+  if (!leg) return "Valgt avgang";
+  const mode = modeLabel(leg.mode);
+  return leg.publicCode ? `${mode} ${leg.publicCode}` : mode;
+}
+
+function legStopLabel(leg?: TravelPlanLeg): string {
+  return leg?.from.stopName ?? leg?.from.name ?? "valgt startpunkt";
+}
+
 function scoreDepartureForLeg(departure: PublicTransportDeparture, leg: TravelPlanLeg): number {
   let score = 0;
   if (leg.serviceJourneyId && departure.serviceJourneyId === leg.serviceJourneyId) score += 12;
@@ -1036,11 +1050,38 @@ function departureStatusClass(departure: PublicTransportDeparture): string {
 
 export function selectedDepartureStatus(
   departure?: PublicTransportDeparture,
+  leg?: TravelPlanLeg,
+  board?: PublicTransportDepartureBoardPayload,
 ): SelectedDepartureStatus {
   if (!departure) {
+    const plannedTime = legDepartureTime(leg);
+    const plannedPart = plannedTime
+      ? `${legLineLabel(leg)} fra ${legStopLabel(leg)} kl. ${formatTravelDateTime(plannedTime)}`
+      : `${legLineLabel(leg)} fra ${legStopLabel(leg)}`;
+    if (board?.status === "unavailable") {
+      return {
+        label: "Sjekk AtB/Entur",
+        detail: `Avgangstavla er utilgjengelig akkurat nå. Reiserådet bruker fortsatt ${plannedPart}, men avgang, plattform og avvik må sjekkes hos AtB/Entur.`,
+        severity: "warning",
+      };
+    }
+    if (board?.status === "empty") {
+      return {
+        label: "Ingen tavletreff",
+        detail: `Avgangstavla for ${board.areaLabel} har ingen avganger for valgt tidsrom. Reiserådet bruker ${plannedPart}; sjekk AtB/Entur før du drar.`,
+        severity: "watch",
+      };
+    }
+    if (board?.departures.length) {
+      return {
+        label: "Ikke i tavla",
+        detail: `Reiserådet bruker ${plannedPart}, men Nytt fant ikke samme avgang i live-tavla. Sjekk holdeplass, plattform og avvik hos AtB/Entur.`,
+        severity: "watch",
+      };
+    }
     return {
       label: "Sjekk",
-      detail: "Ingen sikker match i avgangslisten. Sjekk linje og holdeplass hos AtB/Entur.",
+      detail: `Reiserådet bruker ${plannedPart}. Live-tavla er ikke lastet inn, så sjekk linje og holdeplass hos AtB/Entur.`,
       severity: "watch",
     };
   }
@@ -1117,7 +1158,9 @@ function DepartureBoardPanel({
         ? `${board.areaLabel}: neste avganger fra holdeplasser i nærheten.`
         : "Neste avganger fra Trondheim sentrum lastes inn.";
   const matchedDeparture = selectedDeparture?.departure;
-  const selectedStatus = selectedDepartureStatus(matchedDeparture);
+  const selectedLeg = selectedDeparture?.leg;
+  const selectedStatus = selectedDepartureStatus(matchedDeparture, selectedLeg, board);
+  const selectedPlannedTime = legDepartureTime(selectedLeg);
   return (
     <section className="departure-board-panel" aria-labelledby="departure-board-heading">
       <header>
@@ -1179,10 +1222,7 @@ function DepartureBoardPanel({
           <div>
             <p className="label">Valgt reiseforslag</p>
             <strong>
-              {modeLabel(selectedDeparture.leg.mode)}
-              {selectedDeparture.leg.publicCode
-                ? ` ${selectedDeparture.leg.publicCode}`
-                : ""} fra {selectedDeparture.leg.from.stopName ?? selectedDeparture.leg.from.name}
+              {legLineLabel(selectedDeparture.leg)} fra {legStopLabel(selectedDeparture.leg)}
             </strong>
             <span>{selectedStatus.detail}</span>
           </div>
@@ -1191,6 +1231,10 @@ function DepartureBoardPanel({
             {matchedDeparture ? (
               <time dateTime={matchedDeparture.expectedDepartureTime}>
                 {formatTravelDateTime(matchedDeparture.expectedDepartureTime)}
+              </time>
+            ) : selectedPlannedTime ? (
+              <time dateTime={selectedPlannedTime}>
+                Planlagt {formatTravelDateTime(selectedPlannedTime)}
               </time>
             ) : null}
           </div>

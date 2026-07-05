@@ -282,9 +282,52 @@ describe("TrafficMapPage route overlay helpers", () => {
       severity: "warning",
     });
 
-    expect(selectedDepartureStatus()).toEqual({
+    expect(
+      selectedDepartureStatus(undefined, planWithItinerary.itineraries[0]?.legs[0], {
+        ...departureBoard,
+        departures: [departureBoard.departures[1]!],
+      }),
+    ).toEqual({
+      label: "Ikke i tavla",
+      detail:
+        "Reiserådet bruker Buss 3 fra Munkegata kl. 1. juni 11:10, men Nytt fant ikke samme avgang i live-tavla. Sjekk holdeplass, plattform og avvik hos AtB/Entur.",
+      severity: "watch",
+    });
+
+    expect(selectedDepartureStatus(undefined, planWithItinerary.itineraries[0]?.legs[0])).toEqual({
       label: "Sjekk",
-      detail: "Ingen sikker match i avgangslisten. Sjekk linje og holdeplass hos AtB/Entur.",
+      detail:
+        "Reiserådet bruker Buss 3 fra Munkegata kl. 1. juni 11:10. Live-tavla er ikke lastet inn, så sjekk linje og holdeplass hos AtB/Entur.",
+      severity: "watch",
+    });
+  });
+
+  it("distinguishes unavailable and empty departure boards for selected route fallbacks", () => {
+    expect(
+      selectedDepartureStatus(undefined, planWithItinerary.itineraries[0]?.legs[0], {
+        ...departureBoard,
+        status: "unavailable",
+        detail: "Entur avgangstavle svarer ikke akkurat nå.",
+        departures: [],
+      }),
+    ).toEqual({
+      label: "Sjekk AtB/Entur",
+      detail:
+        "Avgangstavla er utilgjengelig akkurat nå. Reiserådet bruker fortsatt Buss 3 fra Munkegata kl. 1. juni 11:10, men avgang, plattform og avvik må sjekkes hos AtB/Entur.",
+      severity: "warning",
+    });
+
+    expect(
+      selectedDepartureStatus(undefined, planWithItinerary.itineraries[0]?.legs[0], {
+        ...departureBoard,
+        status: "empty",
+        detail: "Ingen avganger funnet nær valgt område.",
+        departures: [],
+      }),
+    ).toEqual({
+      label: "Ingen tavletreff",
+      detail:
+        "Avgangstavla for Valgt område har ingen avganger for valgt tidsrom. Reiserådet bruker Buss 3 fra Munkegata kl. 1. juni 11:10; sjekk AtB/Entur før du drar.",
       severity: "watch",
     });
   });
