@@ -1252,6 +1252,7 @@ export const publicTransportDepartureBoardQuerySchema = z
     radiusMeters: z.coerce.number().int().min(100).max(2_500).default(1_200),
     stopLimit: z.coerce.number().int().min(1).max(6).default(4),
     departureLimit: z.coerce.number().int().min(1).max(20).default(12),
+    startTime: z.string().datetime({ offset: true }).optional(),
   })
   .superRefine((value, context) => {
     const hasLat = value.lat !== undefined;

@@ -400,6 +400,38 @@ describe("traffic travel planner API", () => {
     expect(enturRequestCount).toBe(1);
   });
 
+  it("forwards explicit departure-board start time to Entur", async () => {
+    const requestedStartTime = "2026-07-05T08:30:00.000Z";
+    let enturStartTime: string | undefined;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      );
+      expect(url.hostname).toBe("api.entur.io");
+      enturStartTime = (
+        JSON.parse(String(init?.body)) as {
+          variables: { startTime: string };
+        }
+      ).variables.startTime;
+      return enturDepartureBoardResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent
+      .get(
+        `/api/map/public-transport/departures?lat=63.4305&lon=10.3951&startTime=${encodeURIComponent(requestedStartTime)}`,
+      )
+      .expect(200);
+
+    expect(enturStartTime).toBe(requestedStartTime);
+    expect(response.body.generatedAt).not.toBe(requestedStartTime);
+  });
+
   it("keeps /trafikk useful when the Entur departure board fails", async () => {
     vi.stubGlobal(
       "fetch",

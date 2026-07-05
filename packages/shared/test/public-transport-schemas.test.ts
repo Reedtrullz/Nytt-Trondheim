@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
+  publicTransportDepartureBoardQuerySchema,
   publicTransportMapQuerySchema,
   travelPlanQuerySchema,
   workspaceMapQuerySchema,
@@ -34,6 +35,27 @@ describe("public transport and map tool schemas", () => {
         west: "10.2",
       }),
     ).toThrow(/north/);
+  });
+
+  it("validates departure-board time parameters before querying Entur", () => {
+    expect(
+      publicTransportDepartureBoardQuerySchema.parse({
+        lat: "63.4305",
+        lon: "10.3951",
+        startTime: "2026-07-05T08:30:00.000Z",
+      }),
+    ).toMatchObject({
+      lat: 63.4305,
+      lon: 10.3951,
+      startTime: "2026-07-05T08:30:00.000Z",
+    });
+    expect(() =>
+      publicTransportDepartureBoardQuerySchema.parse({
+        lat: "63.4305",
+        lon: "10.3951",
+        startTime: "2026-07-05T08:30:00",
+      }),
+    ).toThrow();
   });
 
   it("validates travel-plan queries before server-side routing work starts", () => {

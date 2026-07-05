@@ -6,6 +6,7 @@ export interface PublicTransportDepartureBoardRequest {
   radiusMeters?: number;
   stopLimit?: number;
   departureLimit?: number;
+  startTime?: string;
 }
 
 export async function fetchPublicTransportDepartureBoard(
@@ -22,6 +23,7 @@ export async function fetchPublicTransportDepartureBoard(
   if (request.departureLimit !== undefined) {
     params.set("departureLimit", String(request.departureLimit));
   }
+  if (request.startTime) params.set("startTime", request.startTime);
 
   const suffix = params.toString();
   const response = await fetch(

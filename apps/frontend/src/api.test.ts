@@ -452,11 +452,12 @@ describe("frontend source item API helpers", () => {
         radiusMeters: 900,
         stopLimit: 3,
         departureLimit: 7,
+        startTime: "2026-07-05T08:30:00.000Z",
       }),
     ).resolves.toEqual(payload);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/map/public-transport/departures?lat=63.4305&lon=10.3951&radiusMeters=900&stopLimit=3&departureLimit=7",
+      "/api/map/public-transport/departures?lat=63.4305&lon=10.3951&radiusMeters=900&stopLimit=3&departureLimit=7&startTime=2026-07-05T08%3A30%3A00.000Z",
       expect.objectContaining({ credentials: "include" }),
     );
   });

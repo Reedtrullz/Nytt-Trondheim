@@ -1466,6 +1466,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
             radiusMeters: query.radiusMeters,
             stopLimit: query.stopLimit,
             departureLimit: query.departureLimit,
+            startTime: query.startTime ? new Date(query.startTime) : undefined,
             sources,
           }),
         );

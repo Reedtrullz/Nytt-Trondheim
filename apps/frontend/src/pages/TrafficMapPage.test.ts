@@ -200,6 +200,7 @@ describe("TrafficMapPage route overlay helpers", () => {
       scope: "origin",
       label: "Munkegata",
       center: { lat: 63.4305, lon: 10.3951 },
+      startTime: "2026-06-01T09:10:00.000Z",
     });
   });
 

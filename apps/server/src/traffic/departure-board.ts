@@ -471,7 +471,7 @@ export async function fetchEnturDepartureBoard(input: {
         payload,
         center,
         areaLabel: input.areaLabel,
-        generatedAt: startTime,
+        generatedAt: new Date(nowMs),
         sources: input.sources,
         departureLimit,
       });

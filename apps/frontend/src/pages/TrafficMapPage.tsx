@@ -78,6 +78,7 @@ interface DepartureBoardContext {
   scope: DepartureBoardScope;
   label: string;
   center?: { lat: number; lon: number };
+  startTime?: string;
 }
 
 interface SelectedDepartureMatch {
@@ -348,6 +349,9 @@ export function departureBoardContextFromPlan(
       plan.origin.query ??
       "Valgt startpunkt",
     center: { lat, lon },
+    ...(boardingLeg?.expectedStartTime || boardingLeg?.aimedStartTime
+      ? { startTime: boardingLeg.expectedStartTime || boardingLeg.aimedStartTime }
+      : {}),
   };
 }
 
@@ -1078,6 +1082,12 @@ export function selectedDepartureStatus(
   };
 }
 
+function departureBoardHeading(context: DepartureBoardContext): string {
+  return context.startTime
+    ? `Avganger rundt ${formatTravelDateTime(context.startTime)}`
+    : "Avganger nå";
+}
+
 function DepartureBoardPanel({
   board,
   loading,
@@ -1112,7 +1122,7 @@ function DepartureBoardPanel({
       <header>
         <div>
           <p className="label">Kollektiv nå</p>
-          <h2 id="departure-board-heading">Avganger nå</h2>
+          <h2 id="departure-board-heading">{departureBoardHeading(context)}</h2>
           <p>{contextDescription}</p>
         </div>
         <div className="departure-board-actions">
@@ -1433,14 +1443,21 @@ export function TrafficMapPage() {
     setDepartureBoardLoading(true);
     setDepartureBoardError(undefined);
     fetchPublicTransportDepartureBoard(
-      { center: context.center, radiusMeters: 1_200, stopLimit: 4, departureLimit: 12 },
+      {
+        center: context.center,
+        radiusMeters: 1_200,
+        stopLimit: 4,
+        departureLimit: 12,
+        startTime: context.startTime,
+      },
       { signal: controller.signal },
     )
       .then((payload) => {
+        if (departureBoardAbortRef.current !== controller) return;
         setDepartureBoard(payload);
       })
       .catch((reason) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || departureBoardAbortRef.current !== controller) return;
         setDepartureBoardError(
           reason instanceof Error ? reason.message : "Kunne ikke hente avganger.",
         );

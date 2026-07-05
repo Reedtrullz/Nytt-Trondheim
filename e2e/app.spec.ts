@@ -2183,7 +2183,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   ).toBeVisible();
   await expect(page.getByRole("button", { name: /vises på kart/i })).toBeVisible();
   await expect(page.getByText("Forsinkelse på linje 3")).toBeVisible();
-  const board = page.getByRole("region", { name: "Avganger nå" });
+  const board = page.getByRole("region", { name: /Avganger rundt/ });
   await expect(board).toContainText("Munkegata: neste avganger fra holdeplasser ved startpunktet.");
   await expect(board.getByRole("button", { name: "Startpunkt" })).toHaveAttribute(
     "aria-pressed",
@@ -2196,7 +2196,9 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   expect(
     departureRequestUrls.some(
       (url) =>
-        url.searchParams.get("lat") === "63.4305" && url.searchParams.get("lon") === "10.3951",
+        url.searchParams.get("lat") === "63.4305" &&
+        url.searchParams.get("lon") === "10.3951" &&
+        url.searchParams.get("startTime") === "2026-06-01T09:10:00.000Z",
     ),
   ).toBe(true);
   await expect(
