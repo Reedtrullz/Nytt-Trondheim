@@ -236,9 +236,13 @@ curl -fsS https://nytt.reidar.tech/health
 curl -sS -o /tmp/trafikk.html -w '%{http_code}\n' https://nytt.reidar.tech/trafikk
 ASSET=$(grep -oE '/assets/[^"]+\.js' /tmp/trafikk.html | head -n 1)
 curl -fsSL "https://nytt.reidar.tech${ASSET}" -o /tmp/trafikk.js
-grep -Eq 'Trafikk akkurat nå|Finn reiseråd|Reiseråd for ruten|road-context-marker' /tmp/trafikk.js
-curl -sS -o /tmp/traffic-api.json -w '%{http_code}\n' 'https://nytt.reidar.tech/api/map/traffic-events?north=63.5&south=63.3&east=10.6&west=10.1'
-curl -sS -o /tmp/travel-plan-api.json -w '%{http_code}\n' 'https://nytt.reidar.tech/api/map/travel-plan?from=Munkegata&to=Leangen'
+grep -Eq 'Trafikkbildet nå|Finn reiseråd|Beste nå|Åpne hos AtB/Entur|Nytt vurderer reiserisiko' /tmp/trafikk.js
+curl -fsS -o /tmp/traffic-api-unauth.json -w '%{http_code}\n' 'https://nytt.reidar.tech/api/map/traffic-events?north=63.5&south=63.3&east=10.6&west=10.1' || true
+# Protected `/api` traffic endpoints should return 401 without a session. For a full smoke, paste an authenticated browser cookie:
+NYTT_COOKIE='connect.sid=...'
+curl -fsS -H "Cookie: ${NYTT_COOKIE}" -o /tmp/traffic-api.json 'https://nytt.reidar.tech/api/map/traffic-events?north=63.5&south=63.3&east=10.6&west=10.1'
+curl -fsS -H "Cookie: ${NYTT_COOKIE}" -o /tmp/travel-plan-api.json 'https://nytt.reidar.tech/api/map/travel-plan?from=Munkegata&to=Leangen'
+node -e "const fs=require('fs'); for (const file of ['/tmp/traffic-api.json','/tmp/travel-plan-api.json']) { const body=JSON.parse(fs.readFileSync(file,'utf8')); if (!body || typeof body !== 'object') process.exit(1); }"
 
 ssh Racknerd-Deploy "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -P pager=off -F ' | ' -At" <<'SQL'
 SELECT source, state, detail, last_checked_at

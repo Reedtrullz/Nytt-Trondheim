@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api.js";
 import { fetchPublicTransportMap } from "./api/publicTransportMap.js";
+import { fetchTravelPlan } from "./api/travelPlan.js";
 
 describe("frontend source item API helpers", () => {
   beforeEach(() => {
@@ -314,6 +315,54 @@ describe("frontend source item API helpers", () => {
       "/api/operations/spatial-analytics?from=2026-07-02T08%3A00%3A00.000Z&to=2026-07-02T10%3A00%3A00.000Z&minDelaySeconds=300&limit=40",
       expect.objectContaining({ credentials: "include" }),
     );
+  });
+
+  it("requests travel plans with encoded origin, destination and departure time", async () => {
+    const payload = {
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Lade", label: "Lade", coordinate: [10.464, 63.433] },
+      route: {
+        source: "direct",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.3951, 63.4305],
+            [10.464, 63.433],
+          ],
+        },
+        distanceMeters: 4850,
+        detail: "Test",
+      },
+      trafficImpacts: [],
+      publicTransportSuggestions: [],
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-07-05T06:30:00.000Z",
+        source: "Entur Journey Planner",
+      },
+      sources: [],
+      generatedAt: "2026-07-05T06:30:00.000Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchTravelPlan({
+        from: "Munkegata / Dronningens gate",
+        to: "Lade, Trondheim",
+        departAt: "2026-07-05T08:30:00+02:00",
+      }),
+    ).resolves.toEqual(payload);
+
+    const [url, options] = fetchMock.mock.calls[0] ?? [];
+    expect(options).toEqual(expect.objectContaining({ credentials: "include" }));
+    expect(String(url)).toMatch(/^\/api\/map\/travel-plan\?/);
+    const params = new URLSearchParams(String(url).split("?")[1]);
+    expect(params.get("from")).toBe("Munkegata / Dronningens gate");
+    expect(params.get("to")).toBe("Lade, Trondheim");
+    expect(params.get("departAt")).toBe("2026-07-05T08:30:00+02:00");
   });
 
   it("requests raw operations inspector data with typed filters", async () => {

@@ -3,6 +3,7 @@ import {
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
   publicTransportMapQuerySchema,
+  travelPlanQuerySchema,
   workspaceMapQuerySchema,
 } from "../src/schemas.js";
 
@@ -33,6 +34,28 @@ describe("public transport and map tool schemas", () => {
         west: "10.2",
       }),
     ).toThrow(/north/);
+  });
+
+  it("validates travel-plan queries before server-side routing work starts", () => {
+    expect(
+      travelPlanQuerySchema.parse({
+        from: " Munkegata ",
+        to: " Lade ",
+        departAt: "2026-07-05T08:30:00+02:00",
+      }),
+    ).toEqual({
+      from: "Munkegata",
+      to: "Lade",
+      departAt: "2026-07-05T08:30:00+02:00",
+    });
+    expect(() =>
+      travelPlanQuerySchema.parse({
+        from: "Munkegata",
+        to: "Lade",
+        departAt: "2026-07-05T08:30:00",
+      }),
+    ).toThrow();
+    expect(() => travelPlanQuerySchema.parse({ from: "A", to: "Lade" })).toThrow();
   });
 
   it("accepts typed private analysis metadata but no client provenance", () => {

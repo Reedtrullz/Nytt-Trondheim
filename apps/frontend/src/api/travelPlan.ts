@@ -3,6 +3,7 @@ import type { TravelPlanPayload } from "@nytt/shared";
 export interface TravelPlanRequest {
   from: string;
   to: string;
+  departAt?: string;
 }
 
 export async function fetchTravelPlan(
@@ -12,6 +13,7 @@ export async function fetchTravelPlan(
   const params = new URLSearchParams();
   params.set("from", request.from);
   params.set("to", request.to);
+  if (request.departAt) params.set("departAt", request.departAt);
   const response = await fetch(`/api/map/travel-plan?${params.toString()}`, {
     credentials: "include",
     signal: options.signal,

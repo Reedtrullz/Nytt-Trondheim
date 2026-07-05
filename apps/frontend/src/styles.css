@@ -9233,6 +9233,10 @@ button {
   align-items: start;
 }
 
+.travel-planner-result {
+  min-width: 0;
+}
+
 .traffic-filter-panel label,
 .route-planner-form label {
   display: flex;
@@ -9255,12 +9259,14 @@ button {
   min-height: 100%;
 }
 
-.route-planner-form input {
+.route-planner-form input,
+.route-planner-form select {
   width: 100%;
   padding: 10px 12px;
   color: var(--ink);
   border: 1px solid var(--line);
   background: #fff;
+  font: inherit;
 }
 
 .route-planner-form button {
@@ -9285,6 +9291,12 @@ button {
 
 .route-planner-status.error {
   color: var(--terracotta);
+  border-style: solid;
+  background: #fff8f3;
+}
+
+.route-planner-status.warning {
+  color: #8a3b22;
   border-style: solid;
   background: #fff8f3;
 }
@@ -9334,6 +9346,216 @@ button {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.25;
+}
+
+.itinerary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.itinerary-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.itinerary-card-best {
+  border-left: 4px solid var(--green);
+}
+
+.itinerary-card.selected {
+  outline: 2px solid color-mix(in srgb, var(--blue) 42%, transparent);
+  outline-offset: -2px;
+}
+
+.itinerary-card-watch {
+  border-left: 4px solid var(--amber);
+}
+
+.itinerary-card-avoid {
+  border-left: 4px solid var(--terracotta);
+}
+
+.itinerary-card h3 {
+  margin: 8px 0 4px;
+  color: var(--ink);
+  font: 24px/1.05 var(--serif);
+  letter-spacing: 0;
+}
+
+.itinerary-card p,
+.itinerary-card small,
+.itinerary-card footer,
+.itinerary-leg-list span,
+.itinerary-leg-list small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.itinerary-card p {
+  margin: 0;
+}
+
+.itinerary-card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.itinerary-card-labels span,
+.itinerary-card-labels strong,
+.itinerary-leg-notices span {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--green) 34%, var(--line));
+  color: var(--green);
+  background: color-mix(in srgb, var(--paper) 88%, var(--green) 12%);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.itinerary-card-labels strong {
+  border-color: color-mix(in srgb, var(--blue) 36%, var(--line));
+  color: var(--blue);
+  background: color-mix(in srgb, var(--paper) 88%, var(--blue) 12%);
+}
+
+.itinerary-card-watch .itinerary-card-labels strong {
+  border-color: color-mix(in srgb, var(--amber) 44%, var(--line));
+  color: #8a5a00;
+  background: #fff8e8;
+}
+
+.itinerary-card-avoid .itinerary-card-labels strong {
+  border-color: color-mix(in srgb, var(--terracotta) 44%, var(--line));
+  color: var(--terracotta);
+  background: #fff8f3;
+}
+
+.itinerary-leg-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.itinerary-leg-list li {
+  display: grid;
+  gap: 5px;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.itinerary-leg-list li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.itinerary-leg-list strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.itinerary-leg-notices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.itinerary-leg-notices span {
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+  color: #8a5a00;
+  background: #fff8e8;
+}
+
+.itinerary-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.itinerary-card-select {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  color: var(--blue);
+  background: var(--paper);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.itinerary-card-select[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+  color: var(--green);
+  background: color-mix(in srgb, var(--paper) 86%, var(--green) 14%);
+}
+
+.travel-plan-disclaimer {
+  margin-top: 14px;
+  padding-top: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.traffic-data-disclosure {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.traffic-data-disclosure summary {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.traffic-data-disclosure div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.traffic-data-disclosure article {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.traffic-data-disclosure strong,
+.traffic-data-disclosure span {
+  display: block;
+}
+
+.traffic-data-disclosure strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.traffic-data-disclosure span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .travel-plan-card header small,
@@ -10281,28 +10503,38 @@ button {
   gap: 20px;
 }
 
-.traffic-now-summary header {
+.traffic-now-summary {
   display: grid;
-  gap: 4px;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.traffic-now-summary header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
 }
 
 .traffic-now-summary h2 {
   margin: 0;
-  font: 46px/1.04 var(--serif);
-  letter-spacing: -0.025em;
+  font: 30px/1.04 var(--serif);
+  letter-spacing: 0;
 }
 
 .traffic-now-cards {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .traffic-now-card {
-  min-height: 138px;
-  padding: 16px;
+  min-height: 0;
+  padding: 10px;
   border: 1px solid var(--line);
-  background: var(--paper);
+  background: #fff;
 }
 
 .traffic-now-card.severity-critical,
@@ -10310,20 +10542,21 @@ button {
   border-left: 4px solid var(--terracotta);
 }
 
-.traffic-now-card h2 {
-  margin: 4px 0;
-  font: 24px/1.1 var(--serif);
+.traffic-now-card :is(h2, h3) {
+  margin: 2px 0;
+  font: 20px/1.1 var(--serif);
 }
 
 .traffic-now-card p {
+  margin: 4px 0 0;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .traffic-now-count {
   display: block;
-  font: 34px/1 var(--serif);
+  font: 26px/1 var(--serif);
 }
 
 .trust-badge {
@@ -10763,6 +10996,11 @@ button {
 
   .traffic-now-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .itinerary-grid,
+  .traffic-data-disclosure div {
+    grid-template-columns: 1fr;
   }
 
   .access-request-row {
@@ -11623,6 +11861,12 @@ button {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .travel-plan-card {
+    max-height: min(72vh, 620px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
   .situation-workspace-page {
     padding: 16px;
     gap: 12px;
@@ -11686,16 +11930,24 @@ button {
   }
 
   .traffic-now-summary h2 {
-    font-size: 34px;
+    font-size: 26px;
   }
 
   .traffic-now-cards {
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: minmax(170px, 76%);
+    grid-auto-columns: minmax(152px, 72%);
     grid-template-columns: none;
     overflow-x: auto;
     padding-bottom: 6px;
+  }
+
+  .traffic-now-card {
+    padding: 9px;
+  }
+
+  .itinerary-card h3 {
+    font-size: 22px;
   }
 
   .traffic-workspace {

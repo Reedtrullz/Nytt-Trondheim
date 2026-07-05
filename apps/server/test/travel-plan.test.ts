@@ -4,7 +4,11 @@ import path from "node:path";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
-import { buildTravelPlanPayload } from "../src/traffic/travel-plan.js";
+import {
+  buildTravelPlanPayload,
+  clearEnturJourneyCache,
+  fetchEnturJourneyItineraries,
+} from "../src/traffic/travel-plan.js";
 import type {
   PublicTransportServiceAlert,
   PublicTransportVehicle,
@@ -66,13 +70,121 @@ const sourceHealth = [
 ] satisfies SourceHealth[];
 
 afterEach(() => {
+  clearEnturJourneyCache();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
+function enturTripResponse(
+  overrides: {
+    empty?: boolean;
+    cancelled?: boolean;
+    replacement?: boolean;
+    walkOnly?: boolean;
+    missingExpectedTimes?: boolean;
+    malformedSecondLeg?: boolean;
+    routingErrors?: boolean;
+    patternCount?: number;
+  } = {},
+): Response {
+  const leg = {
+    id: overrides.walkOnly ? "leg-walk" : "leg-bus-3",
+    mode: overrides.walkOnly ? "foot" : "bus",
+    aimedStartTime: "2026-06-01T09:10:00+02:00",
+    ...(overrides.missingExpectedTimes ? {} : { expectedStartTime: "2026-06-01T09:10:00+02:00" }),
+    aimedEndTime: "2026-06-01T09:27:00+02:00",
+    ...(overrides.missingExpectedTimes ? {} : { expectedEndTime: "2026-06-01T09:27:00+02:00" }),
+    duration: 1020,
+    distance: overrides.walkOnly ? 1200 : 4850,
+    realtime: !overrides.walkOnly,
+    fromPlace: {
+      name: "Munkegata",
+      latitude: 63.4305,
+      longitude: 10.3951,
+      quay: {
+        id: "NSR:Quay:1",
+        name: "Munkegata",
+        publicCode: "M1",
+      },
+    },
+    toPlace: {
+      name: "Leangen",
+      latitude: 63.433,
+      longitude: 10.464,
+      quay: {
+        id: "NSR:Quay:2",
+        name: "Leangen",
+        publicCode: "L1",
+      },
+    },
+    line: overrides.walkOnly
+      ? null
+      : {
+          id: "ATB:Line:3",
+          publicCode: "3",
+          name: "Lade - Hallset",
+          transportMode: "bus",
+          isReplacement: overrides.replacement ?? false,
+        },
+    serviceJourney: overrides.walkOnly
+      ? null
+      : {
+          id: "ATB:ServiceJourney:3",
+          publicCode: "3",
+          isReplacement: overrides.replacement ?? false,
+        },
+    fromEstimatedCall: {
+      cancellation: overrides.cancelled ?? false,
+      realtime: !overrides.walkOnly,
+    },
+    toEstimatedCall: {
+      cancellation: overrides.cancelled ?? false,
+      realtime: !overrides.walkOnly,
+    },
+    situations: overrides.cancelled
+      ? [
+          {
+            id: "ATB:Situation:cancelled",
+            summary: [{ value: "Avgangen er innstilt", language: "no" }],
+            advice: [{ value: "Finn alternativ avgang.", language: "no" }],
+            severity: "severe",
+          },
+        ]
+      : [],
+  };
+  const malformedLeg = {
+    id: "leg-malformed",
+    mode: "bus",
+    aimedStartTime: "ikke-en-dato",
+    expectedStartTime: "ikke-en-dato",
+    duration: 0,
+    fromPlace: leg.fromPlace,
+  };
+  return Response.json({
+    data: {
+      trip: {
+        tripPatterns: overrides.empty
+          ? []
+          : Array.from({ length: overrides.patternCount ?? 1 }, (_, index) => ({
+              expectedStartTime: "2026-06-01T09:10:00+02:00",
+              expectedEndTime: "2026-06-01T09:27:00+02:00",
+              duration: 1020 + index,
+              walkTime: 240,
+              waitingTime: 120,
+              distance: 4850,
+              legs: overrides.malformedSecondLeg ? [leg, malformedLeg] : [leg],
+            })),
+        routingErrors: overrides.routingErrors
+          ? [{ code: "NO_TRANSIT", description: "No transit found", inputField: "to" }]
+          : [],
+      },
+    },
+  });
+}
+
 describe("traffic travel planner API", () => {
   it("geocodes a from/to trip and returns traffic plus public transport suggestions near the route", async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(
         typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
       );
@@ -114,6 +226,29 @@ describe("traffic travel planner API", () => {
             },
           ],
         });
+      }
+      if (url.hostname === "api.entur.io") {
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>)["ET-Client-Name"]).toBe(
+          "reidar-nytt-trondheim",
+        );
+        const body = JSON.parse(String(init?.body)) as {
+          variables: {
+            from: { coordinates: unknown };
+            to: { coordinates: unknown };
+            dateTime: string;
+          };
+        };
+        expect(body.variables.from.coordinates).toEqual({
+          latitude: 63.4305,
+          longitude: 10.3951,
+        });
+        expect(body.variables.to.coordinates).toEqual({
+          latitude: 63.433,
+          longitude: 10.464,
+        });
+        expect(body.variables.dateTime).toEqual(expect.any(String));
+        return enturTripResponse();
       }
       throw new Error(`unexpected fetch ${url.href}`);
     });
@@ -224,6 +359,35 @@ describe("traffic travel planner API", () => {
         (suggestion: { title: string }) => suggestion.title,
       ),
     ).not.toContain("Stengt holdeplass for linje 9");
+    expect(response.body.journeyPlanner).toMatchObject({
+      status: "ok",
+      source: "Entur Journey Planner",
+    });
+    expect(response.body.itineraries).toEqual([
+      expect.objectContaining({
+        decision: "watch",
+        labels: expect.arrayContaining([
+          "best_now",
+          "fewest_transfers",
+          "soonest_departure",
+          "most_robust",
+        ]),
+        modes: ["bus"],
+        realtime: true,
+        legs: [
+          expect.objectContaining({
+            mode: "bus",
+            publicCode: "3",
+            notices: expect.arrayContaining([
+              expect.objectContaining({
+                title: "Forsinkelse på linje 3",
+                source: "Entur avvik",
+              }),
+            ]),
+          }),
+        ],
+      }),
+    ]);
     expect(response.body.sources.map((source: SourceHealth) => source.source)).toEqual([
       "vegvesen_traffic_info",
       "datex",
@@ -234,22 +398,36 @@ describe("traffic travel planner API", () => {
       expect.objectContaining({
         states: ["active", "planned"],
         bounds: expect.any(Object),
-        limit: null,
+        limit: 120,
       }),
+      "Reedtrullz",
+    );
+    expect(store.listOfficialEvents).toHaveBeenCalledWith(
+      {
+        source: "datex",
+        states: ["active", "updated"],
+        bounds: expect.objectContaining({
+          north: expect.any(Number),
+          south: expect.any(Number),
+          east: expect.any(Number),
+          west: expect.any(Number),
+        }),
+        limit: 200,
+      },
       "Reedtrullz",
     );
     expect(store.listPublicTransportVehicles).toHaveBeenCalledWith(
       expect.objectContaining({
         modes: ["bus", "tram", "rail", "water"],
         bounds: expect.any(Object),
-        limit: null,
+        limit: 80,
       }),
     );
     expect(store.listPublicTransportServiceAlerts).toHaveBeenCalledWith(
       expect.objectContaining({
         states: ["active"],
         bounds: expect.any(Object),
-        limit: null,
+        limit: 80,
       }),
     );
   });
@@ -259,6 +437,9 @@ describe("traffic travel planner API", () => {
       const url = new URL(
         typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
       );
+      if (url.hostname === "api.entur.io") {
+        return enturTripResponse({ empty: true, routingErrors: true });
+      }
       expect(url.hostname).toBe("router.project-osrm.org");
       expect(url.pathname).toContain("10.3951,63.4305;10.464,63.433");
       return Response.json({
@@ -293,6 +474,414 @@ describe("traffic travel planner API", () => {
 
     expect(response.body.origin.coordinate).toEqual([10.3951, 63.4305]);
     expect(response.body.destination.coordinate).toEqual([10.464, 63.433]);
+    expect(response.body.journeyPlanner).toMatchObject({
+      status: "empty",
+      detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+    });
+    expect(response.body.itineraries).toEqual([]);
+  });
+
+  it("accepts departure timestamps with explicit timezone offsets", async () => {
+    const roundedFuture = new Date(Math.ceil((Date.now() + 60 * 60 * 1000) / 1000) * 1000);
+    const offsetDeparture = new Date(roundedFuture.getTime() + 2 * 60 * 60 * 1000)
+      .toISOString()
+      .replace("Z", "+02:00");
+    let enturDateTime: string | undefined;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      );
+      if (url.hostname === "router.project-osrm.org") {
+        return Response.json({
+          routes: [
+            {
+              distance: 4_850,
+              duration: 660,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.464, 63.433],
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (url.hostname === "api.entur.io") {
+        enturDateTime = (JSON.parse(String(init?.body)) as { variables: { dateTime: string } })
+          .variables.dateTime;
+        return enturTripResponse({ empty: true });
+      }
+      throw new Error(`unexpected fetch ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listPublicTransportVehicles").mockResolvedValue([]);
+    vi.spyOn(store, "listPublicTransportServiceAlerts").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    await agent
+      .get(
+        `/api/map/travel-plan?from=10.3951,63.4305&to=10.464,63.433&departAt=${encodeURIComponent(offsetDeparture)}`,
+      )
+      .expect(200);
+
+    expect(enturDateTime).toBe(roundedFuture.toISOString());
+  });
+
+  it("keeps the travel plan useful when Entur journey search is unavailable", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      );
+      if (url.hostname === "nominatim.openstreetmap.org") {
+        const query = url.searchParams.get("q") ?? "";
+        return Response.json([
+          {
+            display_name: query.includes("Munkegata")
+              ? "Munkegata, Midtbyen, Trondheim, Trøndelag, Norge"
+              : "Leangen, Trondheim, Trøndelag, Norge",
+            lat: query.includes("Munkegata") ? "63.4305" : "63.4330",
+            lon: query.includes("Munkegata") ? "10.3951" : "10.4640",
+          },
+        ]);
+      }
+      if (url.hostname === "router.project-osrm.org") {
+        return Response.json({
+          routes: [
+            {
+              distance: 4_850,
+              duration: 660,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.464, 63.433],
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (url.hostname === "api.entur.io") {
+        return Response.json({ errors: [{ message: "rate limited" }] }, { status: 429 });
+      }
+      throw new Error(`unexpected fetch ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listPublicTransportVehicles").mockResolvedValue([]);
+    vi.spyOn(store, "listPublicTransportServiceAlerts").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const response = await agent.get("/api/map/travel-plan?from=Munkegata&to=Leangen").expect(200);
+
+    expect(response.body.journeyPlanner).toMatchObject({
+      status: "unavailable",
+      detail: expect.stringContaining("Entur reisesøk er ikke tilgjengelig"),
+    });
+    expect(response.body.itineraries).toEqual([]);
+    expect(response.body.publicTransportSuggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "planning_link",
+          title: "Sjekk avganger hos AtB/Entur",
+        }),
+      ]),
+    );
+  });
+
+  it("caches identical Entur journey requests briefly to avoid hammering the upstream API", async () => {
+    let enturRequestCount = 0;
+    let geocodeRequestCount = 0;
+    let routeRequestCount = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      );
+      if (url.hostname === "nominatim.openstreetmap.org") {
+        geocodeRequestCount += 1;
+        const query = url.searchParams.get("q") ?? "";
+        return Response.json([
+          {
+            display_name: query.includes("Munkegata")
+              ? "Munkegata, Midtbyen, Trondheim, Trøndelag, Norge"
+              : "Leangen, Trondheim, Trøndelag, Norge",
+            lat: query.includes("Munkegata") ? "63.4305" : "63.4330",
+            lon: query.includes("Munkegata") ? "10.3951" : "10.4640",
+          },
+        ]);
+      }
+      if (url.hostname === "router.project-osrm.org") {
+        routeRequestCount += 1;
+        return Response.json({
+          routes: [
+            {
+              distance: 4_850,
+              duration: 660,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.464, 63.433],
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (url.hostname === "api.entur.io") {
+        enturRequestCount += 1;
+        return enturTripResponse({ empty: true });
+      }
+      throw new Error(`unexpected fetch ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listPublicTransportVehicles").mockResolvedValue([]);
+    vi.spyOn(store, "listPublicTransportServiceAlerts").mockResolvedValue([]);
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    const departAt = encodeURIComponent(new Date(Date.now() + 10 * 60 * 1000).toISOString());
+    const url = `/api/map/travel-plan?from=Munkegata&to=Leangen&departAt=${departAt}`;
+    await agent.get(url).expect(200);
+    await agent.get(url).expect(200);
+
+    expect(enturRequestCount).toBe(1);
+    expect(geocodeRequestCount).toBe(2);
+    expect(routeRequestCount).toBe(1);
+  });
+
+  it("marks cancelled Entur legs as itinerary choices to avoid", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => enturTripResponse({ cancelled: true })),
+    );
+
+    const itineraries = await fetchEnturJourneyItineraries({
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+      departureTime: new Date("2026-06-01T07:10:00.000Z"),
+      clientName: "test-client",
+      endpoint: "https://entur.test/graphql",
+    });
+    const payload = buildTravelPlanPayload({
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+      route: {
+        source: "direct",
+        distanceMeters: 4850,
+        detail: "Test",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.3951, 63.4305],
+            [10.464, 63.433],
+          ],
+        },
+      },
+      events: [],
+      vehicles: [],
+      alerts: [],
+      itineraries,
+      sourceHealth,
+    });
+
+    expect(payload.itineraries[0]).toMatchObject({
+      decision: "avoid",
+      disruptionCount: expect.any(Number),
+      legs: [
+        expect.objectContaining({
+          cancelled: true,
+          notices: expect.arrayContaining([
+            expect.objectContaining({ title: "Avgangen er innstilt", source: "Entur" }),
+          ]),
+        }),
+      ],
+    });
+    expect(payload.itineraries[0]?.decisionReason).toContain("innstilt");
+  });
+
+  it("marks replacement transport as a route choice to watch", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => enturTripResponse({ replacement: true })),
+    );
+
+    const itineraries = await fetchEnturJourneyItineraries({
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+      departureTime: new Date("2026-06-01T07:10:00.000Z"),
+      clientName: "test-client",
+      endpoint: "https://entur.test/graphql",
+    });
+    const payload = buildTravelPlanPayload({
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+      route: {
+        source: "direct",
+        distanceMeters: 4850,
+        detail: "Test",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.3951, 63.4305],
+            [10.464, 63.433],
+          ],
+        },
+      },
+      events: [],
+      vehicles: [],
+      alerts: [],
+      itineraries,
+      sourceHealth,
+    });
+
+    expect(payload.itineraries[0]).toMatchObject({
+      decision: "watch",
+      decisionReason: expect.stringContaining("erstatningstransport"),
+      legs: [
+        expect.objectContaining({
+          replacementTransport: true,
+          notices: expect.arrayContaining([
+            expect.objectContaining({ title: "Erstatningstransport", source: "Entur" }),
+          ]),
+        }),
+      ],
+    });
+  });
+
+  it("handles walk-only Entur trips with sparse optional fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => enturTripResponse({ walkOnly: true, missingExpectedTimes: true })),
+    );
+
+    const itineraries = await fetchEnturJourneyItineraries({
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+      departureTime: new Date("2026-06-01T07:10:00.000Z"),
+      clientName: "test-client",
+      endpoint: "https://entur.test/graphql",
+    });
+
+    expect(itineraries[0]).toMatchObject({
+      modes: ["walk"],
+      transferCount: 0,
+      realtime: false,
+      legs: [
+        expect.objectContaining({
+          mode: "walk",
+          expectedStartTime: "2026-06-01T07:10:00.000Z",
+          expectedEndTime: "2026-06-01T07:27:00.000Z",
+        }),
+      ],
+    });
+    expect(itineraries[0]?.legs[0]).not.toHaveProperty("lineName");
+    expect(itineraries[0]?.legs[0]).not.toHaveProperty("publicCode");
+  });
+
+  it("drops malformed multi-leg Entur trips instead of ranking partial data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => enturTripResponse({ malformedSecondLeg: true })),
+    );
+
+    await expect(
+      fetchEnturJourneyItineraries({
+        origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+        destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+        departureTime: new Date("2026-06-01T07:10:00.000Z"),
+        clientName: "test-client",
+        endpoint: "https://entur.test/graphql",
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("negative-caches Entur upstream failures briefly", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ errors: [{ message: "rate limited" }] }, { status: 429 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+      departureTime: new Date("2026-06-01T07:10:00.000Z"),
+      clientName: "test-client",
+      endpoint: "https://entur.test/graphql",
+    } satisfies Parameters<typeof fetchEnturJourneyItineraries>[0];
+
+    await expect(fetchEnturJourneyItineraries(input)).rejects.toThrow("Entur svarte 429");
+    await expect(fetchEnturJourneyItineraries(input)).rejects.toThrow("Entur svarte 429");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the Entur journey circuit after repeated network failures across route keys", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (let index = 0; index < 3; index += 1) {
+      await expect(
+        fetchEnturJourneyItineraries({
+          origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+          destination: {
+            query: `Mål ${index}`,
+            label: `Mål ${index}`,
+            coordinate: [10.464 + index / 1000, 63.433],
+          },
+          departureTime: new Date("2026-06-01T07:10:00.000Z"),
+          clientName: "test-client",
+          endpoint: "https://entur.test/graphql",
+        }),
+      ).rejects.toThrow("Kunne ikke hente reiser fra Entur");
+    }
+
+    await expect(
+      fetchEnturJourneyItineraries({
+        origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+        destination: { query: "Mål 4", label: "Mål 4", coordinate: [10.469, 63.433] },
+        departureTime: new Date("2026-06-01T07:10:00.000Z"),
+        clientName: "test-client",
+        endpoint: "https://entur.test/graphql",
+      }),
+    ).rejects.toThrow("midlertidig satt på pause");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("caps oversized Entur journey pattern payloads before ranking", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => enturTripResponse({ patternCount: 8 })),
+    );
+
+    const itineraries = await fetchEnturJourneyItineraries({
+      origin: { query: "Munkegata", label: "Munkegata", coordinate: [10.3951, 63.4305] },
+      destination: { query: "Leangen", label: "Leangen", coordinate: [10.464, 63.433] },
+      departureTime: new Date("2026-06-01T07:10:00.000Z"),
+      clientName: "test-client",
+      endpoint: "https://entur.test/graphql",
+    });
+
+    expect(itineraries).toHaveLength(5);
   });
 
   it("returns a controlled dependency error when geocoding is unavailable", async () => {
@@ -313,6 +902,27 @@ describe("traffic travel planner API", () => {
     const response = await agent.get("/api/map/travel-plan?from=Munkegata&to=Leangen").expect(503);
 
     expect(response.body.error).toBe("Karttjenesten svarte ikke. Prøv igjen.");
+  });
+
+  it("returns safe route-planner validation messages for traveller input errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("fetch should not be called for out-of-bounds coordinates");
+      }),
+    );
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const outside = await agent.get("/api/map/travel-plan?from=0,0&to=10.464,63.433").expect(400);
+    expect(outside.body.error).toBe("Koordinater må være i Trondheim-området.");
+
+    const staleDeparture = encodeURIComponent("2026-01-01T10:00:00.000Z");
+    const stale = await agent
+      .get(`/api/map/travel-plan?from=10.3951,63.4305&to=10.464,63.433&departAt=${staleDeparture}`)
+      .expect(400);
+    expect(stale.body.error).toBe("Avreisetid må være innen de neste sju dagene.");
   });
 
   it("treats a route inside a polygon event as a relevant traffic impact", () => {

@@ -43,12 +43,13 @@ describe("TrafficNowSummary", () => {
   it("renders compact top cards with badges", () => {
     const html = renderToStaticMarkup(<TrafficNowSummary cards={cards} />);
 
-    expect(html).toContain("Nå i trafikken");
+    expect(html).toContain("Trafikkbildet nå");
     expect(html).toContain("Kritisk");
     expect(html).toContain("OFFISIELL");
     expect(html).toContain("REISETID");
     expect(html).toContain("Sist hentet 18:42");
-    expect(html).toContain('<h2 id="traffic-now-heading">Nå i trafikken</h2>');
+    expect(html).toContain('<h2 id="traffic-now-heading">Trafikkbildet nå</h2>');
+    expect(html).toContain("<h3>Kritisk</h3>");
     expect(html).not.toContain("<h1");
   });
 });

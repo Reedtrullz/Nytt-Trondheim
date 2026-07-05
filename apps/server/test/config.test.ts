@@ -80,6 +80,18 @@ describe("loadConfig session secret policy", () => {
     );
   });
 
+  it("uses a safe non-secret Entur client identifier by default", () => {
+    withEnv({ NODE_ENV: "development", ENTUR_CLIENT_NAME: undefined }, () => {
+      expect(loadConfig().enturClientName).toBe("reidar-nytt-trondheim");
+    });
+  });
+
+  it("trims configured Entur client identifiers", () => {
+    withEnv({ NODE_ENV: "development", ENTUR_CLIENT_NAME: "  nytt-test-client  " }, () => {
+      expect(loadConfig().enturClientName).toBe("nytt-test-client");
+    });
+  });
+
   it("allows development without SMTP configuration", () => {
     withEnv({ NODE_ENV: "development", SMTP_HOST: undefined, SMTP_FROM: undefined }, () => {
       expect(loadConfig().smtp).toBeUndefined();

@@ -8,6 +8,9 @@ import type {
   TrafficEventState,
   TrafficEventSeverity,
   TrafficMapEvent,
+  TravelPlanItinerary,
+  TravelPlanItineraryLabel,
+  TravelPlanLegMode,
   TravelPlanPayload,
 } from "@nytt/shared";
 import { CorridorImpactCard } from "../components/map/CorridorImpactCard.js";
@@ -47,6 +50,7 @@ import {
 } from "../trafficMapFilters.js";
 import {
   buildTrafficViewModel,
+  formatTrafficFreshness,
   visibleByDefault,
   visibleInTrafficLayers,
 } from "../trafficViewModel.js";
@@ -118,8 +122,186 @@ function formatDuration(seconds?: number): string | undefined {
   return remainder ? `${hours} t ${remainder} min` : `${hours} t`;
 }
 
+const timeFormatter = new Intl.DateTimeFormat("nb-NO", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Europe/Oslo",
+});
+
+function formatClock(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "ukjent";
+  return timeFormatter.format(date);
+}
+
+const osloDateFormatter = new Intl.DateTimeFormat("nb-NO", {
+  day: "numeric",
+  month: "long",
+  timeZone: "Europe/Oslo",
+});
+
+const osloDateTimePartsFormatter = new Intl.DateTimeFormat("en-US", {
+  day: "2-digit",
+  hour: "2-digit",
+  hourCycle: "h23",
+  minute: "2-digit",
+  month: "2-digit",
+  timeZone: "Europe/Oslo",
+  year: "numeric",
+});
+
+interface OsloDateTimeParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+type OsloCivilDate = Pick<OsloDateTimeParts, "year" | "month" | "day">;
+
+function osloDateTimeParts(value: Date): OsloDateTimeParts {
+  const parts = osloDateTimePartsFormatter.formatToParts(value);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+  };
+}
+
+function osloDateKey(value: Date): string {
+  const { year, month, day } = osloDateTimeParts(value);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function addCivilDays(date: OsloCivilDate, days: number): OsloCivilDate {
+  const shifted = new Date(Date.UTC(date.year, date.month - 1, date.day + days));
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+  };
+}
+
+function osloLocalTimeToInstant(input: {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}): Date {
+  const target = Date.UTC(input.year, input.month - 1, input.day, input.hour, input.minute);
+  let instant = new Date(target);
+  for (let index = 0; index < 2; index += 1) {
+    const observed = osloDateTimeParts(instant);
+    const observedAsUtc = Date.UTC(
+      observed.year,
+      observed.month - 1,
+      observed.day,
+      observed.hour,
+      observed.minute,
+    );
+    instant = new Date(instant.getTime() - (observedAsUtc - target));
+  }
+  return instant;
+}
+
+export function formatTravelDateTime(value: string, base = new Date()): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "ukjent";
+  const clock = formatClock(value);
+  if (osloDateKey(date) === osloDateKey(base)) return clock;
+  const tomorrow = addCivilDays(osloDateTimeParts(base), 1);
+  const tomorrowInstant = osloLocalTimeToInstant({ ...tomorrow, hour: 12, minute: 0 });
+  if (osloDateKey(date) === osloDateKey(tomorrowInstant)) return `i morgen ${clock}`;
+  return `${osloDateFormatter.format(date)} ${clock}`;
+}
+
+type TravelTimePreset = "now" | "in30" | "tomorrow_morning";
+
+export function departureTimeForPreset(preset: TravelTimePreset, base = new Date()): string {
+  if (preset === "in30") return new Date(base.getTime() + 30 * 60 * 1000).toISOString();
+  if (preset === "tomorrow_morning") {
+    const tomorrow = addCivilDays(osloDateTimeParts(base), 1);
+    return osloLocalTimeToInstant({ ...tomorrow, hour: 7, minute: 30 }).toISOString();
+  }
+  return base.toISOString();
+}
+
+function travelTimePresetLabel(preset: TravelTimePreset): string {
+  switch (preset) {
+    case "in30":
+      return "Om 30 min";
+    case "tomorrow_morning":
+      return "I morgen tidlig";
+    case "now":
+    default:
+      return "Nå";
+  }
+}
+
+function itineraryLabel(label: TravelPlanItineraryLabel): string {
+  switch (label) {
+    case "best_now":
+      return "Beste nå";
+    case "fewest_transfers":
+      return "Færrest bytter";
+    case "soonest_departure":
+      return "Snarest avgang";
+    case "most_robust":
+      return "Mest robust";
+  }
+}
+
+function modeLabel(mode: TravelPlanLegMode): string {
+  switch (mode) {
+    case "walk":
+      return "Gange";
+    case "bus":
+      return "Buss";
+    case "tram":
+      return "Trikk";
+    case "rail":
+      return "Tog";
+    case "water":
+      return "Båt";
+    case "metro":
+      return "T-bane";
+    default:
+      return "Kollektiv";
+  }
+}
+
+function itineraryDecisionLabel(decision: TravelPlanItinerary["decision"]): string {
+  switch (decision) {
+    case "best":
+      return "Best";
+    case "good":
+      return "Normal";
+    case "watch":
+      return "Følg med";
+    case "avoid":
+      return "Unngå";
+  }
+}
+
 export function routePositions(plan: TravelPlanPayload): [number, number][] {
   return latLngsFromLineString(plan.route.geometry);
+}
+
+function selectedItineraryPositions(
+  plan: TravelPlanPayload,
+  selectedItineraryId?: string,
+): [number, number][] {
+  const selectedItinerary =
+    plan.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
+    plan.itineraries[0];
+  const positions =
+    selectedItinerary?.legs.flatMap((leg) => latLngsFromLineString(leg.geometry)) ?? [];
+  return positions.length >= 2 ? positions : routePositions(plan);
 }
 
 function severityColor(severity: TrafficEventSeverity): string {
@@ -147,6 +329,7 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   roadImpactCount: number;
   vehicleCount: number;
   alertCount: number;
+  itineraryCount: number;
   severity: "ok" | "watch" | "warning";
 } {
   if (!plan) {
@@ -157,6 +340,7 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
       roadImpactCount: 0,
       vehicleCount: 0,
       alertCount: 0,
+      itineraryCount: 0,
       severity: "watch",
     };
   }
@@ -168,27 +352,68 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   const alertCount = plan.publicTransportSuggestions.filter(
     (suggestion) => suggestion.kind === "alert",
   ).length;
+  const itineraryCount = plan.itineraries.length;
   const strongestRoadImpact = strongestRouteImpact(plan);
   const hasHighRoadImpact = strongestRoadImpact === "critical" || strongestRoadImpact === "high";
+  const avoidCount = plan.itineraries.filter((itinerary) => itinerary.decision === "avoid").length;
+  const watchCount = plan.itineraries.filter((itinerary) => itinerary.decision === "watch").length;
 
-  if (hasHighRoadImpact || alertCount > 0) {
+  if (plan.journeyPlanner.status === "unavailable") {
     return {
-      heading: "Sjekk ruten før du drar",
-      detail: `${roadImpactCount} vegmelding${roadImpactCount === 1 ? "" : "er"} og ${alertCount} kollektivavvik kan påvirke reisen.`,
+      heading: "Sjekk AtB/Entur før du drar",
+      detail: `${plan.journeyPlanner.detail} Nytt viser fortsatt vegmeldinger og kjente kollektivavvik langs ruten.`,
       roadImpactCount,
       vehicleCount,
       alertCount,
+      itineraryCount,
       severity: "warning",
     };
   }
 
-  if (roadImpactCount > 0 || vehicleCount > 0) {
+  if (
+    plan.journeyPlanner.status === "empty" &&
+    itineraryCount === 0 &&
+    roadImpactCount === 0 &&
+    alertCount === 0
+  ) {
     return {
-      heading: "Følg med på ruten",
-      detail: `${roadImpactCount} vegmelding${roadImpactCount === 1 ? "" : "er"} og ${vehicleCount} kollektivkjøretøy er funnet nær korridoren.`,
+      heading: "Ingen konkrete Entur-reiser funnet",
+      detail:
+        "Nytt fant ingen Entur-forslag for valgt tidspunkt. Sjekk AtB/Entur for alternativer før avreise.",
       roadImpactCount,
       vehicleCount,
       alertCount,
+      itineraryCount,
+      severity: roadImpactCount > 0 || alertCount > 0 ? "warning" : "watch",
+    };
+  }
+
+  if (avoidCount > 0 || hasHighRoadImpact || alertCount > 0 || watchCount > 0) {
+    return {
+      heading: "Sjekk ruten før du drar",
+      detail:
+        itineraryCount > 0
+          ? `${itineraryCount} reiseforslag funnet. ${avoidCount + watchCount} bør sjekkes ekstra før avreise.`
+          : `${roadImpactCount} vegmelding${roadImpactCount === 1 ? "" : "er"} og ${alertCount} kollektivavvik kan påvirke reisen.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
+      severity: "warning",
+    };
+  }
+
+  if (roadImpactCount > 0 || vehicleCount > 0 || itineraryCount > 0) {
+    return {
+      heading: "Følg med på ruten",
+      detail:
+        itineraryCount > 0
+          ? `${itineraryCount} reiseforslag fra Entur. Nytt fant ingen alvorlige avvik på de beste alternativene.`
+          : `${roadImpactCount} vegmelding${roadImpactCount === 1 ? "" : "er"} og ${vehicleCount} kollektivkjøretøy er funnet nær korridoren.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
       severity: "watch",
     };
   }
@@ -199,6 +424,7 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
     roadImpactCount,
     vehicleCount,
     alertCount,
+    itineraryCount,
     severity: "ok",
   };
 }
@@ -226,12 +452,21 @@ function trafficEventListCopy(
   };
 }
 
-function TravelPlanLayer({ plan }: { plan?: TravelPlanPayload }) {
+function TravelPlanLayer({
+  plan,
+  selectedItineraryId,
+}: {
+  plan?: TravelPlanPayload;
+  selectedItineraryId?: string;
+}) {
   if (!plan) return null;
   const positions = routePositions(plan);
   const origin = latLngFromGeoJsonPosition(plan.origin.coordinate);
   const destination = latLngFromGeoJsonPosition(plan.destination.coordinate);
   const routeSeverity = strongestRouteImpact(plan);
+  const selectedItinerary =
+    plan.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
+    plan.itineraries[0];
   return (
     <>
       {positions.length >= 2 ? (
@@ -259,6 +494,22 @@ function TravelPlanLayer({ plan }: { plan?: TravelPlanPayload }) {
           </Popup>
         </Polyline>
       ) : null}
+      {selectedItinerary?.legs.map((leg) => {
+        const legPositions = latLngsFromLineString(leg.geometry);
+        if (legPositions.length < 2) return null;
+        return (
+          <Polyline
+            key={leg.id}
+            positions={legPositions}
+            pathOptions={{
+              color: leg.mode === "walk" ? "#64748b" : "#0f766e",
+              weight: leg.mode === "walk" ? 3 : 6,
+              opacity: leg.mode === "walk" ? 0.55 : 0.82,
+              dashArray: leg.mode === "walk" ? "3 6" : undefined,
+            }}
+          />
+        );
+      })}
       {origin ? (
         <CircleMarker center={origin} radius={7} pathOptions={{ color: "#16a34a" }}>
           <Popup>{plan.origin.label}</Popup>
@@ -325,9 +576,11 @@ function CorridorImpactLayer({
 function TrafficMapFocus({
   selectedEvent,
   travelPlan,
+  selectedItineraryId,
 }: {
   selectedEvent?: TrafficMapEvent;
   travelPlan?: TravelPlanPayload;
+  selectedItineraryId?: string;
 }) {
   const map = useMap();
   const selectedEventFocusKey = selectedEvent?.id;
@@ -337,15 +590,18 @@ function TrafficMapFocus({
     [selectedEventFocusKey, selectedEventGeometryKey],
   );
   const travelPlanFocusKey = travelPlan
-    ? `${travelPlan.generatedAt}:${travelPlan.origin.label}:${travelPlan.destination.label}`
+    ? `${travelPlan.generatedAt}:${travelPlan.origin.label}:${travelPlan.destination.label}:${selectedItineraryId ?? ""}`
     : undefined;
   const travelPlanRouteKey = travelPlan
-    ? routePositions(travelPlan)
+    ? selectedItineraryPositions(travelPlan, selectedItineraryId)
         .map((position) => position.join(","))
         .join("|")
     : "";
   const travelPlanBounds = useMemo(
-    () => (travelPlan ? boundsFromLatLngs(routePositions(travelPlan)) : undefined),
+    () =>
+      travelPlan
+        ? boundsFromLatLngs(selectedItineraryPositions(travelPlan, selectedItineraryId))
+        : undefined,
     [travelPlanFocusKey, travelPlanRouteKey],
   );
 
@@ -369,34 +625,144 @@ function TrafficMapFocus({
   return null;
 }
 
+function ItineraryCard({
+  itinerary,
+  selected,
+  onSelect,
+}: {
+  itinerary: TravelPlanItinerary;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const safeHandoff = safeExternalUrl(itinerary.handoffUrl);
+  const noticeCount = itinerary.legs.reduce((count, leg) => count + leg.notices.length, 0);
+  const itineraryTimeLabel = `${formatTravelDateTime(itinerary.departureTime)} til ${formatTravelDateTime(
+    itinerary.arrivalTime,
+  )}`;
+  return (
+    <article
+      className={`itinerary-card itinerary-card-${itinerary.decision}${selected ? " selected" : ""}`}
+      aria-current={selected ? "true" : undefined}
+    >
+      <header>
+        <div className="itinerary-card-labels">
+          {itinerary.labels.map((label) => (
+            <span key={label}>{itineraryLabel(label)}</span>
+          ))}
+          <strong>{itineraryDecisionLabel(itinerary.decision)}</strong>
+        </div>
+        <h3>
+          {formatTravelDateTime(itinerary.departureTime)} →{" "}
+          {formatTravelDateTime(itinerary.arrivalTime)}
+        </h3>
+        <p>
+          {formatDuration(itinerary.durationSeconds)} ·{" "}
+          {itinerary.transferCount === 0
+            ? "Direkte"
+            : `${itinerary.transferCount} bytte${itinerary.transferCount === 1 ? "" : "r"}`}{" "}
+          · {formatDuration(itinerary.walkTimeSeconds)} gange
+        </p>
+        <small>{itinerary.decisionReason}</small>
+      </header>
+      <ol className="itinerary-leg-list">
+        {itinerary.legs.map((leg) => (
+          <li key={leg.id}>
+            <div>
+              <strong>
+                {leg.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : modeLabel(leg.mode)}
+              </strong>
+              <span>
+                {formatTravelDateTime(leg.expectedStartTime)} {leg.from.stopName ?? leg.from.name} →{" "}
+                {formatTravelDateTime(leg.expectedEndTime)} {leg.to.stopName ?? leg.to.name}
+              </span>
+            </div>
+            {leg.lineName ? <small>{leg.lineName}</small> : null}
+            {leg.notices.length ? (
+              <div className="itinerary-leg-notices">
+                {leg.notices.slice(0, 3).map((notice) => (
+                  <span key={notice.id}>{notice.title}</span>
+                ))}
+              </div>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+      <footer>
+        <span>
+          {itinerary.realtime ? "Sanntid inkludert" : "Rutetid"} · {noticeCount} varsel
+          {noticeCount === 1 ? "" : "er"}
+        </span>
+        <button
+          type="button"
+          className="itinerary-card-select"
+          aria-pressed={selected}
+          aria-label={
+            selected
+              ? `Reiseforslag ${itineraryTimeLabel} vises på kart`
+              : `Vis reiseforslag ${itineraryTimeLabel} på kart`
+          }
+          onClick={onSelect}
+        >
+          {selected ? "Vises på kart" : "Vis på kart"}
+        </button>
+        {safeHandoff ? (
+          <a
+            href={safeHandoff}
+            target="_blank"
+            rel="noreferrer noopener"
+            aria-label={`Åpne reiseforslag ${itineraryTimeLabel} hos AtB/Entur`}
+          >
+            Åpne hos AtB/Entur
+          </a>
+        ) : null}
+      </footer>
+    </article>
+  );
+}
+
 function TravelPlanCard({
   plan,
   loading,
   error,
+  selectedItineraryId,
+  onSelectItinerary,
 }: {
   plan?: TravelPlanPayload;
   loading: boolean;
   error?: string;
+  selectedItineraryId?: string;
+  onSelectItinerary: (itineraryId: string) => void;
 }) {
   if (error) {
     return (
-      <p className="route-planner-status error" role="alert">
+      <p className="route-planner-status error" role="alert" aria-live="assertive">
         {error}
       </p>
     );
   }
-  if (loading) return <p className="route-planner-status">Henter reiseråd ...</p>;
+  if (loading) {
+    return (
+      <p className="route-planner-status" role="status" aria-live="polite">
+        Henter reiseråd ...
+      </p>
+    );
+  }
   if (!plan) {
     return (
-      <p className="route-planner-status">
+      <p className="route-planner-status" role="status" aria-live="polite">
         Skriv inn start og mål for å se trafikkhendelser og kollektivkontekst langs ruten.
       </p>
     );
   }
   const duration = formatDuration(plan.route.durationSeconds);
   const decision = travelPlanDecision(plan);
+  const showFallbackSuggestions =
+    plan.itineraries.length === 0 && plan.publicTransportSuggestions.length > 0;
   return (
-    <article className={`travel-plan-card travel-plan-card-${decision.severity}`}>
+    <article
+      className={`travel-plan-card travel-plan-card-${decision.severity}`}
+      aria-live="polite"
+    >
       <header>
         <p className="label">Reiseråd</p>
         <h2>{decision.heading}</h2>
@@ -417,6 +783,11 @@ function TravelPlanCard({
             <strong>Kjøretøy nær ruten</strong>
             <small>buss, trikk, tog eller båt</small>
           </article>
+          <article>
+            <span>{decision.itineraryCount}</span>
+            <strong>Reiseforslag</strong>
+            <small>fra Entur</small>
+          </article>
         </div>
         <h3>Rute</h3>
         <p>
@@ -427,6 +798,27 @@ function TravelPlanCard({
           {duration ? ` · ${duration}` : ""} · {plan.route.detail}
         </small>
       </header>
+      <section>
+        <h3>Kollektivvalg</h3>
+        {plan.journeyPlanner.status === "unavailable" ? (
+          <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
+        ) : null}
+        {plan.journeyPlanner.status === "empty" ? (
+          <p className="route-planner-status">Ingen konkrete Entur-reiser funnet for valgt tid.</p>
+        ) : null}
+        {plan.itineraries.length ? (
+          <div className="itinerary-grid">
+            {plan.itineraries.map((itinerary) => (
+              <ItineraryCard
+                key={itinerary.id}
+                itinerary={itinerary}
+                selected={itinerary.id === selectedItineraryId}
+                onSelect={() => onSelectItinerary(itinerary.id)}
+              />
+            ))}
+          </div>
+        ) : null}
+      </section>
       <section>
         <h3>Trafikk langs ruten</h3>
         {plan.trafficImpacts.length ? (
@@ -442,60 +834,112 @@ function TravelPlanCard({
           <p>Ingen aktive trafikkhendelser funnet langs ruten akkurat nå.</p>
         )}
       </section>
-      <section>
-        <h3>Kollektivforslag</h3>
-        <ul>
-          {plan.publicTransportSuggestions.map((suggestion) => (
-            <li key={suggestion.id}>
-              <strong>{suggestion.title}</strong>
-              <span>
-                {suggestion.detail} · {suggestion.source}
-                {suggestion.distanceMeters !== undefined
-                  ? ` · ${formatDistance(suggestion.distanceMeters)} fra ruten`
-                  : ""}
-              </span>
-              {(() => {
-                const safeHref = safeExternalUrl(suggestion.href);
-                return safeHref ? (
-                  <a href={safeHref} target="_blank" rel="noreferrer noopener">
-                    Åpne reiseplanlegger
-                  </a>
-                ) : null;
-              })()}
-            </li>
-          ))}
-        </ul>
-      </section>
+      {showFallbackSuggestions ? (
+        <section>
+          <h3>Kollektivkontekst</h3>
+          <p>
+            Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for billetter og endelig
+            reisevalg.
+          </p>
+          <ul>
+            {plan.publicTransportSuggestions.map((suggestion) => (
+              <li key={suggestion.id}>
+                <strong>{suggestion.title}</strong>
+                <span>
+                  {suggestion.detail} · {suggestion.source}
+                  {suggestion.distanceMeters !== undefined
+                    ? ` · ${formatDistance(suggestion.distanceMeters)} fra ruten`
+                    : ""}
+                </span>
+                {(() => {
+                  const safeHref = safeExternalUrl(suggestion.href);
+                  return safeHref ? (
+                    <a href={safeHref} target="_blank" rel="noreferrer noopener">
+                      Åpne reiseplanlegger
+                    </a>
+                  ) : null;
+                })()}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <footer className="travel-plan-disclaimer">
+        Nytt vurderer reiserisiko, ikke billetter eller garanti. Sjekk alltid AtB/Entur før du drar.
+      </footer>
     </article>
+  );
+}
+
+function TrafficDataDisclosure({
+  sources,
+}: {
+  sources: Array<{
+    source: string;
+    label: string;
+    state: string;
+    detail: string;
+    lastCheckedAt?: string;
+  }>;
+}) {
+  const uniqueSources = Array.from(
+    new Map(sources.map((source) => [source.source, source])).values(),
+  );
+  if (!uniqueSources.length) return null;
+  return (
+    <details className="traffic-data-disclosure">
+      <summary>Se datagrunnlag</summary>
+      <div>
+        {uniqueSources.map((source) => (
+          <article key={source.source}>
+            <strong>{source.label}</strong>
+            <span>
+              {source.state} · {source.detail}
+              {source.lastCheckedAt
+                ? ` · oppdatert ${formatTrafficFreshness(source.lastCheckedAt)}`
+                : ""}
+            </span>
+          </article>
+        ))}
+      </div>
+    </details>
   );
 }
 
 function TravelPlannerPanel({
   originInput,
   destinationInput,
+  timePreset,
   travelPlan,
   travelPlanLoading,
   travelPlanError,
+  selectedItineraryId,
   publicTransportDisruptionsVisible,
   publicTransportVehiclesVisible,
   onOriginChange,
   onDestinationChange,
+  onTimePresetChange,
+  onSelectItinerary,
   onSubmit,
-  onShowDisruptions,
-  onShowVehicles,
+  onToggleDisruptions,
+  onToggleVehicles,
 }: {
   originInput: string;
   destinationInput: string;
+  timePreset: TravelTimePreset;
   travelPlan?: TravelPlanPayload;
   travelPlanLoading: boolean;
   travelPlanError?: string;
+  selectedItineraryId?: string;
   publicTransportDisruptionsVisible: boolean;
   publicTransportVehiclesVisible: boolean;
   onOriginChange: (value: string) => void;
   onDestinationChange: (value: string) => void;
+  onTimePresetChange: (value: TravelTimePreset) => void;
+  onSelectItinerary: (itineraryId: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onShowDisruptions: () => void;
-  onShowVehicles: () => void;
+  onToggleDisruptions: () => void;
+  onToggleVehicles: () => void;
 }) {
   return (
     <section className="travel-planner-panel" aria-labelledby="travel-planner-heading">
@@ -511,7 +955,7 @@ function TravelPlannerPanel({
             type="button"
             className={publicTransportDisruptionsVisible ? "selected" : undefined}
             aria-pressed={publicTransportDisruptionsVisible}
-            onClick={onShowDisruptions}
+            onClick={onToggleDisruptions}
           >
             Vis kollektivavvik
           </button>
@@ -519,7 +963,7 @@ function TravelPlannerPanel({
             type="button"
             className={publicTransportVehiclesVisible ? "selected" : undefined}
             aria-pressed={publicTransportVehiclesVisible}
-            onClick={onShowVehicles}
+            onClick={onToggleVehicles}
           >
             Vis kjøretøy
           </button>
@@ -534,6 +978,8 @@ function TravelPlannerPanel({
               value={originInput}
               onChange={(event) => onOriginChange(event.target.value)}
               placeholder="F.eks. Munkegata eller 63.43, 10.39"
+              aria-describedby="travel-plan-result"
+              aria-invalid={Boolean(travelPlanError)}
             />
           </div>
           <div>
@@ -543,13 +989,35 @@ function TravelPlannerPanel({
               value={destinationInput}
               onChange={(event) => onDestinationChange(event.target.value)}
               placeholder="F.eks. Leangen"
+              aria-describedby="travel-plan-result"
+              aria-invalid={Boolean(travelPlanError)}
             />
+          </div>
+          <div>
+            <label htmlFor="travel-time">Når?</label>
+            <select
+              id="travel-time"
+              value={timePreset}
+              onChange={(event) => onTimePresetChange(event.target.value as TravelTimePreset)}
+            >
+              <option value="now">{travelTimePresetLabel("now")}</option>
+              <option value="in30">{travelTimePresetLabel("in30")}</option>
+              <option value="tomorrow_morning">{travelTimePresetLabel("tomorrow_morning")}</option>
+            </select>
           </div>
           <button type="submit" disabled={travelPlanLoading}>
             {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
           </button>
         </form>
-        <TravelPlanCard plan={travelPlan} loading={travelPlanLoading} error={travelPlanError} />
+        <div id="travel-plan-result" className="travel-planner-result">
+          <TravelPlanCard
+            plan={travelPlan}
+            loading={travelPlanLoading}
+            error={travelPlanError}
+            selectedItineraryId={selectedItineraryId}
+            onSelectItinerary={onSelectItinerary}
+          />
+        </div>
       </div>
     </section>
   );
@@ -575,7 +1043,9 @@ export function TrafficMapPage() {
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
   const [originInput, setOriginInput] = useState("");
   const [destinationInput, setDestinationInput] = useState("");
+  const [timePreset, setTimePreset] = useState<TravelTimePreset>("now");
   const [travelPlan, setTravelPlan] = useState<TravelPlanPayload>();
+  const [selectedItineraryId, setSelectedItineraryId] = useState<string | undefined>();
   const [travelPlanLoading, setTravelPlanLoading] = useState(false);
   const [travelPlanError, setTravelPlanError] = useState<string>();
   const travelPlanRequestIdRef = useRef(0);
@@ -598,12 +1068,21 @@ export function TrafficMapPage() {
     travelPlanAbortRef.current?.abort();
     travelPlanAbortRef.current = undefined;
     setTravelPlan(undefined);
+    setSelectedItineraryId(undefined);
     setTravelPlanLoading(false);
     return requestId;
   }
 
   function handleTravelInputChange(value: string, setter: (nextValue: string) => void): void {
     setter(value);
+    setTravelPlanError(undefined);
+    if (travelPlanLoading || travelPlan) {
+      invalidateTravelPlan();
+    }
+  }
+
+  function handleTravelTimePresetChange(value: TravelTimePreset): void {
+    setTimePreset(value);
     setTravelPlanError(undefined);
     if (travelPlanLoading || travelPlan) {
       invalidateTravelPlan();
@@ -676,6 +1155,22 @@ export function TrafficMapPage() {
         severity: "low" as const,
       }));
   const trafficListCopy = trafficEventListCopy(selectedPreset, visibleContextLayers.showAll);
+  const travelPlanSources = useMemo(
+    () =>
+      travelPlan
+        ? [
+            {
+              source: "entur_journey_planner",
+              label: travelPlan.journeyPlanner.source,
+              state: travelPlan.journeyPlanner.status === "unavailable" ? "degraded" : "ok",
+              detail: `${travelPlan.journeyPlanner.detail} Avreise ${formatTravelDateTime(
+                travelPlan.journeyPlanner.requestedDepartureTime,
+              )}.`,
+            },
+          ]
+        : [],
+    [travelPlan],
+  );
 
   const visibleTrafficEvents = useMemo(() => {
     const events = data?.events ?? [];
@@ -802,10 +1297,17 @@ export function TrafficMapPage() {
     });
   }, [handleContextLayersChange, visibleContextLayers]);
 
-  const showPublicTransportVehicles = useCallback(() => {
+  const togglePublicTransportDisruptions = useCallback(() => {
     handleContextLayersChange({
       ...visibleContextLayers,
-      publicTransportVehicles: true,
+      publicTransportDisruptions: !visibleContextLayers.publicTransportDisruptions,
+    });
+  }, [handleContextLayersChange, visibleContextLayers]);
+
+  const togglePublicTransportVehicles = useCallback(() => {
+    handleContextLayersChange({
+      ...visibleContextLayers,
+      publicTransportVehicles: !visibleContextLayers.publicTransportVehicles,
     });
   }, [handleContextLayersChange, visibleContextLayers]);
 
@@ -825,9 +1327,13 @@ export function TrafficMapPage() {
     setTravelPlanLoading(true);
     setTravelPlanError(undefined);
     try {
-      const payload = await fetchTravelPlan({ from, to }, { signal: controller.signal });
+      const payload = await fetchTravelPlan(
+        { from, to, departAt: departureTimeForPreset(timePreset) },
+        { signal: controller.signal },
+      );
       if (travelPlanRequestIdRef.current !== requestId) return;
       setTravelPlan(payload);
+      setSelectedItineraryId(payload.itineraries[0]?.id);
       showPublicTransportDisruptions();
     } catch (reason) {
       if (travelPlanRequestIdRef.current === requestId) {
@@ -846,18 +1352,29 @@ export function TrafficMapPage() {
       <TravelPlannerPanel
         originInput={originInput}
         destinationInput={destinationInput}
+        timePreset={timePreset}
         travelPlan={travelPlan}
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
+        selectedItineraryId={selectedItineraryId}
         publicTransportDisruptionsVisible={visibleContextLayers.publicTransportDisruptions}
         publicTransportVehiclesVisible={visibleContextLayers.publicTransportVehicles}
         onOriginChange={(value) => handleTravelInputChange(value, setOriginInput)}
         onDestinationChange={(value) => handleTravelInputChange(value, setDestinationInput)}
+        onTimePresetChange={handleTravelTimePresetChange}
+        onSelectItinerary={setSelectedItineraryId}
         onSubmit={(event) => void handleTravelPlanSubmit(event)}
-        onShowDisruptions={showPublicTransportDisruptions}
-        onShowVehicles={showPublicTransportVehicles}
+        onToggleDisruptions={togglePublicTransportDisruptions}
+        onToggleVehicles={togglePublicTransportVehicles}
       />
       <TrafficNowSummary cards={summaryCardsForDisplay} />
+      <TrafficDataDisclosure
+        sources={[
+          ...(data?.sources ?? []),
+          ...(publicTransportDisplayData?.sources ?? []),
+          ...travelPlanSources,
+        ]}
+      />
 
       <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
         <button
@@ -898,7 +1415,11 @@ export function TrafficMapPage() {
           <TileLayer attribution="© Kartverket" url={tiles} />
           <MapAccessibility label="Trafikkart for Trondheim" />
           <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
-          <TrafficMapFocus selectedEvent={selectedEvent} travelPlan={travelPlan} />
+          <TrafficMapFocus
+            selectedEvent={selectedEvent}
+            travelPlan={travelPlan}
+            selectedItineraryId={selectedItineraryId}
+          />
           {visibleContextLayers.travelTime ? (
             <CorridorImpactLayer
               impacts={data?.corridorImpacts}
@@ -925,7 +1446,7 @@ export function TrafficMapPage() {
             payload={publicTransportDisplayData}
             visible={publicTransportVisible}
           />
-          <TravelPlanLayer plan={travelPlan} />
+          <TravelPlanLayer plan={travelPlan} selectedItineraryId={selectedItineraryId} />
         </MapContainer>
       </section>
 

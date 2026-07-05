@@ -1,6 +1,6 @@
 import type { PublicTransportMapPayload, TrafficMapPayload } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
-import { buildTrafficViewModel } from "./trafficViewModel.js";
+import { buildTrafficViewModel, formatTrafficFreshness } from "./trafficViewModel.js";
 
 const traffic: TrafficMapPayload = {
   events: [
@@ -294,8 +294,17 @@ describe("traffic view model", () => {
     });
 
     expect(model.summaryCards.find((card) => card.id === "updated")?.detail).toBe(
-      "Sist hentet 18:42 · 2 kilder krever oppmerksomhet",
+      "Sist hentet 1. juni 2026, 18:42 · 2 kilder krever oppmerksomhet",
     );
+  });
+
+  it("formats source freshness with date context outside the current Oslo day", () => {
+    expect(
+      formatTrafficFreshness("2026-06-01T16:42:00.000Z", new Date("2026-06-01T18:00:00.000Z")),
+    ).toBe("i dag 18:42");
+    expect(
+      formatTrafficFreshness("2026-06-01T16:42:00.000Z", new Date("2026-06-02T18:00:00.000Z")),
+    ).toBe("1. juni 2026, 18:42");
   });
 
   it("keeps TravelTime as a delay card, not an incident row", () => {

@@ -3995,6 +3995,55 @@ describe("private situation API", () => {
     expect(events).toEqual([{ ...payload, state: "active" }]);
   });
 
+  it("PgStore applies official-event bounds before limiting route context", async () => {
+    let capturedSql = "";
+    let capturedParams: unknown[] = [];
+    const payload: OfficialEvent = {
+      id: "datex:route-closure",
+      source: "datex",
+      eventType: "traffic",
+      title: "E6 stengt ved Leangen",
+      detail: "Omkjøring er skiltet.",
+      sourceUrl: "https://datex.example.test/route-closure",
+      areaLabel: "Leangen",
+      state: "active",
+      severity: "high",
+      publishedAt: "2026-07-05T08:00:00.000Z",
+      validFrom: "2026-07-05T08:00:00.000Z",
+      validTo: "2026-07-05T10:00:00.000Z",
+      raw: {},
+    };
+    const geometry: OfficialEvent["geometry"] = {
+      type: "Point",
+      coordinates: [10.432, 63.432],
+    };
+    const fakePool = {
+      async query(sql: string, params: unknown[]) {
+        capturedSql = sql.replace(/\s+/g, " ").trim();
+        capturedParams = params;
+        return { rows: [{ payload, state: "active" as OfficialEvent["state"], geometry }] };
+      },
+    };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    const events = await store.listOfficialEvents({
+      source: "datex",
+      states: ["active", "updated"],
+      bounds: { north: 63.5, south: 63.3, east: 10.5, west: 10.2 },
+      limit: 200,
+    });
+
+    expect(capturedSql).toContain("FROM official_events");
+    expect(capturedSql).toContain("source = $1");
+    expect(capturedSql).toContain("state = ANY($2::text[])");
+    expect(capturedSql).toContain("geometry && ST_MakeEnvelope($3, $4, $5, $6, 4326)");
+    expect(capturedSql.indexOf("geometry && ST_MakeEnvelope")).toBeLessThan(
+      capturedSql.indexOf("ORDER BY published_at DESC"),
+    );
+    expect(capturedParams).toEqual(["datex", ["active", "updated"], 10.2, 63.3, 10.5, 63.5, 200]);
+    expect(events).toEqual([{ ...payload, state: "active", geometry }]);
+  });
+
   it("PgStore hides expired or long-unseen public transport vehicles", async () => {
     let capturedSql = "";
     let capturedParams: unknown[] = [];

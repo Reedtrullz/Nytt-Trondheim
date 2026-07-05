@@ -164,6 +164,7 @@ type HomeSituationSummary = BootstrapPayload["situations"][number];
 export interface OfficialEventFilters {
   source?: OfficialEvent["source"];
   states?: OfficialEvent["state"][];
+  bounds?: { north: number; south: number; east: number; west: number };
   cursor?: string;
   limit?: number;
 }
@@ -6223,6 +6224,21 @@ export class PgStore implements Store {
     if (filters.states?.length) {
       params.push(filters.states);
       where.push(`state = ANY($${params.length}::text[])`);
+    }
+    if (filters.bounds) {
+      params.push(
+        filters.bounds.west,
+        filters.bounds.south,
+        filters.bounds.east,
+        filters.bounds.north,
+      );
+      const westIndex = params.length - 3;
+      const southIndex = params.length - 2;
+      const eastIndex = params.length - 1;
+      const northIndex = params.length;
+      where.push(
+        `geometry && ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326)`,
+      );
     }
     if (filters.cursor) {
       const cursor = decodeCursor(filters.cursor);

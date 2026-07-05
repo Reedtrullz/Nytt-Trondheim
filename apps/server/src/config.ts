@@ -16,6 +16,7 @@ export interface AppConfig {
   rateLimitEnabled: boolean;
   webPushPublicKey?: string;
   webPushConfigured?: boolean;
+  enturClientName?: string;
   smtp?: SmtpConfig;
   emailSender?: EmailSender;
 }
@@ -104,6 +105,7 @@ export function loadConfig(): AppConfig {
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
     webPushPublicKey,
     webPushConfigured: Boolean(webPushPublicKey && webPushPrivateKeyConfigured),
+    enturClientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",
     smtp: smtpConfigForEnvironment(nodeEnv),
   };
 }

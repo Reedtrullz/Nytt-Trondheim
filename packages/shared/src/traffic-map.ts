@@ -217,12 +217,87 @@ export interface TravelPlanTransitSuggestion {
   href?: string;
 }
 
+export type TravelPlanJourneyStatus = "ok" | "empty" | "unavailable";
+export type TravelPlanItineraryDecision = "best" | "good" | "watch" | "avoid";
+export type TravelPlanItineraryLabel =
+  | "best_now"
+  | "fewest_transfers"
+  | "soonest_departure"
+  | "most_robust";
+export type TravelPlanLegMode = "walk" | "bus" | "tram" | "rail" | "water" | "metro" | "unknown";
+
+export interface TravelPlanLegPlace {
+  name: string;
+  coordinate: [number, number];
+  stopId?: string;
+  stopName?: string;
+  stopCode?: string;
+}
+
+export interface TravelPlanLegNotice {
+  id: string;
+  title: string;
+  detail?: string;
+  source: "Entur" | "Entur avvik" | "Vegvesen" | "DATEX" | "Entur kjøretøyposisjoner";
+  severity?: TrafficEventSeverity | "info" | "warning";
+}
+
+export interface TravelPlanLeg {
+  id: string;
+  mode: TravelPlanLegMode;
+  from: TravelPlanLegPlace;
+  to: TravelPlanLegPlace;
+  aimedStartTime: string;
+  expectedStartTime: string;
+  aimedEndTime: string;
+  expectedEndTime: string;
+  durationSeconds: number;
+  distanceMeters?: number;
+  realtime: boolean;
+  cancelled: boolean;
+  replacementTransport: boolean;
+  lineId?: string;
+  publicCode?: string;
+  lineName?: string;
+  serviceJourneyId?: string;
+  geometry: LineString;
+  notices: TravelPlanLegNotice[];
+}
+
+export interface TravelPlanItinerary {
+  id: string;
+  decision: TravelPlanItineraryDecision;
+  decisionReason: string;
+  labels: TravelPlanItineraryLabel[];
+  departureTime: string;
+  arrivalTime: string;
+  durationSeconds: number;
+  transferCount: number;
+  walkTimeSeconds: number;
+  waitingTimeSeconds?: number;
+  distanceMeters?: number;
+  realtime: boolean;
+  modes: TravelPlanLegMode[];
+  legs: TravelPlanLeg[];
+  disruptionCount: number;
+  handoffUrl: string;
+}
+
+export interface TravelPlanJourneyStatusPayload {
+  status: TravelPlanJourneyStatus;
+  detail: string;
+  requestedDepartureTime: string;
+  source: "Entur Journey Planner";
+}
+
 export interface TravelPlanPayload {
   origin: TravelPlanPlace;
   destination: TravelPlanPlace;
   route: TravelPlanRoute;
   trafficImpacts: TravelPlanTrafficImpact[];
   publicTransportSuggestions: TravelPlanTransitSuggestion[];
+  itineraries: TravelPlanItinerary[];
+  journeyPlanner: TravelPlanJourneyStatusPayload;
   sources: TrafficMapSourceStatus[];
   generatedAt: string;
 }

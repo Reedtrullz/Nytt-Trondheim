@@ -1812,8 +1812,8 @@ test("traffic page shows summary cards semantic layers ranked list and detail dr
 
   await page.goto("/trafikk");
 
-  await expect(page.getByRole("heading", { name: "Nå i trafikken" })).toBeVisible();
-  const summary = page.getByRole("region", { name: "Nå i trafikken" });
+  await expect(page.getByRole("heading", { name: "Trafikkbildet nå" })).toBeVisible();
+  const summary = page.getByRole("region", { name: "Trafikkbildet nå" });
   await expect(summary.getByText("OFFISIELL").first()).toBeVisible();
   await expect(summary.getByText("REISETID").first()).toBeVisible();
   await expect(summary.getByText("KOLLEKTIV").first()).toBeVisible();
@@ -1843,6 +1843,9 @@ test("traffic map travel planner shows route-specific traffic and public transpo
     const url = new URL(route.request().url());
     expect(url.searchParams.get("from")).toBe("Munkegata");
     expect(url.searchParams.get("to")).toBe("Leangen");
+    const departAt = url.searchParams.get("departAt");
+    expect(departAt).toBeTruthy();
+    expect(Number.isFinite(Date.parse(departAt ?? ""))).toBe(true);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1917,6 +1920,72 @@ test("traffic map travel planner shows route-specific traffic and public transpo
             href: "https://www.atb.no/reiseplanlegger/",
           },
         ],
+        itineraries: [
+          {
+            id: "itinerary-1",
+            decision: "watch",
+            decisionReason: "Nytt fant avvik eller trafikkmeldinger som kan påvirke reisen.",
+            labels: ["best_now", "fewest_transfers", "soonest_departure", "most_robust"],
+            departureTime: "2026-06-01T09:10:00.000Z",
+            arrivalTime: "2026-06-01T09:27:00.000Z",
+            durationSeconds: 1020,
+            transferCount: 0,
+            walkTimeSeconds: 240,
+            realtime: true,
+            modes: ["bus"],
+            disruptionCount: 1,
+            handoffUrl: "https://www.atb.no/reiseplanlegger/",
+            legs: [
+              {
+                id: "leg-bus-3",
+                mode: "bus",
+                from: {
+                  name: "Munkegata",
+                  stopName: "Munkegata",
+                  coordinate: [10.3951, 63.4305],
+                },
+                to: {
+                  name: "Leangen",
+                  stopName: "Leangen",
+                  coordinate: [10.464, 63.433],
+                },
+                aimedStartTime: "2026-06-01T09:10:00.000Z",
+                expectedStartTime: "2026-06-01T09:10:00.000Z",
+                aimedEndTime: "2026-06-01T09:27:00.000Z",
+                expectedEndTime: "2026-06-01T09:27:00.000Z",
+                durationSeconds: 1020,
+                distanceMeters: 4850,
+                realtime: true,
+                cancelled: false,
+                replacementTransport: false,
+                publicCode: "3",
+                lineName: "Lade - Hallset",
+                geometry: {
+                  type: "LineString",
+                  coordinates: [
+                    [10.3951, 63.4305],
+                    [10.464, 63.433],
+                  ],
+                },
+                notices: [
+                  {
+                    id: "alert-1",
+                    title: "Forsinkelse på linje 3",
+                    detail: "Beregn ekstra tid.",
+                    source: "Entur avvik",
+                    severity: "warning",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        journeyPlanner: {
+          status: "ok",
+          detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+          source: "Entur Journey Planner",
+        },
         sources: [],
         generatedAt: "2026-06-01T09:05:00.000Z",
       }),
@@ -1927,6 +1996,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(page.getByRole("heading", { name: "Planlegg reisen" })).toBeVisible();
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await page.getByLabel("Når?").selectOption("in30");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
   await expect(page.getByRole("heading", { name: "Sjekk ruten før du drar" })).toBeVisible();
@@ -1936,18 +2006,18 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(routeAssessment.getByText("Kollektivavvik", { exact: true })).toBeVisible();
   await expect(routeAssessment.getByText("Kjøretøy nær ruten", { exact: true })).toBeVisible();
   await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
-  await expect(page.getByText("Buss 3 mot Lade")).toBeVisible();
+  await expect(page.getByText("Beste nå")).toBeVisible();
+  await expect(page.getByText("Buss 3")).toBeVisible();
+  await expect(page.getByRole("button", { name: /vises på kart/i })).toBeVisible();
   await expect(page.getByText("Forsinkelse på linje 3")).toBeVisible();
-  await expect(page.getByText("Sjekk avganger hos AtB/Entur")).toBeVisible();
   await expect(
-    page.getByText(
-      "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
-    ),
+    page.getByText("Nytt vurderer reiserisiko, ikke billetter eller garanti."),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
-    "href",
-    "https://www.atb.no/reiseplanlegger/",
-  );
+  await expect(
+    page.getByRole("link", { name: /Åpne reiseforslag .* hos AtB\/Entur/ }),
+  ).toHaveAttribute("href", "https://www.atb.no/reiseplanlegger/");
+  await page.getByText("Se datagrunnlag").click();
+  await expect(page.getByText("Entur Journey Planner", { exact: true })).toBeVisible();
 });
 
 test("traffic map clears a stale route when planner validation fails", async ({ page }) => {
@@ -1991,6 +2061,13 @@ test("traffic map clears a stale route when planner validation fails", async ({ 
             href: "https://www.atb.no/reiseplanlegger/",
           },
         ],
+        itineraries: [],
+        journeyPlanner: {
+          status: "empty",
+          detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+          source: "Entur Journey Planner",
+        },
         sources: [],
         generatedAt: "2026-06-01T09:05:00.000Z",
       }),
@@ -2002,7 +2079,7 @@ test("traffic map clears a stale route when planner validation fails", async ({ 
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
   await expect(
-    page.getByRole("heading", { name: "Ingen kjente hindringer langs ruten" }),
+    page.getByRole("heading", { name: "Ingen konkrete Entur-reiser funnet" }),
   ).toBeVisible();
   await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(1);
 
@@ -2011,6 +2088,76 @@ test("traffic map clears a stale route when planner validation fails", async ({ 
 
   await expect(page.getByRole("alert")).toContainText("Skriv inn både start og mål");
   await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(0);
+});
+
+test("traffic map keeps planner useful when Entur journey search is unavailable", async ({
+  page,
+}) => {
+  await page.route("**/api/map/travel-plan?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        origin: {
+          query: "Munkegata",
+          label: "Munkegata, Midtbyen",
+          coordinate: [10.3951, 63.4305],
+        },
+        destination: {
+          query: "Leangen",
+          label: "Leangen, Trondheim",
+          coordinate: [10.464, 63.433],
+        },
+        route: {
+          source: "direct",
+          distanceMeters: 4850,
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.3951, 63.4305],
+              [10.464, 63.433],
+            ],
+          },
+          detail: "Ruten er vist som rett korridor fordi veiruting ikke var tilgjengelig.",
+        },
+        trafficImpacts: [],
+        publicTransportSuggestions: [
+          {
+            id: "atb-entur-planner",
+            kind: "planning_link",
+            title: "Sjekk avganger hos AtB/Entur",
+            detail:
+              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+            source: "AtB/Entur",
+            href: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        itineraries: [],
+        journeyPlanner: {
+          status: "unavailable",
+          detail: "Entur reisesøk er ikke tilgjengelig akkurat nå.",
+          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+          source: "Entur Journey Planner",
+        },
+        sources: [],
+        generatedAt: "2026-06-01T09:05:00.000Z",
+      }),
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+
+  await expect(page.getByRole("heading", { name: "Sjekk AtB/Entur før du drar" })).toBeVisible();
+  await expect(
+    page.getByText("Entur reisesøk er ikke tilgjengelig akkurat nå.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
+    "href",
+    "https://www.atb.no/reiseplanlegger/",
+  );
 });
 
 test("traffic map invalidates an in-flight route when inputs change", async ({ page }) => {
@@ -2047,6 +2194,13 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
             },
             trafficImpacts: [],
             publicTransportSuggestions: [],
+            itineraries: [],
+            journeyPlanner: {
+              status: "empty",
+              detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+              requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+              source: "Entur Journey Planner",
+            },
             sources: [],
             generatedAt: "2026-06-01T09:05:00.000Z",
           }),
@@ -2069,7 +2223,7 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
 
   await expect(page.getByRole("heading", { name: "Reiseråd for ruten" })).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "Ingen kjente hindringer langs ruten" }),
+    page.getByRole("heading", { name: "Ingen konkrete Entur-reiser funnet" }),
   ).toHaveCount(0);
   await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(0);
 });
@@ -2812,7 +2966,7 @@ test("viewer shell keeps command center tools out of the public traffic map", as
 
   for (const route of [
     { path: "/", heading: "Siste nytt i Trondheim" },
-    { path: "/trafikk", heading: "Nå i trafikken" },
+    { path: "/trafikk", heading: "Trafikkbildet nå" },
     { path: "/vaer", heading: "Vær" },
     { path: "/sport", heading: "VM 2026" },
     { path: "/situasjoner", heading: "Trondheim situasjonskart" },

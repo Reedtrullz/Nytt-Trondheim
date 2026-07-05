@@ -61,15 +61,39 @@ const severityRank: Record<TrafficEventSeverity, number> = {
   critical: 4,
 };
 
-function formatClock(value?: string): string {
+const osloTimeFormatter = new Intl.DateTimeFormat("nb-NO", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Europe/Oslo",
+});
+
+const osloDateFormatter = new Intl.DateTimeFormat("nb-NO", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  timeZone: "Europe/Oslo",
+});
+
+const osloDateKeyFormatter = new Intl.DateTimeFormat("en-US", {
+  day: "2-digit",
+  month: "2-digit",
+  timeZone: "Europe/Oslo",
+  year: "numeric",
+});
+
+function osloDateKey(value: Date): string {
+  const parts = osloDateKeyFormatter.formatToParts(value);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+export function formatTrafficFreshness(value?: string, now = new Date()): string {
   if (!value) return "ukjent";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "ukjent";
-  return date.toLocaleTimeString("nb-NO", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Oslo",
-  });
+  const clock = osloTimeFormatter.format(date);
+  if (osloDateKey(date) === osloDateKey(now)) return `i dag ${clock}`;
+  return `${osloDateFormatter.format(date)}, ${clock}`;
 }
 
 function minutes(seconds?: number): string | undefined {
@@ -102,7 +126,7 @@ function sourceFreshness(sources: TrafficFreshnessSource[]): string {
     .filter((value): value is string => Boolean(value))
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
   const problemCount = sources.filter((source) => source.state !== "ok").length;
-  const base = newest ? `Sist hentet ${formatClock(newest)}` : "Oppdatering ukjent";
+  const base = newest ? `Sist hentet ${formatTrafficFreshness(newest)}` : "Oppdatering ukjent";
   if (problemCount === 1) return `${base} · 1 kilde krever oppmerksomhet`;
   return problemCount > 1 ? `${base} · ${problemCount} kilder krever oppmerksomhet` : base;
 }

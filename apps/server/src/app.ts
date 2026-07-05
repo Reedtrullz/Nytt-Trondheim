@@ -66,6 +66,7 @@ import {
   type TrafficEventState,
   type TrafficMapEvent,
   type TrafficMapSourceStatus,
+  type TravelPlanItinerary,
   type UnexplainedDelayCandidate,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
@@ -92,8 +93,11 @@ import {
 } from "./traffic/spatial-analytics.js";
 import {
   buildTravelPlanPayload,
+  fetchEnturJourneyItineraries,
+  resolveTravelPlanDepartureTime,
   resolveTravelPlanPlacesAndRoute,
   routeBounds,
+  TravelPlanRequestError,
 } from "./traffic/travel-plan.js";
 import { buildTrafficBrief } from "./traffic/traffic-brief.js";
 import { loadWeatherPreparedness } from "./weather/preparedness.js";
@@ -1308,6 +1312,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = travelPlanQuerySchema.parse(req.query);
       const login = currentLogin(req);
+      const departureTime = resolveTravelPlanDepartureTime(query.departAt);
       const { origin, destination, route } = await resolveTravelPlanPlacesAndRoute(
         query.from,
         query.to,
@@ -1326,16 +1331,50 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
               sources: ["vegvesen_traffic_info"],
               states: ["active", "planned"],
               bounds,
-              limit: null,
+              limit: 120,
             },
             login,
           ),
-          store.listOfficialEvents({ source: "datex" }, login),
-          store.listPublicTransportVehicles({ modes: publicTransportModes, bounds, limit: null }),
-          store.listPublicTransportServiceAlerts({ states: ["active"], bounds, limit: null }),
+          store.listOfficialEvents(
+            { source: "datex", states: ["active", "updated"], bounds, limit: 200 },
+            login,
+          ),
+          store.listPublicTransportVehicles({ modes: publicTransportModes, bounds, limit: 80 }),
+          store.listPublicTransportServiceAlerts({ states: ["active"], bounds, limit: 80 }),
           store.listSourceHealth(),
         ],
       );
+      let itineraries: TravelPlanItinerary[];
+      let journeyPlanner:
+        | {
+            status: "ok" | "empty" | "unavailable";
+            detail: string;
+            requestedDepartureTime: string;
+          }
+        | undefined;
+      try {
+        itineraries = await fetchEnturJourneyItineraries({
+          origin,
+          destination,
+          departureTime,
+          clientName: config.enturClientName ?? "reidar-nytt-trondheim",
+        });
+        journeyPlanner = {
+          status: itineraries.length ? "ok" : "empty",
+          detail: itineraries.length
+            ? "Entur Journey Planner returnerte konkrete reiseforslag."
+            : "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+          requestedDepartureTime: departureTime.toISOString(),
+        };
+      } catch {
+        itineraries = [];
+        journeyPlanner = {
+          status: "unavailable",
+          detail:
+            "Entur reisesøk er ikke tilgjengelig akkurat nå. Trafikk- og avvikskontekst vises fortsatt.",
+          requestedDepartureTime: departureTime.toISOString(),
+        };
+      }
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
       for (const event of trafficInfoEvents) eventsBySourceKey.set(sourceKey(event), event);
@@ -1353,6 +1392,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           events: [...eventsBySourceKey.values()],
           vehicles,
           alerts,
+          itineraries,
+          journeyPlanner,
           sourceHealth,
         }),
       );
@@ -2420,6 +2461,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       }
 
       const status = errorStatus(error);
+      if (error instanceof TravelPlanRequestError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
       if (status === 400) {
         res.status(400).json({ error: "Ugyldig forespørsel." });
         return;
