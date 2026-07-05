@@ -28,6 +28,7 @@ import {
   formatTravelDateTime,
   routePositions,
   selectedDepartureMatch,
+  selectedDepartureStatus,
   timeWindowForPreset,
   travelPlanDecision,
 } from "./TrafficMapPage.js";
@@ -218,6 +219,43 @@ describe("TrafficMapPage route overlay helpers", () => {
     ).toMatchObject({
       leg: { id: "leg-bus-3" },
       departure: undefined,
+    });
+  });
+
+  it("describes selected departure realtime state without overclaiming", () => {
+    expect(selectedDepartureStatus(departureBoard.departures[0])).toEqual({
+      label: "Sanntid",
+      detail: "Matcher sanntidsavgang mot Leangen.",
+      severity: "ok",
+    });
+
+    expect(
+      selectedDepartureStatus({
+        ...departureBoard.departures[0]!,
+        delaySeconds: 240,
+        expectedDepartureTime: "2026-06-01T09:14:00.000Z",
+      }),
+    ).toEqual({
+      label: "4 min forsinket",
+      detail: "Matcher avgang mot Leangen, men den er 4 min forsinket.",
+      severity: "warning",
+    });
+
+    expect(
+      selectedDepartureStatus({
+        ...departureBoard.departures[0]!,
+        cancelled: true,
+      }),
+    ).toEqual({
+      label: "Innstilt",
+      detail: "Avgangen mot Leangen er innstilt. Velg et annet reiseforslag hos AtB/Entur.",
+      severity: "warning",
+    });
+
+    expect(selectedDepartureStatus()).toEqual({
+      label: "Sjekk",
+      detail: "Ingen sikker match i avgangslisten. Sjekk linje og holdeplass hos AtB/Entur.",
+      severity: "watch",
     });
   });
 

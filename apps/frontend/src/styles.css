@@ -9536,6 +9536,16 @@ button {
   background: color-mix(in srgb, var(--paper) 88%, var(--green) 12%);
 }
 
+.selected-departure-callout.selected-departure-watch {
+  border-color: color-mix(in srgb, var(--blue) 38%, var(--line));
+  background: color-mix(in srgb, var(--paper) 88%, var(--blue) 12%);
+}
+
+.selected-departure-callout.selected-departure-warning {
+  border-color: color-mix(in srgb, var(--terracotta) 44%, var(--line));
+  background: #fff8f3;
+}
+
 .selected-departure-callout strong,
 .selected-departure-callout span {
   display: block;
@@ -9551,6 +9561,33 @@ button {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.3;
+}
+
+.selected-departure-state {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  min-width: fit-content;
+}
+
+.selected-departure-state span {
+  width: fit-content;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
+  color: var(--green);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.selected-departure-watch .selected-departure-state span {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+}
+
+.selected-departure-warning .selected-departure-state span {
+  color: var(--terracotta);
+  border-color: color-mix(in srgb, var(--terracotta) 45%, var(--line));
 }
 
 .selected-departure-callout time {
@@ -12529,6 +12566,10 @@ button {
   .selected-departure-callout {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .selected-departure-state {
+    justify-items: start;
   }
 
   .departure-board-grid {

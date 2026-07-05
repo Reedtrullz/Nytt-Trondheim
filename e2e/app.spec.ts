@@ -2191,7 +2191,8 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   );
   const selectedDeparture = board.getByLabel("Valgt reiseforslag");
   await expect(selectedDeparture).toContainText("Buss 3 fra Munkegata");
-  await expect(selectedDeparture).toContainText("Matcher avgang mot Leangen");
+  await expect(selectedDeparture).toContainText("Sanntid");
+  await expect(selectedDeparture).toContainText("Matcher sanntidsavgang mot Leangen");
   expect(
     departureRequestUrls.some(
       (url) =>

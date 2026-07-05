@@ -85,6 +85,14 @@ interface SelectedDepartureMatch {
   departure?: PublicTransportDeparture;
 }
 
+type SelectedDepartureStatusSeverity = "ok" | "watch" | "warning";
+
+interface SelectedDepartureStatus {
+  label: string;
+  detail: string;
+  severity: SelectedDepartureStatusSeverity;
+}
+
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
 const defaultDepartureBoardContext: DepartureBoardContext = {
   scope: "default",
@@ -1021,6 +1029,55 @@ function departureStatusClass(departure: PublicTransportDeparture): string {
   return "ok";
 }
 
+export function selectedDepartureStatus(
+  departure?: PublicTransportDeparture,
+): SelectedDepartureStatus {
+  if (!departure) {
+    return {
+      label: "Sjekk",
+      detail: "Ingen sikker match i avgangslisten. Sjekk linje og holdeplass hos AtB/Entur.",
+      severity: "watch",
+    };
+  }
+  if (departure.cancelled) {
+    return {
+      label: "Innstilt",
+      detail: `Avgangen mot ${departure.destinationName} er innstilt. Velg et annet reiseforslag hos AtB/Entur.`,
+      severity: "warning",
+    };
+  }
+  if (departure.delaySeconds >= 60) {
+    const minutes = Math.max(1, Math.round(departure.delaySeconds / 60));
+    return {
+      label: `${minutes} min forsinket`,
+      detail: `Matcher avgang mot ${departure.destinationName}, men den er ${minutes} min forsinket.`,
+      severity: departure.delaySeconds >= 180 ? "warning" : "watch",
+    };
+  }
+  if (departure.delaySeconds <= -60) {
+    const minutes = Math.max(1, Math.round(Math.abs(departure.delaySeconds) / 60));
+    return {
+      label: `${minutes} min tidlig`,
+      detail: `Matcher avgang mot ${departure.destinationName}, men den går ${minutes} min tidligere enn planlagt.`,
+      severity: "watch",
+    };
+  }
+  if (departure.notices.length) {
+    return {
+      label: "Avvik",
+      detail: `Matcher avgang mot ${departure.destinationName}. ${departure.notices[0]?.title ?? "Sjekk avvik hos AtB/Entur."}`,
+      severity: "watch",
+    };
+  }
+  return {
+    label: departure.realtime ? "Sanntid" : "Planlagt",
+    detail: departure.realtime
+      ? `Matcher sanntidsavgang mot ${departure.destinationName}.`
+      : `Matcher planlagt avgang mot ${departure.destinationName}.`,
+    severity: "ok",
+  };
+}
+
 function DepartureBoardPanel({
   board,
   loading,
@@ -1049,6 +1106,7 @@ function DepartureBoardPanel({
         ? `${board.areaLabel}: neste avganger fra holdeplasser i nærheten.`
         : "Neste avganger fra Trondheim sentrum lastes inn.";
   const matchedDeparture = selectedDeparture?.departure;
+  const selectedStatus = selectedDepartureStatus(matchedDeparture);
   return (
     <section className="departure-board-panel" aria-labelledby="departure-board-heading">
       <header>
@@ -1102,7 +1160,9 @@ function DepartureBoardPanel({
       {board?.status === "empty" ? <p className="route-planner-status">{board.detail}</p> : null}
       {selectedDeparture ? (
         <article
-          className={`selected-departure-callout${matchedDeparture ? " matched" : ""}`}
+          className={`selected-departure-callout selected-departure-${selectedStatus.severity}${
+            matchedDeparture ? " matched" : ""
+          }`}
           aria-label="Valgt reiseforslag"
         >
           <div>
@@ -1113,17 +1173,16 @@ function DepartureBoardPanel({
                 ? ` ${selectedDeparture.leg.publicCode}`
                 : ""} fra {selectedDeparture.leg.from.stopName ?? selectedDeparture.leg.from.name}
             </strong>
-            <span>
-              {matchedDeparture
-                ? `Matcher avgang mot ${matchedDeparture.destinationName}.`
-                : "Ingen sikker match i avgangslisten. Sjekk linje og holdeplass hos AtB/Entur."}
-            </span>
+            <span>{selectedStatus.detail}</span>
           </div>
-          {matchedDeparture ? (
-            <time dateTime={matchedDeparture.expectedDepartureTime}>
-              {formatTravelDateTime(matchedDeparture.expectedDepartureTime)}
-            </time>
-          ) : null}
+          <div className="selected-departure-state">
+            <span>{selectedStatus.label}</span>
+            {matchedDeparture ? (
+              <time dateTime={matchedDeparture.expectedDepartureTime}>
+                {formatTravelDateTime(matchedDeparture.expectedDepartureTime)}
+              </time>
+            ) : null}
+          </div>
         </article>
       ) : null}
       {displayedDepartures.length ? (
