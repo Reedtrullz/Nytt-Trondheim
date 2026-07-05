@@ -9365,6 +9365,7 @@ button {
 .traffic-filter-panel,
 .traffic-brief-card,
 .travel-planner-panel,
+.departure-board-panel,
 .travel-plan-card,
 .traffic-event-list-card,
 .public-transport-card,
@@ -9376,6 +9377,7 @@ button {
 
 .traffic-filter-panel h2,
 .traffic-brief-card h2,
+.departure-board-panel h2,
 .travel-planner-panel h1,
 .travel-plan-card h2,
 .traffic-event-list-card h2,
@@ -9387,6 +9389,7 @@ button {
 
 .traffic-filter-panel h3,
 .travel-planner-panel h3,
+.departure-board-panel h3,
 .travel-plan-card h3,
 .public-transport-mode-group h3,
 .corridor-impact-card h3 {
@@ -9454,6 +9457,155 @@ button {
 
 .travel-planner-result {
   min-width: 0;
+}
+
+.departure-board-panel {
+  display: grid;
+  gap: 14px;
+  border-left: 5px solid var(--green);
+}
+
+.departure-board-panel > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.departure-board-panel h2 {
+  font-size: 34px;
+}
+
+.departure-board-panel p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.departure-board-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.departure-board-actions button,
+.departure-board-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  color: var(--green);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.departure-board-actions button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.departure-board-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.departure-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.departure-row-main,
+.departure-row-time {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.departure-row-main strong,
+.departure-row-main small,
+.departure-row-time span {
+  min-width: 0;
+}
+
+.departure-line,
+.departure-status,
+.departure-notice {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.departure-line {
+  color: var(--blue);
+  background: color-mix(in srgb, #fff 88%, var(--blue) 12%);
+}
+
+.departure-row-main strong {
+  overflow-wrap: anywhere;
+}
+
+.departure-row-main small {
+  color: var(--muted);
+  line-height: 1.25;
+}
+
+.departure-row-time {
+  justify-items: end;
+  text-align: right;
+}
+
+.departure-row-time time {
+  font-size: 24px;
+  line-height: 1;
+  font-family: var(--serif);
+}
+
+.departure-status.ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, var(--line));
+}
+
+.departure-status.watch {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+}
+
+.departure-status.warning,
+.departure-notice.warning {
+  color: var(--terracotta);
+  border-color: color-mix(in srgb, var(--terracotta) 45%, var(--line));
+  background: #fff8f3;
+}
+
+.departure-notices {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.departure-notice.info {
+  color: var(--muted);
+  background: #fbfbf8;
+}
+
+.departure-board-panel footer {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .traffic-filter-panel label,
@@ -11395,6 +11547,7 @@ button {
 
   .traffic-workspace,
   .travel-planner-panel,
+  .departure-board-panel,
   .travel-planner-workbench,
   .traffic-bottom-panel {
     grid-template-columns: 1fr;
@@ -12288,6 +12441,33 @@ button {
     order: 1;
     padding: 14px;
     gap: 14px;
+  }
+
+  .departure-board-panel {
+    order: 2;
+    padding: 14px;
+  }
+
+  .departure-board-panel > header,
+  .departure-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .departure-board-panel > header {
+    display: grid;
+  }
+
+  .departure-board-actions {
+    justify-content: flex-start;
+  }
+
+  .departure-board-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .departure-row-time {
+    justify-items: start;
+    text-align: left;
   }
 
   .travel-planner-panel h1 {

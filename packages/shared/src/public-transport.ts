@@ -64,3 +64,56 @@ export interface PublicTransportMapPayload {
   sources: SourceHealth[];
   generatedAt: string;
 }
+
+export type PublicTransportDepartureBoardStatus = "ok" | "empty" | "unavailable";
+export type PublicTransportDepartureNoticeSeverity = "info" | "warning";
+
+export interface PublicTransportDepartureNotice {
+  id: string;
+  title: string;
+  detail?: string;
+  severity: PublicTransportDepartureNoticeSeverity;
+}
+
+export interface PublicTransportDeparture {
+  id: string;
+  stopId: string;
+  stopName: string;
+  stopDistanceMeters?: number;
+  quayId?: string;
+  quayName?: string;
+  quayPublicCode?: string;
+  mode: PublicTransportVehicleMode;
+  lineId?: string;
+  publicCode?: string;
+  lineName?: string;
+  destinationName: string;
+  aimedDepartureTime: string;
+  expectedDepartureTime: string;
+  delaySeconds: number;
+  realtime: boolean;
+  cancelled: boolean;
+  notices: PublicTransportDepartureNotice[];
+  handoffUrl: string;
+}
+
+export interface PublicTransportDepartureStop {
+  id: string;
+  name: string;
+  coordinate: [number, number];
+  distanceMeters?: number;
+  modes: PublicTransportVehicleMode[];
+  departures: PublicTransportDeparture[];
+}
+
+export interface PublicTransportDepartureBoardPayload {
+  status: PublicTransportDepartureBoardStatus;
+  detail: string;
+  areaLabel: string;
+  center: { lat: number; lon: number };
+  stops: PublicTransportDepartureStop[];
+  departures: PublicTransportDeparture[];
+  sources: SourceHealth[];
+  generatedAt: string;
+  handoffUrl: string;
+}

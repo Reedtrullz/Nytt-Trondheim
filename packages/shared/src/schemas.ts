@@ -1245,6 +1245,30 @@ export const publicTransportMapQuerySchema = z
 
 export type PublicTransportMapQueryInput = z.infer<typeof publicTransportMapQuerySchema>;
 
+export const publicTransportDepartureBoardQuerySchema = z
+  .object({
+    lat: publicTransportLatitudeParamSchema,
+    lon: publicTransportLongitudeParamSchema,
+    radiusMeters: z.coerce.number().int().min(100).max(2_500).default(1_200),
+    stopLimit: z.coerce.number().int().min(1).max(6).default(4),
+    departureLimit: z.coerce.number().int().min(1).max(20).default(12),
+  })
+  .superRefine((value, context) => {
+    const hasLat = value.lat !== undefined;
+    const hasLon = value.lon !== undefined;
+    if (hasLat !== hasLon) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Avganger krever både lat og lon, eller ingen av dem.",
+        path: ["center"],
+      });
+    }
+  });
+
+export type PublicTransportDepartureBoardQueryInput = z.infer<
+  typeof publicTransportDepartureBoardQuerySchema
+>;
+
 export const travelPlanQuerySchema = z.object({
   from: z.string().trim().min(2).max(160),
   to: z.string().trim().min(2).max(160),

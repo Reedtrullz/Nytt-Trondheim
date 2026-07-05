@@ -61,6 +61,104 @@ async function useViewerSession(page: Page): Promise<void> {
   });
 }
 
+async function mockTrafficDepartureBoard(page: Page): Promise<void> {
+  await page.route("**/api/map/public-transport/departures**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "ok",
+        detail: "Entur viser konkrete avganger nær valgt område.",
+        areaLabel: "Trondheim sentrum",
+        center: { lat: 63.4305, lon: 10.3951 },
+        stops: [
+          {
+            id: "NSR:StopPlace:41613",
+            name: "Prinsens gate",
+            coordinate: [10.392007, 63.431034],
+            distanceMeters: 183,
+            modes: ["bus"],
+            departures: [
+              {
+                id: "departure:71",
+                stopId: "NSR:StopPlace:41613",
+                stopName: "Prinsens gate",
+                stopDistanceMeters: 183,
+                quayId: "NSR:Quay:71181",
+                quayName: "Prinsens gate",
+                quayPublicCode: "P2",
+                mode: "bus",
+                lineId: "ATB:Line:71",
+                publicCode: "71",
+                lineName: "MelhusSkyss-Trondheim",
+                destinationName: "Dora",
+                aimedDepartureTime: "2026-07-05T16:24:00.000Z",
+                expectedDepartureTime: "2026-07-05T16:26:48.000Z",
+                delaySeconds: 168,
+                realtime: true,
+                cancelled: false,
+                notices: [
+                  {
+                    id: "notice:route-change",
+                    title: "Endret rute",
+                    detail: "Planlagt vegarbeid.",
+                    severity: "info",
+                  },
+                ],
+                handoffUrl: "https://www.atb.no/reiseplanlegger/",
+              },
+            ],
+          },
+        ],
+        departures: [
+          {
+            id: "departure:71",
+            stopId: "NSR:StopPlace:41613",
+            stopName: "Prinsens gate",
+            stopDistanceMeters: 183,
+            quayId: "NSR:Quay:71181",
+            quayName: "Prinsens gate",
+            quayPublicCode: "P2",
+            mode: "bus",
+            lineId: "ATB:Line:71",
+            publicCode: "71",
+            lineName: "MelhusSkyss-Trondheim",
+            destinationName: "Dora",
+            aimedDepartureTime: "2026-07-05T16:24:00.000Z",
+            expectedDepartureTime: "2026-07-05T16:26:48.000Z",
+            delaySeconds: 168,
+            realtime: true,
+            cancelled: false,
+            notices: [
+              {
+                id: "notice:route-change",
+                title: "Endret rute",
+                detail: "Planlagt vegarbeid.",
+                severity: "info",
+              },
+            ],
+            handoffUrl: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        sources: [
+          {
+            source: "entur_service_alerts",
+            label: "Entur avvik",
+            state: "ok",
+            detail: "1 aktivt avvik",
+          },
+        ],
+        generatedAt: "2026-07-05T16:20:00.000Z",
+        handoffUrl: "https://www.atb.no/reiseplanlegger/",
+      }),
+    });
+  });
+}
+
+test.beforeEach(async ({ page }) => {
+  await mockTrafficDepartureBoard(page);
+});
+
 test("Situation Room explains provenance and keeps private map controls distinct", async ({
   page,
 }) => {
@@ -1780,6 +1878,10 @@ test("traffic page shows summary cards semantic layers ranked list and detail dr
     });
   });
   await page.route("**/api/map/public-transport**", async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith("/departures")) {
+      await route.fallback();
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1834,6 +1936,23 @@ test("traffic page shows summary cards semantic layers ranked list and detail dr
   await expect(drawer).toContainText("Hvorfor ser jeg dette?");
   await expect(drawer).toContainText("Statens vegvesen DATEX Situation");
   await expect(drawer).toContainText("Adresseavisen: Kø ved Sluppen");
+});
+
+test("traffic map shows useful default public transport departures", async ({ page }) => {
+  await page.goto("/trafikk");
+
+  const board = page.getByRole("region", { name: "Avganger nå" });
+  await expect(board.getByRole("heading", { name: "Avganger nå" })).toBeVisible();
+  await expect(board).toContainText("Trondheim sentrum");
+  await expect(board).toContainText("Buss 71");
+  await expect(board).toContainText("Dora");
+  await expect(board).toContainText("Prinsens gate");
+  await expect(board).toContainText("3 min forsinket");
+  await expect(board).toContainText("Endret rute");
+  await expect(board.getByRole("link", { name: "AtB/Entur" })).toHaveAttribute(
+    "href",
+    "https://www.atb.no/reiseplanlegger/",
+  );
 });
 
 test("traffic map travel planner shows route-specific traffic and public transport advice", async ({
@@ -2230,6 +2349,10 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
 
 test("traffic map can show Entur public transport context", async ({ page }) => {
   await page.route("**/api/map/public-transport**", async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith("/departures")) {
+      await route.fallback();
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -2273,9 +2396,9 @@ test("traffic map can show Entur public transport context", async ({ page }) => 
     });
   });
   await page.goto("/trafikk");
+  await page.getByRole("button", { name: "Vis kjøretøy" }).click();
   await expect(page.getByRole("heading", { name: "Kollektivtrafikk" })).toBeVisible();
   await openTrafficLayersIfHidden(page);
-  await page.getByLabel("Kjøretøyposisjoner").check();
   await expect(page.getByText("45 → Hagen")).toBeVisible();
   await expect(page.getByText("Rota flyttet").first()).toBeVisible();
 });
@@ -3580,6 +3703,10 @@ test("situation map exposes private fire and SAR planning tools", async ({ page 
 
 test("situation map can show Kollektivtrafikk-kontekst", async ({ page }) => {
   await page.route("**/api/map/public-transport**", async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith("/departures")) {
+      await route.fallback();
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",

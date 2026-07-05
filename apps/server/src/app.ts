@@ -24,6 +24,7 @@ import {
   operationsTimelineQuerySchema,
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
+  publicTransportDepartureBoardQuerySchema,
   publicTransportMapQuerySchema,
   pushSubscriptionInputSchema,
   rawInspectorAiRunQuerySchema,
@@ -85,6 +86,7 @@ import { MemoryStore, PgStore, type Store } from "./store.js";
 import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
 import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
+import { fetchEnturDepartureBoard, unavailableDepartureBoard } from "./traffic/departure-board.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
 import { relatedTrafficArticlesForEvent } from "./traffic/related-articles.js";
 import {
@@ -1439,6 +1441,37 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         sources: sourceHealth.filter((source) => publicTransportSourceIdSet.has(source.source)),
         generatedAt: new Date().toISOString(),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/map/public-transport/departures", async (req, res, next) => {
+    try {
+      const query = publicTransportDepartureBoardQuerySchema.parse(req.query);
+      const sources = (await store.listSourceHealth()).filter((source) =>
+        publicTransportSourceIdSet.has(source.source),
+      );
+      const center =
+        query.lat !== undefined && query.lon !== undefined
+          ? { lat: query.lat, lon: query.lon }
+          : undefined;
+      const areaLabel = center ? "Valgt område" : undefined;
+      try {
+        res.json(
+          await fetchEnturDepartureBoard({
+            clientName: config.enturClientName ?? "reidar-nytt-trondheim",
+            center,
+            areaLabel,
+            radiusMeters: query.radiusMeters,
+            stopLimit: query.stopLimit,
+            departureLimit: query.departureLimit,
+            sources,
+          }),
+        );
+      } catch {
+        res.json(unavailableDepartureBoard({ center, areaLabel, sources }));
+      }
     } catch (error) {
       next(error);
     }

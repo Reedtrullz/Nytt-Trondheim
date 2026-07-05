@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type {
+  PublicTransportDeparture,
+  PublicTransportDepartureBoardPayload,
   TrafficCorridorImpact,
   TrafficEventCategory,
   TrafficEventState,
@@ -31,6 +33,7 @@ import {
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { TrafficLegend } from "../components/map/TrafficLegend.js";
 import { TrafficNowSummary } from "../components/map/TrafficNowSummary.js";
+import { fetchPublicTransportDepartureBoard } from "../api/publicTransportDepartures.js";
 import { fetchTravelPlan } from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
@@ -871,6 +874,122 @@ function TravelPlanCard({
   );
 }
 
+function departureLineLabel(departure: PublicTransportDeparture): string {
+  const mode = modeLabel(departure.mode);
+  return departure.publicCode ? `${mode} ${departure.publicCode}` : mode;
+}
+
+function departureStatusLabel(departure: PublicTransportDeparture): string {
+  if (departure.cancelled) return "Innstilt";
+  if (departure.delaySeconds >= 60) {
+    const minutes = Math.max(1, Math.round(departure.delaySeconds / 60));
+    return `${minutes} min forsinket`;
+  }
+  if (departure.delaySeconds <= -60) {
+    const minutes = Math.max(1, Math.round(Math.abs(departure.delaySeconds) / 60));
+    return `${minutes} min tidlig`;
+  }
+  return departure.realtime ? "Sanntid" : "Planlagt";
+}
+
+function departureStatusClass(departure: PublicTransportDeparture): string {
+  if (departure.cancelled || departure.delaySeconds >= 180) return "warning";
+  if (departure.delaySeconds >= 60 || departure.notices.length) return "watch";
+  return "ok";
+}
+
+function DepartureBoardPanel({
+  board,
+  loading,
+  error,
+  onReload,
+}: {
+  board?: PublicTransportDepartureBoardPayload;
+  loading: boolean;
+  error?: string;
+  onReload: () => void;
+}) {
+  const safeHandoff = safeExternalUrl(board?.handoffUrl ?? "https://www.atb.no/reiseplanlegger/");
+  const displayedDepartures = Array.isArray(board?.departures) ? board.departures.slice(0, 8) : [];
+  return (
+    <section className="departure-board-panel" aria-labelledby="departure-board-heading">
+      <header>
+        <div>
+          <p className="label">Kollektiv nå</p>
+          <h2 id="departure-board-heading">Avganger nå</h2>
+          <p>
+            {board
+              ? `${board.areaLabel}: neste avganger fra holdeplasser i nærheten.`
+              : "Neste avganger fra Trondheim sentrum lastes inn."}
+          </p>
+        </div>
+        <div className="departure-board-actions">
+          <button type="button" onClick={onReload} disabled={loading}>
+            {loading ? "Oppdaterer ..." : "Oppdater"}
+          </button>
+          {safeHandoff ? (
+            <a href={safeHandoff} target="_blank" rel="noreferrer noopener">
+              AtB/Entur
+            </a>
+          ) : null}
+        </div>
+      </header>
+      {error ? <p className="route-planner-status error">{error}</p> : null}
+      {!board && loading ? (
+        <p className="route-planner-status" role="status" aria-live="polite">
+          Henter avganger ...
+        </p>
+      ) : null}
+      {board?.status === "unavailable" ? (
+        <p className="route-planner-status warning">{board.detail}</p>
+      ) : null}
+      {board?.status === "empty" ? <p className="route-planner-status">{board.detail}</p> : null}
+      {displayedDepartures.length ? (
+        <div className="departure-board-grid">
+          {displayedDepartures.map((departure) => (
+            <article key={departure.id} className="departure-row">
+              <div className="departure-row-main">
+                <span className="departure-line">{departureLineLabel(departure)}</span>
+                <strong>{departure.destinationName}</strong>
+                <small>
+                  {departure.stopName}
+                  {departure.quayPublicCode ? ` · ${departure.quayPublicCode}` : ""}
+                  {departure.stopDistanceMeters !== undefined
+                    ? ` · ${formatDistance(departure.stopDistanceMeters)} unna`
+                    : ""}
+                </small>
+              </div>
+              <div className="departure-row-time">
+                <time dateTime={departure.expectedDepartureTime}>
+                  {formatTravelDateTime(departure.expectedDepartureTime)}
+                </time>
+                <span className={`departure-status ${departureStatusClass(departure)}`}>
+                  {departureStatusLabel(departure)}
+                </span>
+              </div>
+              {departure.notices.length ? (
+                <div className="departure-notices" aria-label="Avvik for avgangen">
+                  {departure.notices.slice(0, 2).map((notice) => (
+                    <span key={notice.id} className={`departure-notice ${notice.severity}`}>
+                      {notice.title}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+      <footer>
+        <span>
+          Nytt viser avgangs- og avvikskontekst. AtB/Entur er fasit for avgang, billett og
+          operatørvalg.
+        </span>
+      </footer>
+    </section>
+  );
+}
+
 function TrafficDataDisclosure({
   sources,
 }: {
@@ -1048,10 +1167,47 @@ export function TrafficMapPage() {
   const [selectedItineraryId, setSelectedItineraryId] = useState<string | undefined>();
   const [travelPlanLoading, setTravelPlanLoading] = useState(false);
   const [travelPlanError, setTravelPlanError] = useState<string>();
+  const [departureBoard, setDepartureBoard] = useState<PublicTransportDepartureBoardPayload>();
+  const [departureBoardLoading, setDepartureBoardLoading] = useState(false);
+  const [departureBoardError, setDepartureBoardError] = useState<string>();
   const travelPlanRequestIdRef = useRef(0);
   const travelPlanAbortRef = useRef<AbortController | undefined>(undefined);
+  const departureBoardAbortRef = useRef<AbortController | undefined>(undefined);
 
-  useEffect(() => () => travelPlanAbortRef.current?.abort(), []);
+  const reloadDepartureBoard = useCallback(() => {
+    departureBoardAbortRef.current?.abort();
+    const controller = new AbortController();
+    departureBoardAbortRef.current = controller;
+    setDepartureBoardLoading(true);
+    setDepartureBoardError(undefined);
+    fetchPublicTransportDepartureBoard(
+      { radiusMeters: 1_200, stopLimit: 4, departureLimit: 12 },
+      { signal: controller.signal },
+    )
+      .then((payload) => {
+        setDepartureBoard(payload);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setDepartureBoardError(
+          reason instanceof Error ? reason.message : "Kunne ikke hente avganger.",
+        );
+      })
+      .finally(() => {
+        if (departureBoardAbortRef.current === controller) {
+          setDepartureBoardLoading(false);
+          departureBoardAbortRef.current = undefined;
+        }
+      });
+  }, []);
+
+  useEffect(() => {
+    reloadDepartureBoard();
+    return () => {
+      travelPlanAbortRef.current?.abort();
+      departureBoardAbortRef.current?.abort();
+    };
+  }, [reloadDepartureBoard]);
 
   useEffect(() => {
     setSelectedPreset(trafficFilters.preset);
@@ -1366,6 +1522,12 @@ export function TrafficMapPage() {
         onSubmit={(event) => void handleTravelPlanSubmit(event)}
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}
+      />
+      <DepartureBoardPanel
+        board={departureBoard}
+        loading={departureBoardLoading}
+        error={departureBoardError}
+        onReload={reloadDepartureBoard}
       />
       <TrafficNowSummary cards={summaryCardsForDisplay} />
       <TrafficDataDisclosure

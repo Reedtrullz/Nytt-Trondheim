@@ -5,6 +5,10 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import {
+  clearEnturDepartureBoardCache,
+  publicTransportDepartureBoardFromEntur,
+} from "../src/traffic/departure-board.js";
+import {
   buildTravelPlanPayload,
   clearEnturJourneyCache,
   fetchEnturJourneyItineraries,
@@ -71,6 +75,7 @@ const sourceHealth = [
 
 afterEach(() => {
   clearEnturJourneyCache();
+  clearEnturDepartureBoardCache();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -182,7 +187,239 @@ function enturTripResponse(
   });
 }
 
+function enturDepartureBoardResponse(
+  overrides: {
+    empty?: boolean;
+    cancelled?: boolean;
+    alert?: boolean;
+    delayedSeconds?: number;
+  } = {},
+): Response {
+  const aimedDeparture = "2026-07-05T18:24:00+02:00";
+  const expectedDeparture = new Date(
+    Date.parse("2026-07-05T16:24:00.000Z") + (overrides.delayedSeconds ?? 168) * 1000,
+  ).toISOString();
+  return Response.json({
+    data: {
+      nearest: {
+        edges: [
+          {
+            node: {
+              distance: 182.786,
+              place: {
+                __typename: "StopPlace",
+                id: "NSR:StopPlace:41613",
+                name: "Prinsens gate",
+                latitude: 63.431034,
+                longitude: 10.392007,
+                transportMode: ["bus"],
+                estimatedCalls: overrides.empty
+                  ? []
+                  : [
+                      {
+                        realtime: true,
+                        aimedDepartureTime: aimedDeparture,
+                        expectedDepartureTime: expectedDeparture,
+                        cancellation: overrides.cancelled ?? false,
+                        destinationDisplay: { frontText: "Dora" },
+                        quay: {
+                          id: "NSR:Quay:71181",
+                          name: "Prinsens gate",
+                          publicCode: "P2",
+                        },
+                        serviceJourney: {
+                          id: "ATB:ServiceJourney:71",
+                          journeyPattern: {
+                            line: {
+                              id: "ATB:Line:71",
+                              name: "MelhusSkyss-Trondheim",
+                              publicCode: "71",
+                              transportMode: "bus",
+                            },
+                          },
+                        },
+                        situations: overrides.alert
+                          ? [
+                              {
+                                id: "ATB:Situation:25576-line",
+                                summary: [{ value: "Endret rute", language: null }],
+                                description: [{ value: "Planlagt vegarbeid.", language: null }],
+                                severity: "normal",
+                              },
+                            ]
+                          : [],
+                      },
+                    ],
+              },
+            },
+          },
+        ],
+      },
+    },
+  });
+}
+
 describe("traffic travel planner API", () => {
+  it("parses an Entur departure board with delays, cancellations and notices", () => {
+    const payload = publicTransportDepartureBoardFromEntur({
+      payload: {
+        data: {
+          nearest: {
+            edges: [
+              {
+                node: {
+                  distance: 180.5,
+                  place: {
+                    __typename: "StopPlace",
+                    id: "NSR:StopPlace:41613",
+                    name: "Prinsens gate",
+                    latitude: 63.431034,
+                    longitude: 10.392007,
+                    transportMode: ["bus"],
+                    estimatedCalls: [
+                      {
+                        realtime: true,
+                        aimedDepartureTime: "2026-07-05T18:24:00+02:00",
+                        expectedDepartureTime: "2026-07-05T18:27:00+02:00",
+                        cancellation: true,
+                        destinationDisplay: { frontText: "Dora" },
+                        quay: { id: "NSR:Quay:71181", name: "Prinsens gate", publicCode: "P2" },
+                        serviceJourney: {
+                          id: "ATB:ServiceJourney:71",
+                          journeyPattern: {
+                            line: {
+                              id: "ATB:Line:71",
+                              name: "MelhusSkyss-Trondheim",
+                              publicCode: "71",
+                              transportMode: "bus",
+                            },
+                          },
+                        },
+                        situations: [
+                          {
+                            id: "ATB:Situation:25576-line",
+                            summary: [{ value: "Endret rute", language: null }],
+                            description: [{ value: "Planlagt vegarbeid.", language: null }],
+                            severity: "normal",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+      center: { lat: 63.4305, lon: 10.3951 },
+      generatedAt: new Date("2026-07-05T16:20:00.000Z"),
+      departureLimit: 8,
+    });
+
+    expect(payload).toMatchObject({
+      status: "ok",
+      areaLabel: "Trondheim sentrum",
+      departures: [
+        expect.objectContaining({
+          stopName: "Prinsens gate",
+          publicCode: "71",
+          destinationName: "Dora",
+          delaySeconds: 180,
+          realtime: true,
+          cancelled: true,
+          notices: expect.arrayContaining([
+            expect.objectContaining({ title: "Endret rute", severity: "info" }),
+            expect.objectContaining({ title: "Avgangen er innstilt", severity: "warning" }),
+          ]),
+        }),
+      ],
+    });
+  });
+
+  it("returns a default Trondheim departure board without persisting Entur trip data", async () => {
+    let enturRequestCount = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      );
+      expect(url.hostname).toBe("api.entur.io");
+      enturRequestCount += 1;
+      expect(init?.method).toBe("POST");
+      expect((init?.headers as Record<string, string>)["ET-Client-Name"]).toBe(
+        "reidar-nytt-trondheim",
+      );
+      const body = JSON.parse(String(init?.body)) as {
+        variables: {
+          lat: number;
+          lon: number;
+          stopLimit: number;
+          departureLimit: number;
+          startTime: string;
+        };
+      };
+      expect(body.variables).toMatchObject({
+        lat: 63.4305,
+        lon: 10.3951,
+        stopLimit: 4,
+        departureLimit: 12,
+      });
+      expect(Date.parse(body.variables.startTime)).not.toBeNaN();
+      return enturDepartureBoardResponse({ alert: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const first = await agent.get("/api/map/public-transport/departures").expect(200);
+    const second = await agent.get("/api/map/public-transport/departures").expect(200);
+
+    expect(first.body).toMatchObject({
+      status: "ok",
+      detail: "Entur viser konkrete avganger nær valgt område.",
+      areaLabel: "Trondheim sentrum",
+      departures: [
+        expect.objectContaining({
+          stopName: "Prinsens gate",
+          publicCode: "71",
+          destinationName: "Dora",
+          delaySeconds: 168,
+          realtime: true,
+          notices: [expect.objectContaining({ title: "Endret rute" })],
+        }),
+      ],
+    });
+    expect(second.body.departures).toEqual(first.body.departures);
+    expect(first.body.sources.map((source: SourceHealth) => source.source)).toEqual([
+      "entur_vehicle_positions",
+      "entur_service_alerts",
+    ]);
+    expect(enturRequestCount).toBe(1);
+  });
+
+  it("keeps /trafikk useful when the Entur departure board fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ errors: [{ message: "rate limited" }] }, { status: 429 })),
+    );
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    const response = await agent.get("/api/map/public-transport/departures").expect(200);
+
+    expect(response.body).toMatchObject({
+      status: "unavailable",
+      detail: "Entur avgangstavle er ikke tilgjengelig akkurat nå. Trafikkbildet vises fortsatt.",
+      departures: [],
+      stops: [],
+    });
+  });
+
   it("geocodes a from/to trip and returns traffic plus public transport suggestions near the route", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(
