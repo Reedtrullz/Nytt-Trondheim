@@ -3,10 +3,11 @@ import {
   sourceMixConfidenceSummary,
   derivePublicVerificationForArticleGroup,
   type Article,
+  type ArticleTopic,
   type CityPulseStory,
   type SourceConfidenceSummary,
 } from "@nytt/shared";
-import { articleCategoryLabels } from "./homeFilters.js";
+import { articleCategoryLabels, articleTopicLabels } from "./homeFilters.js";
 import type { HomeArticleGroup } from "./homeArticleGroups.js";
 
 export interface HomeStoryCard {
@@ -17,6 +18,7 @@ export interface HomeStoryCard {
   excerpt: string;
   category: Article["category"];
   channelLabel: string;
+  topicLabels: string[];
   sourceCount: number;
   updateCount: number;
   sourceSummary: string;
@@ -38,6 +40,7 @@ export interface HomeStoryVerification {
 }
 
 const genericPlaces = new Set(["norge", "trondheim", "trondelag", "trøndelag"]);
+const multiplePlacesLabel = "Flere steder";
 
 function normalizePlace(value: string): string {
   return value
@@ -64,7 +67,19 @@ function storyPlaces(group: HomeArticleGroup): string[] {
     group.articles.flatMap((article) => [article.location?.label, ...article.places]),
   );
   const specific = labels.filter((label) => !genericPlaces.has(normalizePlace(label)));
-  return specific.length > 0 ? specific : labels;
+  const places = specific.length > 0 ? specific : labels;
+  const hasPreciseLocation = group.articles.some((article) => article.location);
+  const singleUnlocatedStory = group.articles.length === 1 && !hasPreciseLocation;
+  if (singleUnlocatedStory && places.length > 1) return [multiplePlacesLabel];
+  return places;
+}
+
+function storyTopicLabels(group: HomeArticleGroup): string[] {
+  const topics = new Set<ArticleTopic>();
+  for (const article of group.articles) {
+    for (const topic of article.topics ?? []) topics.add(topic);
+  }
+  return [...topics].map((topic) => articleTopicLabels[topic]);
 }
 
 export function sourceClusterLabelForGroup(group: HomeArticleGroup): string | undefined {
@@ -172,6 +187,7 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     excerpt: group.primary.excerpt,
     category: group.primary.category,
     channelLabel: articleCategoryLabels[group.primary.category],
+    topicLabels: storyTopicLabels(group),
     sourceCount: group.sourceLabels.length,
     updateCount: group.articles.length,
     sourceSummary: sourceSummary(group),

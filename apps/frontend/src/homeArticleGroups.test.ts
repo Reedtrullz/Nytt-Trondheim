@@ -327,6 +327,63 @@ describe("home article grouping", () => {
     expect(groups[0]?.sourceLabels).toEqual(["Adresseavisen", "NRK Trøndelag", "Politiloggen"]);
   });
 
+  it("consolidates missing-person news bundle with the Politiloggen situation row", () => {
+    const coverageBundle = {
+      id: "coverage:incident:saupstad-savnet",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme sak på tvers av kilder",
+      generatedAt: "2026-07-05T12:20:00.000Z",
+    };
+    const groups = groupHomeArticles([
+      article({
+        id: "adressa-savnet",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Person savnet fra sykehjem",
+        excerpt:
+          "En pasient skal ha vært savnet fra et sykehjem i Trondheim i over 90 minutter. Beskrivelsen på damen er en eldre dame i 70-årene.",
+        publishedAt: "2026-07-05T12:15:00.000Z",
+        category: "Krim",
+        places: ["Saupstad", "Trondheim"],
+        location: { lat: 63.3675, lng: 10.3567, label: "Saupstad" },
+        coverageBundle,
+      }),
+      article({
+        id: "nrk-savnet",
+        title: "Kvinne savnet i Trondheim",
+        excerpt:
+          "Politiet melder at en eldre kvinne har vært savnet fra et sykehjem i Trondheim. Hun skal være i 70-årene.",
+        publishedAt: "2026-07-05T12:14:00.000Z",
+        category: "Hendelser",
+        places: ["Saupstad", "Trondheim"],
+        location: { lat: 63.3675, lng: 10.3567, label: "Saupstad" },
+        coverageBundle,
+      }),
+      article({
+        id: "politiloggen-savnet",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Savnet: Trondheim, Saupstad",
+        excerpt:
+          "Pasient fra Saupstad Helsehus savnet i over 90 minutter. Beskrivelse eldre dame i 70-årene. 170 cm høy, grått hår, blå genser, grønn bukse.",
+        publishedAt: "2026-07-05T12:12:00.000Z",
+        category: "Hendelser",
+        places: ["Trondheim", "Saupstad"],
+        location: { lat: 63.3675, lng: 10.3567, label: "Saupstad" },
+        situationId: "politiloggen-saupstad-savnet",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
+      "adressa-savnet",
+      "nrk-savnet",
+      "politiloggen-savnet",
+    ]);
+    expect(groups[0]?.sourceLabels).toEqual(["Adresseavisen", "NRK Trøndelag", "Politiloggen"]);
+  });
+
   it("consolidates Kyvannet drowning and lifeless-under-water updates", () => {
     const groups = groupHomeArticles([
       article({

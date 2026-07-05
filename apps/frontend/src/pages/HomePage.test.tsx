@@ -32,6 +32,7 @@ import {
   mergeCityPulseStoryLists,
   morningBriefFreshness,
   rankHomeStoryCardsForPublicFeed,
+  shouldShowStoryConfidenceBadge,
   storyFeedSummary,
   storyFeedTrustStats,
 } from "./HomePage.js";
@@ -734,6 +735,74 @@ describe("StoryConfidenceBadge", () => {
     expect(html).toContain("98 %");
     expect(html).toContain("story-confidence-confirmed");
     expect(html).toContain("Offisielle kilder og redaksjonelle kilder peker mot samme område.");
+  });
+});
+
+describe("shouldShowStoryConfidenceBadge", () => {
+  it("hides source trust noise for ordinary single-source trusted newsroom stories", () => {
+    const [adressaCard] = homeStoryCardsForGroups(groupHomeArticles([article]));
+    const [nrkCard] = homeStoryCardsForGroups(
+      groupHomeArticles([
+        {
+          ...article,
+          id: "nrk-story",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Nyhet fra Trondheim",
+          url: "https://example.test/nrk",
+        },
+      ]),
+    );
+
+    expect(adressaCard?.sourceConfidence).toMatchObject({ label: "Usikker", score: 0.64 });
+    expect(nrkCard?.sourceConfidence).toMatchObject({ label: "Usikker", score: 0.64 });
+    expect(adressaCard ? shouldShowStoryConfidenceBadge(adressaCard) : true).toBe(false);
+    expect(nrkCard ? shouldShowStoryConfidenceBadge(nrkCard) : true).toBe(false);
+  });
+
+  it("keeps source trust visible when cross-source or official verification adds signal", () => {
+    const coverageBundle = {
+      id: "coverage:incident:sluppen",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-02T07:20:00.000Z",
+    } as const;
+    const [clusteredCard] = homeStoryCardsForGroups(
+      groupHomeArticles([
+        {
+          ...article,
+          id: "adressa-sluppen",
+          coverageBundle,
+        },
+        {
+          ...article,
+          id: "nrk-sluppen",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          coverageBundle,
+        },
+      ]),
+    );
+    const [verifiedCard] = homeStoryCardsForGroups(
+      groupHomeArticles([
+        {
+          ...article,
+          id: "verified-road",
+          title: "Kollisjon stenger E6",
+          publicVerification: {
+            status: "verified",
+            label: "Verifisert",
+            detail: "Bekreftet av Statens vegvesen DATEX og Adresseavisen.",
+            officialSources: ["datex"],
+            reportingSources: ["adressa"],
+          },
+        },
+      ]),
+    );
+
+    expect(clusteredCard ? shouldShowStoryConfidenceBadge(clusteredCard) : false).toBe(true);
+    expect(verifiedCard ? shouldShowStoryConfidenceBadge(verifiedCard) : false).toBe(true);
   });
 });
 

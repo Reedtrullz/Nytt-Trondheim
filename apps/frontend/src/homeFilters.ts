@@ -42,7 +42,7 @@ export const articleCategoryDescriptions = {
 } as const satisfies Record<ArticleCategory | "Alle", string>;
 
 export const articleTopicLabels = {
-  rosenborg: "Rosenborg",
+  rosenborg: "RBK",
 } as const satisfies Record<ArticleTopic, string>;
 
 export const homeTimeWindows = ["all", "2h", "24h", "7d"] as const;

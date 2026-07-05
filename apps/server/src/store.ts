@@ -269,6 +269,8 @@ function sportCategorySqlPredicate(categoryParam: string): string {
         OR a.payload->>'excerpt' ILIKE '%håndball%'
         OR a.payload->>'title' ILIKE '%kamp%'
         OR a.payload->>'excerpt' ILIKE '%kamp%'
+        OR a.payload->>'title' ILIKE '%profil%'
+        OR a.payload->>'excerpt' ILIKE '%profil%'
         OR a.payload->>'title' ILIKE '%tapte%'
         OR a.payload->>'excerpt' ILIKE '%tapte%'
         OR a.payload->>'title' ~* '\\d+\\s*[–-]\\s*\\d+'

@@ -58,6 +58,10 @@ describe("Trondheim relevance classification", () => {
   it("categorizes local sports coverage separately from incidents and culture", () => {
     expect(categorize("Freyr Alexandersson blir ny hovedtrener i Rosenborg")).toBe("Sport");
     expect(categorize("Han kan bli RBK-trener")).toBe("Sport");
+    expect(categorize("Ukas eiendomsoverdragelser: RBK-profil har kjøpt seg ny bolig")).toBe(
+      "Sport",
+    );
+    expect(categorize("Rosenborg-profil har kjøpt seg ny bolig")).toBe("Sport");
     expect(categorize("Kolstad håndball møter europeisk motstand")).toBe("Sport");
     expect(categorize("Rosenborg møter Brann på Lerkendal")).toBe("Sport");
     expect(
@@ -69,6 +73,10 @@ describe("Trondheim relevance classification", () => {
       "rosenborg",
     ]);
     expect(articleTopics("Han kan bli RBK-trener")).toEqual(["rosenborg"]);
+    expect(articleTopics("Ukas eiendomsoverdragelser: RBK-profil har kjøpt seg ny bolig")).toEqual([
+      "rosenborg",
+    ]);
+    expect(articleTopics("Rosenborg-profil har kjøpt seg ny bolig")).toEqual(["rosenborg"]);
     expect(articleTopics("Kolstad håndball møter europeisk motstand")).toEqual([]);
   });
 

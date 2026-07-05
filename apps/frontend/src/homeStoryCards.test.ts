@@ -239,6 +239,24 @@ describe("home story cards", () => {
     expect(card?.neighborhoodLabels).toEqual(["Trondheim sentrum", "Sentrum"]);
   });
 
+  it("does not show multiple distant place pills for a single unlocated regional story", () => {
+    const group = groupHomeArticles([
+      article({
+        id: "regional-roundup",
+        title: "To tatt for promillekjøring",
+        excerpt: "I Namsos og Melhus kan to bilførere bli uten førerkort etter kontroller i natt.",
+        scope: "trondelag",
+        places: ["Melhus", "Namsos"],
+        location: undefined,
+      }),
+    ])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.locationLabel).toBe("Flere steder");
+    expect(card.neighborhoodLabels).toEqual(["Flere steder"]);
+  });
+
   it("keeps single-source stories compact and unclustered", () => {
     const group = groupHomeArticles([
       article({
@@ -264,6 +282,27 @@ describe("home story cards", () => {
       label: "Usikker",
       sourceCount: 1,
     });
+  });
+
+  it("surfaces RBK as a local football club topic on Sport story cards", () => {
+    const group = groupHomeArticles([
+      article({
+        id: "rbk-profile",
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        title: "Ukas eiendomsoverdragelser: RBK-profil har kjøpt seg ny bolig",
+        excerpt: "Det har vært stor aktivitet i eiendomsmarkedet i Trondheim den siste uken.",
+        category: "Sport",
+        topics: ["rosenborg"],
+        places: ["Trondheim"],
+        location: undefined,
+      }),
+    ])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.channelLabel).toBe("Sport");
+    expect(card.topicLabels).toEqual(["RBK"]);
   });
 
   it("builds public story cards directly from City Pulse story objects", () => {

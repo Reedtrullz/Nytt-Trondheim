@@ -119,6 +119,10 @@ const genericPlaceIncidentSignalRules = new Map<
     "innbrudd",
     { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 2 },
   ],
+  [
+    "missing_person",
+    { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 2, minDistinctiveOverlap: 1 },
+  ],
   ["vold", { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 2 }],
   [
     "bryllup_uro",
@@ -162,6 +166,9 @@ const genericIncidentTokens = new Set([
   "rykka",
   "rykket",
   "rykker",
+  "savnet",
+  "leteaksjon",
+  "søker",
   "røyk",
   "røykutvikling",
   "slagsmål",
@@ -237,6 +244,10 @@ const incidentSignals: Array<[string, RegExp]> = [
   [
     "water_rescue",
     /\b(badeulykke\w*|drukn\w*|livl[øo]s\s+under\s+vann|hav(?:net|na)\s+under\s+vann|g[åa]tt\s+under\s+vann|under\s+vann|bading|hjerte\s*-?\s*og\s*lungeredning|redningsaksjon\b(?=.*\b(vann|bading|kyvannet)\b))/iu,
+  ],
+  [
+    "missing_person",
+    /^(?!.*\b(?:dyr|hund|hest|katt)\b)(?=.*\b(?:savnet\w*|leteaksjon\w*|s[øo]k(?:er|te|t|es)?\w*)\b)(?=.*\b(?:dame|eldre|kvinne|mann|pasient|person|[0-9]{2}\s*-?\s*[åa]r(?:ene|ing)?|[0-9]{2}-[åa]ra)\b)/iu,
   ],
 ];
 const topicSignals: Array<[string, (text: string) => boolean]> = [

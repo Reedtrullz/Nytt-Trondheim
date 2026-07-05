@@ -284,6 +284,85 @@ describe("article coverage analysis", () => {
     ]);
   });
 
+  it("merges missing-person newsroom coverage with the Politiloggen situation update", () => {
+    const generatedAt = "2026-07-05T12:30:00.000Z";
+    const newsBundle = {
+      id: "coverage:incident:saupstad-missing-patient",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme sak på tvers av kilder",
+      generatedAt,
+    };
+
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-savnet",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Person savnet fra sykehjem",
+          excerpt:
+            "En pasient skal ha vært savnet fra et sykehjem i Trondheim i over 90 minutter. Beskrivelsen på damen er en eldre dame i 70-årene. Politiet melder saken.",
+          publishedAt: "2026-07-05T12:15:00.000Z",
+          category: "Krim",
+          places: ["Saupstad", "Trondheim"],
+          location: { lat: 63.3675, lng: 10.3567, label: "Saupstad" },
+          coverageBundle: newsBundle,
+        }),
+        article({
+          id: "nrk-savnet",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Kvinne savnet i Trondheim",
+          excerpt:
+            "Politiet melder at en eldre kvinne har vært savnet fra et sykehjem i Trondheim. Hun skal være i 70-årene.",
+          publishedAt: "2026-07-05T12:14:00.000Z",
+          category: "Hendelser",
+          places: ["Saupstad", "Trondheim"],
+          location: { lat: 63.3675, lng: 10.3567, label: "Saupstad" },
+          coverageBundle: newsBundle,
+        }),
+        article({
+          id: "politiloggen-savnet",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Savnet: Trondheim, Saupstad",
+          excerpt:
+            "Pasient fra Saupstad Helsehus savnet i over 90 minutter. Beskrivelse eldre dame i 70-årene, 170 cm høy, grått hår, blå genser, grønn bukse.",
+          publishedAt: "2026-07-05T12:12:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim", "Saupstad"],
+          location: { lat: 63.3675, lng: 10.3567, label: "Saupstad" },
+          situationId: "politiloggen-saupstad-savnet",
+        }),
+      ],
+      generatedAt,
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      id: "coverage:situation:politiloggen-saupstad-savnet",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse med offisiell tråd",
+      memberArticleIds: expect.arrayContaining([
+        "adressa-savnet",
+        "nrk-savnet",
+        "politiloggen-savnet",
+      ]),
+      sourceIds: expect.arrayContaining(["adressa", "nrk", "politiloggen"]),
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "missing_person",
+        }),
+      ]),
+    });
+    expect(new Set(analysis.articles.map((item) => item.coverageBundle?.id))).toEqual(
+      new Set(["coverage:situation:politiloggen-saupstad-savnet"]),
+    );
+  });
+
   it("bundles close downtown order and threat updates that otherwise split into several rows", () => {
     const analysis = analyzeArticleCoverage(
       [

@@ -339,6 +339,7 @@ describe("article store", () => {
       expect(normalized).toContain("a.category = 'Nyheter'");
       expect(normalized).toContain("a.payload->>'title' ILIKE '%ranheim%'");
       expect(normalized).toContain("a.payload->>'excerpt' ILIKE '%bortetap%'");
+      expect(normalized).toContain("a.payload->>'title' ILIKE '%profil%'");
       expect(normalized).toContain("a.payload->>'title' ~* '\\d+\\s*[–-]\\s*\\d+'");
       expect(params).toEqual(["Reedtrullz", "Sport", 41]);
       return { rows: [{ payload: article, saved: false }] };

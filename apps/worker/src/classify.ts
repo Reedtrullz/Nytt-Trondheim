@@ -224,7 +224,7 @@ const categoryRules: Array<[ArticleCategory, CategoryMatcher[]]> = [
 ];
 
 const rosenborgClubContext =
-  /\b(?:rbk|rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u;
+  /\b(?:rbk|rosenborgs?\b.*\b(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|profil\w*|samtaler|spiller|tapte|trener\w*|vant)\b|(?:ansatt|eliteserien|fotball|hovedtrener|kamp|m[øo]ter|presentert|profil\w*|samtaler|spiller|tapte|trener\w*|vant)\b.*\brosenborgs?\b)/u;
 const rosenborgDistrictContext =
   /\b(?:(?:på|til|ved)\s+rosenborg|i\s+rosenborg\s+(?:bydel|området)|rosenborg\s+(?:barnehage|bydel|gate|kirke|området|park|skole))\b/u;
 
@@ -257,6 +257,7 @@ export function detectScope(text: string): GeographicScope | undefined {
 
 export function categorize(text: string): ArticleCategory {
   const normalized = text.toLocaleLowerCase("nb");
+  if (rosenborgClubContext.test(normalized)) return "Sport";
   if (isLocalSportsCoverageText(normalized)) return "Sport";
   return (
     categoryRules.find(([, terms]) =>

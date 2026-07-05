@@ -79,7 +79,7 @@ describe("home filter query params", () => {
     expect(articleCategoryLabels.Transport).toBe("Trafikk");
     expect(articleCategoryLabels.Krim).toBe("Krim");
     expect(articleCategoryLabels.Vær).toBe("Vær");
-    expect(articleTopicLabels.rosenborg).toBe("Rosenborg");
+    expect(articleTopicLabels.rosenborg).toBe("RBK");
     expect(parseHomeFilters("?category=Transport").category).toBe("Transport");
     expect(parseHomeFilters("?window=2h").timeWindow).toBe("2h");
     expect(parseHomeFilters("?window=old").timeWindow).toBe("all");
@@ -141,7 +141,7 @@ describe("home filter query params", () => {
         topic: "rosenborg",
         timeWindow: "all",
       }),
-    ).toBe("Rosenborg Sport i Trondheim");
+    ).toBe("RBK Sport i Trondheim");
   });
 
   it("converts public time windows to stable API lower bounds", () => {

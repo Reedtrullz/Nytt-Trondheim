@@ -598,6 +598,11 @@ function LeadStory({
         <p>{article.excerpt}</p>
         <div className="story-card-tags lead-story-tags">
           <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
+          {card.topicLabels.map((label) => (
+            <span className="story-topic" key={label}>
+              {label}
+            </span>
+          ))}
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
@@ -606,7 +611,9 @@ function LeadStory({
               {card.verification.label}
             </span>
           ) : null}
-          <StoryConfidenceBadge confidence={card.sourceConfidence} />
+          {shouldShowStoryConfidenceBadge(card) ? (
+            <StoryConfidenceBadge confidence={card.sourceConfidence} />
+          ) : null}
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}
@@ -675,6 +682,16 @@ export function StoryConfidenceBadge({ confidence }: { confidence: SourceConfide
       {scoreLabel}
     </span>
   );
+}
+
+export function shouldShowStoryConfidenceBadge(card: HomeStoryCard): boolean {
+  if (card.verification) return true;
+  if (card.cardKind === "situasjon") return true;
+  if (card.isClustered) return true;
+  if (card.sourceConfidence.level === "confirmed" || card.sourceConfidence.level === "likely") {
+    return true;
+  }
+  return card.sourceConfidence.level === "speculative";
 }
 
 function storyBundleLabel(kind: HomeStoryCard["cardKind"]): string {
@@ -881,6 +898,11 @@ function StoryCard({
         <p className="excerpt">{article.excerpt}</p>
         <div className="story-card-tags">
           <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
+          {card.topicLabels.map((label) => (
+            <span className="story-topic" key={label}>
+              {label}
+            </span>
+          ))}
           {card.cardKind !== "sak" ? (
             <span className="story-badge">{storyKindLabel(card.cardKind)}</span>
           ) : null}
@@ -889,7 +911,9 @@ function StoryCard({
               {card.verification.label}
             </span>
           ) : null}
-          <StoryConfidenceBadge confidence={card.sourceConfidence} />
+          {shouldShowStoryConfidenceBadge(card) ? (
+            <StoryConfidenceBadge confidence={card.sourceConfidence} />
+          ) : null}
           {card.neighborhoodLabels.slice(1, 3).map((label) => (
             <span className="story-place small" key={label}>
               {label}

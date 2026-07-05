@@ -1666,7 +1666,8 @@ button {
 }
 
 .story-place,
-.story-badge {
+.story-badge,
+.story-topic {
   display: inline-flex;
   min-height: 23px;
   align-items: center;
@@ -1681,7 +1682,8 @@ button {
 }
 
 .story-place.small,
-.story-badge {
+.story-badge,
+.story-topic {
   min-height: 21px;
   padding-inline: 7px;
   font-size: 10px;
@@ -1690,6 +1692,12 @@ button {
 .story-badge {
   border-color: rgba(20, 104, 75, 0.28);
   color: var(--green);
+}
+
+.story-topic {
+  border-color: rgba(21, 90, 168, 0.28);
+  background: rgba(21, 90, 168, 0.06);
+  color: #155aa8;
 }
 
 .story-badge-verified {
