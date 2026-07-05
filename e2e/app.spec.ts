@@ -2034,6 +2034,31 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   page,
 }) => {
   const travelPlanRequestUrls: URL[] = [];
+  const departureRequestUrls: URL[] = [];
+  await page.route("**/api/map/public-transport/departures**", async (route) => {
+    const url = new URL(route.request().url());
+    departureRequestUrls.push(url);
+    const lat = url.searchParams.get("lat");
+    const lon = url.searchParams.get("lon");
+    const hasCenter = Boolean(lat && lon);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "ok",
+        detail: hasCenter
+          ? "Entur viser konkrete avganger nær valgt startpunkt."
+          : "Entur viser konkrete avganger nær Trondheim sentrum.",
+        areaLabel: hasCenter ? "Munkegata, Trondheim" : "Trondheim sentrum",
+        center: hasCenter ? { lat: Number(lat), lon: Number(lon) } : { lat: 63.4305, lon: 10.3951 },
+        stops: [],
+        departures: [],
+        sources: [],
+        generatedAt: "2026-07-05T16:20:00.000Z",
+        handoffUrl: "https://www.atb.no/reiseplanlegger/",
+      }),
+    });
+  });
   await page.route("**/api/map/travel-plan?**", async (route) => {
     const url = new URL(route.request().url());
     travelPlanRequestUrls.push(url);
@@ -2098,6 +2123,15 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   await page.getByRole("option", { name: /Munkegata, Trondheim/ }).click();
   await expect(page.getByLabel("Hvor er du?")).toHaveValue("Munkegata, Trondheim");
   await expect(page.getByText("Bruker holdeplass fra Entur")).toBeVisible();
+  await expect
+    .poll(() => departureRequestUrls.map((url) => url.searchParams.get("lat")))
+    .toContain("63.432883");
+  await expect
+    .poll(() => departureRequestUrls.map((url) => url.searchParams.get("lon")))
+    .toContain("10.393742");
+  await expect(page.getByRole("region", { name: "Avganger nå" })).toContainText(
+    "Munkegata, Trondheim",
+  );
 
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await expect(page.getByRole("option", { name: /Leangen, Trondheim/ })).toBeVisible();

@@ -378,6 +378,19 @@ export function departureBoardContextFromPlan(
   };
 }
 
+export function departureBoardContextFromSuggestion(
+  suggestion?: TravelPlaceSuggestion,
+): DepartureBoardContext | undefined {
+  if (!suggestion) return undefined;
+  const [lon, lat] = suggestion.coordinate;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+  return {
+    scope: "origin",
+    label: suggestion.label,
+    center: { lat, lon },
+  };
+}
+
 function selectedItineraryPositions(
   plan: TravelPlanPayload,
   selectedItineraryId?: string,
@@ -1807,12 +1820,19 @@ export function TrafficMapPage() {
       setLocationMessage(undefined);
       setSelectedOriginSuggestion(suggestion);
       setOriginInput(suggestion.label);
+      if (travelPlanLoading || travelPlan) {
+        invalidateTravelPlan();
+      }
+      const context = departureBoardContextFromSuggestion(suggestion);
+      if (context) {
+        loadDepartureBoard(context);
+      }
     } else {
       setSelectedDestinationSuggestion(suggestion);
       setDestinationInput(suggestion.label);
-    }
-    if (travelPlanLoading || travelPlan) {
-      invalidateTravelPlan({ resetDepartureBoard: true });
+      if (travelPlanLoading || travelPlan) {
+        invalidateTravelPlan({ resetDepartureBoard: true });
+      }
     }
   }
 

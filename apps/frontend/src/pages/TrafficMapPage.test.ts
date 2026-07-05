@@ -24,6 +24,7 @@ vi.mock("react-leaflet", () => ({
 
 import {
   departureBoardContextFromPlan,
+  departureBoardContextFromSuggestion,
   departureTimeForPreset,
   formatTravelDateTime,
   routePositions,
@@ -195,6 +196,24 @@ describe("TrafficMapPage route overlay helpers", () => {
       scope: "origin",
       label: "Start",
       center: { lat: 63.39, lon: 10.39 },
+    });
+  });
+
+  it("uses an Entur origin suggestion as an explicit departure-board center", () => {
+    expect(
+      departureBoardContextFromSuggestion({
+        id: "NSR:StopPlace:63277",
+        label: "Munkegata, Trondheim",
+        query: "Munkegata, Trondheim",
+        kind: "stop",
+        coordinate: [10.393742, 63.432883],
+        locality: "Trondheim",
+        source: "Entur Geocoder",
+      }),
+    ).toEqual({
+      scope: "origin",
+      label: "Munkegata, Trondheim",
+      center: { lat: 63.432883, lon: 10.393742 },
     });
   });
 
