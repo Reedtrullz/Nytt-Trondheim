@@ -948,6 +948,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   if (pool && config.seedDemo) await (store as PgStore).seedDevelopmentData();
 
   await mkdir(config.uploadDir, { recursive: true });
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const frontendDist = path.resolve(here, "../../frontend/dist");
+  const frontendIndex = path.join(frontendDist, "index.html");
   app.set("trust proxy", 1);
   if (config.rateLimitEnabled) {
     app.use(createRateLimiter());
@@ -980,8 +983,6 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       crossOriginEmbedderPolicy: false,
     }),
   );
-  app.use(express.json({ limit: "1mb" }));
-  configureAuth(app, config, store, pool);
 
   app.get("/health", async (_req, res) => {
     try {
@@ -991,6 +992,18 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       res.status(503).json({ status: "degraded" });
     }
   });
+
+  app.use(express.static(frontendDist, { index: false }));
+  app.get("/{*path}", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/auth")) {
+      next();
+      return;
+    }
+    res.sendFile(frontendIndex);
+  });
+
+  app.use(express.json({ limit: "1mb" }));
+  configureAuth(app, config, store, pool);
 
   app.get("/auth/access/verify", async (req, res, next) => {
     try {
@@ -2378,11 +2391,6 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "API-ruten finnes ikke." });
   });
-
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const frontendDist = path.resolve(here, "../../frontend/dist");
-  app.use(express.static(frontendDist));
-  app.get("/{*path}", (_req, res) => res.sendFile(path.join(frontendDist, "index.html")));
 
   app.use(
     (error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
