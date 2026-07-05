@@ -257,6 +257,21 @@ export function formatTravelDateTime(value: string, base = new Date()): string {
 
 type TravelTimePreset = "now" | "in30" | "tomorrow_morning";
 
+interface DestinationPreset {
+  label: string;
+  query: string;
+}
+
+const destinationPresets: DestinationPreset[] = [
+  { label: "Trondheim S", query: "Trondheim S" },
+  { label: "St. Olavs", query: "St. Olavs hospital" },
+  { label: "NTNU Gløshaugen", query: "NTNU Gløshaugen" },
+  { label: "Lerkendal", query: "Lerkendal stadion" },
+  { label: "Lade", query: "Lade Arena" },
+  { label: "Heimdal", query: "Heimdal stasjon" },
+  { label: "Værnes", query: "Trondheim lufthavn Værnes" },
+];
+
 export function departureTimeForPreset(preset: TravelTimePreset, base = new Date()): string {
   if (preset === "in30") return new Date(base.getTime() + 30 * 60 * 1000).toISOString();
   if (preset === "tomorrow_morning") {
@@ -1346,6 +1361,7 @@ function TravelPlannerPanel({
   locationMessage,
   onOriginChange,
   onDestinationChange,
+  onDestinationPresetSelect,
   onTimePresetChange,
   onUseCurrentLocation,
   onSelectItinerary,
@@ -1366,6 +1382,7 @@ function TravelPlannerPanel({
   locationMessage?: string;
   onOriginChange: (value: string) => void;
   onDestinationChange: (value: string) => void;
+  onDestinationPresetSelect: (preset: DestinationPreset) => void;
   onTimePresetChange: (value: TravelTimePreset) => void;
   onUseCurrentLocation: () => void;
   onSelectItinerary: (itineraryId: string) => void;
@@ -1439,6 +1456,21 @@ function TravelPlannerPanel({
               aria-describedby="travel-plan-result"
               aria-invalid={Boolean(travelPlanError)}
             />
+            <div className="route-destination-presets" role="group" aria-label="Vanlige reisemål">
+              <span className="route-destination-presets-title">Vanlige mål</span>
+              {destinationPresets.map((preset) => (
+                <button
+                  key={preset.query}
+                  type="button"
+                  className={destinationInput === preset.query ? "selected" : undefined}
+                  aria-pressed={destinationInput === preset.query}
+                  onClick={() => onDestinationPresetSelect(preset)}
+                  disabled={travelPlanLoading}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label htmlFor="travel-time">Når?</label>
@@ -1590,6 +1622,10 @@ export function TrafficMapPage() {
     setLocationStatus("idle");
     setLocationMessage(undefined);
     handleTravelInputChange(value, setOriginInput);
+  }
+
+  function handleDestinationPresetSelect(preset: DestinationPreset): void {
+    handleTravelInputChange(preset.query, setDestinationInput);
   }
 
   function handleTravelTimePresetChange(value: TravelTimePreset): void {
@@ -1943,6 +1979,7 @@ export function TrafficMapPage() {
         locationMessage={locationMessage}
         onOriginChange={handleOriginInputChange}
         onDestinationChange={(value) => handleTravelInputChange(value, setDestinationInput)}
+        onDestinationPresetSelect={handleDestinationPresetSelect}
         onTimePresetChange={handleTravelTimePresetChange}
         onUseCurrentLocation={handleUseCurrentLocation}
         onSelectItinerary={handleSelectItinerary}

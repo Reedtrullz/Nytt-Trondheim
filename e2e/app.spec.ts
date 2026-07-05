@@ -1955,6 +1955,20 @@ test("traffic map shows useful default public transport departures", async ({ pa
   );
 });
 
+test("traffic map offers common destination presets for faster planning", async ({ page }) => {
+  await page.goto("/trafikk");
+
+  const presetList = page.getByRole("group", { name: "Vanlige reisemål" });
+  await expect(presetList.getByText("Vanlige mål")).toBeVisible();
+  await presetList.getByRole("button", { name: "St. Olavs" }).click();
+
+  await expect(page.getByLabel("Hvor skal du?")).toHaveValue("St. Olavs hospital");
+  await expect(presetList.getByRole("button", { name: "St. Olavs" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
 test("traffic map can use browser location as the route origin and nearby stop board", async ({
   page,
   context,

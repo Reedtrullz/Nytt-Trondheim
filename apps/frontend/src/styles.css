@@ -9751,6 +9751,23 @@ button {
   min-width: 0;
 }
 
+.route-destination-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.route-destination-presets-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .route-planner-form button {
   padding: 10px 12px;
   color: #fff;
@@ -9766,6 +9783,22 @@ button {
   background: #fff;
   font-size: 12px;
   font-weight: 850;
+}
+
+.route-planner-form .route-destination-presets button {
+  min-height: 30px;
+  padding: 6px 8px;
+  color: var(--blue);
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.route-planner-form .route-destination-presets button.selected {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 44%, var(--line));
+  background: color-mix(in srgb, var(--paper) 84%, var(--green) 16%);
 }
 
 .route-planner-form button:disabled {
