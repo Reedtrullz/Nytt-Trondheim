@@ -1362,6 +1362,7 @@ function TravelPlannerPanel({
   onOriginChange,
   onDestinationChange,
   onDestinationPresetSelect,
+  onSwapRoute,
   onTimePresetChange,
   onUseCurrentLocation,
   onSelectItinerary,
@@ -1383,6 +1384,7 @@ function TravelPlannerPanel({
   onOriginChange: (value: string) => void;
   onDestinationChange: (value: string) => void;
   onDestinationPresetSelect: (preset: DestinationPreset) => void;
+  onSwapRoute: () => void;
   onTimePresetChange: (value: TravelTimePreset) => void;
   onUseCurrentLocation: () => void;
   onSelectItinerary: (itineraryId: string) => void;
@@ -1472,6 +1474,14 @@ function TravelPlannerPanel({
               ))}
             </div>
           </div>
+          <button
+            type="button"
+            className="route-swap-button"
+            onClick={onSwapRoute}
+            disabled={travelPlanLoading || (!originInput.trim() && !destinationInput.trim())}
+          >
+            Bytt retning
+          </button>
           <div>
             <label htmlFor="travel-time">Når?</label>
             <select
@@ -1626,6 +1636,17 @@ export function TrafficMapPage() {
 
   function handleDestinationPresetSelect(preset: DestinationPreset): void {
     handleTravelInputChange(preset.query, setDestinationInput);
+  }
+
+  function handleSwapRouteInputs(): void {
+    setLocationStatus("idle");
+    setLocationMessage(undefined);
+    setTravelPlanError(undefined);
+    setOriginInput(destinationInput);
+    setDestinationInput(originInput);
+    if (travelPlanLoading || travelPlan) {
+      invalidateTravelPlan({ resetDepartureBoard: true });
+    }
   }
 
   function handleTravelTimePresetChange(value: TravelTimePreset): void {
@@ -1980,6 +2001,7 @@ export function TrafficMapPage() {
         onOriginChange={handleOriginInputChange}
         onDestinationChange={(value) => handleTravelInputChange(value, setDestinationInput)}
         onDestinationPresetSelect={handleDestinationPresetSelect}
+        onSwapRoute={handleSwapRouteInputs}
         onTimePresetChange={handleTravelTimePresetChange}
         onUseCurrentLocation={handleUseCurrentLocation}
         onSelectItinerary={handleSelectItinerary}

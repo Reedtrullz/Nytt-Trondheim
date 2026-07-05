@@ -9801,6 +9801,13 @@ button {
   background: color-mix(in srgb, var(--paper) 84%, var(--green) 16%);
 }
 
+.route-planner-form .route-swap-button {
+  color: var(--blue);
+  border: 1px solid var(--line);
+  background: #fff;
+  font-weight: 850;
+}
+
 .route-planner-form button:disabled {
   opacity: 0.65;
   cursor: wait;

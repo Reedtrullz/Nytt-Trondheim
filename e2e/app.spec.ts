@@ -1959,14 +1959,29 @@ test("traffic map offers common destination presets for faster planning", async 
   await page.goto("/trafikk");
 
   const presetList = page.getByRole("group", { name: "Vanlige reisemål" });
-  await expect(presetList.getByText("Vanlige mål")).toBeVisible();
-  await presetList.getByRole("button", { name: "St. Olavs" }).click();
+  const stOlavsPreset = presetList.getByRole("button", { name: "St. Olavs" });
+  await expect(stOlavsPreset).toBeVisible();
+  await stOlavsPreset.click();
 
   await expect(page.getByLabel("Hvor skal du?")).toHaveValue("St. Olavs hospital");
   await expect(presetList.getByRole("button", { name: "St. Olavs" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
+});
+
+test("traffic map can reverse a planned route without retyping", async ({ page }) => {
+  await page.goto("/trafikk");
+
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page
+    .getByRole("group", { name: "Vanlige reisemål" })
+    .getByRole("button", { name: "Lade" })
+    .click();
+  await page.getByRole("button", { name: "Bytt retning" }).click();
+
+  await expect(page.getByLabel("Hvor er du?")).toHaveValue("Lade Arena");
+  await expect(page.getByLabel("Hvor skal du?")).toHaveValue("Munkegata");
 });
 
 test("traffic map can use browser location as the route origin and nearby stop board", async ({
