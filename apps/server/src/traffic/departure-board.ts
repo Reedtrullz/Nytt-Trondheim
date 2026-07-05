@@ -173,6 +173,7 @@ function departureFromRaw(
     ...(lineId ? { lineId } : {}),
     ...(publicCode ? { publicCode } : {}),
     ...(lineName ? { lineName } : {}),
+    ...(text(serviceJourney?.id) ? { serviceJourneyId: text(serviceJourney?.id) } : {}),
     destinationName,
     aimedDepartureTime,
     expectedDepartureTime,

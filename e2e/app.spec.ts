@@ -1986,6 +1986,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
             lineId: "ATB:Line:3",
             publicCode: "3",
             lineName: "Lade - Hallset",
+            serviceJourneyId: "ATB:ServiceJourney:3",
             destinationName: "Leangen",
             aimedDepartureTime: "2026-06-01T09:10:00.000Z",
             expectedDepartureTime: "2026-06-01T09:10:00.000Z",
@@ -2131,6 +2132,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
                 replacementTransport: false,
                 publicCode: "3",
                 lineName: "Lade - Hallset",
+                serviceJourneyId: "ATB:ServiceJourney:3",
                 geometry: {
                   type: "LineString",
                   coordinates: [

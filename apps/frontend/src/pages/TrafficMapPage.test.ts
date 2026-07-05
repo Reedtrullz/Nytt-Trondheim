@@ -106,6 +106,7 @@ const planWithItinerary: TravelPlanPayload = {
           lineId: "ATB:Line:3",
           publicCode: "3",
           lineName: "Lade - Hallset",
+          serviceJourneyId: "ATB:ServiceJourney:3",
           geometry: {
             type: "LineString",
             coordinates: [
@@ -142,6 +143,7 @@ const departureBoard: PublicTransportDepartureBoardPayload = {
       lineId: "ATB:Line:3",
       publicCode: "3",
       lineName: "Lade - Hallset",
+      serviceJourneyId: "ATB:ServiceJourney:3",
       destinationName: "Leangen",
       aimedDepartureTime: "2026-06-01T09:10:00.000Z",
       expectedDepartureTime: "2026-06-01T09:10:00.000Z",
@@ -160,6 +162,7 @@ const departureBoard: PublicTransportDepartureBoardPayload = {
       lineId: "ATB:Line:71",
       publicCode: "71",
       lineName: "MelhusSkyss-Trondheim",
+      serviceJourneyId: "ATB:ServiceJourney:71",
       destinationName: "Dora",
       aimedDepartureTime: "2026-06-01T09:11:00.000Z",
       expectedDepartureTime: "2026-06-01T09:11:00.000Z",
@@ -208,6 +211,32 @@ describe("TrafficMapPage route overlay helpers", () => {
     expect(selectedDepartureMatch(planWithItinerary, "itinerary-1", departureBoard)).toMatchObject({
       leg: { id: "leg-bus-3" },
       departure: { id: "departure:3" },
+    });
+  });
+
+  it("prefers exact Entur service journey matches before generic line and stop scoring", () => {
+    expect(
+      selectedDepartureMatch(planWithItinerary, "itinerary-1", {
+        ...departureBoard,
+        departures: [
+          {
+            ...departureBoard.departures[0]!,
+            id: "departure:same-line-wrong-journey",
+            serviceJourneyId: "ATB:ServiceJourney:other",
+          },
+          {
+            ...departureBoard.departures[0]!,
+            id: "departure:exact-journey",
+            stopId: "NSR:StopPlace:99999",
+            stopName: "Prinsens gate",
+            stopDistanceMeters: 180,
+            serviceJourneyId: "ATB:ServiceJourney:3",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      leg: { id: "leg-bus-3" },
+      departure: { id: "departure:exact-journey" },
     });
   });
 

@@ -324,6 +324,7 @@ describe("traffic travel planner API", () => {
         expect.objectContaining({
           stopName: "Prinsens gate",
           publicCode: "71",
+          serviceJourneyId: "ATB:ServiceJourney:71",
           destinationName: "Dora",
           delaySeconds: 180,
           realtime: true,
@@ -385,6 +386,7 @@ describe("traffic travel planner API", () => {
         expect.objectContaining({
           stopName: "Prinsens gate",
           publicCode: "71",
+          serviceJourneyId: "ATB:ServiceJourney:71",
           destinationName: "Dora",
           delaySeconds: 168,
           realtime: true,

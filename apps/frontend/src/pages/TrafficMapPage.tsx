@@ -410,6 +410,7 @@ function firstBoardingLeg(itinerary?: TravelPlanItinerary): TravelPlanLeg | unde
 
 function scoreDepartureForLeg(departure: PublicTransportDeparture, leg: TravelPlanLeg): number {
   let score = 0;
+  if (leg.serviceJourneyId && departure.serviceJourneyId === leg.serviceJourneyId) score += 12;
   if (departure.mode === leg.mode) score += 1;
   if (leg.lineId && departure.lineId === leg.lineId) score += 5;
   if (leg.publicCode && departure.publicCode === leg.publicCode) score += 4;

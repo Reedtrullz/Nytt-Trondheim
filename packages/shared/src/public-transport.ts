@@ -87,6 +87,7 @@ export interface PublicTransportDeparture {
   lineId?: string;
   publicCode?: string;
   lineName?: string;
+  serviceJourneyId?: string;
   destinationName: string;
   aimedDepartureTime: string;
   expectedDepartureTime: string;
