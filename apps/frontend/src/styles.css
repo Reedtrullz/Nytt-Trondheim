@@ -9742,6 +9742,15 @@ button {
   font: inherit;
 }
 
+.route-input-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  min-width: 0;
+}
+
 .route-planner-form button {
   padding: 10px 12px;
   color: #fff;
@@ -9750,9 +9759,33 @@ button {
   cursor: pointer;
 }
 
+.route-planner-form .route-location-button {
+  padding: 7px 9px;
+  color: var(--blue);
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .route-planner-form button:disabled {
   opacity: 0.65;
   cursor: wait;
+}
+
+.route-location-status {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.route-location-status.success {
+  color: var(--green);
+}
+
+.route-location-status.error {
+  color: var(--terracotta);
 }
 
 .route-planner-status {

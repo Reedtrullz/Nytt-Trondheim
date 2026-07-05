@@ -1955,6 +1955,97 @@ test("traffic map shows useful default public transport departures", async ({ pa
   );
 });
 
+test("traffic map can use browser location as the route origin and nearby stop board", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["geolocation"]);
+  await context.setGeolocation({ latitude: 63.4305, longitude: 10.3951 });
+
+  const departureRequestUrls: URL[] = [];
+  await page.route("**/api/map/public-transport/departures**", async (route) => {
+    const url = new URL(route.request().url());
+    departureRequestUrls.push(url);
+    if (!url.searchParams.has("lat") && !url.searchParams.has("lon")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "empty",
+          detail: "Ingen avganger funnet nær valgt område.",
+          areaLabel: "Trondheim sentrum",
+          center: { lat: 63.4305, lon: 10.3951 },
+          stops: [],
+          departures: [],
+          sources: [],
+          generatedAt: "2026-06-01T09:06:00.000Z",
+          handoffUrl: "https://www.atb.no/reiseplanlegger/",
+        }),
+      });
+      return;
+    }
+    if (url.searchParams.get("lat") !== "63.4305" || url.searchParams.get("lon") !== "10.3951") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "ok",
+        detail: "Entur viser konkrete avganger nær valgt område.",
+        areaLabel: "Din posisjon",
+        center: { lat: 63.4305, lon: 10.3951 },
+        stops: [],
+        departures: [
+          {
+            id: "departure:3",
+            stopId: "NSR:StopPlace:41613",
+            stopName: "Munkegata",
+            stopDistanceMeters: 42,
+            mode: "bus",
+            lineId: "ATB:Line:3",
+            publicCode: "3",
+            lineName: "Lade - Hallset",
+            serviceJourneyId: "ATB:ServiceJourney:3",
+            destinationName: "Leangen",
+            aimedDepartureTime: "2026-06-01T09:10:00.000Z",
+            expectedDepartureTime: "2026-06-01T09:10:00.000Z",
+            delaySeconds: 0,
+            realtime: true,
+            cancelled: false,
+            notices: [],
+            handoffUrl: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        sources: [],
+        generatedAt: "2026-06-01T09:06:00.000Z",
+        handoffUrl: "https://www.atb.no/reiseplanlegger/",
+      }),
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByRole("button", { name: "Bruk min posisjon" }).click();
+
+  await expect(page.getByLabel("Hvor er du?")).toHaveValue("63.43050, 10.39510");
+  await expect(
+    page.getByText("Posisjonen brukes bare i nettleseren og lagres ikke av Nytt."),
+  ).toBeVisible();
+  const board = page.getByRole("region", { name: "Avganger nå" });
+  await expect(board).toContainText(
+    "Din posisjon: neste avganger fra holdeplasser ved startpunktet.",
+  );
+  await expect(board).toContainText("Buss 3");
+  await expect(board).toContainText("Leangen");
+  expect(
+    departureRequestUrls.some(
+      (url) =>
+        url.searchParams.get("lat") === "63.4305" && url.searchParams.get("lon") === "10.3951",
+    ),
+  ).toBe(true);
+});
+
 test("traffic map travel planner shows route-specific traffic and public transport advice", async ({
   page,
 }) => {

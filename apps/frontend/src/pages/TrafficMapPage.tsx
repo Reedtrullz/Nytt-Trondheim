@@ -73,6 +73,7 @@ interface TrafficTimeWindow {
 }
 
 type DepartureBoardScope = "default" | "origin";
+type LocationRequestStatus = "idle" | "loading" | "success" | "error";
 
 interface DepartureBoardContext {
   scope: DepartureBoardScope;
@@ -109,6 +110,10 @@ const severityRank: Record<TrafficEventSeverity, number> = {
 
 function addHours(date: Date, hours: number): Date {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
+function formatCoordinateInput(input: { lat: number; lon: number }): string {
+  return `${input.lat.toFixed(5)}, ${input.lon.toFixed(5)}`;
 }
 
 export function timeWindowForPreset(preset: TrafficMapPreset): TrafficTimeWindow {
@@ -1337,9 +1342,12 @@ function TravelPlannerPanel({
   selectedItineraryId,
   publicTransportDisruptionsVisible,
   publicTransportVehiclesVisible,
+  locationStatus,
+  locationMessage,
   onOriginChange,
   onDestinationChange,
   onTimePresetChange,
+  onUseCurrentLocation,
   onSelectItinerary,
   onSubmit,
   onToggleDisruptions,
@@ -1354,9 +1362,12 @@ function TravelPlannerPanel({
   selectedItineraryId?: string;
   publicTransportDisruptionsVisible: boolean;
   publicTransportVehiclesVisible: boolean;
+  locationStatus: LocationRequestStatus;
+  locationMessage?: string;
   onOriginChange: (value: string) => void;
   onDestinationChange: (value: string) => void;
   onTimePresetChange: (value: TravelTimePreset) => void;
+  onUseCurrentLocation: () => void;
   onSelectItinerary: (itineraryId: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onToggleDisruptions: () => void;
@@ -1402,6 +1413,21 @@ function TravelPlannerPanel({
               aria-describedby="travel-plan-result"
               aria-invalid={Boolean(travelPlanError)}
             />
+            <div className="route-input-tools">
+              <button
+                type="button"
+                className="route-location-button"
+                onClick={onUseCurrentLocation}
+                disabled={travelPlanLoading || locationStatus === "loading"}
+              >
+                {locationStatus === "loading" ? "Henter posisjon ..." : "Bruk min posisjon"}
+              </button>
+              {locationMessage ? (
+                <small className={`route-location-status ${locationStatus}`}>
+                  {locationMessage}
+                </small>
+              ) : null}
+            </div>
           </div>
           <div>
             <label htmlFor="travel-destination">Hvor skal du?</label>
@@ -1465,6 +1491,8 @@ export function TrafficMapPage() {
   const [originInput, setOriginInput] = useState("");
   const [destinationInput, setDestinationInput] = useState("");
   const [timePreset, setTimePreset] = useState<TravelTimePreset>("now");
+  const [locationStatus, setLocationStatus] = useState<LocationRequestStatus>("idle");
+  const [locationMessage, setLocationMessage] = useState<string>();
   const [travelPlan, setTravelPlan] = useState<TravelPlanPayload>();
   const [selectedItineraryId, setSelectedItineraryId] = useState<string | undefined>();
   const [travelPlanLoading, setTravelPlanLoading] = useState(false);
@@ -1556,6 +1584,12 @@ export function TrafficMapPage() {
     if (travelPlanLoading || travelPlan) {
       invalidateTravelPlan({ resetDepartureBoard: true });
     }
+  }
+
+  function handleOriginInputChange(value: string): void {
+    setLocationStatus("idle");
+    setLocationMessage(undefined);
+    handleTravelInputChange(value, setOriginInput);
   }
 
   function handleTravelTimePresetChange(value: TravelTimePreset): void {
@@ -1796,6 +1830,51 @@ export function TrafficMapPage() {
     });
   }, [handleContextLayersChange, visibleContextLayers]);
 
+  function handleUseCurrentLocation(): void {
+    if (!("geolocation" in navigator)) {
+      setLocationStatus("error");
+      setLocationMessage("Nettleseren støtter ikke posisjon. Skriv inn adresse eller koordinater.");
+      return;
+    }
+
+    setLocationStatus("loading");
+    setLocationMessage("Henter posisjon fra nettleseren ...");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          setLocationStatus("error");
+          setLocationMessage("Nettleseren ga ikke en gyldig posisjon. Skriv inn adresse manuelt.");
+          return;
+        }
+
+        const nextOrigin = formatCoordinateInput({ lat, lon });
+        setOriginInput(nextOrigin);
+        setTravelPlanError(undefined);
+        if (travelPlanLoading || travelPlan) {
+          invalidateTravelPlan();
+        }
+        loadDepartureBoard({
+          scope: "origin",
+          label: "Din posisjon",
+          center: { lat, lon },
+        });
+        setLocationStatus("success");
+        setLocationMessage("Posisjonen brukes bare i nettleseren og lagres ikke av Nytt.");
+      },
+      (error) => {
+        setLocationStatus("error");
+        setLocationMessage(
+          error.code === error.PERMISSION_DENIED
+            ? "Posisjon ble ikke delt. Du kan fortsatt skrive inn adresse eller koordinater."
+            : "Klarte ikke hente posisjon nå. Prøv igjen eller skriv inn startpunkt.",
+        );
+      },
+      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 10_000 },
+    );
+  }
+
   function handleSelectItinerary(itineraryId: string): void {
     setSelectedItineraryId(itineraryId);
     const context = departureBoardContextFromPlan(travelPlan, itineraryId);
@@ -1860,9 +1939,12 @@ export function TrafficMapPage() {
         selectedItineraryId={selectedItineraryId}
         publicTransportDisruptionsVisible={visibleContextLayers.publicTransportDisruptions}
         publicTransportVehiclesVisible={visibleContextLayers.publicTransportVehicles}
-        onOriginChange={(value) => handleTravelInputChange(value, setOriginInput)}
+        locationStatus={locationStatus}
+        locationMessage={locationMessage}
+        onOriginChange={handleOriginInputChange}
         onDestinationChange={(value) => handleTravelInputChange(value, setDestinationInput)}
         onTimePresetChange={handleTravelTimePresetChange}
+        onUseCurrentLocation={handleUseCurrentLocation}
         onSelectItinerary={handleSelectItinerary}
         onSubmit={(event) => void handleTravelPlanSubmit(event)}
         onToggleDisruptions={togglePublicTransportDisruptions}
