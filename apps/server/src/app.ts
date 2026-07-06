@@ -42,6 +42,7 @@ import {
   situationPublicVisibility,
   taskInputSchema,
   trafficMapQuerySchema,
+  travelPlanComparisonQuerySchema,
   travelPlaceSuggestionQuerySchema,
   travelPlanQuerySchema,
   userGrantSchema,
@@ -68,8 +69,13 @@ import {
   type TrafficEventState,
   type TrafficMapEvent,
   type TrafficMapSourceStatus,
+  type TravelPlanComparisonPreset,
   type TravelPlanItinerary,
+  type TravelPlanPayload,
+  type TravelPlanPlace,
+  type TravelPlanRoute,
   type UnexplainedDelayCandidate,
+  type PublicTransportServiceAlert,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
 import {
@@ -1337,99 +1343,173 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  type TravelPlanRequestContext = {
+    origin: TravelPlanPlace;
+    destination: TravelPlanPlace;
+    route: TravelPlanRoute;
+    events: TrafficMapEvent[];
+    vehicles: PublicTransportVehicle[];
+    alerts: PublicTransportServiceAlert[];
+    sourceHealth: SourceHealth[];
+  };
+
+  const travelPlanComparisonPresets: TravelPlanComparisonPreset[] = [
+    "now",
+    "in30",
+    "in60",
+    "in120",
+  ];
+
+  function departureTimeForComparisonPreset(
+    preset: TravelPlanComparisonPreset,
+    base = new Date(),
+  ): Date {
+    if (preset === "in30") return new Date(base.getTime() + 30 * 60 * 1000);
+    if (preset === "in60") return new Date(base.getTime() + 60 * 60 * 1000);
+    if (preset === "in120") return new Date(base.getTime() + 120 * 60 * 1000);
+    return base;
+  }
+
+  async function loadTravelPlanRequestContext(
+    query: { from: string; to: string; fromLabel?: string; toLabel?: string },
+    login: string,
+  ): Promise<TravelPlanRequestContext> {
+    const resolved = await resolveTravelPlanPlacesAndRoute(query.from, query.to);
+    const origin = query.fromLabel
+      ? { ...resolved.origin, query: query.fromLabel, label: query.fromLabel }
+      : resolved.origin;
+    const destination = query.toLabel
+      ? { ...resolved.destination, query: query.toLabel, label: query.toLabel }
+      : resolved.destination;
+    const route = resolved.route;
+    const bounds = routeBounds(route);
+    const publicTransportModes: PublicTransportVehicle["mode"][] = ["bus", "tram", "rail", "water"];
+    const [trafficInfoEvents, officialEvents, vehicles, alerts, sourceHealth] = await Promise.all([
+      store.listTrafficMapEvents(
+        {
+          sources: ["vegvesen_traffic_info"],
+          states: ["active", "planned"],
+          bounds,
+          limit: 120,
+        },
+        login,
+      ),
+      store.listOfficialEvents(
+        { source: "datex", states: ["active", "updated"], bounds, limit: 200 },
+        login,
+      ),
+      store.listPublicTransportVehicles({ modes: publicTransportModes, bounds, limit: 80 }),
+      store.listPublicTransportServiceAlerts({ states: ["active"], bounds, limit: 80 }),
+      store.listSourceHealth(),
+    ]);
+    const eventsBySourceKey = new Map<string, TrafficMapEvent>();
+    const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
+    for (const event of trafficInfoEvents) eventsBySourceKey.set(sourceKey(event), event);
+    for (const event of officialEvents) {
+      const trafficEvent = officialEventToTrafficMapEvent(event);
+      if (trafficEvent && (trafficEvent.state === "active" || trafficEvent.state === "planned")) {
+        eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
+      }
+    }
+    return {
+      origin,
+      destination,
+      route,
+      events: [...eventsBySourceKey.values()],
+      vehicles,
+      alerts,
+      sourceHealth,
+    };
+  }
+
+  async function buildTravelPlanForDeparture(
+    context: TravelPlanRequestContext,
+    departureTime: Date,
+  ): Promise<TravelPlanPayload> {
+    let itineraries: TravelPlanItinerary[];
+    let journeyPlanner:
+      | {
+          status: "ok" | "empty" | "unavailable";
+          detail: string;
+          requestedDepartureTime: string;
+        }
+      | undefined;
+    try {
+      itineraries = await fetchEnturJourneyItineraries({
+        origin: context.origin,
+        destination: context.destination,
+        departureTime,
+        clientName: config.enturClientName ?? "reidar-nytt-trondheim",
+      });
+      journeyPlanner = {
+        status: itineraries.length ? "ok" : "empty",
+        detail: itineraries.length
+          ? "Entur Journey Planner returnerte konkrete reiseforslag."
+          : "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: departureTime.toISOString(),
+      };
+    } catch {
+      itineraries = [];
+      journeyPlanner = {
+        status: "unavailable",
+        detail:
+          "Entur reisesøk er ikke tilgjengelig akkurat nå. Trafikk- og avvikskontekst vises fortsatt.",
+        requestedDepartureTime: departureTime.toISOString(),
+      };
+    }
+    return buildTravelPlanPayload({
+      ...context,
+      itineraries,
+      journeyPlanner,
+    });
+  }
+
   app.get("/api/map/travel-plan", async (req, res, next) => {
     try {
       const query = travelPlanQuerySchema.parse(req.query);
-      const login = currentLogin(req);
-      const departureTime = resolveTravelPlanDepartureTime(query.departAt);
-      const resolved = await resolveTravelPlanPlacesAndRoute(query.from, query.to);
-      const origin = query.fromLabel
-        ? { ...resolved.origin, query: query.fromLabel, label: query.fromLabel }
-        : resolved.origin;
-      const destination = query.toLabel
-        ? { ...resolved.destination, query: query.toLabel, label: query.toLabel }
-        : resolved.destination;
-      const route = resolved.route;
-      const bounds = routeBounds(route);
-      const publicTransportModes: PublicTransportVehicle["mode"][] = [
-        "bus",
-        "tram",
-        "rail",
-        "water",
-      ];
-      const [trafficInfoEvents, officialEvents, vehicles, alerts, sourceHealth] = await Promise.all(
-        [
-          store.listTrafficMapEvents(
-            {
-              sources: ["vegvesen_traffic_info"],
-              states: ["active", "planned"],
-              bounds,
-              limit: 120,
-            },
-            login,
-          ),
-          store.listOfficialEvents(
-            { source: "datex", states: ["active", "updated"], bounds, limit: 200 },
-            login,
-          ),
-          store.listPublicTransportVehicles({ modes: publicTransportModes, bounds, limit: 80 }),
-          store.listPublicTransportServiceAlerts({ states: ["active"], bounds, limit: 80 }),
-          store.listSourceHealth(),
-        ],
-      );
-      let itineraries: TravelPlanItinerary[];
-      let journeyPlanner:
-        | {
-            status: "ok" | "empty" | "unavailable";
-            detail: string;
-            requestedDepartureTime: string;
-          }
-        | undefined;
-      try {
-        itineraries = await fetchEnturJourneyItineraries({
-          origin,
-          destination,
-          departureTime,
-          clientName: config.enturClientName ?? "reidar-nytt-trondheim",
-        });
-        journeyPlanner = {
-          status: itineraries.length ? "ok" : "empty",
-          detail: itineraries.length
-            ? "Entur Journey Planner returnerte konkrete reiseforslag."
-            : "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
-          requestedDepartureTime: departureTime.toISOString(),
-        };
-      } catch {
-        itineraries = [];
-        journeyPlanner = {
-          status: "unavailable",
-          detail:
-            "Entur reisesøk er ikke tilgjengelig akkurat nå. Trafikk- og avvikskontekst vises fortsatt.",
-          requestedDepartureTime: departureTime.toISOString(),
-        };
-      }
-      const eventsBySourceKey = new Map<string, TrafficMapEvent>();
-      const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
-      for (const event of trafficInfoEvents) eventsBySourceKey.set(sourceKey(event), event);
-      for (const event of officialEvents) {
-        const trafficEvent = officialEventToTrafficMapEvent(event);
-        if (trafficEvent && (trafficEvent.state === "active" || trafficEvent.state === "planned")) {
-          eventsBySourceKey.set(sourceKey(trafficEvent), trafficEvent);
-        }
-      }
+      const context = await loadTravelPlanRequestContext(query, currentLogin(req));
       res.json(
-        buildTravelPlanPayload({
-          origin,
-          destination,
-          route,
-          events: [...eventsBySourceKey.values()],
-          vehicles,
-          alerts,
-          itineraries,
-          journeyPlanner,
-          sourceHealth,
+        await buildTravelPlanForDeparture(context, resolveTravelPlanDepartureTime(query.departAt)),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/map/travel-plan/compare", async (req, res, next) => {
+    try {
+      const query = travelPlanComparisonQuerySchema.parse(req.query);
+      const context = await loadTravelPlanRequestContext(query, currentLogin(req));
+      const base = new Date();
+      const sources = await Promise.all(
+        travelPlanComparisonPresets.map(async (preset) => {
+          try {
+            const departureTime =
+              preset === query.preset && query.departAt
+                ? resolveTravelPlanDepartureTime(query.departAt)
+                : departureTimeForComparisonPreset(preset, base);
+            return {
+              preset,
+              plan: await buildTravelPlanForDeparture(context, departureTime),
+            };
+          } catch (error) {
+            return {
+              preset,
+              error: error instanceof Error ? error.message : "Kunne ikke hente reisesøk.",
+            };
+          }
         }),
       );
+      const selectedPlan = sources.find((source) => source.preset === query.preset)?.plan;
+      if (!selectedPlan) {
+        throw new Error("Kunne ikke hente valgt reisesøk.");
+      }
+      res.json({
+        activePreset: query.preset,
+        selectedPlan,
+        sources,
+        generatedAt: new Date().toISOString(),
+      });
     } catch (error) {
       next(error);
     }

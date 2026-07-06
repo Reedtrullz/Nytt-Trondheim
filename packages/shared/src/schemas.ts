@@ -1280,6 +1280,14 @@ export const travelPlanQuerySchema = z.object({
 
 export type TravelPlanQueryInput = z.infer<typeof travelPlanQuerySchema>;
 
+export const travelPlanComparisonPresetSchema = z.enum(["now", "in30", "in60", "in120"]);
+
+export const travelPlanComparisonQuerySchema = travelPlanQuerySchema.extend({
+  preset: travelPlanComparisonPresetSchema.default("now"),
+});
+
+export type TravelPlanComparisonQueryInput = z.infer<typeof travelPlanComparisonQuerySchema>;
+
 export const travelPlaceSuggestionQuerySchema = z.object({
   q: z.string().trim().min(2).max(80),
   limit: z.coerce.number().int().min(1).max(8).default(6),

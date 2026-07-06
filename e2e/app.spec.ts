@@ -41,6 +41,17 @@ function cityPulseStoryPageBody(articles: Article[], nextCursor?: string): strin
   });
 }
 
+const travelPlanComparisonFixturePresets = ["now", "in30", "in60", "in120"] as const;
+
+function travelPlanComparisonFixture(plan: unknown, activePreset = "now") {
+  return {
+    activePreset,
+    selectedPlan: plan,
+    sources: travelPlanComparisonFixturePresets.map((preset) => ({ preset, plan })),
+    generatedAt: "2026-06-01T09:05:00.000Z",
+  };
+}
+
 async function useViewerSession(page: Page): Promise<void> {
   await page.route("**/api/session", async (route) => {
     await route.fulfill({
@@ -2059,59 +2070,69 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
       }),
     });
   });
-  await page.route("**/api/map/travel-plan?**", async (route) => {
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
     const url = new URL(route.request().url());
     travelPlanRequestUrls.push(url);
     expect(url.searchParams.get("from")).toBe("63.43288, 10.39374");
     expect(url.searchParams.get("to")).toBe("63.43300, 10.46400");
     expect(url.searchParams.get("fromLabel")).toBe("Munkegata, Trondheim");
     expect(url.searchParams.get("toLabel")).toBe("Leangen, Trondheim");
+    expect(url.searchParams.get("preset")).toBe("now");
+    const selectedPlan = {
+      origin: {
+        query: "Munkegata, Trondheim",
+        label: "Munkegata, Trondheim",
+        coordinate: [10.393742, 63.432883],
+      },
+      destination: {
+        query: "Leangen, Trondheim",
+        label: "Leangen, Trondheim",
+        coordinate: [10.464, 63.433],
+      },
+      route: {
+        source: "direct",
+        distanceMeters: 4850,
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.464, 63.433],
+          ],
+        },
+        detail: "Direkte korridor.",
+      },
+      trafficImpacts: [],
+      publicTransportSuggestions: [
+        {
+          id: "atb-entur-planner",
+          kind: "planning_link",
+          title: "Sjekk avganger hos AtB/Entur",
+          detail:
+            "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+          source: "AtB/Entur",
+          href: "https://www.atb.no/reiseplanlegger/",
+        },
+      ],
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-07-05T16:20:00.000Z",
+        source: "Entur Journey Planner",
+      },
+      sources: [],
+      generatedAt: "2026-07-05T16:20:00.000Z",
+    };
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        origin: {
-          query: "Munkegata, Trondheim",
-          label: "Munkegata, Trondheim",
-          coordinate: [10.393742, 63.432883],
-        },
-        destination: {
-          query: "Leangen, Trondheim",
-          label: "Leangen, Trondheim",
-          coordinate: [10.464, 63.433],
-        },
-        route: {
-          source: "direct",
-          distanceMeters: 4850,
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [10.393742, 63.432883],
-              [10.464, 63.433],
-            ],
-          },
-          detail: "Direkte korridor.",
-        },
-        trafficImpacts: [],
-        publicTransportSuggestions: [
-          {
-            id: "atb-entur-planner",
-            kind: "planning_link",
-            title: "Sjekk avganger hos AtB/Entur",
-            detail:
-              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
-            source: "AtB/Entur",
-            href: "https://www.atb.no/reiseplanlegger/",
-          },
-        ],
-        itineraries: [],
-        journeyPlanner: {
-          status: "empty",
-          detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
-          requestedDepartureTime: "2026-07-05T16:20:00.000Z",
-          source: "Entur Journey Planner",
-        },
-        sources: [],
+        activePreset: "now",
+        selectedPlan,
+        sources: ["now", "in30", "in60", "in120"].map((preset) => ({
+          preset,
+          plan: selectedPlan,
+        })),
         generatedAt: "2026-07-05T16:20:00.000Z",
       }),
     });
@@ -2142,65 +2163,69 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
   await expect(page.getByText("Munkegata, Trondheim → Leangen, Trondheim")).toBeVisible();
-  await expect.poll(() => travelPlanRequestUrls.length).toBe(4);
-  expect(new Set(travelPlanRequestUrls.map((url) => url.searchParams.get("departAt"))).size).toBe(
-    4,
-  );
+  await expect.poll(() => travelPlanRequestUrls.length).toBe(1);
+  expect(travelPlanRequestUrls[0]?.pathname).toBe("/api/map/travel-plan/compare");
 });
 
 test("traffic map restores a shared route from the URL", async ({ page }) => {
   const travelPlanRequestUrls: URL[] = [];
-  await page.route("**/api/map/travel-plan?**", async (route) => {
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
     const url = new URL(route.request().url());
     travelPlanRequestUrls.push(url);
+    const activePreset = url.searchParams.get("preset") ?? "now";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        origin: {
-          query: "Munkegata",
-          label: "Munkegata",
-          coordinate: [10.3951, 63.4305],
-        },
-        destination: {
-          query: "Lade Arena",
-          label: "Lade Arena",
-          coordinate: [10.464, 63.433],
-        },
-        route: {
-          source: "direct",
-          distanceMeters: 4850,
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [10.3951, 63.4305],
-              [10.464, 63.433],
-            ],
-          },
-          detail: "Direkte korridor.",
-        },
-        trafficImpacts: [],
-        publicTransportSuggestions: [
+      body: JSON.stringify(
+        travelPlanComparisonFixture(
           {
-            id: "atb-entur-planner",
-            kind: "planning_link",
-            title: "Sjekk avganger hos AtB/Entur",
-            detail:
-              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
-            source: "AtB/Entur",
-            href: "https://www.atb.no/reiseplanlegger/",
+            origin: {
+              query: "Munkegata",
+              label: "Munkegata",
+              coordinate: [10.3951, 63.4305],
+            },
+            destination: {
+              query: "Lade Arena",
+              label: "Lade Arena",
+              coordinate: [10.464, 63.433],
+            },
+            route: {
+              source: "direct",
+              distanceMeters: 4850,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.464, 63.433],
+                ],
+              },
+              detail: "Direkte korridor.",
+            },
+            trafficImpacts: [],
+            publicTransportSuggestions: [
+              {
+                id: "atb-entur-planner",
+                kind: "planning_link",
+                title: "Sjekk avganger hos AtB/Entur",
+                detail:
+                  "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+                source: "AtB/Entur",
+                href: "https://www.atb.no/reiseplanlegger/",
+              },
+            ],
+            itineraries: [],
+            journeyPlanner: {
+              status: "empty",
+              detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+              requestedDepartureTime: "2026-07-05T16:20:00.000Z",
+              source: "Entur Journey Planner",
+            },
+            sources: [],
+            generatedAt: "2026-07-05T16:20:00.000Z",
           },
-        ],
-        itineraries: [],
-        journeyPlanner: {
-          status: "empty",
-          detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
-          requestedDepartureTime: "2026-07-05T16:20:00.000Z",
-          source: "Entur Journey Planner",
-        },
-        sources: [],
-        generatedAt: "2026-07-05T16:20:00.000Z",
-      }),
+          activePreset,
+        ),
+      ),
     });
   });
 
@@ -2215,6 +2240,7 @@ test("traffic map restores a shared route from the URL", async ({ page }) => {
   await expect.poll(() => travelPlanRequestUrls.length).toBeGreaterThan(0);
   expect(travelPlanRequestUrls.at(-1)?.searchParams.get("from")).toBe("Munkegata");
   expect(travelPlanRequestUrls.at(-1)?.searchParams.get("to")).toBe("Lade Arena");
+  expect(travelPlanRequestUrls.at(-1)?.pathname).toBe("/api/map/travel-plan/compare");
   await expect(page).toHaveURL(/fra=Munkegata/);
 });
 
@@ -2366,23 +2392,22 @@ test("traffic map travel planner shows route-specific traffic and public transpo
     });
   });
 
-  await page.route("**/api/map/travel-plan?**", async (route) => {
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
     const url = new URL(route.request().url());
-    const requestIndex = travelPlanRequestUrls.length;
     travelPlanRequestUrls.push(url);
-    const departureTime =
-      requestIndex === 0 ? "2026-06-01T09:10:00.000Z" : "2026-06-01T11:10:00.000Z";
-    const arrivalTime =
-      requestIndex === 0 ? "2026-06-01T09:27:00.000Z" : "2026-06-01T11:27:00.000Z";
     expect(url.searchParams.get("from")).toBe("Munkegata");
     expect(url.searchParams.get("to")).toBe("Leangen");
-    const departAt = url.searchParams.get("departAt");
-    expect(departAt).toBeTruthy();
-    expect(Number.isFinite(Date.parse(departAt ?? ""))).toBe(true);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
+    const requestedPreset = url.searchParams.get("preset") ?? "now";
+    expect(["now", "in30", "in60", "in120"]).toContain(requestedPreset);
+    const departureTimes: Record<string, [string, string]> = {
+      now: ["2026-06-01T08:40:00.000Z", "2026-06-01T08:57:00.000Z"],
+      in30: ["2026-06-01T09:10:00.000Z", "2026-06-01T09:27:00.000Z"],
+      in60: ["2026-06-01T09:40:00.000Z", "2026-06-01T09:57:00.000Z"],
+      in120: ["2026-06-01T11:10:00.000Z", "2026-06-01T11:27:00.000Z"],
+    };
+    const planForPreset = (preset: string) => {
+      const [departureTime, arrivalTime] = departureTimes[preset] ?? departureTimes.now;
+      return {
         origin: {
           query: "Munkegata",
           label: "Munkegata, Midtbyen",
@@ -2517,10 +2542,24 @@ test("traffic map travel planner shows route-specific traffic and public transpo
         journeyPlanner: {
           status: "ok",
           detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
-          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+          requestedDepartureTime: departureTime,
           source: "Entur Journey Planner",
         },
         sources: [],
+        generatedAt: "2026-06-01T09:05:00.000Z",
+      };
+    };
+    const selectedPlan = planForPreset(requestedPreset);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        activePreset: requestedPreset,
+        selectedPlan,
+        sources: ["now", "in30", "in60", "in120"].map((preset) => ({
+          preset,
+          plan: planForPreset(preset),
+        })),
         generatedAt: "2026-06-01T09:05:00.000Z",
       }),
     });
@@ -2615,98 +2654,104 @@ test("traffic map explains selected route departures that are missing from the l
     });
   });
 
-  await page.route("**/api/map/travel-plan?**", async (route) => {
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
+    const url = new URL(route.request().url());
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        origin: {
-          query: "Munkegata",
-          label: "Munkegata, Midtbyen",
-          coordinate: [10.3951, 63.4305],
-        },
-        destination: {
-          query: "Leangen",
-          label: "Leangen, Trondheim",
-          coordinate: [10.464, 63.433],
-        },
-        route: {
-          source: "osrm",
-          distanceMeters: 4850,
-          durationSeconds: 660,
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [10.3951, 63.4305],
-              [10.464, 63.433],
-            ],
-          },
-          detail: "Rute beregnet med OSRM.",
-        },
-        trafficImpacts: [],
-        publicTransportSuggestions: [],
-        itineraries: [
+      body: JSON.stringify(
+        travelPlanComparisonFixture(
           {
-            id: "itinerary-1",
-            decision: "good",
-            decisionReason: "Normal reise.",
-            labels: ["best_now", "fewest_transfers", "soonest_departure", "most_robust"],
-            departureTime: "2026-06-01T09:10:00.000Z",
-            arrivalTime: "2026-06-01T09:27:00.000Z",
-            durationSeconds: 1020,
-            transferCount: 0,
-            walkTimeSeconds: 240,
-            realtime: true,
-            modes: ["bus"],
-            disruptionCount: 0,
-            handoffUrl: "https://www.atb.no/reiseplanlegger/",
-            legs: [
+            origin: {
+              query: "Munkegata",
+              label: "Munkegata, Midtbyen",
+              coordinate: [10.3951, 63.4305],
+            },
+            destination: {
+              query: "Leangen",
+              label: "Leangen, Trondheim",
+              coordinate: [10.464, 63.433],
+            },
+            route: {
+              source: "osrm",
+              distanceMeters: 4850,
+              durationSeconds: 660,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.464, 63.433],
+                ],
+              },
+              detail: "Rute beregnet med OSRM.",
+            },
+            trafficImpacts: [],
+            publicTransportSuggestions: [],
+            itineraries: [
               {
-                id: "leg-bus-3",
-                mode: "bus",
-                from: {
-                  name: "Munkegata",
-                  stopName: "Munkegata",
-                  coordinate: [10.3951, 63.4305],
-                },
-                to: {
-                  name: "Leangen",
-                  stopName: "Leangen",
-                  coordinate: [10.464, 63.433],
-                },
-                aimedStartTime: "2026-06-01T09:10:00.000Z",
-                expectedStartTime: "2026-06-01T09:10:00.000Z",
-                aimedEndTime: "2026-06-01T09:27:00.000Z",
-                expectedEndTime: "2026-06-01T09:27:00.000Z",
+                id: "itinerary-1",
+                decision: "good",
+                decisionReason: "Normal reise.",
+                labels: ["best_now", "fewest_transfers", "soonest_departure", "most_robust"],
+                departureTime: "2026-06-01T09:10:00.000Z",
+                arrivalTime: "2026-06-01T09:27:00.000Z",
                 durationSeconds: 1020,
-                distanceMeters: 4850,
+                transferCount: 0,
+                walkTimeSeconds: 240,
                 realtime: true,
-                cancelled: false,
-                replacementTransport: false,
-                publicCode: "3",
-                lineName: "Lade - Hallset",
-                serviceJourneyId: "ATB:ServiceJourney:3",
-                geometry: {
-                  type: "LineString",
-                  coordinates: [
-                    [10.3951, 63.4305],
-                    [10.464, 63.433],
-                  ],
-                },
-                notices: [],
+                modes: ["bus"],
+                disruptionCount: 0,
+                handoffUrl: "https://www.atb.no/reiseplanlegger/",
+                legs: [
+                  {
+                    id: "leg-bus-3",
+                    mode: "bus",
+                    from: {
+                      name: "Munkegata",
+                      stopName: "Munkegata",
+                      coordinate: [10.3951, 63.4305],
+                    },
+                    to: {
+                      name: "Leangen",
+                      stopName: "Leangen",
+                      coordinate: [10.464, 63.433],
+                    },
+                    aimedStartTime: "2026-06-01T09:10:00.000Z",
+                    expectedStartTime: "2026-06-01T09:10:00.000Z",
+                    aimedEndTime: "2026-06-01T09:27:00.000Z",
+                    expectedEndTime: "2026-06-01T09:27:00.000Z",
+                    durationSeconds: 1020,
+                    distanceMeters: 4850,
+                    realtime: true,
+                    cancelled: false,
+                    replacementTransport: false,
+                    publicCode: "3",
+                    lineName: "Lade - Hallset",
+                    serviceJourneyId: "ATB:ServiceJourney:3",
+                    geometry: {
+                      type: "LineString",
+                      coordinates: [
+                        [10.3951, 63.4305],
+                        [10.464, 63.433],
+                      ],
+                    },
+                    notices: [],
+                  },
+                ],
               },
             ],
+            journeyPlanner: {
+              status: "ok",
+              detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+              requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+              source: "Entur Journey Planner",
+            },
+            sources: [],
+            generatedAt: "2026-06-01T09:05:00.000Z",
           },
-        ],
-        journeyPlanner: {
-          status: "ok",
-          detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
-          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
-          source: "Entur Journey Planner",
-        },
-        sources: [],
-        generatedAt: "2026-06-01T09:05:00.000Z",
-      }),
+          url.searchParams.get("preset") ?? "now",
+        ),
+      ),
     });
   });
 
@@ -2800,137 +2845,143 @@ test("traffic map checks transfer legs against live departure boards", async ({ 
     });
   });
 
-  await page.route("**/api/map/travel-plan?**", async (route) => {
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
+    const url = new URL(route.request().url());
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        origin: {
-          query: "Munkegata",
-          label: "Munkegata, Midtbyen",
-          coordinate: [10.3951, 63.4305],
-        },
-        destination: {
-          query: "Lade",
-          label: "Lade, Trondheim",
-          coordinate: [10.465, 63.444],
-        },
-        route: {
-          source: "osrm",
-          distanceMeters: 5200,
-          durationSeconds: 1440,
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [10.3951, 63.4305],
-              [10.447, 63.433],
-              [10.465, 63.444],
-            ],
-          },
-          detail: "Rute beregnet med OSRM.",
-        },
-        trafficImpacts: [],
-        publicTransportSuggestions: [],
-        itineraries: [
+      body: JSON.stringify(
+        travelPlanComparisonFixture(
           {
-            id: "itinerary-transfer",
-            decision: "good",
-            decisionReason: "Normal reise, men bytte kontrolleres mot live-tavle.",
-            labels: ["best_now", "fewest_transfers"],
-            departureTime: "2026-06-01T09:10:00.000Z",
-            arrivalTime: "2026-06-01T09:34:00.000Z",
-            durationSeconds: 1440,
-            transferCount: 1,
-            walkTimeSeconds: 180,
-            realtime: true,
-            modes: ["bus"],
-            disruptionCount: 0,
-            handoffUrl: "https://www.atb.no/reiseplanlegger/",
-            legs: [
-              {
-                id: "leg-bus-3",
-                mode: "bus",
-                from: {
-                  name: "Munkegata",
-                  stopName: "Munkegata",
-                  stopId: "NSR:StopPlace:41613",
-                  coordinate: [10.3951, 63.4305],
-                },
-                to: {
-                  name: "Strindheim",
-                  stopName: "Strindheim",
-                  coordinate: [10.447, 63.433],
-                },
-                aimedStartTime: "2026-06-01T09:10:00.000Z",
-                expectedStartTime: "2026-06-01T09:10:00.000Z",
-                aimedEndTime: "2026-06-01T09:18:00.000Z",
-                expectedEndTime: "2026-06-01T09:18:00.000Z",
-                durationSeconds: 480,
-                distanceMeters: 2800,
-                realtime: true,
-                cancelled: false,
-                replacementTransport: false,
-                lineId: "ATB:Line:3",
-                publicCode: "3",
-                lineName: "Lade - Hallset",
-                serviceJourneyId: "ATB:ServiceJourney:3",
-                geometry: {
-                  type: "LineString",
-                  coordinates: [
-                    [10.3951, 63.4305],
-                    [10.447, 63.433],
-                  ],
-                },
-                notices: [],
+            origin: {
+              query: "Munkegata",
+              label: "Munkegata, Midtbyen",
+              coordinate: [10.3951, 63.4305],
+            },
+            destination: {
+              query: "Lade",
+              label: "Lade, Trondheim",
+              coordinate: [10.465, 63.444],
+            },
+            route: {
+              source: "osrm",
+              distanceMeters: 5200,
+              durationSeconds: 1440,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.447, 63.433],
+                  [10.465, 63.444],
+                ],
               },
+              detail: "Rute beregnet med OSRM.",
+            },
+            trafficImpacts: [],
+            publicTransportSuggestions: [],
+            itineraries: [
               {
-                id: "leg-bus-4",
-                mode: "bus",
-                from: {
-                  name: "Strindheim",
-                  stopName: "Strindheim",
-                  stopId: "NSR:StopPlace:41000",
-                  coordinate: [10.447, 63.433],
-                },
-                to: {
-                  name: "Lade",
-                  stopName: "Lade",
-                  coordinate: [10.465, 63.444],
-                },
-                aimedStartTime: "2026-06-01T09:20:00.000Z",
-                expectedStartTime: "2026-06-01T09:20:00.000Z",
-                aimedEndTime: "2026-06-01T09:34:00.000Z",
-                expectedEndTime: "2026-06-01T09:34:00.000Z",
-                durationSeconds: 840,
-                distanceMeters: 2400,
+                id: "itinerary-transfer",
+                decision: "good",
+                decisionReason: "Normal reise, men bytte kontrolleres mot live-tavle.",
+                labels: ["best_now", "fewest_transfers"],
+                departureTime: "2026-06-01T09:10:00.000Z",
+                arrivalTime: "2026-06-01T09:34:00.000Z",
+                durationSeconds: 1440,
+                transferCount: 1,
+                walkTimeSeconds: 180,
                 realtime: true,
-                cancelled: false,
-                replacementTransport: false,
-                lineId: "ATB:Line:4",
-                publicCode: "4",
-                lineName: "Strindheim - Lade",
-                serviceJourneyId: "ATB:ServiceJourney:4",
-                geometry: {
-                  type: "LineString",
-                  coordinates: [
-                    [10.447, 63.433],
-                    [10.465, 63.444],
-                  ],
-                },
-                notices: [],
+                modes: ["bus"],
+                disruptionCount: 0,
+                handoffUrl: "https://www.atb.no/reiseplanlegger/",
+                legs: [
+                  {
+                    id: "leg-bus-3",
+                    mode: "bus",
+                    from: {
+                      name: "Munkegata",
+                      stopName: "Munkegata",
+                      stopId: "NSR:StopPlace:41613",
+                      coordinate: [10.3951, 63.4305],
+                    },
+                    to: {
+                      name: "Strindheim",
+                      stopName: "Strindheim",
+                      coordinate: [10.447, 63.433],
+                    },
+                    aimedStartTime: "2026-06-01T09:10:00.000Z",
+                    expectedStartTime: "2026-06-01T09:10:00.000Z",
+                    aimedEndTime: "2026-06-01T09:18:00.000Z",
+                    expectedEndTime: "2026-06-01T09:18:00.000Z",
+                    durationSeconds: 480,
+                    distanceMeters: 2800,
+                    realtime: true,
+                    cancelled: false,
+                    replacementTransport: false,
+                    lineId: "ATB:Line:3",
+                    publicCode: "3",
+                    lineName: "Lade - Hallset",
+                    serviceJourneyId: "ATB:ServiceJourney:3",
+                    geometry: {
+                      type: "LineString",
+                      coordinates: [
+                        [10.3951, 63.4305],
+                        [10.447, 63.433],
+                      ],
+                    },
+                    notices: [],
+                  },
+                  {
+                    id: "leg-bus-4",
+                    mode: "bus",
+                    from: {
+                      name: "Strindheim",
+                      stopName: "Strindheim",
+                      stopId: "NSR:StopPlace:41000",
+                      coordinate: [10.447, 63.433],
+                    },
+                    to: {
+                      name: "Lade",
+                      stopName: "Lade",
+                      coordinate: [10.465, 63.444],
+                    },
+                    aimedStartTime: "2026-06-01T09:20:00.000Z",
+                    expectedStartTime: "2026-06-01T09:20:00.000Z",
+                    aimedEndTime: "2026-06-01T09:34:00.000Z",
+                    expectedEndTime: "2026-06-01T09:34:00.000Z",
+                    durationSeconds: 840,
+                    distanceMeters: 2400,
+                    realtime: true,
+                    cancelled: false,
+                    replacementTransport: false,
+                    lineId: "ATB:Line:4",
+                    publicCode: "4",
+                    lineName: "Strindheim - Lade",
+                    serviceJourneyId: "ATB:ServiceJourney:4",
+                    geometry: {
+                      type: "LineString",
+                      coordinates: [
+                        [10.447, 63.433],
+                        [10.465, 63.444],
+                      ],
+                    },
+                    notices: [],
+                  },
+                ],
               },
             ],
+            journeyPlanner: {
+              status: "ok",
+              detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+              requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+              source: "Entur Journey Planner",
+            },
+            sources: [],
+            generatedAt: "2026-06-01T09:05:00.000Z",
           },
-        ],
-        journeyPlanner: {
-          status: "ok",
-          detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
-          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
-          source: "Entur Journey Planner",
-        },
-        sources: [],
-        generatedAt: "2026-06-01T09:05:00.000Z",
-      }),
+          url.searchParams.get("preset") ?? "now",
+        ),
+      ),
     });
   });
 
@@ -2955,154 +3006,14 @@ test("traffic map checks transfer legs against live departure boards", async ({ 
 });
 
 test("traffic map clears a stale route when planner validation fails", async ({ page }) => {
-  await page.route("**/api/map/travel-plan?**", async (route) => {
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
+    const url = new URL(route.request().url());
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        origin: {
-          query: "Munkegata",
-          label: "Munkegata, Midtbyen",
-          coordinate: [10.3951, 63.4305],
-        },
-        destination: {
-          query: "Leangen",
-          label: "Leangen, Trondheim",
-          coordinate: [10.464, 63.433],
-        },
-        route: {
-          source: "osrm",
-          distanceMeters: 4850,
-          durationSeconds: 660,
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [10.3951, 63.4305],
-              [10.464, 63.433],
-            ],
-          },
-          detail: "Rute beregnet med OSRM.",
-        },
-        trafficImpacts: [],
-        publicTransportSuggestions: [
+      body: JSON.stringify(
+        travelPlanComparisonFixture(
           {
-            id: "atb-entur-planner",
-            kind: "planning_link",
-            title: "Sjekk avganger hos AtB/Entur",
-            detail:
-              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
-            source: "AtB/Entur",
-            href: "https://www.atb.no/reiseplanlegger/",
-          },
-        ],
-        itineraries: [],
-        journeyPlanner: {
-          status: "empty",
-          detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
-          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
-          source: "Entur Journey Planner",
-        },
-        sources: [],
-        generatedAt: "2026-06-01T09:05:00.000Z",
-      }),
-    });
-  });
-
-  await page.goto("/trafikk");
-  await page.getByLabel("Hvor er du?").fill("Munkegata");
-  await page.getByLabel("Hvor skal du?").fill("Leangen");
-  await page.getByRole("button", { name: "Finn reiseråd" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Ingen konkrete Entur-reiser funnet" }),
-  ).toBeVisible();
-  await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(1);
-
-  await page.getByLabel("Hvor er du?").fill("");
-  await page.getByRole("button", { name: "Finn reiseråd" }).click();
-
-  await expect(page.getByRole("alert")).toContainText("Skriv inn både start og mål");
-  await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(0);
-});
-
-test("traffic map keeps planner useful when Entur journey search is unavailable", async ({
-  page,
-}) => {
-  await page.route("**/api/map/travel-plan?**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        origin: {
-          query: "Munkegata",
-          label: "Munkegata, Midtbyen",
-          coordinate: [10.3951, 63.4305],
-        },
-        destination: {
-          query: "Leangen",
-          label: "Leangen, Trondheim",
-          coordinate: [10.464, 63.433],
-        },
-        route: {
-          source: "direct",
-          distanceMeters: 4850,
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [10.3951, 63.4305],
-              [10.464, 63.433],
-            ],
-          },
-          detail: "Ruten er vist som rett korridor fordi veiruting ikke var tilgjengelig.",
-        },
-        trafficImpacts: [],
-        publicTransportSuggestions: [
-          {
-            id: "atb-entur-planner",
-            kind: "planning_link",
-            title: "Sjekk avganger hos AtB/Entur",
-            detail:
-              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
-            source: "AtB/Entur",
-            href: "https://www.atb.no/reiseplanlegger/",
-          },
-        ],
-        itineraries: [],
-        journeyPlanner: {
-          status: "unavailable",
-          detail: "Entur reisesøk er ikke tilgjengelig akkurat nå.",
-          requestedDepartureTime: "2026-06-01T09:05:00.000Z",
-          source: "Entur Journey Planner",
-        },
-        sources: [],
-        generatedAt: "2026-06-01T09:05:00.000Z",
-      }),
-    });
-  });
-
-  await page.goto("/trafikk");
-  await page.getByLabel("Hvor er du?").fill("Munkegata");
-  await page.getByLabel("Hvor skal du?").fill("Leangen");
-  await page.getByRole("button", { name: "Finn reiseråd" }).click();
-
-  await expect(page.getByRole("heading", { name: "Sjekk AtB/Entur før du drar" })).toBeVisible();
-  await expect(
-    page.getByText("Entur reisesøk er ikke tilgjengelig akkurat nå.", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
-    "href",
-    "https://www.atb.no/reiseplanlegger/",
-  );
-});
-
-test("traffic map invalidates an in-flight route when inputs change", async ({ page }) => {
-  let fulfillRoute: (() => Promise<void>) | undefined;
-  await page.route("**/api/map/travel-plan?**", async (route) => {
-    await new Promise<void>((resolve) => {
-      fulfillRoute = async () => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
             origin: {
               query: "Munkegata",
               label: "Munkegata, Midtbyen",
@@ -3127,7 +3038,17 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
               detail: "Rute beregnet med OSRM.",
             },
             trafficImpacts: [],
-            publicTransportSuggestions: [],
+            publicTransportSuggestions: [
+              {
+                id: "atb-entur-planner",
+                kind: "planning_link",
+                title: "Sjekk avganger hos AtB/Entur",
+                detail:
+                  "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+                source: "AtB/Entur",
+                href: "https://www.atb.no/reiseplanlegger/",
+              },
+            ],
             itineraries: [],
             journeyPlanner: {
               status: "empty",
@@ -3137,7 +3058,155 @@ test("traffic map invalidates an in-flight route when inputs change", async ({ p
             },
             sources: [],
             generatedAt: "2026-06-01T09:05:00.000Z",
-          }),
+          },
+          url.searchParams.get("preset") ?? "now",
+        ),
+      ),
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Ingen konkrete Entur-reiser funnet" }),
+  ).toBeVisible();
+  await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(1);
+
+  await page.getByLabel("Hvor er du?").fill("");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+
+  await expect(page.getByRole("alert")).toContainText("Skriv inn både start og mål");
+  await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(0);
+});
+
+test("traffic map keeps planner useful when Entur journey search is unavailable", async ({
+  page,
+}) => {
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
+    const url = new URL(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        travelPlanComparisonFixture(
+          {
+            origin: {
+              query: "Munkegata",
+              label: "Munkegata, Midtbyen",
+              coordinate: [10.3951, 63.4305],
+            },
+            destination: {
+              query: "Leangen",
+              label: "Leangen, Trondheim",
+              coordinate: [10.464, 63.433],
+            },
+            route: {
+              source: "direct",
+              distanceMeters: 4850,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [10.3951, 63.4305],
+                  [10.464, 63.433],
+                ],
+              },
+              detail: "Ruten er vist som rett korridor fordi veiruting ikke var tilgjengelig.",
+            },
+            trafficImpacts: [],
+            publicTransportSuggestions: [
+              {
+                id: "atb-entur-planner",
+                kind: "planning_link",
+                title: "Sjekk avganger hos AtB/Entur",
+                detail:
+                  "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+                source: "AtB/Entur",
+                href: "https://www.atb.no/reiseplanlegger/",
+              },
+            ],
+            itineraries: [],
+            journeyPlanner: {
+              status: "unavailable",
+              detail: "Entur reisesøk er ikke tilgjengelig akkurat nå.",
+              requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+              source: "Entur Journey Planner",
+            },
+            sources: [],
+            generatedAt: "2026-06-01T09:05:00.000Z",
+          },
+          url.searchParams.get("preset") ?? "now",
+        ),
+      ),
+    });
+  });
+
+  await page.goto("/trafikk");
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page.getByLabel("Hvor skal du?").fill("Leangen");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+
+  await expect(page.getByRole("heading", { name: "Sjekk AtB/Entur før du drar" })).toBeVisible();
+  await expect(
+    page.getByText("Entur reisesøk er ikke tilgjengelig akkurat nå.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
+    "href",
+    "https://www.atb.no/reiseplanlegger/",
+  );
+});
+
+test("traffic map invalidates an in-flight route when inputs change", async ({ page }) => {
+  let fulfillRoute: (() => Promise<void>) | undefined;
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
+    const url = new URL(route.request().url());
+    await new Promise<void>((resolve) => {
+      fulfillRoute = async () => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(
+            travelPlanComparisonFixture(
+              {
+                origin: {
+                  query: "Munkegata",
+                  label: "Munkegata, Midtbyen",
+                  coordinate: [10.3951, 63.4305],
+                },
+                destination: {
+                  query: "Leangen",
+                  label: "Leangen, Trondheim",
+                  coordinate: [10.464, 63.433],
+                },
+                route: {
+                  source: "osrm",
+                  distanceMeters: 4850,
+                  durationSeconds: 660,
+                  geometry: {
+                    type: "LineString",
+                    coordinates: [
+                      [10.3951, 63.4305],
+                      [10.464, 63.433],
+                    ],
+                  },
+                  detail: "Rute beregnet med OSRM.",
+                },
+                trafficImpacts: [],
+                publicTransportSuggestions: [],
+                itineraries: [],
+                journeyPlanner: {
+                  status: "empty",
+                  detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+                  requestedDepartureTime: "2026-06-01T09:05:00.000Z",
+                  source: "Entur Journey Planner",
+                },
+                sources: [],
+                generatedAt: "2026-06-01T09:05:00.000Z",
+              },
+              url.searchParams.get("preset") ?? "now",
+            ),
+          ),
         });
         resolve();
       };

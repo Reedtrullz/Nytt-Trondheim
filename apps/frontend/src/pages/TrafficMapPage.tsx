@@ -11,6 +11,8 @@ import type {
   TrafficEventSeverity,
   TrafficMapEvent,
   TravelPlaceSuggestion,
+  TravelPlanComparisonPreset,
+  TravelPlanComparisonSource,
   TravelPlanItinerary,
   TravelPlanItineraryLabel,
   TravelPlanLeg,
@@ -36,7 +38,11 @@ import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { TrafficLegend } from "../components/map/TrafficLegend.js";
 import { TrafficNowSummary } from "../components/map/TrafficNowSummary.js";
 import { fetchPublicTransportDepartureBoard } from "../api/publicTransportDepartures.js";
-import { fetchTravelPlaceSuggestions, fetchTravelPlan } from "../api/travelPlan.js";
+import {
+  fetchTravelPlaceSuggestions,
+  fetchTravelPlan,
+  fetchTravelPlanComparison,
+} from "../api/travelPlan.js";
 import { usePublicTransportMap } from "../hooks/usePublicTransportMap.js";
 import { useTrafficMap } from "../hooks/useTrafficMap.js";
 import {
@@ -325,14 +331,8 @@ interface TravelPlannerSearchState {
 
 type TravelTimeComparisonStatus = "idle" | "loading" | "ready" | "partial" | "error";
 
-export interface TravelTimeComparisonSource {
-  preset: TravelTimePreset;
-  plan?: TravelPlanPayload;
-  error?: string;
-}
-
 export interface TravelTimeComparisonOption {
-  preset: TravelTimePreset;
+  preset: TravelPlanComparisonPreset;
   label: string;
   status: "available" | "empty" | "unavailable" | "error";
   severity: "ok" | "watch" | "warning";
@@ -352,7 +352,7 @@ export interface TravelTimeComparisonModel {
   status: Exclude<TravelTimeComparisonStatus, "idle" | "loading">;
   heading: string;
   detail: string;
-  recommendedPreset?: TravelTimePreset;
+  recommendedPreset?: TravelPlanComparisonPreset;
   options: TravelTimeComparisonOption[];
 }
 
@@ -372,11 +372,17 @@ const destinationPresets: DestinationPreset[] = [
 ];
 
 const travelTimePresets: TravelTimePreset[] = ["now", "in30", "in60", "in120", "tomorrow_morning"];
-const travelTimeComparisonPresets: TravelTimePreset[] = ["now", "in30", "in60", "in120"];
+const travelTimeComparisonPresets: TravelPlanComparisonPreset[] = ["now", "in30", "in60", "in120"];
 const travelTimePresetSet = new Set<string>(travelTimePresets);
 const travelTimeComparisonPresetSet = new Set<string>(travelTimeComparisonPresets);
 const trafficFilterSearchKeys = ["preset", "category", "severity", "layers"] as const;
 const travelPlannerSearchKeys = ["fra", "til", "tid"] as const;
+
+function isTravelTimeComparisonPreset(
+  preset: TravelTimePreset,
+): preset is TravelPlanComparisonPreset {
+  return travelTimeComparisonPresetSet.has(preset);
+}
 
 function cleanTravelSearchText(value: string | null): string {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
@@ -1007,7 +1013,7 @@ function comparisonOptionSeverity(
 }
 
 function comparisonOptionScore(
-  source: TravelTimeComparisonSource,
+  source: TravelPlanComparisonSource,
   severity: SelectedDepartureStatusSeverity,
   itinerary?: TravelPlanItinerary,
 ): number {
@@ -1036,8 +1042,8 @@ function comparisonOptionScore(
 }
 
 function comparisonOptionFromSource(
-  source: TravelTimeComparisonSource,
-  activePreset: TravelTimePreset,
+  source: TravelPlanComparisonSource,
+  activePreset: TravelPlanComparisonPreset,
 ): TravelTimeComparisonOption {
   const label = travelTimePresetLabel(source.preset);
   if (source.error || !source.plan) {
@@ -1106,8 +1112,8 @@ function comparisonOptionFromSource(
 }
 
 export function buildTravelTimeComparisonModel(
-  sources: TravelTimeComparisonSource[],
-  activePreset: TravelTimePreset,
+  sources: TravelPlanComparisonSource[],
+  activePreset: TravelPlanComparisonPreset,
 ): TravelTimeComparisonModel {
   const byPreset = new Map(sources.map((source) => [source.preset, source]));
   const options = travelTimeComparisonPresets.map((preset) =>
@@ -2678,8 +2684,6 @@ export function TrafficMapPage() {
   const travelPlanAbortRef = useRef<AbortController | undefined>(undefined);
   const departureBoardAbortRef = useRef<AbortController | undefined>(undefined);
   const routeDepartureBoardsAbortRef = useRef<AbortController | undefined>(undefined);
-  const travelTimeComparisonAbortRef = useRef<AbortController | undefined>(undefined);
-  const travelTimeComparisonRequestIdRef = useRef(0);
 
   const loadDepartureBoard = useCallback((context: DepartureBoardContext) => {
     departureBoardAbortRef.current?.abort();
@@ -2785,7 +2789,6 @@ export function TrafficMapPage() {
     loadDepartureBoard(defaultDepartureBoardContext);
     return () => {
       travelPlanAbortRef.current?.abort();
-      travelTimeComparisonAbortRef.current?.abort();
       departureBoardAbortRef.current?.abort();
       routeDepartureBoardsAbortRef.current?.abort();
     };
@@ -2805,9 +2808,6 @@ export function TrafficMapPage() {
     travelPlanRequestIdRef.current = requestId;
     travelPlanAbortRef.current?.abort();
     travelPlanAbortRef.current = undefined;
-    travelTimeComparisonAbortRef.current?.abort();
-    travelTimeComparisonAbortRef.current = undefined;
-    travelTimeComparisonRequestIdRef.current += 1;
     routeDepartureBoardsAbortRef.current?.abort();
     routeDepartureBoardsAbortRef.current = undefined;
     setTravelPlan(undefined);
@@ -3242,65 +3242,12 @@ export function TrafficMapPage() {
     }
   }
 
-  async function loadTravelTimeComparison(input: {
-    from: string;
-    to: string;
-    fromLabel?: string;
-    toLabel?: string;
-    activePreset: TravelTimePreset;
-    activePlan: TravelPlanPayload;
-  }): Promise<void> {
-    if (!travelTimeComparisonPresetSet.has(input.activePreset)) {
-      setTravelTimeComparison({ status: "idle" });
-      return;
-    }
-
-    travelTimeComparisonAbortRef.current?.abort();
-    const requestId = travelTimeComparisonRequestIdRef.current + 1;
-    travelTimeComparisonRequestIdRef.current = requestId;
-    const controller = new AbortController();
-    travelTimeComparisonAbortRef.current = controller;
-    const initialSources: TravelTimeComparisonSource[] = [
-      { preset: input.activePreset, plan: input.activePlan },
-    ];
-    const initialModel = buildTravelTimeComparisonModel(initialSources, input.activePreset);
-    setTravelTimeComparison({ status: "loading", model: initialModel });
-
-    const base = new Date();
-    const comparisonPromises = travelTimeComparisonPresets
-      .filter((preset) => preset !== input.activePreset)
-      .map(async (preset): Promise<TravelTimeComparisonSource> => {
-        try {
-          const planForPreset = await fetchTravelPlan(
-            {
-              from: input.from,
-              to: input.to,
-              ...(input.fromLabel ? { fromLabel: input.fromLabel } : {}),
-              ...(input.toLabel ? { toLabel: input.toLabel } : {}),
-              departAt: departureTimeForPreset(preset, base),
-            },
-            { signal: controller.signal },
-          );
-          return { preset, plan: planForPreset };
-        } catch (reason) {
-          return {
-            preset,
-            error: reason instanceof Error ? reason.message : "Kunne ikke hente reisesøk.",
-          };
-        }
-      });
-
-    const settledSources = await Promise.all(comparisonPromises);
-    if (controller.signal.aborted || travelTimeComparisonRequestIdRef.current !== requestId) return;
-
-    const model = buildTravelTimeComparisonModel(
-      [...initialSources, ...settledSources],
-      input.activePreset,
-    );
+  function setTravelTimeComparisonFromSources(
+    sources: TravelPlanComparisonSource[],
+    activePreset: TravelPlanComparisonPreset,
+  ): void {
+    const model = buildTravelTimeComparisonModel(sources, activePreset);
     setTravelTimeComparison({ status: model.status, model });
-    if (travelTimeComparisonAbortRef.current === controller) {
-      travelTimeComparisonAbortRef.current = undefined;
-    }
   }
 
   async function loadTravelPlanForInput(input: {
@@ -3345,28 +3292,46 @@ export function TrafficMapPage() {
     travelPlanAbortRef.current = controller;
     setTravelPlanLoading(true);
     setTravelPlanError(undefined);
-    try {
-      const payload = await fetchTravelPlan(
-        {
-          from,
-          to,
-          ...(originSuggestion ? { fromLabel: originSuggestion.label } : {}),
-          ...(destinationSuggestion ? { toLabel: destinationSuggestion.label } : {}),
-          departAt: departureTimeForPreset(input.timePreset),
-        },
-        { signal: controller.signal },
+    if (isTravelTimeComparisonPreset(input.timePreset)) {
+      const loadingModel = buildTravelTimeComparisonModel(
+        [{ preset: input.timePreset, error: "Reisesøket hentes." }],
+        input.timePreset,
       );
-      if (travelPlanRequestIdRef.current !== requestId) return;
-      setTravelPlan(payload);
-      setSelectedItineraryId(payload.itineraries[0]?.id);
-      void loadTravelTimeComparison({
+      setTravelTimeComparison({ status: "loading", model: loadingModel });
+    } else {
+      setTravelTimeComparison({ status: "idle" });
+    }
+    try {
+      const request = {
         from,
         to,
         ...(originSuggestion ? { fromLabel: originSuggestion.label } : {}),
         ...(destinationSuggestion ? { toLabel: destinationSuggestion.label } : {}),
-        activePreset: input.timePreset,
-        activePlan: payload,
-      });
+        departAt: departureTimeForPreset(input.timePreset),
+      };
+      const comparisonPreset = isTravelTimeComparisonPreset(input.timePreset)
+        ? input.timePreset
+        : undefined;
+      const comparisonPayload = comparisonPreset
+        ? await fetchTravelPlanComparison(
+            {
+              ...request,
+              preset: comparisonPreset,
+            },
+            { signal: controller.signal },
+          )
+        : undefined;
+      const payload =
+        comparisonPayload?.selectedPlan ??
+        (await fetchTravelPlan(request, { signal: controller.signal }));
+      if (travelPlanRequestIdRef.current !== requestId) return;
+      setTravelPlan(payload);
+      setSelectedItineraryId(payload.itineraries[0]?.id);
+      if (comparisonPayload && comparisonPreset) {
+        setTravelTimeComparisonFromSources(comparisonPayload.sources, comparisonPreset);
+      } else {
+        setTravelTimeComparison({ status: "idle" });
+      }
       const originContext = departureBoardContextFromPlan(payload, payload.itineraries[0]?.id);
       if (originContext) {
         loadDepartureBoard(originContext);

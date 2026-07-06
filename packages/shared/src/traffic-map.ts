@@ -329,6 +329,21 @@ export interface TravelPlanPayload {
   generatedAt: string;
 }
 
+export type TravelPlanComparisonPreset = "now" | "in30" | "in60" | "in120";
+
+export interface TravelPlanComparisonSource {
+  preset: TravelPlanComparisonPreset;
+  plan?: TravelPlanPayload;
+  error?: string;
+}
+
+export interface TravelPlanComparisonPayload {
+  activePreset: TravelPlanComparisonPreset;
+  selectedPlan: TravelPlanPayload;
+  sources: TravelPlanComparisonSource[];
+  generatedAt: string;
+}
+
 export interface SpatialHeatmapTimeBucket {
   bucketStart: string;
   count: number;

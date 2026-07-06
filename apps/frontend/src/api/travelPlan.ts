@@ -1,4 +1,9 @@
-import type { TravelPlaceSuggestionPayload, TravelPlanPayload } from "@nytt/shared";
+import type {
+  TravelPlaceSuggestionPayload,
+  TravelPlanComparisonPayload,
+  TravelPlanComparisonPreset,
+  TravelPlanPayload,
+} from "@nytt/shared";
 
 export interface TravelPlanRequest {
   from: string;
@@ -33,6 +38,34 @@ export async function fetchTravelPlan(
     throw new Error(body.error ?? "Kunne ikke hente reiseråd.");
   }
   return (await response.json()) as TravelPlanPayload;
+}
+
+export async function fetchTravelPlanComparison(
+  request: TravelPlanRequest & { preset: TravelPlanComparisonPreset },
+  options: { signal?: AbortSignal } = {},
+): Promise<TravelPlanComparisonPayload> {
+  const params = new URLSearchParams();
+  params.set("from", request.from);
+  params.set("to", request.to);
+  params.set("preset", request.preset);
+  if (request.fromLabel) params.set("fromLabel", request.fromLabel);
+  if (request.toLabel) params.set("toLabel", request.toLabel);
+  if (request.departAt) params.set("departAt", request.departAt);
+  const response = await fetch(`/api/map/travel-plan/compare?${params.toString()}`, {
+    credentials: "include",
+    signal: options.signal,
+  });
+  if (response.status === 401) {
+    window.location.href = "/logg-inn";
+    throw new Error("Innlogging kreves");
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
+      error?: string;
+    };
+    throw new Error(body.error ?? "Kunne ikke sammenligne reisetider.");
+  }
+  return (await response.json()) as TravelPlanComparisonPayload;
 }
 
 export async function fetchTravelPlaceSuggestions(
