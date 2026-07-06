@@ -2154,6 +2154,29 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   await expect(page.getByRole("region", { name: "Avganger nå" })).toContainText(
     "Munkegata, Trondheim",
   );
+  const departureBoard = page.getByRole("region", { name: "Avganger nå" });
+  await departureBoard.getByRole("button", { name: "Lagre tavle" }).click();
+  await expect(departureBoard.getByRole("button", { name: "Tavle lagret" })).toBeDisabled();
+  await departureBoard.getByRole("button", { name: "Sentrum" }).click();
+  await expect
+    .poll(() => departureRequestUrls.some((url) => !url.searchParams.has("lat")))
+    .toBe(true);
+  const rememberedBoardLoadsBeforeSelect = departureRequestUrls.length;
+  await departureBoard.getByRole("button", { name: "Munkegata, Trondheim", exact: true }).click();
+  await expect
+    .poll(() =>
+      departureRequestUrls.slice(rememberedBoardLoadsBeforeSelect).map((url) => ({
+        lat: url.searchParams.get("lat"),
+        lon: url.searchParams.get("lon"),
+      })),
+    )
+    .toContainEqual({ lat: "63.432883", lon: "10.393742" });
+  await departureBoard
+    .getByRole("button", { name: "Fjern Munkegata, Trondheim fra lagrede avgangstavler" })
+    .click();
+  await expect(
+    departureBoard.getByRole("button", { name: "Munkegata, Trondheim", exact: true }),
+  ).toHaveCount(0);
 
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await expect(page.getByRole("option", { name: /Leangen, Trondheim/ })).toBeVisible();

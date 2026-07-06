@@ -38,7 +38,9 @@ import {
   mergeTrafficFilterSearch,
   mergeTravelPlannerSearch,
   parseTravelPlannerSearch,
+  readRememberedDepartureBoards,
   readRememberedTravelRoutes,
+  removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
   routeDepartureCheckpoints,
   routeDepartureConfidenceItems,
@@ -47,10 +49,13 @@ import {
   selectedDepartureMatch,
   selectedDepartureStatus,
   selectedRouteWatchSummary,
+  sortRememberedDepartureBoards,
   sortRememberedTravelRoutes,
   timeWindowForPreset,
   toggleRememberedTravelRoutePinned,
+  upsertRememberedDepartureBoard,
   travelPlanDecision,
+  type RememberedDepartureBoard,
   upsertRememberedTravelRoute,
   type RememberedTravelRoute,
 } from "./TrafficMapPage.js";
@@ -178,6 +183,106 @@ describe("remembered travel routes", () => {
     );
 
     expect(removeRememberedTravelRoute(routes, routes[0]?.id ?? "")).toEqual([]);
+  });
+});
+
+describe("remembered departure boards", () => {
+  it("deduplicates boards by coordinates and keeps recent boards first", () => {
+    const first = upsertRememberedDepartureBoard(
+      [],
+      {
+        label: "Munkegata, Trondheim",
+        center: { lat: 63.432883, lon: 10.393742 },
+      },
+      "2026-07-07T08:00:00.000Z",
+    );
+    const second = upsertRememberedDepartureBoard(
+      first,
+      {
+        label: "Munkegata",
+        center: { lat: 63.432884, lon: 10.393743 },
+      },
+      "2026-07-07T08:02:00.000Z",
+    );
+    const third = upsertRememberedDepartureBoard(
+      second,
+      {
+        label: "Leangen, Trondheim",
+        center: { lat: 63.433, lon: 10.464 },
+      },
+      "2026-07-07T08:03:00.000Z",
+    );
+
+    expect(third).toHaveLength(2);
+    expect(third.map((board) => board.label)).toEqual(["Leangen, Trondheim", "Munkegata"]);
+    expect(third[1]).toMatchObject({
+      useCount: 2,
+      createdAt: "2026-07-07T08:00:00.000Z",
+      lastUsedAt: "2026-07-07T08:02:00.000Z",
+    });
+  });
+
+  it("sorts boards by recency, use count, then label", () => {
+    const boards: RememberedDepartureBoard[] = [
+      {
+        id: "old",
+        label: "Solsiden",
+        center: { lat: 63.435, lon: 10.41 },
+        useCount: 5,
+        createdAt: "2026-07-07T07:00:00.000Z",
+        lastUsedAt: "2026-07-07T08:00:00.000Z",
+      },
+      {
+        id: "recent",
+        label: "Munkegata",
+        center: { lat: 63.432883, lon: 10.393742 },
+        useCount: 1,
+        createdAt: "2026-07-07T07:00:00.000Z",
+        lastUsedAt: "2026-07-07T09:00:00.000Z",
+      },
+    ];
+
+    expect(sortRememberedDepartureBoards(boards).map((board) => board.id)).toEqual([
+      "recent",
+      "old",
+    ]);
+  });
+
+  it("drops invalid storage rows and survives corrupt or blocked storage", () => {
+    const raw = JSON.stringify([
+      {
+        label: "Munkegata",
+        center: { lat: 63.432883, lon: 10.393742 },
+        useCount: 2,
+        createdAt: "2026-07-07T07:00:00.000Z",
+        lastUsedAt: "2026-07-07T08:00:00.000Z",
+      },
+      { label: "Uten koordinat" },
+      { label: "Feil koordinat", center: { lat: 999, lon: 10.4 } },
+    ]);
+
+    expect(readRememberedDepartureBoards(storageReturning(raw))).toHaveLength(1);
+    expect(readRememberedDepartureBoards(storageReturning("{"))).toEqual([]);
+    expect(
+      readRememberedDepartureBoards({
+        getItem: () => {
+          throw new Error("blocked");
+        },
+      } as unknown as Storage),
+    ).toEqual([]);
+  });
+
+  it("removes boards by id", () => {
+    const boards = upsertRememberedDepartureBoard(
+      [],
+      {
+        label: "Munkegata",
+        center: { lat: 63.432883, lon: 10.393742 },
+      },
+      "2026-07-07T08:00:00.000Z",
+    );
+
+    expect(removeRememberedDepartureBoard(boards, boards[0]?.id ?? "")).toEqual([]);
   });
 });
 

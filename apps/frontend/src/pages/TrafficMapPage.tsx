@@ -354,6 +354,15 @@ export interface RememberedTravelRouteCandidate {
   timePreset: TravelTimePreset;
 }
 
+export interface RememberedDepartureBoard {
+  id: string;
+  label: string;
+  center: { lat: number; lon: number };
+  useCount: number;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
 interface RememberedTravelRouteQueryOverride {
   from: string;
   to: string;
@@ -411,6 +420,8 @@ const trafficFilterSearchKeys = ["preset", "category", "severity", "layers"] as 
 const travelPlannerSearchKeys = ["fra", "til", "tid"] as const;
 const rememberedTravelRoutesStorageKey = "nytt:traffic:remembered-routes:v1";
 const rememberedTravelRouteLimit = 8;
+const rememberedDepartureBoardsStorageKey = "nytt:traffic:remembered-departure-boards:v1";
+const rememberedDepartureBoardLimit = 6;
 
 function isTravelTimeComparisonPreset(
   preset: TravelTimePreset,
@@ -558,6 +569,103 @@ export function readRememberedTravelRoutes(storage: Storage | undefined): Rememb
   }
 }
 
+function rememberedDepartureBoardId(input: { center: { lat: number; lon: number } }): string {
+  return `${input.center.lat.toFixed(5)},${input.center.lon.toFixed(5)}`;
+}
+
+function cleanRememberedDepartureBoard(
+  board: Partial<RememberedDepartureBoard>,
+): RememberedDepartureBoard | undefined {
+  const label = cleanTravelSearchText(board.label ?? null);
+  const lat = board.center?.lat;
+  const lon = board.center?.lon;
+  if (!label || !Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+  const center = { lat: Number(lat), lon: Number(lon) };
+  if (center.lat < -90 || center.lat > 90 || center.lon < -180 || center.lon > 180) {
+    return undefined;
+  }
+  const now = new Date().toISOString();
+  return {
+    id: rememberedDepartureBoardId({ center }),
+    label,
+    center,
+    useCount: Math.max(1, Math.floor(board.useCount ?? 1)),
+    createdAt:
+      board.createdAt && Number.isFinite(Date.parse(board.createdAt)) ? board.createdAt : now,
+    lastUsedAt:
+      board.lastUsedAt && Number.isFinite(Date.parse(board.lastUsedAt)) ? board.lastUsedAt : now,
+  };
+}
+
+export function sortRememberedDepartureBoards(
+  boards: RememberedDepartureBoard[],
+): RememberedDepartureBoard[] {
+  return [...boards].sort((left, right) => {
+    const lastUsedDelta = Date.parse(right.lastUsedAt) - Date.parse(left.lastUsedAt);
+    if (Number.isFinite(lastUsedDelta) && lastUsedDelta !== 0) return lastUsedDelta;
+    if (right.useCount !== left.useCount) return right.useCount - left.useCount;
+    return left.label.localeCompare(right.label, "nb");
+  });
+}
+
+export function upsertRememberedDepartureBoard(
+  boards: RememberedDepartureBoard[],
+  candidate: Pick<RememberedDepartureBoard, "label" | "center">,
+  now = new Date().toISOString(),
+): RememberedDepartureBoard[] {
+  const cleaned = cleanRememberedDepartureBoard({
+    ...candidate,
+    createdAt: now,
+    lastUsedAt: now,
+    useCount: 1,
+  });
+  if (!cleaned)
+    return sortRememberedDepartureBoards(boards).slice(0, rememberedDepartureBoardLimit);
+  const existing = boards.find((board) => board.id === cleaned.id);
+  const nextBoard: RememberedDepartureBoard = existing
+    ? {
+        ...cleaned,
+        useCount: existing.useCount + 1,
+        createdAt: existing.createdAt,
+        lastUsedAt: now,
+      }
+    : { ...cleaned, createdAt: now, lastUsedAt: now };
+  const rest = boards.filter((board) => board.id !== nextBoard.id);
+  return sortRememberedDepartureBoards([nextBoard, ...rest]).slice(
+    0,
+    rememberedDepartureBoardLimit,
+  );
+}
+
+export function removeRememberedDepartureBoard(
+  boards: RememberedDepartureBoard[],
+  boardId: string,
+): RememberedDepartureBoard[] {
+  return sortRememberedDepartureBoards(boards.filter((board) => board.id !== boardId)).slice(
+    0,
+    rememberedDepartureBoardLimit,
+  );
+}
+
+export function readRememberedDepartureBoards(
+  storage: Storage | undefined,
+): RememberedDepartureBoard[] {
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(rememberedDepartureBoardsStorageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return sortRememberedDepartureBoards(
+      parsed
+        .map((entry) => cleanRememberedDepartureBoard(entry as Partial<RememberedDepartureBoard>))
+        .filter((entry): entry is RememberedDepartureBoard => Boolean(entry)),
+    ).slice(0, rememberedDepartureBoardLimit);
+  } catch {
+    return [];
+  }
+}
+
 function writeRememberedTravelRoutes(
   storage: Storage | undefined,
   routes: RememberedTravelRoute[],
@@ -567,6 +675,18 @@ function writeRememberedTravelRoutes(
     storage.setItem(rememberedTravelRoutesStorageKey, JSON.stringify(routes));
   } catch {
     // Local route memory is a convenience only. Ignore quota/private-mode failures.
+  }
+}
+
+function writeRememberedDepartureBoards(
+  storage: Storage | undefined,
+  boards: RememberedDepartureBoard[],
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(rememberedDepartureBoardsStorageKey, JSON.stringify(boards));
+  } catch {
+    // Local departure-board memory is a convenience only.
   }
 }
 
@@ -2188,6 +2308,25 @@ function departureBoardHeading(context: DepartureBoardContext): string {
     : "Avganger nå";
 }
 
+function rememberedDepartureBoardFromContext(
+  context: DepartureBoardContext,
+): Pick<RememberedDepartureBoard, "label" | "center"> | undefined {
+  if (!context.center) return undefined;
+  if (context.label === "Din posisjon" || looksLikeCoordinateQuery(context.label)) return undefined;
+  return {
+    label: context.label,
+    center: context.center,
+  };
+}
+
+function rememberedDepartureBoardContext(board: RememberedDepartureBoard): DepartureBoardContext {
+  return {
+    scope: "origin",
+    label: board.label,
+    center: board.center,
+  };
+}
+
 function RouteDepartureConfidencePanel({
   checkpoints,
   results,
@@ -2255,22 +2394,38 @@ function DepartureBoardPanel({
   error,
   context,
   routeOriginContext,
+  rememberedBoards,
   selectedDeparture,
   onReload,
   onContextChange,
+  onRememberCurrentBoard,
+  onSelectRememberedBoard,
+  onRemoveRememberedBoard,
 }: {
   board?: PublicTransportDepartureBoardPayload;
   loading: boolean;
   error?: string;
   context: DepartureBoardContext;
   routeOriginContext?: DepartureBoardContext;
+  rememberedBoards: RememberedDepartureBoard[];
   selectedDeparture?: SelectedDepartureMatch;
   onReload: () => void;
   onContextChange: (context: DepartureBoardContext) => void;
+  onRememberCurrentBoard: (context: DepartureBoardContext) => void;
+  onSelectRememberedBoard: (board: RememberedDepartureBoard) => void;
+  onRemoveRememberedBoard: (boardId: string) => void;
 }) {
   const [activeDepartureFilterKey, setActiveDepartureFilterKey] = useState("all");
   const safeHandoff = safeExternalUrl(board?.handoffUrl ?? "https://www.atb.no/reiseplanlegger/");
   const departures = Array.isArray(board?.departures) ? board.departures : [];
+  const currentRememberedBoard = rememberedDepartureBoardFromContext(context);
+  const currentRememberedBoardId = currentRememberedBoard
+    ? rememberedDepartureBoardId(currentRememberedBoard)
+    : undefined;
+  const currentBoardSaved = Boolean(
+    currentRememberedBoardId &&
+    rememberedBoards.some((rememberedBoard) => rememberedBoard.id === currentRememberedBoardId),
+  );
   const contextDescription =
     context.scope === "origin"
       ? `${context.label}: neste avganger fra holdeplasser ved startpunktet.`
@@ -2329,6 +2484,13 @@ function DepartureBoardPanel({
               </button>
             ) : null}
           </div>
+          <button
+            type="button"
+            onClick={() => currentRememberedBoard && onRememberCurrentBoard(context)}
+            disabled={loading || !currentRememberedBoard || currentBoardSaved}
+          >
+            {currentBoardSaved ? "Tavle lagret" : "Lagre tavle"}
+          </button>
           <button type="button" onClick={onReload} disabled={loading}>
             {loading ? "Oppdaterer ..." : "Oppdater"}
           </button>
@@ -2338,6 +2500,29 @@ function DepartureBoardPanel({
             </a>
           ) : null}
         </div>
+        {rememberedBoards.length ? (
+          <div className="departure-board-favorites" aria-label="Lagrede avgangstavler">
+            <span>Lagrede tavler</span>
+            {rememberedBoards.map((rememberedBoard) => (
+              <div key={rememberedBoard.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelectRememberedBoard(rememberedBoard)}
+                  disabled={loading && currentRememberedBoardId === rememberedBoard.id}
+                >
+                  {rememberedBoard.label}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRemoveRememberedBoard(rememberedBoard.id)}
+                  aria-label={`Fjern ${rememberedBoard.label} fra lagrede avgangstavler`}
+                >
+                  Fjern
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </header>
       {error ? <p className="route-planner-status error">{error}</p> : null}
       {!board && loading ? (
@@ -2945,6 +3130,9 @@ export function TrafficMapPage() {
   const [rememberedRoutes, setRememberedRoutes] = useState<RememberedTravelRoute[]>(() =>
     readRememberedTravelRoutes(browserStorage()),
   );
+  const [rememberedDepartureBoards, setRememberedDepartureBoards] = useState<
+    RememberedDepartureBoard[]
+  >(() => readRememberedDepartureBoards(browserStorage()));
   const [locationStatus, setLocationStatus] = useState<LocationRequestStatus>("idle");
   const [locationMessage, setLocationMessage] = useState<string>();
   const [travelPlan, setTravelPlan] = useState<TravelPlanPayload>();
@@ -2973,6 +3161,17 @@ export function TrafficMapPage() {
       setRememberedRoutes((current) => {
         const next = updater(current);
         writeRememberedTravelRoutes(browserStorage(), next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const updateRememberedDepartureBoards = useCallback(
+    (updater: (boards: RememberedDepartureBoard[]) => RememberedDepartureBoard[]) => {
+      setRememberedDepartureBoards((current) => {
+        const next = updater(current);
+        writeRememberedDepartureBoards(browserStorage(), next);
         return next;
       });
     },
@@ -3260,6 +3459,26 @@ export function TrafficMapPage() {
 
   function handleRemoveRememberedRoute(routeId: string): void {
     updateRememberedRoutes((routes) => removeRememberedTravelRoute(routes, routeId));
+  }
+
+  function handleRememberCurrentDepartureBoard(context: DepartureBoardContext): void {
+    const candidate = rememberedDepartureBoardFromContext(context);
+    if (!candidate) return;
+    updateRememberedDepartureBoards((boards) => upsertRememberedDepartureBoard(boards, candidate));
+  }
+
+  function handleSelectRememberedDepartureBoard(board: RememberedDepartureBoard): void {
+    updateRememberedDepartureBoards((boards) =>
+      upsertRememberedDepartureBoard(boards, {
+        label: board.label,
+        center: board.center,
+      }),
+    );
+    loadDepartureBoard(rememberedDepartureBoardContext(board));
+  }
+
+  function handleRemoveRememberedDepartureBoard(boardId: string): void {
+    updateRememberedDepartureBoards((boards) => removeRememberedDepartureBoard(boards, boardId));
   }
 
   const stableBounds = useMemo(
@@ -3784,9 +4003,13 @@ export function TrafficMapPage() {
         error={departureBoardError}
         context={departureBoardContext}
         routeOriginContext={routeOriginDepartureBoardContext}
+        rememberedBoards={rememberedDepartureBoards}
         selectedDeparture={selectedDeparture}
         onReload={reloadDepartureBoard}
         onContextChange={loadDepartureBoard}
+        onRememberCurrentBoard={handleRememberCurrentDepartureBoard}
+        onSelectRememberedBoard={handleSelectRememberedDepartureBoard}
+        onRemoveRememberedBoard={handleRemoveRememberedDepartureBoard}
       />
       <TrafficNowSummary cards={summaryCardsForDisplay} />
       <TrafficDataDisclosure
