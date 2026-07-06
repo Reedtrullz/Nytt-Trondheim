@@ -53,6 +53,7 @@ import {
   sortRememberedTravelRoutes,
   timeWindowForPreset,
   toggleRememberedTravelRoutePinned,
+  travelTimeComparisonLiveCheckFromRouteDepartureConfidence,
   upsertRememberedDepartureBoard,
   travelPlanDecision,
   type RememberedDepartureBoard,
@@ -854,6 +855,102 @@ describe("TrafficMapPage route overlay helpers", () => {
         },
       ],
     });
+  });
+
+  it("feeds selected-route live-board uncertainty into the travel-time comparison", () => {
+    const nowPlan = planWithTravelDuration({
+      id: "now",
+      departureTime: "2026-06-01T09:10:00.000Z",
+      arrivalTime: "2026-06-01T09:28:00.000Z",
+      durationSeconds: 1080,
+    });
+    const laterPlan = planWithTravelDuration({
+      id: "in30",
+      departureTime: "2026-06-01T09:40:00.000Z",
+      arrivalTime: "2026-06-01T09:58:00.000Z",
+      durationSeconds: 1080,
+    });
+
+    const model = buildTravelTimeComparisonModel(
+      [
+        { preset: "now", plan: nowPlan },
+        { preset: "in30", plan: laterPlan },
+      ],
+      "now",
+      {
+        heading: "Sjekk byttene før du drar",
+        detail: "1 av 2 boardingpunkt trenger kontroll hos AtB/Entur før avreise.",
+        severity: "warning",
+      },
+    );
+
+    expect(model.recommendedPreset).toBe("in30");
+    expect(model.heading).toContain("Vent til om 30 min");
+    expect(model.detail).toContain("Live-sjekken for valgt reise gir usikkerhet");
+    expect(model.options.find((option) => option.preset === "now")).toMatchObject({
+      active: true,
+      recommended: false,
+      severity: "warning",
+      detail:
+        "Live-sjekk av valgt avreise: 1 av 2 boardingpunkt trenger kontroll hos AtB/Entur før avreise.",
+    });
+  });
+
+  it("marks the active travel window as check-needed when later options are not usable", () => {
+    const nowPlan = planWithTravelDuration({
+      id: "now",
+      departureTime: "2026-06-01T09:10:00.000Z",
+      arrivalTime: "2026-06-01T09:28:00.000Z",
+      durationSeconds: 1080,
+    });
+
+    const model = buildTravelTimeComparisonModel(
+      [
+        { preset: "now", plan: nowPlan },
+        { preset: "in30", error: "Entur svarte ikke." },
+      ],
+      "now",
+      {
+        heading: "Følg med på byttene",
+        detail: "1 av 2 boardingpunkt er ikke entydig live-bekreftet.",
+        severity: "watch",
+      },
+    );
+
+    expect(model.recommendedPreset).toBe("now");
+    expect(model.heading).toBe("Sjekk valgt avreise");
+    expect(model.detail).toContain("Valgt reise trenger ekstra sjekk");
+    expect(model.options.find((option) => option.preset === "now")).toMatchObject({
+      active: true,
+      recommended: true,
+      severity: "watch",
+    });
+  });
+
+  it("only exports comparison live checks after live-board reads settle with uncertainty", () => {
+    const checkpoints = routeDepartureCheckpoints(planWithTransfer, "itinerary-transfer");
+    const items = routeDepartureConfidenceItems(checkpoints, [
+      { checkpointId: checkpoints[0]!.id, board: departureBoard },
+      { checkpointId: checkpoints[1]!.id, error: "Entur svarte ikke." },
+    ]);
+
+    expect(
+      travelTimeComparisonLiveCheckFromRouteDepartureConfidence(items, "loading"),
+    ).toBeUndefined();
+    expect(
+      travelTimeComparisonLiveCheckFromRouteDepartureConfidence(items, "partial"),
+    ).toMatchObject({
+      heading: "Sjekk byttene før du drar",
+      severity: "warning",
+    });
+    expect(
+      travelTimeComparisonLiveCheckFromRouteDepartureConfidence(
+        routeDepartureConfidenceItems(routeDepartureCheckpoints(planWithItinerary, "itinerary-1"), [
+          { checkpointId: "itinerary-1:leg-bus-3:0", board: departureBoard },
+        ]),
+        "ready",
+      ),
+    ).toBeUndefined();
   });
 
   it("keeps the matched itinerary departure visible when it falls outside the first rows", () => {

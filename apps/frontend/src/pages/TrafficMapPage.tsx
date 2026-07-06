@@ -397,9 +397,17 @@ export interface TravelTimeComparisonModel {
   options: TravelTimeComparisonOption[];
 }
 
+export interface TravelTimeComparisonLiveCheck {
+  severity: SelectedDepartureStatusSeverity;
+  heading: string;
+  detail: string;
+}
+
 interface TravelTimeComparisonState {
   status: TravelTimeComparisonStatus;
   model?: TravelTimeComparisonModel;
+  sources?: TravelPlanComparisonSource[];
+  activePreset?: TravelPlanComparisonPreset;
 }
 
 const destinationPresets: DestinationPreset[] = [
@@ -1131,6 +1139,16 @@ export function routeDepartureConfidenceSummary(
   };
 }
 
+export function travelTimeComparisonLiveCheckFromRouteDepartureConfidence(
+  items: RouteDepartureConfidenceItem[],
+  fetchStatus: RouteDepartureBoardStatus,
+): TravelTimeComparisonLiveCheck | undefined {
+  if (fetchStatus === "idle" || fetchStatus === "loading" || !items.length) return undefined;
+  const summary = routeDepartureConfidenceSummary(items, fetchStatus);
+  if (summary.severity === "ok") return undefined;
+  return summary;
+}
+
 function routeWatchSeverityFromNotice(
   severity?: TrafficEventSeverity | "info" | "warning",
 ): SelectedDepartureStatusSeverity {
@@ -1280,6 +1298,14 @@ const comparisonSeverityPenalty: Record<SelectedDepartureStatusSeverity, number>
   warning: 70,
 };
 
+function strongestDepartureSeverity(
+  left: SelectedDepartureStatusSeverity,
+  right?: SelectedDepartureStatusSeverity,
+): SelectedDepartureStatusSeverity {
+  if (!right) return left;
+  return departureStatusRank[right] > departureStatusRank[left] ? right : left;
+}
+
 function comparisonBestItinerary(plan?: TravelPlanPayload): TravelPlanItinerary | undefined {
   return (
     plan?.itineraries.find((itinerary) => itinerary.labels.includes("best_now")) ??
@@ -1355,8 +1381,10 @@ function comparisonOptionScore(
 function comparisonOptionFromSource(
   source: TravelPlanComparisonSource,
   activePreset: TravelPlanComparisonPreset,
+  liveCheck?: TravelTimeComparisonLiveCheck,
 ): TravelTimeComparisonOption {
   const label = travelTimePresetLabel(source.preset);
+  const liveCheckApplies = source.preset === activePreset && liveCheck?.severity !== "ok";
   if (source.error || !source.plan) {
     const error = source.error ?? "Reisesøket svarte ikke.";
     return {
@@ -1375,7 +1403,10 @@ function comparisonOptionFromSource(
   }
 
   const itinerary = comparisonBestItinerary(source.plan);
-  const severity = comparisonOptionSeverity(source.plan, itinerary);
+  const routeSeverity = comparisonOptionSeverity(source.plan, itinerary);
+  const severity = liveCheckApplies
+    ? strongestDepartureSeverity(routeSeverity, liveCheck?.severity)
+    : routeSeverity;
   const status =
     source.plan.journeyPlanner.status === "unavailable"
       ? "unavailable"
@@ -1414,17 +1445,20 @@ function comparisonOptionFromSource(
         ? `${departureLabel}${arrivalLabel ? `-${arrivalLabel}` : ""}`
         : routeDecision.heading,
     detail:
-      watchSummary && watchSummary.severity !== "ok"
-        ? watchSummary.detail
-        : itinerary
-          ? itinerary.decisionReason
-          : routeDecision.detail,
+      liveCheckApplies && liveCheck
+        ? `Live-sjekk av valgt avreise: ${liveCheck.detail}`
+        : watchSummary && watchSummary.severity !== "ok"
+          ? watchSummary.detail
+          : itinerary
+            ? itinerary.decisionReason
+            : routeDecision.detail,
   };
 }
 
 export function buildTravelTimeComparisonModel(
   sources: TravelPlanComparisonSource[],
   activePreset: TravelPlanComparisonPreset,
+  liveCheck?: TravelTimeComparisonLiveCheck,
 ): TravelTimeComparisonModel {
   const byPreset = new Map(sources.map((source) => [source.preset, source]));
   const options = travelTimeComparisonPresets.map((preset) =>
@@ -1434,6 +1468,7 @@ export function buildTravelTimeComparisonModel(
         error: "Reisesøket er ikke hentet ennå.",
       },
       activePreset,
+      liveCheck,
     ),
   );
   const activeOption = options.find((option) => option.preset === activePreset);
@@ -1457,6 +1492,8 @@ export function buildTravelTimeComparisonModel(
   }
 
   const allFailed = options.every((option) => option.status === "error");
+  const activeLiveNeedsCheck = liveCheck && liveCheck.severity !== "ok";
+  const recommendedLater = recommendedOption?.preset && recommendedOption.preset !== activePreset;
   return {
     status: allFailed
       ? "error"
@@ -1464,15 +1501,21 @@ export function buildTravelTimeComparisonModel(
         ? "partial"
         : "ready",
     heading:
-      recommendedOption?.preset && recommendedOption.preset !== activePreset
-        ? `Vent til ${travelTimePresetLabel(recommendedOption.preset).toLowerCase()} kan være bedre`
-        : activePreset === "now"
-          ? "Dra nå ser best ut"
-          : "Valgt avreise ser best ut",
+      activeLiveNeedsCheck && !recommendedLater
+        ? "Sjekk valgt avreise"
+        : recommendedLater
+          ? `Vent til ${travelTimePresetLabel(recommendedOption.preset).toLowerCase()} kan være bedre`
+          : activePreset === "now"
+            ? "Dra nå ser best ut"
+            : "Valgt avreise ser best ut",
     detail:
-      recommendedOption?.preset && recommendedOption.preset !== activePreset
-        ? "Sammenligningen fant et senere reiseforslag med bedre margin eller mindre usikkerhet."
-        : "Nytt fant ikke et senere alternativ som tydelig slår valgt avreise.",
+      activeLiveNeedsCheck && recommendedLater
+        ? "Live-sjekken for valgt reise gir usikkerhet. En senere Entur-sammenligning kan gi bedre margin, men sjekk AtB/Entur før avreise."
+        : activeLiveNeedsCheck
+          ? "Valgt reise trenger ekstra sjekk i live-tavla. Andre tider er lett Entur-sammenligning, ikke full live-bekreftelse."
+          : recommendedLater
+            ? "Sammenligningen fant et senere reiseforslag med bedre margin eller mindre usikkerhet."
+            : "Nytt fant ikke et senere alternativ som tydelig slår valgt avreise.",
     recommendedPreset: recommendedOption?.preset,
     options,
   };
@@ -3631,10 +3674,30 @@ export function TrafficMapPage() {
       travelPlan,
     ],
   );
+  const travelTimeComparisonLiveCheck = useMemo(
+    () =>
+      travelTimeComparisonLiveCheckFromRouteDepartureConfidence(
+        routeDepartureConfidenceItemsForSelection,
+        routeDepartureBoardStatus,
+      ),
+    [routeDepartureBoardStatus, routeDepartureConfidenceItemsForSelection],
+  );
 
   useEffect(() => {
     loadRouteDepartureBoards(routeDepartureCheckpointsForSelection);
   }, [loadRouteDepartureBoards, routeDepartureCheckpointsForSelection]);
+
+  useEffect(() => {
+    setTravelTimeComparison((current) => {
+      if (!current.sources || !current.activePreset) return current;
+      const model = buildTravelTimeComparisonModel(
+        current.sources,
+        current.activePreset,
+        travelTimeComparisonLiveCheck,
+      );
+      return { ...current, status: model.status, model };
+    });
+  }, [travelTimeComparisonLiveCheck]);
 
   const highlightedEventIds = useMemo(() => {
     const highlightedIds = new Set<string>();
@@ -3800,8 +3863,12 @@ export function TrafficMapPage() {
     sources: TravelPlanComparisonSource[],
     activePreset: TravelPlanComparisonPreset,
   ): void {
-    const model = buildTravelTimeComparisonModel(sources, activePreset);
-    setTravelTimeComparison({ status: model.status, model });
+    const model = buildTravelTimeComparisonModel(
+      sources,
+      activePreset,
+      travelTimeComparisonLiveCheck,
+    );
+    setTravelTimeComparison({ status: model.status, model, sources, activePreset });
   }
 
   async function loadTravelPlanForInput(input: {

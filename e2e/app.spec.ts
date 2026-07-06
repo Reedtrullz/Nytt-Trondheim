@@ -3043,6 +3043,10 @@ test("traffic map checks transfer legs against live departure boards", async ({ 
   await expect(confidence).toContainText("Bytte 1: Strindheim");
   await expect(confidence).toContainText("Innstilt");
   await expect(confidence).toContainText("Buss 4");
+  const comparison = page.getByLabel("Dra nå eller vent");
+  await expect(comparison).toContainText("Vent til om 30 min kan være bedre");
+  await expect(comparison).toContainText("Live-sjekken for valgt reise gir usikkerhet");
+  await expect(comparison.getByRole("button", { name: /Om 30 min · anbefalt/ })).toBeVisible();
   expect(
     departureRequestUrls.some(
       (url) =>
