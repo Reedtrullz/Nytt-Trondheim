@@ -2142,7 +2142,10 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
   await expect(page.getByText("Munkegata, Trondheim → Leangen, Trondheim")).toBeVisible();
-  expect(travelPlanRequestUrls).toHaveLength(1);
+  await expect.poll(() => travelPlanRequestUrls.length).toBe(4);
+  expect(new Set(travelPlanRequestUrls.map((url) => url.searchParams.get("departAt"))).size).toBe(
+    4,
+  );
 });
 
 test("traffic map restores a shared route from the URL", async ({ page }) => {
@@ -2538,14 +2541,15 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(routeAssessment.getByText("Kjøretøy nær ruten", { exact: true })).toBeVisible();
   await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
   await expect(page.getByText("Beste nå")).toBeVisible();
-  await expect(
-    page.getByLabel("Planlegg reisen").getByText("Buss 3", { exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".itinerary-grid").getByText("Buss 3", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /vises på kart/i })).toBeVisible();
   await expect(page.getByText("Forsinkelse på linje 3", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
     "Sjekk dette før avreise",
   );
+  const comparison = page.getByLabel("Dra nå eller vent");
+  await expect(comparison).toContainText("Dra nå eller vent?");
+  await expect(comparison).toContainText("Om 2 timer");
   const board = page.getByRole("region", { name: /Avganger rundt/ });
   await expect(board).toContainText("Munkegata: neste avganger fra holdeplasser ved startpunktet.");
   await expect(board.getByRole("button", { name: "Startpunkt" })).toHaveAttribute(

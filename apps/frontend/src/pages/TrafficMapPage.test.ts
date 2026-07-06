@@ -27,6 +27,7 @@ vi.mock("react-leaflet", () => ({
 }));
 
 import {
+  buildTravelTimeComparisonModel,
   departureBoardContextFromPlan,
   departureBoardContextFromSuggestion,
   departureLineFilterKey,
@@ -238,6 +239,63 @@ const planWithTransfer: TravelPlanPayload = {
     },
   ],
 };
+
+function planWithTravelDuration(input: {
+  id: string;
+  departureTime: string;
+  arrivalTime: string;
+  durationSeconds: number;
+  decision?: TravelPlanPayload["itineraries"][number]["decision"];
+  transferCount?: number;
+  disruptionCount?: number;
+}): TravelPlanPayload {
+  const baseItinerary = planWithItinerary.itineraries[0]!;
+  const baseLeg = baseItinerary.legs[0]!;
+  return {
+    ...planWithItinerary,
+    itineraries: [
+      {
+        ...baseItinerary,
+        id: input.id,
+        decision: input.decision ?? "good",
+        decisionReason:
+          input.decision === "watch" ? "Nytt fant avvik som kan påvirke reisen." : "Normal reise.",
+        departureTime: input.departureTime,
+        arrivalTime: input.arrivalTime,
+        durationSeconds: input.durationSeconds,
+        transferCount: input.transferCount ?? 0,
+        disruptionCount: input.disruptionCount ?? 0,
+        legs: [
+          {
+            ...baseLeg,
+            id: `${input.id}:leg`,
+            aimedStartTime: input.departureTime,
+            expectedStartTime: input.departureTime,
+            aimedEndTime: input.arrivalTime,
+            expectedEndTime: input.arrivalTime,
+            durationSeconds: input.durationSeconds,
+            notices:
+              input.decision === "watch"
+                ? [
+                    {
+                      id: `${input.id}:notice`,
+                      title: "Forsinkelse på linja",
+                      detail: "Beregn ekstra tid.",
+                      source: "Entur avvik",
+                      severity: "medium",
+                    },
+                  ]
+                : [],
+          },
+        ],
+      },
+    ],
+    journeyPlanner: {
+      ...planWithItinerary.journeyPlanner,
+      requestedDepartureTime: input.departureTime,
+    },
+  };
+}
 
 function departureFixture(
   override: Partial<PublicTransportDeparture> = {},
@@ -722,6 +780,86 @@ describe("TrafficMapPage route overlay helpers", () => {
     expect(formatTravelDateTime("2026-07-05T20:30:00.000Z", base)).toBe("22:30");
     expect(formatTravelDateTime("2026-07-06T05:30:00.000Z", base)).toBe("i morgen 07:30");
     expect(formatTravelDateTime("2026-07-08T05:30:00.000Z", base)).toBe("8. juli 07:30");
+  });
+
+  it("recommends waiting only when a later travel window is meaningfully better", () => {
+    const nowPlan = planWithTravelDuration({
+      id: "now",
+      departureTime: "2026-06-01T09:10:00.000Z",
+      arrivalTime: "2026-06-01T09:52:00.000Z",
+      durationSeconds: 2520,
+      decision: "watch",
+      disruptionCount: 1,
+    });
+    const laterPlan = planWithTravelDuration({
+      id: "in30",
+      departureTime: "2026-06-01T09:40:00.000Z",
+      arrivalTime: "2026-06-01T09:58:00.000Z",
+      durationSeconds: 1080,
+    });
+
+    const model = buildTravelTimeComparisonModel(
+      [
+        { preset: "now", plan: nowPlan },
+        { preset: "in30", plan: laterPlan },
+      ],
+      "now",
+    );
+
+    expect(model.recommendedPreset).toBe("in30");
+    expect(model.heading).toContain("Vent til om 30 min");
+    expect(model.options.find((option) => option.preset === "in30")).toMatchObject({
+      recommended: true,
+      severity: "ok",
+      durationLabel: "18 min",
+    });
+  });
+
+  it("keeps the chosen travel window when later options are only marginally different", () => {
+    const nowPlan = planWithTravelDuration({
+      id: "now",
+      departureTime: "2026-06-01T09:10:00.000Z",
+      arrivalTime: "2026-06-01T09:29:00.000Z",
+      durationSeconds: 1140,
+    });
+    const laterPlan = planWithTravelDuration({
+      id: "in30",
+      departureTime: "2026-06-01T09:40:00.000Z",
+      arrivalTime: "2026-06-01T09:56:00.000Z",
+      durationSeconds: 960,
+    });
+
+    const model = buildTravelTimeComparisonModel(
+      [
+        { preset: "now", plan: nowPlan },
+        { preset: "in30", plan: laterPlan },
+      ],
+      "now",
+    );
+
+    expect(model.recommendedPreset).toBe("now");
+    expect(model.heading).toBe("Dra nå ser best ut");
+    expect(model.options.find((option) => option.preset === "now")).toMatchObject({
+      recommended: true,
+      active: true,
+    });
+  });
+
+  it("keeps partial comparison rows when one travel window fails", () => {
+    const model = buildTravelTimeComparisonModel(
+      [
+        { preset: "now", plan: planWithItinerary },
+        { preset: "in30", error: "Entur svarte ikke." },
+      ],
+      "now",
+    );
+
+    expect(model.status).toBe("partial");
+    expect(model.options.find((option) => option.preset === "in30")).toMatchObject({
+      status: "error",
+      severity: "warning",
+      detail: "Entur svarte ikke.",
+    });
   });
 
   it("turns route impacts and transit alerts into a travel decision", () => {

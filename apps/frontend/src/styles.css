@@ -10417,6 +10417,140 @@ button {
   border-left: 3px solid var(--terracotta);
 }
 
+.travel-time-comparison {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+  background: #fbfbf8;
+}
+
+.travel-time-comparison-ready {
+  border-left-color: var(--green);
+}
+
+.travel-time-comparison-partial,
+.travel-time-comparison-loading {
+  border-left-color: var(--amber);
+}
+
+.travel-time-comparison-error {
+  border-left-color: var(--terracotta);
+  background: #fff8f3;
+}
+
+.travel-time-comparison header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.travel-time-comparison header div {
+  min-width: 0;
+}
+
+.travel-time-comparison header h3 {
+  margin: 2px 0 0;
+  font: 20px/1.05 var(--serif);
+  letter-spacing: 0;
+}
+
+.travel-time-comparison header p:not(.label),
+.travel-time-comparison footer,
+.travel-time-option small,
+.travel-time-option em {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.travel-time-comparison header p:not(.label) {
+  margin: 4px 0 0;
+}
+
+.travel-time-comparison header > span {
+  flex: 0 1 auto;
+  max-width: 190px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  color: var(--green);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.travel-time-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.travel-time-option {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px;
+  color: inherit;
+  border: 1px solid var(--line);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.travel-time-option:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.travel-time-option.active {
+  outline: 2px solid color-mix(in srgb, var(--blue) 34%, transparent);
+  outline-offset: -2px;
+}
+
+.travel-time-option.recommended {
+  border-color: color-mix(in srgb, var(--green) 44%, var(--line));
+  background: color-mix(in srgb, #fff 90%, var(--green) 10%);
+}
+
+.travel-time-option-watch {
+  border-left: 3px solid var(--amber);
+}
+
+.travel-time-option-warning {
+  border-left: 3px solid var(--terracotta);
+}
+
+.travel-time-option span {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.travel-time-option strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.travel-time-option small,
+.travel-time-option em,
+.travel-time-option strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.travel-time-option em {
+  font-style: normal;
+  font-weight: 750;
+}
+
 .travel-plan-disclaimer {
   margin-top: 14px;
   padding-top: 12px;
@@ -13053,6 +13187,15 @@ button {
 
   .travel-plan-decision-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .travel-time-comparison header {
+    display: grid;
+  }
+
+  .travel-time-comparison header > span {
+    max-width: 100%;
+    text-align: left;
   }
 
   .travel-plan-card {
