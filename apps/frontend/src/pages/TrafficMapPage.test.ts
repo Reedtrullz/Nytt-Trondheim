@@ -34,6 +34,9 @@ import {
   departureTimeForPreset,
   displayDepartureRows,
   formatTravelDateTime,
+  routeDepartureCheckpoints,
+  routeDepartureConfidenceItems,
+  routeDepartureConfidenceSummary,
   routePositions,
   selectedDepartureMatch,
   selectedDepartureStatus,
@@ -186,6 +189,52 @@ const departureBoard: PublicTransportDepartureBoardPayload = {
   handoffUrl: "https://www.atb.no/reiseplanlegger/",
 };
 
+const planWithTransfer: TravelPlanPayload = {
+  ...planWithItinerary,
+  itineraries: [
+    {
+      ...planWithItinerary.itineraries[0]!,
+      id: "itinerary-transfer",
+      arrivalTime: "2026-06-01T09:34:00.000Z",
+      durationSeconds: 1440,
+      transferCount: 1,
+      legs: [
+        planWithItinerary.itineraries[0]!.legs[0]!,
+        {
+          ...planWithItinerary.itineraries[0]!.legs[0]!,
+          id: "leg-bus-4",
+          from: {
+            name: "Strindheim",
+            stopName: "Strindheim",
+            stopId: "NSR:StopPlace:41000",
+            coordinate: [10.447, 63.433],
+          },
+          to: {
+            name: "Lade",
+            stopName: "Lade",
+            coordinate: [10.465, 63.444],
+          },
+          aimedStartTime: "2026-06-01T09:20:00.000Z",
+          expectedStartTime: "2026-06-01T09:20:00.000Z",
+          aimedEndTime: "2026-06-01T09:34:00.000Z",
+          expectedEndTime: "2026-06-01T09:34:00.000Z",
+          lineId: "ATB:Line:4",
+          publicCode: "4",
+          lineName: "Strindheim - Lade",
+          serviceJourneyId: "ATB:ServiceJourney:4",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.447, 63.433],
+              [10.465, 63.444],
+            ],
+          },
+        },
+      ],
+    },
+  ],
+};
+
 function departureFixture(
   override: Partial<PublicTransportDeparture> = {},
 ): PublicTransportDeparture {
@@ -283,6 +332,89 @@ describe("TrafficMapPage route overlay helpers", () => {
         activeFilterKey: lineKey,
       }).map((departure) => departure.id),
     ).toEqual(["departure:3"]);
+  });
+
+  it("builds route departure checkpoints for start and transfer boardings", () => {
+    expect(routeDepartureCheckpoints(planWithTransfer, "itinerary-transfer")).toMatchObject([
+      {
+        id: "itinerary-transfer:leg-bus-3:0",
+        index: 0,
+        label: "Start: Munkegata",
+        context: {
+          scope: "origin",
+          label: "Munkegata",
+          center: { lat: 63.4305, lon: 10.3951 },
+          startTime: "2026-06-01T09:10:00.000Z",
+        },
+      },
+      {
+        id: "itinerary-transfer:leg-bus-4:1",
+        index: 1,
+        label: "Bytte 1: Strindheim",
+        context: {
+          scope: "origin",
+          label: "Strindheim",
+          center: { lat: 63.433, lon: 10.447 },
+          startTime: "2026-06-01T09:20:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("summarizes transfer confidence when a later boarding is cancelled", () => {
+    const checkpoints = routeDepartureCheckpoints(planWithTransfer, "itinerary-transfer");
+    const items = routeDepartureConfidenceItems(checkpoints, [
+      { checkpointId: checkpoints[0]!.id, board: departureBoard },
+      {
+        checkpointId: checkpoints[1]!.id,
+        board: {
+          ...departureBoard,
+          areaLabel: "Strindheim",
+          center: { lat: 63.433, lon: 10.447 },
+          departures: [
+            departureFixture({
+              id: "departure:4",
+              stopId: "NSR:StopPlace:41000",
+              stopName: "Strindheim",
+              lineId: "ATB:Line:4",
+              publicCode: "4",
+              lineName: "Strindheim - Lade",
+              serviceJourneyId: "ATB:ServiceJourney:4",
+              destinationName: "Lade",
+              aimedDepartureTime: "2026-06-01T09:20:00.000Z",
+              expectedDepartureTime: "2026-06-01T09:20:00.000Z",
+              cancelled: true,
+            }),
+          ],
+        },
+      },
+    ]);
+
+    expect(items.map((item) => item.status.label)).toEqual(["Sanntid", "Innstilt"]);
+    expect(routeDepartureConfidenceSummary(items, "ready")).toEqual({
+      heading: "Sjekk byttene før du drar",
+      detail: "1 av 2 boardingpunkt trenger kontroll hos AtB/Entur før avreise.",
+      severity: "warning",
+    });
+  });
+
+  it("treats failed transfer-board reads as check-before-leaving states", () => {
+    const checkpoints = routeDepartureCheckpoints(planWithTransfer, "itinerary-transfer");
+    const items = routeDepartureConfidenceItems(checkpoints, [
+      { checkpointId: checkpoints[0]!.id, board: departureBoard },
+      { checkpointId: checkpoints[1]!.id, error: "Entur svarte ikke." },
+    ]);
+
+    expect(items[1]?.status).toEqual({
+      label: "Sjekk AtB/Entur",
+      detail:
+        "Klarte ikke hente live-tavla for bytte 1: strindheim. Sjekk avgang og plattform hos AtB/Entur.",
+      severity: "warning",
+    });
+    expect(routeDepartureConfidenceSummary(items, "partial")).toMatchObject({
+      heading: "Sjekk byttene før du drar",
+      severity: "warning",
+    });
   });
 
   it("keeps the matched itinerary departure visible when it falls outside the first rows", () => {

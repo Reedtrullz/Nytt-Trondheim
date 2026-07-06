@@ -9365,6 +9365,7 @@ button {
 .traffic-filter-panel,
 .traffic-brief-card,
 .travel-planner-panel,
+.route-departure-confidence,
 .departure-board-panel,
 .travel-plan-card,
 .traffic-event-list-card,
@@ -9377,6 +9378,7 @@ button {
 
 .traffic-filter-panel h2,
 .traffic-brief-card h2,
+.route-departure-confidence h2,
 .departure-board-panel h2,
 .travel-planner-panel h1,
 .travel-plan-card h2,
@@ -9457,6 +9459,136 @@ button {
 
 .travel-planner-result {
   min-width: 0;
+}
+
+.route-departure-confidence {
+  display: grid;
+  gap: 12px;
+  border-left: 5px solid var(--blue);
+}
+
+.route-departure-confidence-ok {
+  border-left-color: var(--green);
+}
+
+.route-departure-confidence-warning {
+  border-left-color: var(--terracotta);
+}
+
+.route-departure-confidence > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.route-departure-confidence h2 {
+  font-size: 30px;
+}
+
+.route-departure-confidence p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.route-departure-confidence > header > span {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  color: var(--green);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.route-departure-confidence-watch > header > span {
+  color: var(--blue);
+}
+
+.route-departure-confidence-warning > header > span {
+  color: var(--terracotta);
+}
+
+.route-departure-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.route-departure-check {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.route-departure-check strong,
+.route-departure-check span,
+.route-departure-check p {
+  min-width: 0;
+}
+
+.route-departure-check strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.route-departure-check span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.route-departure-check > div:last-of-type {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+}
+
+.route-departure-check-state {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
+  color: var(--green) !important;
+  background: #fff;
+  font-size: 11px !important;
+  font-weight: 850;
+}
+
+.route-departure-check-watch .route-departure-check-state {
+  color: var(--blue) !important;
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+}
+
+.route-departure-check-warning .route-departure-check-state {
+  color: var(--terracotta) !important;
+  border-color: color-mix(in srgb, var(--terracotta) 45%, var(--line));
+  background: #fff8f3;
+}
+
+.route-departure-check time {
+  font: 23px/1 var(--serif);
+}
+
+.route-departure-check p {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+
+.route-departure-confidence footer {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .departure-board-panel {
@@ -11857,6 +11989,7 @@ button {
 
   .traffic-workspace,
   .travel-planner-panel,
+  .route-departure-confidence,
   .departure-board-panel,
   .travel-planner-workbench,
   .traffic-bottom-panel {
@@ -12753,22 +12886,44 @@ button {
     gap: 14px;
   }
 
-  .departure-board-panel {
+  .route-departure-confidence {
     order: 2;
     padding: 14px;
   }
 
+  .departure-board-panel {
+    order: 3;
+    padding: 14px;
+  }
+
+  .route-departure-confidence > header,
   .departure-board-panel > header,
   .departure-row {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .route-departure-confidence > header,
   .departure-board-panel > header {
     display: grid;
   }
 
+  .route-departure-checks,
   .departure-board-actions {
+    grid-template-columns: minmax(0, 1fr);
     justify-content: flex-start;
+  }
+
+  .route-departure-checks {
+    display: grid;
+  }
+
+  .route-departure-check {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .route-departure-check > div:last-of-type {
+    justify-items: start;
+    text-align: left;
   }
 
   .selected-departure-callout {

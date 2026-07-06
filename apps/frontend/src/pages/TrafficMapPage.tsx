@@ -96,6 +96,35 @@ interface SelectedDepartureStatus {
   severity: SelectedDepartureStatusSeverity;
 }
 
+export type RouteDepartureBoardStatus = "idle" | "loading" | "ready" | "partial" | "error";
+
+export interface RouteDepartureCheckpoint {
+  id: string;
+  leg: TravelPlanLeg;
+  index: number;
+  label: string;
+  context: DepartureBoardContext;
+}
+
+export interface RouteDepartureBoardResult {
+  checkpointId: string;
+  board?: PublicTransportDepartureBoardPayload;
+  error?: string;
+}
+
+export interface RouteDepartureConfidenceItem {
+  checkpoint: RouteDepartureCheckpoint;
+  departure?: PublicTransportDeparture;
+  status: SelectedDepartureStatus;
+  board?: PublicTransportDepartureBoardPayload;
+}
+
+export interface RouteDepartureConfidenceSummary {
+  heading: string;
+  detail: string;
+  severity: SelectedDepartureStatusSeverity;
+}
+
 export interface DepartureLineFilterOption {
   key: string;
   label: string;
@@ -444,11 +473,17 @@ function transitTextMatches(left?: string, right?: string): boolean {
   return normalisedLeft === normalisedRight || normalisedLeft.includes(normalisedRight);
 }
 
+function isBoardingLeg(leg: TravelPlanLeg): boolean {
+  if (leg.mode === "walk") return false;
+  return Boolean(leg.publicCode || leg.lineId || leg.from.stopId || leg.from.stopName);
+}
+
+function boardingLegsForItinerary(itinerary?: TravelPlanItinerary): TravelPlanLeg[] {
+  return itinerary?.legs.filter(isBoardingLeg) ?? [];
+}
+
 function firstBoardingLeg(itinerary?: TravelPlanItinerary): TravelPlanLeg | undefined {
-  return itinerary?.legs.find((leg) => {
-    if (leg.mode === "walk") return false;
-    return Boolean(leg.publicCode || leg.lineId || leg.from.stopId || leg.from.stopName);
-  });
+  return boardingLegsForItinerary(itinerary)[0];
 }
 
 function legDepartureTime(leg?: TravelPlanLeg): string | undefined {
@@ -497,13 +532,10 @@ function scoreDepartureForLeg(departure: PublicTransportDeparture, leg: TravelPl
   return score;
 }
 
-export function selectedDepartureMatch(
-  plan?: TravelPlanPayload,
-  selectedItineraryId?: string,
+function selectedDepartureForLeg(
+  leg: TravelPlanLeg,
   board?: PublicTransportDepartureBoardPayload,
-): SelectedDepartureMatch | undefined {
-  const leg = firstBoardingLeg(selectedItineraryForPlan(plan, selectedItineraryId));
-  if (!leg) return undefined;
+): PublicTransportDeparture | undefined {
   let best: PublicTransportDeparture | undefined;
   let bestScore = 0;
   for (const departure of board?.departures ?? []) {
@@ -513,9 +545,118 @@ export function selectedDepartureMatch(
       bestScore = score;
     }
   }
+  return bestScore >= 7 ? best : undefined;
+}
+
+export function selectedDepartureMatch(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+  board?: PublicTransportDepartureBoardPayload,
+): SelectedDepartureMatch | undefined {
+  const leg = firstBoardingLeg(selectedItineraryForPlan(plan, selectedItineraryId));
+  if (!leg) return undefined;
   return {
     leg,
-    departure: bestScore >= 7 ? best : undefined,
+    departure: selectedDepartureForLeg(leg, board),
+  };
+}
+
+export function routeDepartureCheckpoints(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+  limit = 3,
+): RouteDepartureCheckpoint[] {
+  const itinerary = selectedItineraryForPlan(plan, selectedItineraryId);
+  if (!itinerary) return [];
+  return boardingLegsForItinerary(itinerary)
+    .slice(0, limit)
+    .flatMap((leg, index) => {
+      const [lon, lat] = leg.from.coordinate;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+      const stopLabel = legStopLabel(leg);
+      return [
+        {
+          id: `${itinerary.id}:${leg.id}:${index}`,
+          leg,
+          index,
+          label: index === 0 ? `Start: ${stopLabel}` : `Bytte ${index}: ${stopLabel}`,
+          context: {
+            scope: "origin",
+            label: stopLabel,
+            center: { lat, lon },
+            ...(legDepartureTime(leg) ? { startTime: legDepartureTime(leg) } : {}),
+          },
+        },
+      ];
+    });
+}
+
+export function routeDepartureConfidenceItems(
+  checkpoints: RouteDepartureCheckpoint[],
+  results: RouteDepartureBoardResult[],
+): RouteDepartureConfidenceItem[] {
+  const resultByCheckpoint = new Map(results.map((result) => [result.checkpointId, result]));
+  return checkpoints.map((checkpoint) => {
+    const result = resultByCheckpoint.get(checkpoint.id);
+    if (result?.error) {
+      return {
+        checkpoint,
+        status: {
+          label: "Sjekk AtB/Entur",
+          detail: `Klarte ikke hente live-tavla for ${checkpoint.label.toLowerCase()}. Sjekk avgang og plattform hos AtB/Entur.`,
+          severity: "warning",
+        },
+        board: result.board,
+      };
+    }
+    const departure = selectedDepartureForLeg(checkpoint.leg, result?.board);
+    return {
+      checkpoint,
+      departure,
+      status: selectedDepartureStatus(departure, checkpoint.leg, result?.board),
+      board: result?.board,
+    };
+  });
+}
+
+export function routeDepartureConfidenceSummary(
+  items: RouteDepartureConfidenceItem[],
+  fetchStatus: RouteDepartureBoardStatus,
+): RouteDepartureConfidenceSummary {
+  if (!items.length) {
+    return {
+      heading: "Reisekontroll",
+      detail: "Ingen kollektivbein valgt ennå.",
+      severity: "watch",
+    };
+  }
+  if (fetchStatus === "loading") {
+    return {
+      heading: "Sjekker bytter",
+      detail: "Henter live-tavler for start og byttepunkter i valgt reiseforslag.",
+      severity: "watch",
+    };
+  }
+  const warningCount = items.filter((item) => item.status.severity === "warning").length;
+  const watchCount = items.filter((item) => item.status.severity === "watch").length;
+  if (fetchStatus === "error" || warningCount > 0) {
+    return {
+      heading: "Sjekk byttene før du drar",
+      detail: `${warningCount || items.length} av ${items.length} boardingpunkt trenger kontroll hos AtB/Entur før avreise.`,
+      severity: "warning",
+    };
+  }
+  if (fetchStatus === "partial" || watchCount > 0) {
+    return {
+      heading: "Følg med på byttene",
+      detail: `${watchCount || 1} av ${items.length} boardingpunkt er ikke entydig live-bekreftet.`,
+      severity: "watch",
+    };
+  }
+  return {
+    heading: "Reisen er live-sjekket",
+    detail: `Alle ${items.length} boardingpunkt matcher live- eller rutetavla akkurat nå.`,
+    severity: "ok",
   };
 }
 
@@ -1239,6 +1380,67 @@ function departureBoardHeading(context: DepartureBoardContext): string {
     : "Avganger nå";
 }
 
+function RouteDepartureConfidencePanel({
+  checkpoints,
+  results,
+  fetchStatus,
+}: {
+  checkpoints: RouteDepartureCheckpoint[];
+  results: RouteDepartureBoardResult[];
+  fetchStatus: RouteDepartureBoardStatus;
+}) {
+  if (checkpoints.length <= 1) return null;
+  const items = routeDepartureConfidenceItems(checkpoints, results);
+  const summary = routeDepartureConfidenceSummary(items, fetchStatus);
+  return (
+    <section
+      className={`route-departure-confidence route-departure-confidence-${summary.severity}`}
+      aria-labelledby="route-departure-confidence-heading"
+    >
+      <header>
+        <div>
+          <p className="label">Reisekontroll</p>
+          <h2 id="route-departure-confidence-heading">{summary.heading}</h2>
+          <p>{summary.detail}</p>
+        </div>
+        <span>{fetchStatus === "loading" ? "Henter" : `${items.length} stopp`}</span>
+      </header>
+      <div className="route-departure-checks">
+        {items.map((item) => {
+          const plannedTime = legDepartureTime(item.checkpoint.leg);
+          return (
+            <article
+              key={item.checkpoint.id}
+              className={`route-departure-check route-departure-check-${item.status.severity}`}
+            >
+              <div>
+                <strong>{item.checkpoint.label}</strong>
+                <span>
+                  {legLineLabel(item.checkpoint.leg)}
+                  {plannedTime ? ` · ${formatTravelDateTime(plannedTime)}` : ""}
+                </span>
+              </div>
+              <div>
+                <span className="route-departure-check-state">{item.status.label}</span>
+                {item.departure ? (
+                  <time dateTime={item.departure.expectedDepartureTime}>
+                    {formatTravelDateTime(item.departure.expectedDepartureTime)}
+                  </time>
+                ) : null}
+              </div>
+              <p>{item.status.detail}</p>
+            </article>
+          );
+        })}
+      </div>
+      <footer>
+        Nytt sjekker start og bytter mot live-tavler. AtB/Entur er fortsatt fasit for avgang og
+        plattform.
+      </footer>
+    </section>
+  );
+}
+
 function DepartureBoardPanel({
   board,
   loading,
@@ -1829,9 +2031,13 @@ export function TrafficMapPage() {
   );
   const [departureBoardLoading, setDepartureBoardLoading] = useState(false);
   const [departureBoardError, setDepartureBoardError] = useState<string>();
+  const [routeDepartureBoards, setRouteDepartureBoards] = useState<RouteDepartureBoardResult[]>([]);
+  const [routeDepartureBoardStatus, setRouteDepartureBoardStatus] =
+    useState<RouteDepartureBoardStatus>("idle");
   const travelPlanRequestIdRef = useRef(0);
   const travelPlanAbortRef = useRef<AbortController | undefined>(undefined);
   const departureBoardAbortRef = useRef<AbortController | undefined>(undefined);
+  const routeDepartureBoardsAbortRef = useRef<AbortController | undefined>(undefined);
 
   const loadDepartureBoard = useCallback((context: DepartureBoardContext) => {
     departureBoardAbortRef.current?.abort();
@@ -1873,11 +2079,72 @@ export function TrafficMapPage() {
     loadDepartureBoard(departureBoardContext);
   }, [departureBoardContext, loadDepartureBoard]);
 
+  const loadRouteDepartureBoards = useCallback((checkpoints: RouteDepartureCheckpoint[]) => {
+    routeDepartureBoardsAbortRef.current?.abort();
+    if (checkpoints.length <= 1) {
+      routeDepartureBoardsAbortRef.current = undefined;
+      setRouteDepartureBoards([]);
+      setRouteDepartureBoardStatus("idle");
+      return;
+    }
+
+    const controller = new AbortController();
+    routeDepartureBoardsAbortRef.current = controller;
+    setRouteDepartureBoards([]);
+    setRouteDepartureBoardStatus("loading");
+    Promise.allSettled(
+      checkpoints.map(async (checkpoint) => ({
+        checkpointId: checkpoint.id,
+        board: await fetchPublicTransportDepartureBoard(
+          {
+            center: checkpoint.context.center,
+            radiusMeters: 900,
+            stopLimit: 3,
+            departureLimit: 8,
+            startTime: checkpoint.context.startTime,
+          },
+          { signal: controller.signal },
+        ),
+      })),
+    )
+      .then((settled) => {
+        if (routeDepartureBoardsAbortRef.current !== controller) return;
+        const results: RouteDepartureBoardResult[] = settled.map((result, index) => {
+          const checkpoint = checkpoints[index];
+          if (!checkpoint) {
+            return {
+              checkpointId: `unknown:${index}`,
+              error: "Ukjent byttepunkt.",
+            };
+          }
+          if (result.status === "fulfilled") return result.value;
+          return {
+            checkpointId: checkpoint.id,
+            error:
+              result.reason instanceof Error
+                ? result.reason.message
+                : "Kunne ikke hente live-tavla.",
+          };
+        });
+        const failures = results.filter((result) => result.error).length;
+        setRouteDepartureBoards(results);
+        setRouteDepartureBoardStatus(
+          failures === 0 ? "ready" : failures === results.length ? "error" : "partial",
+        );
+      })
+      .finally(() => {
+        if (routeDepartureBoardsAbortRef.current === controller) {
+          routeDepartureBoardsAbortRef.current = undefined;
+        }
+      });
+  }, []);
+
   useEffect(() => {
     loadDepartureBoard(defaultDepartureBoardContext);
     return () => {
       travelPlanAbortRef.current?.abort();
       departureBoardAbortRef.current?.abort();
+      routeDepartureBoardsAbortRef.current?.abort();
     };
   }, [loadDepartureBoard]);
 
@@ -1895,8 +2162,12 @@ export function TrafficMapPage() {
     travelPlanRequestIdRef.current = requestId;
     travelPlanAbortRef.current?.abort();
     travelPlanAbortRef.current = undefined;
+    routeDepartureBoardsAbortRef.current?.abort();
+    routeDepartureBoardsAbortRef.current = undefined;
     setTravelPlan(undefined);
     setSelectedItineraryId(undefined);
+    setRouteDepartureBoards([]);
+    setRouteDepartureBoardStatus("idle");
     setTravelPlanLoading(false);
     if (options.resetDepartureBoard) {
       loadDepartureBoard(defaultDepartureBoardContext);
@@ -2098,10 +2369,18 @@ export function TrafficMapPage() {
     () => departureBoardContextFromPlan(travelPlan, selectedItineraryId),
     [selectedItineraryId, travelPlan],
   );
+  const routeDepartureCheckpointsForSelection = useMemo(
+    () => routeDepartureCheckpoints(travelPlan, selectedItineraryId),
+    [selectedItineraryId, travelPlan],
+  );
   const selectedDeparture = useMemo(
     () => selectedDepartureMatch(travelPlan, selectedItineraryId, departureBoard),
     [departureBoard, selectedItineraryId, travelPlan],
   );
+
+  useEffect(() => {
+    loadRouteDepartureBoards(routeDepartureCheckpointsForSelection);
+  }, [loadRouteDepartureBoards, routeDepartureCheckpointsForSelection]);
 
   const highlightedEventIds = useMemo(() => {
     const highlightedIds = new Set<string>();
@@ -2345,6 +2624,11 @@ export function TrafficMapPage() {
         onSubmit={(event) => void handleTravelPlanSubmit(event)}
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}
+      />
+      <RouteDepartureConfidencePanel
+        checkpoints={routeDepartureCheckpointsForSelection}
+        results={routeDepartureBoards}
+        fetchStatus={routeDepartureBoardStatus}
       />
       <DepartureBoardPanel
         board={departureBoard}
