@@ -2145,6 +2145,76 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   expect(travelPlanRequestUrls).toHaveLength(1);
 });
 
+test("traffic map restores a shared route from the URL", async ({ page }) => {
+  const travelPlanRequestUrls: URL[] = [];
+  await page.route("**/api/map/travel-plan?**", async (route) => {
+    const url = new URL(route.request().url());
+    travelPlanRequestUrls.push(url);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        origin: {
+          query: "Munkegata",
+          label: "Munkegata",
+          coordinate: [10.3951, 63.4305],
+        },
+        destination: {
+          query: "Lade Arena",
+          label: "Lade Arena",
+          coordinate: [10.464, 63.433],
+        },
+        route: {
+          source: "direct",
+          distanceMeters: 4850,
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.3951, 63.4305],
+              [10.464, 63.433],
+            ],
+          },
+          detail: "Direkte korridor.",
+        },
+        trafficImpacts: [],
+        publicTransportSuggestions: [
+          {
+            id: "atb-entur-planner",
+            kind: "planning_link",
+            title: "Sjekk avganger hos AtB/Entur",
+            detail:
+              "Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for konkrete avganger og billetter.",
+            source: "AtB/Entur",
+            href: "https://www.atb.no/reiseplanlegger/",
+          },
+        ],
+        itineraries: [],
+        journeyPlanner: {
+          status: "empty",
+          detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+          requestedDepartureTime: "2026-07-05T16:20:00.000Z",
+          source: "Entur Journey Planner",
+        },
+        sources: [],
+        generatedAt: "2026-07-05T16:20:00.000Z",
+      }),
+    });
+  });
+
+  await page.goto("/trafikk?fra=Munkegata&til=Lade+Arena&tid=in30&preset=severe");
+
+  await expect(page.getByLabel("Hvor er du?")).toHaveValue("Munkegata");
+  await expect(page.getByLabel("Hvor skal du?")).toHaveValue("Lade Arena");
+  await expect(page.getByLabel("Når?")).toHaveValue("in30");
+  await expect(
+    page.getByRole("heading", { name: "Ingen konkrete Entur-reiser funnet" }),
+  ).toBeVisible();
+  await expect.poll(() => travelPlanRequestUrls.length).toBeGreaterThan(0);
+  expect(travelPlanRequestUrls.at(-1)?.searchParams.get("from")).toBe("Munkegata");
+  expect(travelPlanRequestUrls.at(-1)?.searchParams.get("to")).toBe("Lade Arena");
+  await expect(page).toHaveURL(/fra=Munkegata/);
+});
+
 test("traffic map can use browser location as the route origin and nearby stop board", async ({
   page,
   context,

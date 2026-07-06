@@ -34,6 +34,9 @@ import {
   departureTimeForPreset,
   displayDepartureRows,
   formatTravelDateTime,
+  mergeTrafficFilterSearch,
+  mergeTravelPlannerSearch,
+  parseTravelPlannerSearch,
   routeDepartureCheckpoints,
   routeDepartureConfidenceItems,
   routeDepartureConfidenceSummary,
@@ -245,6 +248,59 @@ function departureFixture(
 }
 
 describe("TrafficMapPage route overlay helpers", () => {
+  it("restores a submitted travel plan from the URL", () => {
+    expect(
+      parseTravelPlannerSearch("preset=next24h&fra=%20Munkegata%20&til=Lade+Arena&tid=in30"),
+    ).toEqual({
+      originInput: "Munkegata",
+      destinationInput: "Lade Arena",
+      timePreset: "in30",
+      shouldAutoSubmit: true,
+    });
+  });
+
+  it("keeps map filters and submitted travel plan params separate", () => {
+    const withTravel = mergeTravelPlannerSearch("preset=next24h", {
+      originInput: "Munkegata",
+      destinationInput: "Lade Arena",
+      timePreset: "tomorrow_morning",
+    });
+
+    expect(withTravel).toBe("preset=next24h&fra=Munkegata&til=Lade+Arena&tid=tomorrow_morning");
+
+    const withSevereFilter = mergeTrafficFilterSearch(withTravel, {
+      preset: "severe",
+      categories: [
+        "roadworks",
+        "accident",
+        "closure",
+        "congestion",
+        "weather",
+        "restriction",
+        "obstruction",
+        "other",
+      ],
+      severities: ["high", "critical"],
+      layers: {
+        incidents: true,
+        roadworks: true,
+        travelTime: true,
+        publicTransportDisruptions: true,
+        publicTransportVehicles: false,
+        weatherRisk: false,
+        estimatedNews: true,
+        privateNotes: false,
+        showAll: false,
+      },
+    });
+    const params = new URLSearchParams(withSevereFilter);
+
+    expect(params.get("fra")).toBe("Munkegata");
+    expect(params.get("til")).toBe("Lade Arena");
+    expect(params.get("tid")).toBe("tomorrow_morning");
+    expect(params.get("preset")).toBe("severe");
+  });
+
   it("keeps the default now preset scoped to active incidents", () => {
     expect(timeWindowForPreset("now")).toEqual({ states: ["active"] });
   });

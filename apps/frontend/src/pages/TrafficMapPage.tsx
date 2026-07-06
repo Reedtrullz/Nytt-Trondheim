@@ -301,6 +301,13 @@ interface DestinationPreset {
   query: string;
 }
 
+interface TravelPlannerSearchState {
+  originInput: string;
+  destinationInput: string;
+  timePreset: TravelTimePreset;
+  shouldAutoSubmit: boolean;
+}
+
 const destinationPresets: DestinationPreset[] = [
   { label: "Trondheim S", query: "Trondheim S" },
   { label: "St. Olavs", query: "St. Olavs hospital" },
@@ -310,6 +317,63 @@ const destinationPresets: DestinationPreset[] = [
   { label: "Heimdal", query: "Heimdal stasjon" },
   { label: "Værnes", query: "Trondheim lufthavn Værnes" },
 ];
+
+const travelTimePresets: TravelTimePreset[] = ["now", "in30", "tomorrow_morning"];
+const travelTimePresetSet = new Set<string>(travelTimePresets);
+const trafficFilterSearchKeys = ["preset", "category", "severity", "layers"] as const;
+const travelPlannerSearchKeys = ["fra", "til", "tid"] as const;
+
+function cleanTravelSearchText(value: string | null): string {
+  return (value ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function travelTimePresetFromSearch(value: string | null): TravelTimePreset {
+  return travelTimePresetSet.has(value ?? "") ? (value as TravelTimePreset) : "now";
+}
+
+export function parseTravelPlannerSearch(search: string): TravelPlannerSearchState {
+  const params = new URLSearchParams(search);
+  const originInput = cleanTravelSearchText(params.get("fra"));
+  const destinationInput = cleanTravelSearchText(params.get("til"));
+  return {
+    originInput,
+    destinationInput,
+    timePreset: travelTimePresetFromSearch(params.get("tid")),
+    shouldAutoSubmit: Boolean(originInput && destinationInput),
+  };
+}
+
+export function mergeTrafficFilterSearch(search: string, filters: TrafficMapFilters): string {
+  const next = new URLSearchParams(search);
+  trafficFilterSearchKeys.forEach((key) => next.delete(key));
+  const filterParams = new URLSearchParams(buildTrafficMapSearch(filters));
+  for (const [key, value] of filterParams.entries()) {
+    next.set(key, value);
+  }
+  return next.toString();
+}
+
+export function mergeTravelPlannerSearch(
+  search: string,
+  input?: {
+    originInput: string;
+    destinationInput: string;
+    timePreset: TravelTimePreset;
+  },
+): string {
+  const next = new URLSearchParams(search);
+  travelPlannerSearchKeys.forEach((key) => next.delete(key));
+  const originInput = cleanTravelSearchText(input?.originInput ?? null);
+  const destinationInput = cleanTravelSearchText(input?.destinationInput ?? null);
+  if (originInput && destinationInput) {
+    next.set("fra", originInput);
+    next.set("til", destinationInput);
+    if (input?.timePreset && input.timePreset !== "now") {
+      next.set("tid", input.timePreset);
+    }
+  }
+  return next.toString();
+}
 
 export function departureTimeForPreset(preset: TravelTimePreset, base = new Date()): string {
   if (preset === "in30") return new Date(base.getTime() + 30 * 60 * 1000).toISOString();
@@ -1999,6 +2063,14 @@ export function TrafficMapPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const trafficSearch = searchParams.toString();
   const trafficFilters = useMemo(() => parseTrafficMapFilters(trafficSearch), [trafficSearch]);
+  const initialTravelSearchRef = useRef<TravelPlannerSearchState | undefined>(undefined);
+  if (!initialTravelSearchRef.current) {
+    initialTravelSearchRef.current = parseTravelPlannerSearch(trafficSearch);
+  }
+  const initialTravelSearch = initialTravelSearchRef.current;
+  const [autoTravelSearchPending, setAutoTravelSearchPending] = useState(
+    () => initialTravelSearch.shouldAutoSubmit,
+  );
   const [bounds, setBounds] = useState<MapBounds>();
   const [selectedPreset, setSelectedPreset] = useState<TrafficMapPreset>(
     () => trafficFilters.preset,
@@ -2013,12 +2085,16 @@ export function TrafficMapPage() {
     trafficFilters.layers,
   );
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
-  const [originInput, setOriginInput] = useState("");
-  const [destinationInput, setDestinationInput] = useState("");
+  const [originInput, setOriginInput] = useState(() => initialTravelSearch.originInput);
+  const [destinationInput, setDestinationInput] = useState(
+    () => initialTravelSearch.destinationInput,
+  );
   const [selectedOriginSuggestion, setSelectedOriginSuggestion] = useState<TravelPlaceSuggestion>();
   const [selectedDestinationSuggestion, setSelectedDestinationSuggestion] =
     useState<TravelPlaceSuggestion>();
-  const [timePreset, setTimePreset] = useState<TravelTimePreset>("now");
+  const [timePreset, setTimePreset] = useState<TravelTimePreset>(
+    () => initialTravelSearch.timePreset,
+  );
   const [locationStatus, setLocationStatus] = useState<LocationRequestStatus>("idle");
   const [locationMessage, setLocationMessage] = useState<string>();
   const [travelPlan, setTravelPlan] = useState<TravelPlanPayload>();
@@ -2175,11 +2251,21 @@ export function TrafficMapPage() {
     return requestId;
   }
 
+  function updateTravelSearchParams(input?: {
+    originInput: string;
+    destinationInput: string;
+    timePreset: TravelTimePreset;
+  }): void {
+    const next = mergeTravelPlannerSearch(searchParams.toString(), input);
+    setSearchParams(next, { replace: true });
+  }
+
   function handleTravelInputChange(value: string, setter: (nextValue: string) => void): void {
     setter(value);
     setTravelPlanError(undefined);
     if (travelPlanLoading || travelPlan) {
       invalidateTravelPlan({ resetDepartureBoard: true });
+      updateTravelSearchParams();
     }
   }
 
@@ -2207,6 +2293,7 @@ export function TrafficMapPage() {
       setOriginInput(suggestion.label);
       if (travelPlanLoading || travelPlan) {
         invalidateTravelPlan();
+        updateTravelSearchParams();
       }
       const context = departureBoardContextFromSuggestion(suggestion);
       if (context) {
@@ -2217,6 +2304,7 @@ export function TrafficMapPage() {
       setDestinationInput(suggestion.label);
       if (travelPlanLoading || travelPlan) {
         invalidateTravelPlan({ resetDepartureBoard: true });
+        updateTravelSearchParams();
       }
     }
   }
@@ -2236,6 +2324,7 @@ export function TrafficMapPage() {
     setSelectedDestinationSuggestion(selectedOriginSuggestion);
     if (travelPlanLoading || travelPlan) {
       invalidateTravelPlan({ resetDepartureBoard: true });
+      updateTravelSearchParams();
     }
   }
 
@@ -2244,6 +2333,7 @@ export function TrafficMapPage() {
     setTravelPlanError(undefined);
     if (travelPlanLoading || travelPlan) {
       invalidateTravelPlan({ resetDepartureBoard: true });
+      updateTravelSearchParams();
     }
   }
 
@@ -2407,11 +2497,13 @@ export function TrafficMapPage() {
       setSelectedCategories(filters.categories);
       setSelectedSeverities(filters.severities);
       setVisibleContextLayers(filters.layers);
-      setSearchParams(buildTrafficMapSearch(filters), { replace: true });
+      setSearchParams(mergeTrafficFilterSearch(trafficSearch, filters), {
+        replace: true,
+      });
       setSelectedCorridorId(undefined);
       setSelectedEventId(undefined);
     },
-    [setSearchParams],
+    [setSearchParams, trafficSearch],
   );
 
   const applyPreset = useCallback(
@@ -2539,8 +2631,13 @@ export function TrafficMapPage() {
     }
   }
 
-  async function handleTravelPlanSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function loadTravelPlanForInput(input: {
+    originInput: string;
+    destinationInput: string;
+    timePreset: TravelTimePreset;
+    updateSearch: boolean;
+    onAbort?: () => void;
+  }) {
     const requestId = invalidateTravelPlan({
       resetDepartureBoard: Boolean(
         travelPlanLoading || travelPlan || departureBoardContext.scope === "origin",
@@ -2548,18 +2645,28 @@ export function TrafficMapPage() {
     });
 
     const originSuggestion =
-      selectedOriginSuggestion?.label === originInput ? selectedOriginSuggestion : undefined;
+      selectedOriginSuggestion?.label === input.originInput ? selectedOriginSuggestion : undefined;
     const destinationSuggestion =
-      selectedDestinationSuggestion?.label === destinationInput
+      selectedDestinationSuggestion?.label === input.destinationInput
         ? selectedDestinationSuggestion
         : undefined;
-    const from = originSuggestion ? travelSuggestionQuery(originSuggestion) : originInput.trim();
+    const from = originSuggestion
+      ? travelSuggestionQuery(originSuggestion)
+      : cleanTravelSearchText(input.originInput);
     const to = destinationSuggestion
       ? travelSuggestionQuery(destinationSuggestion)
-      : destinationInput.trim();
+      : cleanTravelSearchText(input.destinationInput);
     if (!from || !to) {
       setTravelPlanError("Skriv inn både start og mål.");
+      if (input.updateSearch) updateTravelSearchParams();
       return;
+    }
+    if (input.updateSearch) {
+      updateTravelSearchParams({
+        originInput: input.originInput,
+        destinationInput: input.destinationInput,
+        timePreset: input.timePreset,
+      });
     }
 
     const controller = new AbortController();
@@ -2573,7 +2680,7 @@ export function TrafficMapPage() {
           to,
           ...(originSuggestion ? { fromLabel: originSuggestion.label } : {}),
           ...(destinationSuggestion ? { toLabel: destinationSuggestion.label } : {}),
-          departAt: departureTimeForPreset(timePreset),
+          departAt: departureTimeForPreset(input.timePreset),
         },
         { signal: controller.signal },
       );
@@ -2586,6 +2693,10 @@ export function TrafficMapPage() {
       }
       showPublicTransportDisruptions();
     } catch (reason) {
+      if (controller.signal.aborted) {
+        input.onAbort?.();
+        return;
+      }
       if (travelPlanRequestIdRef.current === requestId) {
         setTravelPlanError(reason instanceof Error ? reason.message : "Kunne ikke hente reiseråd.");
       }
@@ -2596,6 +2707,28 @@ export function TrafficMapPage() {
       }
     }
   }
+
+  function handleTravelPlanSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void loadTravelPlanForInput({
+      originInput,
+      destinationInput,
+      timePreset,
+      updateSearch: true,
+    });
+  }
+
+  useEffect(() => {
+    if (!autoTravelSearchPending || !initialTravelSearch.shouldAutoSubmit) return;
+    setAutoTravelSearchPending(false);
+    void loadTravelPlanForInput({
+      originInput: initialTravelSearch.originInput,
+      destinationInput: initialTravelSearch.destinationInput,
+      timePreset: initialTravelSearch.timePreset,
+      updateSearch: false,
+      onAbort: () => setAutoTravelSearchPending(true),
+    });
+  }, [autoTravelSearchPending]);
 
   return (
     <main className="traffic-page-shell">
