@@ -125,6 +125,21 @@ export interface RouteDepartureConfidenceSummary {
   severity: SelectedDepartureStatusSeverity;
 }
 
+export interface SelectedRouteWatchItem {
+  id: string;
+  label: string;
+  detail: string;
+  severity: SelectedDepartureStatusSeverity;
+  source: string;
+}
+
+export interface SelectedRouteWatchSummary {
+  heading: string;
+  detail: string;
+  severity: SelectedDepartureStatusSeverity;
+  items: SelectedRouteWatchItem[];
+}
+
 export interface DepartureLineFilterOption {
   key: string;
   label: string;
@@ -294,7 +309,7 @@ export function formatTravelDateTime(value: string, base = new Date()): string {
   return `${osloDateFormatter.format(date)} ${clock}`;
 }
 
-type TravelTimePreset = "now" | "in30" | "tomorrow_morning";
+type TravelTimePreset = "now" | "in30" | "in60" | "in120" | "tomorrow_morning";
 
 interface DestinationPreset {
   label: string;
@@ -318,7 +333,7 @@ const destinationPresets: DestinationPreset[] = [
   { label: "Værnes", query: "Trondheim lufthavn Værnes" },
 ];
 
-const travelTimePresets: TravelTimePreset[] = ["now", "in30", "tomorrow_morning"];
+const travelTimePresets: TravelTimePreset[] = ["now", "in30", "in60", "in120", "tomorrow_morning"];
 const travelTimePresetSet = new Set<string>(travelTimePresets);
 const trafficFilterSearchKeys = ["preset", "category", "severity", "layers"] as const;
 const travelPlannerSearchKeys = ["fra", "til", "tid"] as const;
@@ -375,8 +390,15 @@ export function mergeTravelPlannerSearch(
   return next.toString();
 }
 
+function currentSearchString(fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return window.location.search;
+}
+
 export function departureTimeForPreset(preset: TravelTimePreset, base = new Date()): string {
   if (preset === "in30") return new Date(base.getTime() + 30 * 60 * 1000).toISOString();
+  if (preset === "in60") return new Date(base.getTime() + 60 * 60 * 1000).toISOString();
+  if (preset === "in120") return new Date(base.getTime() + 120 * 60 * 1000).toISOString();
   if (preset === "tomorrow_morning") {
     const tomorrow = addCivilDays(osloDateTimeParts(base), 1);
     return osloLocalTimeToInstant({ ...tomorrow, hour: 7, minute: 30 }).toISOString();
@@ -388,6 +410,10 @@ function travelTimePresetLabel(preset: TravelTimePreset): string {
   switch (preset) {
     case "in30":
       return "Om 30 min";
+    case "in60":
+      return "Om 1 time";
+    case "in120":
+      return "Om 2 timer";
     case "tomorrow_morning":
       return "I morgen tidlig";
     case "now":
@@ -721,6 +747,142 @@ export function routeDepartureConfidenceSummary(
     heading: "Reisen er live-sjekket",
     detail: `Alle ${items.length} boardingpunkt matcher live- eller rutetavla akkurat nå.`,
     severity: "ok",
+  };
+}
+
+function routeWatchSeverityFromNotice(
+  severity?: TrafficEventSeverity | "info" | "warning",
+): SelectedDepartureStatusSeverity {
+  if (severity === "critical" || severity === "high" || severity === "warning") {
+    return "warning";
+  }
+  if (severity === "medium") return "watch";
+  return "watch";
+}
+
+function strongestRouteWatchSeverity(
+  items: SelectedRouteWatchItem[],
+): SelectedDepartureStatusSeverity {
+  if (items.some((item) => item.severity === "warning")) return "warning";
+  if (items.some((item) => item.severity === "watch")) return "watch";
+  return "ok";
+}
+
+export function selectedRouteWatchSummary(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+  confidenceItems: RouteDepartureConfidenceItem[] = [],
+  fetchStatus: RouteDepartureBoardStatus = "idle",
+): SelectedRouteWatchSummary | undefined {
+  const itinerary = selectedItineraryForPlan(plan, selectedItineraryId);
+  if (!itinerary) return undefined;
+
+  const watchItems: SelectedRouteWatchItem[] = [];
+  for (const leg of itinerary.legs) {
+    const lineLabel = legLineLabel(leg);
+    if (leg.cancelled) {
+      watchItems.push({
+        id: `${leg.id}:cancelled`,
+        label: `${lineLabel} er innstilt`,
+        detail: `${legStopLabel(leg)} kl. ${formatTravelDateTime(leg.expectedStartTime)} må sjekkes hos AtB/Entur.`,
+        severity: "warning",
+        source: "Entur",
+      });
+    }
+    if (leg.replacementTransport) {
+      watchItems.push({
+        id: `${leg.id}:replacement`,
+        label: `${lineLabel}: alternativ transport`,
+        detail: "Reiseforslaget inneholder alternativ transport. Beregn ekstra margin.",
+        severity: "watch",
+        source: "Entur",
+      });
+    }
+    for (const notice of leg.notices) {
+      watchItems.push({
+        id: `${leg.id}:notice:${notice.id}`,
+        label: `${lineLabel}: ${notice.title}`,
+        detail: notice.detail ?? `Varsel fra ${notice.source}. Sjekk detaljene hos AtB/Entur.`,
+        severity: routeWatchSeverityFromNotice(notice.severity),
+        source: notice.source,
+      });
+    }
+  }
+
+  for (const item of confidenceItems) {
+    if (item.status.severity === "ok") continue;
+    watchItems.push({
+      id: `${item.checkpoint.id}:live-board`,
+      label: `${item.checkpoint.label}: ${item.status.label}`,
+      detail: item.status.detail,
+      severity: item.status.severity,
+      source: "Live-tavle",
+    });
+  }
+
+  if (fetchStatus === "loading") {
+    return {
+      heading: "Sjekker valgt reise",
+      detail: "Nytt henter live-tavler for start og eventuelle bytter.",
+      severity: "watch",
+      items: watchItems.slice(0, 4),
+    };
+  }
+
+  if (fetchStatus === "error" && confidenceItems.length === 0) {
+    watchItems.push({
+      id: `${itinerary.id}:live-board-error`,
+      label: "Live-sjekk mangler",
+      detail:
+        "Klarte ikke sjekke live-tavler for valgt reise. Kontroller avgang og plattform hos AtB/Entur.",
+      severity: "warning",
+      source: "Live-tavle",
+    });
+  } else if (
+    fetchStatus === "partial" &&
+    !watchItems.some((item) => item.source === "Live-tavle")
+  ) {
+    watchItems.push({
+      id: `${itinerary.id}:live-board-partial`,
+      label: "Noen live-tavler mangler",
+      detail: "Ikke alle boardingpunkt kunne live-sjekkes. Sjekk bytter hos AtB/Entur før du drar.",
+      severity: "watch",
+      source: "Live-tavle",
+    });
+  }
+
+  if (!watchItems.length && (itinerary.decision === "watch" || itinerary.decision === "avoid")) {
+    watchItems.push({
+      id: `${itinerary.id}:decision`,
+      label: itineraryDecisionLabel(itinerary.decision),
+      detail: itinerary.decisionReason,
+      severity: itinerary.decision === "avoid" ? "warning" : "watch",
+      source: "Entur",
+    });
+  }
+
+  if (!watchItems.length) {
+    return {
+      heading: "Valgt reise ser rolig ut",
+      detail: `${formatTravelDateTime(itinerary.departureTime)} til ${formatTravelDateTime(
+        itinerary.arrivalTime,
+      )}. Nytt fant ingen konkrete avvik på valgt reiseforslag akkurat nå.`,
+      severity: "ok",
+      items: [],
+    };
+  }
+
+  watchItems.sort(
+    (left, right) =>
+      departureStatusRank[right.severity] - departureStatusRank[left.severity] ||
+      left.label.localeCompare(right.label, "nb"),
+  );
+  const severity = strongestRouteWatchSeverity(watchItems);
+  return {
+    heading: severity === "warning" ? "Sjekk dette før avreise" : "Følg med på valgt reise",
+    detail: `${watchItems.length} ${watchItems.length === 1 ? "punkt" : "punkter"} kan påvirke reiseforslaget.`,
+    severity,
+    items: watchItems.slice(0, 4),
   };
 }
 
@@ -1121,17 +1283,53 @@ function ItineraryCard({
   );
 }
 
+function SelectedRouteWatchPanel({ summary }: { summary?: SelectedRouteWatchSummary }) {
+  if (!summary) return null;
+  return (
+    <section
+      className={`selected-route-watch selected-route-watch-${summary.severity}`}
+      aria-label="Dette kan påvirke valgt reise"
+    >
+      <header>
+        <div>
+          <p className="label">Valgt reise</p>
+          <h3>{summary.heading}</h3>
+          <p>{summary.detail}</p>
+        </div>
+        <span>{summary.items.length ? `${summary.items.length} punkt` : "OK"}</span>
+      </header>
+      {summary.items.length ? (
+        <ul>
+          {summary.items.map((item) => (
+            <li key={item.id} className={`selected-route-watch-item-${item.severity}`}>
+              <strong>{item.label}</strong>
+              <span>{item.detail}</span>
+              <small>{item.source}</small>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="selected-route-watch-clear">
+          Fortsett likevel å sjekke AtB/Entur rett før avreise.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function TravelPlanCard({
   plan,
   loading,
   error,
   selectedItineraryId,
+  routeWatchSummary,
   onSelectItinerary,
 }: {
   plan?: TravelPlanPayload;
   loading: boolean;
   error?: string;
   selectedItineraryId?: string;
+  routeWatchSummary?: SelectedRouteWatchSummary;
   onSelectItinerary: (itineraryId: string) => void;
 }) {
   if (error) {
@@ -1220,6 +1418,7 @@ function TravelPlanCard({
           </div>
         ) : null}
       </section>
+      <SelectedRouteWatchPanel summary={routeWatchSummary} />
       <section>
         <h3>Trafikk langs ruten</h3>
         {plan.trafficImpacts.length ? (
@@ -1892,6 +2091,7 @@ function TravelPlannerPanel({
   travelPlanLoading,
   travelPlanError,
   selectedItineraryId,
+  routeWatchSummary,
   selectedOriginSuggestion,
   selectedDestinationSuggestion,
   publicTransportDisruptionsVisible,
@@ -1917,6 +2117,7 @@ function TravelPlannerPanel({
   travelPlanLoading: boolean;
   travelPlanError?: string;
   selectedItineraryId?: string;
+  routeWatchSummary?: SelectedRouteWatchSummary;
   selectedOriginSuggestion?: TravelPlaceSuggestion;
   selectedDestinationSuggestion?: TravelPlaceSuggestion;
   publicTransportDisruptionsVisible: boolean;
@@ -2036,9 +2237,11 @@ function TravelPlannerPanel({
               value={timePreset}
               onChange={(event) => onTimePresetChange(event.target.value as TravelTimePreset)}
             >
-              <option value="now">{travelTimePresetLabel("now")}</option>
-              <option value="in30">{travelTimePresetLabel("in30")}</option>
-              <option value="tomorrow_morning">{travelTimePresetLabel("tomorrow_morning")}</option>
+              {travelTimePresets.map((preset) => (
+                <option key={preset} value={preset}>
+                  {travelTimePresetLabel(preset)}
+                </option>
+              ))}
             </select>
           </div>
           <button type="submit" disabled={travelPlanLoading}>
@@ -2051,6 +2254,7 @@ function TravelPlannerPanel({
             loading={travelPlanLoading}
             error={travelPlanError}
             selectedItineraryId={selectedItineraryId}
+            routeWatchSummary={routeWatchSummary}
             onSelectItinerary={onSelectItinerary}
           />
         </div>
@@ -2256,7 +2460,7 @@ export function TrafficMapPage() {
     destinationInput: string;
     timePreset: TravelTimePreset;
   }): void {
-    const next = mergeTravelPlannerSearch(searchParams.toString(), input);
+    const next = mergeTravelPlannerSearch(currentSearchString(searchParams.toString()), input);
     setSearchParams(next, { replace: true });
   }
 
@@ -2331,9 +2535,29 @@ export function TrafficMapPage() {
   function handleTravelTimePresetChange(value: TravelTimePreset): void {
     setTimePreset(value);
     setTravelPlanError(undefined);
-    if (travelPlanLoading || travelPlan) {
+    const hasCompleteRoute = Boolean(
+      cleanTravelSearchText(originInput) && cleanTravelSearchText(destinationInput),
+    );
+    if ((travelPlanLoading || travelPlan) && hasCompleteRoute) {
+      void loadTravelPlanForInput({
+        originInput,
+        destinationInput,
+        timePreset: value,
+        updateSearch: true,
+      });
+      return;
+    }
+    if (travelPlanLoading || travelPlan || !hasCompleteRoute) {
       invalidateTravelPlan({ resetDepartureBoard: true });
-      updateTravelSearchParams();
+      updateTravelSearchParams(
+        hasCompleteRoute
+          ? {
+              originInput,
+              destinationInput,
+              timePreset: value,
+            }
+          : undefined,
+      );
     }
   }
 
@@ -2467,6 +2691,26 @@ export function TrafficMapPage() {
     () => selectedDepartureMatch(travelPlan, selectedItineraryId, departureBoard),
     [departureBoard, selectedItineraryId, travelPlan],
   );
+  const routeDepartureConfidenceItemsForSelection = useMemo(
+    () =>
+      routeDepartureConfidenceItems(routeDepartureCheckpointsForSelection, routeDepartureBoards),
+    [routeDepartureBoards, routeDepartureCheckpointsForSelection],
+  );
+  const routeWatchSummary = useMemo(
+    () =>
+      selectedRouteWatchSummary(
+        travelPlan,
+        selectedItineraryId,
+        routeDepartureConfidenceItemsForSelection,
+        routeDepartureBoardStatus,
+      ),
+    [
+      routeDepartureBoardStatus,
+      routeDepartureConfidenceItemsForSelection,
+      selectedItineraryId,
+      travelPlan,
+    ],
+  );
 
   useEffect(() => {
     loadRouteDepartureBoards(routeDepartureCheckpointsForSelection);
@@ -2497,7 +2741,7 @@ export function TrafficMapPage() {
       setSelectedCategories(filters.categories);
       setSelectedSeverities(filters.severities);
       setVisibleContextLayers(filters.layers);
-      setSearchParams(mergeTrafficFilterSearch(trafficSearch, filters), {
+      setSearchParams(mergeTrafficFilterSearch(currentSearchString(trafficSearch), filters), {
         replace: true,
       });
       setSelectedCorridorId(undefined);
@@ -2740,6 +2984,7 @@ export function TrafficMapPage() {
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
         selectedItineraryId={selectedItineraryId}
+        routeWatchSummary={routeWatchSummary}
         selectedOriginSuggestion={selectedOriginSuggestion}
         selectedDestinationSuggestion={selectedDestinationSuggestion}
         publicTransportDisruptionsVisible={visibleContextLayers.publicTransportDisruptions}

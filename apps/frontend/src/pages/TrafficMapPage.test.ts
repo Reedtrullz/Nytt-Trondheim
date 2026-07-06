@@ -43,6 +43,7 @@ import {
   routePositions,
   selectedDepartureMatch,
   selectedDepartureStatus,
+  selectedRouteWatchSummary,
   timeWindowForPreset,
   travelPlanDecision,
 } from "./TrafficMapPage.js";
@@ -257,6 +258,10 @@ describe("TrafficMapPage route overlay helpers", () => {
       timePreset: "in30",
       shouldAutoSubmit: true,
     });
+
+    expect(parseTravelPlannerSearch("fra=Munkegata&til=Lade&tid=in60").timePreset).toBe("in60");
+    expect(parseTravelPlannerSearch("fra=Munkegata&til=Lade&tid=in120").timePreset).toBe("in120");
+    expect(parseTravelPlannerSearch("fra=Munkegata&til=Lade&tid=weekend").timePreset).toBe("now");
   });
 
   it("keeps map filters and submitted travel plan params separate", () => {
@@ -299,6 +304,14 @@ describe("TrafficMapPage route overlay helpers", () => {
     expect(params.get("til")).toBe("Lade Arena");
     expect(params.get("tid")).toBe("tomorrow_morning");
     expect(params.get("preset")).toBe("severe");
+
+    expect(
+      mergeTravelPlannerSearch("preset=next24h", {
+        originInput: "Munkegata",
+        destinationInput: "Lade Arena",
+        timePreset: "now",
+      }),
+    ).toBe("preset=next24h&fra=Munkegata&til=Lade+Arena");
   });
 
   it("keeps the default now preset scoped to active incidents", () => {
@@ -473,6 +486,81 @@ describe("TrafficMapPage route overlay helpers", () => {
     });
   });
 
+  it("summarizes a clean selected route as calm but still points to AtB/Entur", () => {
+    const checkpoints = routeDepartureCheckpoints(planWithItinerary, "itinerary-1");
+    const items = routeDepartureConfidenceItems(checkpoints, [
+      { checkpointId: checkpoints[0]!.id, board: departureBoard },
+    ]);
+
+    expect(
+      selectedRouteWatchSummary(planWithItinerary, "itinerary-1", items, "ready"),
+    ).toMatchObject({
+      heading: "Valgt reise ser rolig ut",
+      severity: "ok",
+      items: [],
+    });
+  });
+
+  it("lifts selected itinerary notices into a route watch summary", () => {
+    const planWithNotice: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [
+        {
+          ...planWithItinerary.itineraries[0]!,
+          decision: "watch",
+          decisionReason: "Holdeplassendring på ruten.",
+          legs: [
+            {
+              ...planWithItinerary.itineraries[0]!.legs[0]!,
+              notices: [
+                {
+                  id: "notice-stop-moved",
+                  title: "Holdeplass flyttet",
+                  detail: "Bruk midlertidig holdeplass ved Munkegata.",
+                  source: "Entur avvik",
+                  severity: "warning",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(selectedRouteWatchSummary(planWithNotice, "itinerary-1", [], "idle")).toMatchObject({
+      heading: "Sjekk dette før avreise",
+      severity: "warning",
+      items: [
+        {
+          label: "Buss 3: Holdeplass flyttet",
+          detail: "Bruk midlertidig holdeplass ved Munkegata.",
+          source: "Entur avvik",
+        },
+      ],
+    });
+  });
+
+  it("uses route live-board uncertainty as selected-route advice", () => {
+    const checkpoints = routeDepartureCheckpoints(planWithTransfer, "itinerary-transfer");
+    const items = routeDepartureConfidenceItems(checkpoints, [
+      { checkpointId: checkpoints[0]!.id, board: departureBoard },
+      { checkpointId: checkpoints[1]!.id, error: "Entur svarte ikke." },
+    ]);
+
+    expect(
+      selectedRouteWatchSummary(planWithTransfer, "itinerary-transfer", items, "partial"),
+    ).toMatchObject({
+      heading: "Sjekk dette før avreise",
+      severity: "warning",
+      items: [
+        {
+          label: "Bytte 1: Strindheim: Sjekk AtB/Entur",
+          source: "Live-tavle",
+        },
+      ],
+    });
+  });
+
   it("keeps the matched itinerary departure visible when it falls outside the first rows", () => {
     const genericRows = Array.from({ length: 9 }, (_, index) =>
       departureFixture({
@@ -623,6 +711,8 @@ describe("TrafficMapPage route overlay helpers", () => {
 
     expect(departureTimeForPreset("now", base)).toBe("2026-07-05T20:00:00.000Z");
     expect(departureTimeForPreset("in30", base)).toBe("2026-07-05T20:30:00.000Z");
+    expect(departureTimeForPreset("in60", base)).toBe("2026-07-05T21:00:00.000Z");
+    expect(departureTimeForPreset("in120", base)).toBe("2026-07-05T22:00:00.000Z");
     expect(departureTimeForPreset("tomorrow_morning", base)).toBe("2026-07-06T05:30:00.000Z");
   });
 

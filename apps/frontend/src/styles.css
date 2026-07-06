@@ -10318,6 +10318,105 @@ button {
   background: color-mix(in srgb, var(--paper) 86%, var(--green) 14%);
 }
 
+.selected-route-watch {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+  background: #fbfbf8;
+}
+
+.selected-route-watch-ok {
+  border-left-color: var(--green);
+}
+
+.selected-route-watch-watch {
+  border-left-color: var(--amber);
+}
+
+.selected-route-watch-warning {
+  border-left-color: var(--terracotta);
+  background: #fff8f3;
+}
+
+.selected-route-watch header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.selected-route-watch header div {
+  min-width: 0;
+}
+
+.selected-route-watch header h3 {
+  margin: 2px 0 0;
+  font: 20px/1.05 var(--serif);
+  letter-spacing: 0;
+}
+
+.selected-route-watch header p:not(.label),
+.selected-route-watch-clear,
+.selected-route-watch li span,
+.selected-route-watch li small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.selected-route-watch header p:not(.label),
+.selected-route-watch-clear {
+  margin: 4px 0 0;
+}
+
+.selected-route-watch header > span {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  color: var(--green);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.selected-route-watch ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.selected-route-watch li {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.selected-route-watch li strong {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.selected-route-watch li small {
+  font-weight: 800;
+}
+
+.selected-route-watch-item-watch {
+  border-left: 3px solid var(--amber);
+}
+
+.selected-route-watch-item-warning {
+  border-left: 3px solid var(--terracotta);
+}
+
 .travel-plan-disclaimer {
   margin-top: 14px;
   padding-top: 12px;
@@ -13039,6 +13138,18 @@ button {
 
   .traffic-now-card {
     padding: 9px;
+  }
+
+  .selected-route-watch header {
+    display: grid;
+  }
+
+  .selected-route-watch header > span {
+    justify-self: start;
+  }
+
+  .selected-route-watch ul {
+    grid-template-columns: 1fr;
   }
 
   .itinerary-card h3 {

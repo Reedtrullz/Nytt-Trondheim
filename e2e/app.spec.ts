@@ -2310,6 +2310,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   page,
 }) => {
   const departureRequestUrls: URL[] = [];
+  const travelPlanRequestUrls: URL[] = [];
   await page.route("**/api/map/public-transport/departures**", async (route) => {
     const url = new URL(route.request().url());
     departureRequestUrls.push(url);
@@ -2364,6 +2365,12 @@ test("traffic map travel planner shows route-specific traffic and public transpo
 
   await page.route("**/api/map/travel-plan?**", async (route) => {
     const url = new URL(route.request().url());
+    const requestIndex = travelPlanRequestUrls.length;
+    travelPlanRequestUrls.push(url);
+    const departureTime =
+      requestIndex === 0 ? "2026-06-01T09:10:00.000Z" : "2026-06-01T11:10:00.000Z";
+    const arrivalTime =
+      requestIndex === 0 ? "2026-06-01T09:27:00.000Z" : "2026-06-01T11:27:00.000Z";
     expect(url.searchParams.get("from")).toBe("Munkegata");
     expect(url.searchParams.get("to")).toBe("Leangen");
     const departAt = url.searchParams.get("departAt");
@@ -2449,8 +2456,8 @@ test("traffic map travel planner shows route-specific traffic and public transpo
             decision: "watch",
             decisionReason: "Nytt fant avvik eller trafikkmeldinger som kan påvirke reisen.",
             labels: ["best_now", "fewest_transfers", "soonest_departure", "most_robust"],
-            departureTime: "2026-06-01T09:10:00.000Z",
-            arrivalTime: "2026-06-01T09:27:00.000Z",
+            departureTime,
+            arrivalTime,
             durationSeconds: 1020,
             transferCount: 0,
             walkTimeSeconds: 240,
@@ -2472,10 +2479,10 @@ test("traffic map travel planner shows route-specific traffic and public transpo
                   stopName: "Leangen",
                   coordinate: [10.464, 63.433],
                 },
-                aimedStartTime: "2026-06-01T09:10:00.000Z",
-                expectedStartTime: "2026-06-01T09:10:00.000Z",
-                aimedEndTime: "2026-06-01T09:27:00.000Z",
-                expectedEndTime: "2026-06-01T09:27:00.000Z",
+                aimedStartTime: departureTime,
+                expectedStartTime: departureTime,
+                aimedEndTime: arrivalTime,
+                expectedEndTime: arrivalTime,
                 durationSeconds: 1020,
                 distanceMeters: 4850,
                 realtime: true,
@@ -2535,7 +2542,10 @@ test("traffic map travel planner shows route-specific traffic and public transpo
     page.getByLabel("Planlegg reisen").getByText("Buss 3", { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: /vises på kart/i })).toBeVisible();
-  await expect(page.getByText("Forsinkelse på linje 3")).toBeVisible();
+  await expect(page.getByText("Forsinkelse på linje 3", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
+    "Sjekk dette før avreise",
+  );
   const board = page.getByRole("region", { name: /Avganger rundt/ });
   await expect(board).toContainText("Munkegata: neste avganger fra holdeplasser ved startpunktet.");
   await expect(board.getByRole("button", { name: "Startpunkt" })).toHaveAttribute(
@@ -2552,6 +2562,17 @@ test("traffic map travel planner shows route-specific traffic and public transpo
         url.searchParams.get("lat") === "63.4305" &&
         url.searchParams.get("lon") === "10.3951" &&
         url.searchParams.get("startTime") === "2026-06-01T09:10:00.000Z",
+    ),
+  ).toBe(true);
+  await page.getByLabel("Når?").selectOption("in120");
+  await expect.poll(() => travelPlanRequestUrls.length).toBeGreaterThanOrEqual(2);
+  await expect(page).toHaveURL(/tid=in120/);
+  expect(
+    departureRequestUrls.some(
+      (url) =>
+        url.searchParams.get("lat") === "63.4305" &&
+        url.searchParams.get("lon") === "10.3951" &&
+        url.searchParams.get("startTime") === "2026-06-01T11:10:00.000Z",
     ),
   ).toBe(true);
   await expect(
