@@ -72,7 +72,11 @@ jobs:
             fi
           done
       - name: Install Ansible
-        run: sudo apt-get update && sudo apt-get install -y ansible
+        timeout-minutes: 5
+        run: |
+          python3 -m pip install --user --disable-pip-version-check "ansible-core>=2.16,<2.20"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/ansible-playbook" --version
       - name: Install Docker collection
         run: ansible-galaxy collection install community.docker
       - name: Configure deployment SSH
