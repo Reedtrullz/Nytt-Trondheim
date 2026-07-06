@@ -9521,6 +9521,67 @@ button {
   background: color-mix(in srgb, var(--paper) 84%, var(--green) 16%);
 }
 
+.departure-line-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.departure-line-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.departure-line-filters button span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.departure-line-filters button.watch {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 38%, var(--line));
+}
+
+.departure-line-filters button.warning {
+  color: var(--terracotta);
+  border-color: color-mix(in srgb, var(--terracotta) 42%, var(--line));
+  background: #fff8f3;
+}
+
+.departure-line-filters button.selected {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 48%, var(--line));
+  background: color-mix(in srgb, var(--paper) 84%, var(--green) 16%);
+}
+
+.departure-line-filters button.selected.watch {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--paper) 84%, var(--blue) 16%);
+}
+
+.departure-line-filters button.selected.warning {
+  color: var(--terracotta);
+  background: #fff1e9;
+}
+
 .selected-departure-callout {
   display: flex;
   justify-content: space-between;

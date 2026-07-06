@@ -96,6 +96,13 @@ interface SelectedDepartureStatus {
   severity: SelectedDepartureStatusSeverity;
 }
 
+export interface DepartureLineFilterOption {
+  key: string;
+  label: string;
+  count: number;
+  severity: SelectedDepartureStatusSeverity;
+}
+
 type RouteInputKind = "origin" | "destination";
 
 const trondheimCenter: [number, number] = [63.4305, 10.3951];
@@ -1084,6 +1091,72 @@ function departureStatusClass(departure: PublicTransportDeparture): string {
   return "ok";
 }
 
+const departureStatusRank: Record<SelectedDepartureStatusSeverity, number> = {
+  ok: 0,
+  watch: 1,
+  warning: 2,
+};
+
+export function departureLineFilterKey(departure: PublicTransportDeparture): string {
+  const line = departure.publicCode ?? departure.lineId ?? departure.lineName ?? departure.mode;
+  return [departure.mode, line, departure.destinationName].join("|");
+}
+
+function departureLineFilterLabel(departure: PublicTransportDeparture): string {
+  return `${departureLineLabel(departure)} mot ${departure.destinationName}`;
+}
+
+export function departureLineFilterOptions(
+  departures: PublicTransportDeparture[],
+): DepartureLineFilterOption[] {
+  const options = new Map<string, DepartureLineFilterOption>();
+  for (const departure of departures) {
+    const key = departureLineFilterKey(departure);
+    const severity = departureStatusClass(departure) as SelectedDepartureStatusSeverity;
+    const existing = options.get(key);
+    if (!existing) {
+      options.set(key, {
+        key,
+        label: departureLineFilterLabel(departure),
+        count: 1,
+        severity,
+      });
+      continue;
+    }
+    existing.count += 1;
+    if (departureStatusRank[severity] > departureStatusRank[existing.severity]) {
+      existing.severity = severity;
+    }
+  }
+  return [...options.values()].sort(
+    (left, right) =>
+      departureStatusRank[right.severity] - departureStatusRank[left.severity] ||
+      right.count - left.count ||
+      left.label.localeCompare(right.label, "nb"),
+  );
+}
+
+export function displayDepartureRows(input: {
+  departures: PublicTransportDeparture[];
+  activeFilterKey: string;
+  matchedDeparture?: PublicTransportDeparture;
+  limit?: number;
+}): PublicTransportDeparture[] {
+  const limit = input.limit ?? 8;
+  const filtered =
+    input.activeFilterKey === "all"
+      ? input.departures
+      : input.departures.filter(
+          (departure) => departureLineFilterKey(departure) === input.activeFilterKey,
+        );
+  const rows = filtered.slice(0, limit);
+  if (!input.matchedDeparture || input.activeFilterKey !== "all") return rows;
+  if (rows.some((departure) => departure.id === input.matchedDeparture?.id)) return rows;
+  const matched = input.departures.find((departure) => departure.id === input.matchedDeparture?.id);
+  if (!matched) return rows;
+  return [matched, ...rows].slice(0, limit);
+}
+
 export function selectedDepartureStatus(
   departure?: PublicTransportDeparture,
   leg?: TravelPlanLeg,
@@ -1185,8 +1258,9 @@ function DepartureBoardPanel({
   onReload: () => void;
   onContextChange: (context: DepartureBoardContext) => void;
 }) {
+  const [activeDepartureFilterKey, setActiveDepartureFilterKey] = useState("all");
   const safeHandoff = safeExternalUrl(board?.handoffUrl ?? "https://www.atb.no/reiseplanlegger/");
-  const displayedDepartures = Array.isArray(board?.departures) ? board.departures.slice(0, 8) : [];
+  const departures = Array.isArray(board?.departures) ? board.departures : [];
   const contextDescription =
     context.scope === "origin"
       ? `${context.label}: neste avganger fra holdeplasser ved startpunktet.`
@@ -1197,6 +1271,23 @@ function DepartureBoardPanel({
   const selectedLeg = selectedDeparture?.leg;
   const selectedStatus = selectedDepartureStatus(matchedDeparture, selectedLeg, board);
   const selectedPlannedTime = legDepartureTime(selectedLeg);
+  const departureFilters = useMemo(() => departureLineFilterOptions(departures), [departures]);
+  const displayedDepartures = useMemo(
+    () =>
+      displayDepartureRows({
+        departures,
+        activeFilterKey: activeDepartureFilterKey,
+        matchedDeparture,
+      }),
+    [activeDepartureFilterKey, departures, matchedDeparture],
+  );
+
+  useEffect(() => {
+    if (activeDepartureFilterKey === "all") return;
+    if (departureFilters.some((option) => option.key === activeDepartureFilterKey)) return;
+    setActiveDepartureFilterKey("all");
+  }, [activeDepartureFilterKey, departureFilters]);
+
   return (
     <section className="departure-board-panel" aria-labelledby="departure-board-heading">
       <header>
@@ -1275,6 +1366,29 @@ function DepartureBoardPanel({
             ) : null}
           </div>
         </article>
+      ) : null}
+      {departureFilters.length > 1 ? (
+        <div className="departure-line-filters" aria-label="Filtrer avganger etter linje">
+          <button
+            type="button"
+            className={activeDepartureFilterKey === "all" ? "selected" : undefined}
+            aria-pressed={activeDepartureFilterKey === "all"}
+            onClick={() => setActiveDepartureFilterKey("all")}
+          >
+            Alle <span>{departures.length}</span>
+          </button>
+          {departureFilters.slice(0, 8).map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              className={`${option.severity}${activeDepartureFilterKey === option.key ? " selected" : ""}`}
+              aria-pressed={activeDepartureFilterKey === option.key}
+              onClick={() => setActiveDepartureFilterKey(option.key)}
+            >
+              {option.label} <span>{option.count}</span>
+            </button>
+          ))}
+        </div>
       ) : null}
       {displayedDepartures.length ? (
         <div className="departure-board-grid">

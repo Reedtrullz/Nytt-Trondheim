@@ -1,4 +1,8 @@
-import type { PublicTransportDepartureBoardPayload, TravelPlanPayload } from "@nytt/shared";
+import type {
+  PublicTransportDeparture,
+  PublicTransportDepartureBoardPayload,
+  TravelPlanPayload,
+} from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react-leaflet", () => ({
@@ -25,7 +29,10 @@ vi.mock("react-leaflet", () => ({
 import {
   departureBoardContextFromPlan,
   departureBoardContextFromSuggestion,
+  departureLineFilterKey,
+  departureLineFilterOptions,
   departureTimeForPreset,
+  displayDepartureRows,
   formatTravelDateTime,
   routePositions,
   selectedDepartureMatch,
@@ -179,6 +186,15 @@ const departureBoard: PublicTransportDepartureBoardPayload = {
   handoffUrl: "https://www.atb.no/reiseplanlegger/",
 };
 
+function departureFixture(
+  override: Partial<PublicTransportDeparture> = {},
+): PublicTransportDeparture {
+  return {
+    ...departureBoard.departures[0]!,
+    ...override,
+  };
+}
+
 describe("TrafficMapPage route overlay helpers", () => {
   it("keeps the default now preset scoped to active incidents", () => {
     expect(timeWindowForPreset("now")).toEqual({ states: ["active"] });
@@ -231,6 +247,69 @@ describe("TrafficMapPage route overlay helpers", () => {
       leg: { id: "leg-bus-3" },
       departure: { id: "departure:3" },
     });
+  });
+
+  it("builds compact line filters by line and direction with disruption severity", () => {
+    const delayedDeparture = departureFixture({
+      id: "departure:3-delayed",
+      expectedDepartureTime: "2026-06-01T09:18:00.000Z",
+      delaySeconds: 240,
+    });
+    const options = departureLineFilterOptions([
+      departureBoard.departures[0]!,
+      delayedDeparture,
+      departureBoard.departures[1]!,
+    ]);
+
+    expect(options[0]).toMatchObject({
+      key: departureLineFilterKey(delayedDeparture),
+      label: "Buss 3 mot Leangen",
+      count: 2,
+      severity: "warning",
+    });
+    expect(options[1]).toMatchObject({
+      label: "Buss 71 mot Dora",
+      count: 1,
+      severity: "ok",
+    });
+  });
+
+  it("filters departure rows by selected line and direction", () => {
+    const lineKey = departureLineFilterKey(departureBoard.departures[0]!);
+
+    expect(
+      displayDepartureRows({
+        departures: departureBoard.departures,
+        activeFilterKey: lineKey,
+      }).map((departure) => departure.id),
+    ).toEqual(["departure:3"]);
+  });
+
+  it("keeps the matched itinerary departure visible when it falls outside the first rows", () => {
+    const genericRows = Array.from({ length: 9 }, (_, index) =>
+      departureFixture({
+        id: `departure:generic-${index}`,
+        lineId: `ATB:Line:${index + 20}`,
+        publicCode: String(index + 20),
+        destinationName: `Rute ${index + 20}`,
+        expectedDepartureTime: `2026-06-01T09:${String(index + 1).padStart(2, "0")}:00.000Z`,
+      }),
+    );
+    const matchedDeparture = departureFixture({
+      id: "departure:matched-late",
+      expectedDepartureTime: "2026-06-01T09:30:00.000Z",
+    });
+
+    const displayed = displayDepartureRows({
+      departures: [...genericRows, matchedDeparture],
+      activeFilterKey: "all",
+      matchedDeparture,
+      limit: 8,
+    });
+
+    expect(displayed.map((departure) => departure.id)).toContain("departure:matched-late");
+    expect(displayed[0]?.id).toBe("departure:matched-late");
+    expect(displayed).toHaveLength(8);
   });
 
   it("prefers exact Entur service journey matches before generic line and stop scoring", () => {
