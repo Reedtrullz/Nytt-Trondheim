@@ -2073,11 +2073,12 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   await page.route("**/api/map/travel-plan/compare?**", async (route) => {
     const url = new URL(route.request().url());
     travelPlanRequestUrls.push(url);
+    const activePreset = url.searchParams.get("preset") ?? "now";
     expect(url.searchParams.get("from")).toBe("63.43288, 10.39374");
     expect(url.searchParams.get("to")).toBe("63.43300, 10.46400");
     expect(url.searchParams.get("fromLabel")).toBe("Munkegata, Trondheim");
     expect(url.searchParams.get("toLabel")).toBe("Leangen, Trondheim");
-    expect(url.searchParams.get("preset")).toBe("now");
+    expect(["now", "in30"]).toContain(activePreset);
     const selectedPlan = {
       origin: {
         query: "Munkegata, Trondheim",
@@ -2127,7 +2128,7 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        activePreset: "now",
+        activePreset,
         selectedPlan,
         sources: ["now", "in30", "in60", "in120"].map((preset) => ({
           preset,
@@ -2162,9 +2163,33 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
 
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
-  await expect(page.getByText("Munkegata, Trondheim → Leangen, Trondheim")).toBeVisible();
+  await expect(
+    page.locator("#travel-plan-result").getByText("Munkegata, Trondheim → Leangen, Trondheim"),
+  ).toBeVisible();
   await expect.poll(() => travelPlanRequestUrls.length).toBe(1);
   expect(travelPlanRequestUrls[0]?.pathname).toBe("/api/map/travel-plan/compare");
+
+  const rememberedRoute = page.getByRole("button", {
+    name: /Munkegata, Trondheim → Leangen, Trondheim/,
+  });
+  await expect(page.getByRole("region", { name: "Ruter" })).toContainText(
+    "Lagres bare i denne nettleseren",
+  );
+  await expect(rememberedRoute).toContainText("brukt 1 gang");
+  await page
+    .getByRole("button", { name: "Fest Munkegata, Trondheim til Leangen, Trondheim" })
+    .click();
+  await expect(page.getByText("Festet")).toBeVisible();
+  await rememberedRoute.click();
+  await expect.poll(() => travelPlanRequestUrls.length).toBe(2);
+  expect(travelPlanRequestUrls[1]?.searchParams.get("from")).toBe("63.43288, 10.39374");
+  expect(travelPlanRequestUrls[1]?.searchParams.get("to")).toBe("63.43300, 10.46400");
+  await expect(rememberedRoute).toContainText("brukt 2 ganger");
+  await page.getByLabel("Når?").selectOption("in30");
+  await expect.poll(() => travelPlanRequestUrls.length).toBe(3);
+  expect(travelPlanRequestUrls[2]?.searchParams.get("from")).toBe("63.43288, 10.39374");
+  expect(travelPlanRequestUrls[2]?.searchParams.get("to")).toBe("63.43300, 10.46400");
+  expect(travelPlanRequestUrls[2]?.searchParams.get("preset")).toBe("in30");
 });
 
 test("traffic map restores a shared route from the URL", async ({ page }) => {

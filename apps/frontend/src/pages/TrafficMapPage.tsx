@@ -329,6 +329,38 @@ interface TravelPlannerSearchState {
   shouldAutoSubmit: boolean;
 }
 
+export interface RememberedTravelRoute {
+  id: string;
+  originInput: string;
+  destinationInput: string;
+  originQuery: string;
+  destinationQuery: string;
+  originLabel?: string;
+  destinationLabel?: string;
+  timePreset: TravelTimePreset;
+  pinned: boolean;
+  useCount: number;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
+export interface RememberedTravelRouteCandidate {
+  originInput: string;
+  destinationInput: string;
+  originQuery: string;
+  destinationQuery: string;
+  originLabel?: string;
+  destinationLabel?: string;
+  timePreset: TravelTimePreset;
+}
+
+interface RememberedTravelRouteQueryOverride {
+  from: string;
+  to: string;
+  fromLabel?: string;
+  toLabel?: string;
+}
+
 type TravelTimeComparisonStatus = "idle" | "loading" | "ready" | "partial" | "error";
 
 export interface TravelTimeComparisonOption {
@@ -377,6 +409,8 @@ const travelTimePresetSet = new Set<string>(travelTimePresets);
 const travelTimeComparisonPresetSet = new Set<string>(travelTimeComparisonPresets);
 const trafficFilterSearchKeys = ["preset", "category", "severity", "layers"] as const;
 const travelPlannerSearchKeys = ["fra", "til", "tid"] as const;
+const rememberedTravelRoutesStorageKey = "nytt:traffic:remembered-routes:v1";
+const rememberedTravelRouteLimit = 8;
 
 function isTravelTimeComparisonPreset(
   preset: TravelTimePreset,
@@ -386,6 +420,163 @@ function isTravelTimeComparisonPreset(
 
 function cleanTravelSearchText(value: string | null): string {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function looksLikeCoordinateQuery(value: string): boolean {
+  return /^-?\d{1,2}(?:\.\d+)?,\s*-?\d{1,3}(?:\.\d+)?$/.test(cleanTravelSearchText(value));
+}
+
+function normalizedRememberedRouteKey(value: string): string {
+  return cleanTravelSearchText(value).toLocaleLowerCase("nb");
+}
+
+function rememberedTravelRouteId(
+  candidate: Pick<RememberedTravelRouteCandidate, "originQuery" | "destinationQuery">,
+): string {
+  return `${normalizedRememberedRouteKey(candidate.originQuery)} -> ${normalizedRememberedRouteKey(candidate.destinationQuery)}`;
+}
+
+function cleanOptionalRouteLabel(value: string | undefined): string | undefined {
+  const cleaned = cleanTravelSearchText(value ?? null);
+  return cleaned || undefined;
+}
+
+function cleanRememberedRoute(
+  route: Partial<RememberedTravelRoute>,
+): RememberedTravelRoute | undefined {
+  const originInput = cleanTravelSearchText(route.originInput ?? null);
+  const destinationInput = cleanTravelSearchText(route.destinationInput ?? null);
+  const originQuery = cleanTravelSearchText(route.originQuery ?? null);
+  const destinationQuery = cleanTravelSearchText(route.destinationQuery ?? null);
+  if (!originInput || !destinationInput || !originQuery || !destinationQuery) return undefined;
+  const timePreset = travelTimePresetSet.has(route.timePreset ?? "")
+    ? (route.timePreset as TravelTimePreset)
+    : "now";
+  const now = new Date().toISOString();
+  return {
+    id: rememberedTravelRouteId({ originQuery, destinationQuery }),
+    originInput,
+    destinationInput,
+    originQuery,
+    destinationQuery,
+    ...(cleanOptionalRouteLabel(route.originLabel)
+      ? { originLabel: cleanOptionalRouteLabel(route.originLabel) }
+      : {}),
+    ...(cleanOptionalRouteLabel(route.destinationLabel)
+      ? { destinationLabel: cleanOptionalRouteLabel(route.destinationLabel) }
+      : {}),
+    timePreset,
+    pinned: Boolean(route.pinned),
+    useCount: Math.max(1, Math.floor(route.useCount ?? 1)),
+    createdAt:
+      route.createdAt && Number.isFinite(Date.parse(route.createdAt)) ? route.createdAt : now,
+    lastUsedAt:
+      route.lastUsedAt && Number.isFinite(Date.parse(route.lastUsedAt)) ? route.lastUsedAt : now,
+  };
+}
+
+export function sortRememberedTravelRoutes(
+  routes: RememberedTravelRoute[],
+): RememberedTravelRoute[] {
+  return [...routes].sort((left, right) => {
+    if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+    const lastUsedDelta = Date.parse(right.lastUsedAt) - Date.parse(left.lastUsedAt);
+    if (Number.isFinite(lastUsedDelta) && lastUsedDelta !== 0) return lastUsedDelta;
+    return right.useCount - left.useCount;
+  });
+}
+
+export function upsertRememberedTravelRoute(
+  routes: RememberedTravelRoute[],
+  candidate: RememberedTravelRouteCandidate,
+  now = new Date().toISOString(),
+): RememberedTravelRoute[] {
+  const cleaned = cleanRememberedRoute({
+    ...candidate,
+    createdAt: now,
+    lastUsedAt: now,
+    useCount: 1,
+  });
+  if (!cleaned) return sortRememberedTravelRoutes(routes).slice(0, rememberedTravelRouteLimit);
+  const existing = routes.find((route) => route.id === cleaned.id);
+  const nextRoute: RememberedTravelRoute = existing
+    ? {
+        id: existing.id,
+        originInput: cleaned.originInput,
+        destinationInput: cleaned.destinationInput,
+        originQuery: cleaned.originQuery,
+        destinationQuery: cleaned.destinationQuery,
+        ...(cleaned.originLabel ? { originLabel: cleaned.originLabel } : {}),
+        ...(cleaned.destinationLabel ? { destinationLabel: cleaned.destinationLabel } : {}),
+        timePreset: cleaned.timePreset,
+        pinned: existing.pinned,
+        useCount: existing.useCount + 1,
+        createdAt: existing.createdAt,
+        lastUsedAt: now,
+      }
+    : { ...cleaned, lastUsedAt: now, createdAt: now };
+  const rest = routes.filter((route) => route.id !== nextRoute.id);
+  return sortRememberedTravelRoutes([nextRoute, ...rest]).slice(0, rememberedTravelRouteLimit);
+}
+
+export function toggleRememberedTravelRoutePinned(
+  routes: RememberedTravelRoute[],
+  routeId: string,
+  now = new Date().toISOString(),
+): RememberedTravelRoute[] {
+  return sortRememberedTravelRoutes(
+    routes.map((route) =>
+      route.id === routeId ? { ...route, pinned: !route.pinned, lastUsedAt: now } : route,
+    ),
+  ).slice(0, rememberedTravelRouteLimit);
+}
+
+export function removeRememberedTravelRoute(
+  routes: RememberedTravelRoute[],
+  routeId: string,
+): RememberedTravelRoute[] {
+  return sortRememberedTravelRoutes(routes.filter((route) => route.id !== routeId)).slice(
+    0,
+    rememberedTravelRouteLimit,
+  );
+}
+
+export function readRememberedTravelRoutes(storage: Storage | undefined): RememberedTravelRoute[] {
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(rememberedTravelRoutesStorageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return sortRememberedTravelRoutes(
+      parsed
+        .map((entry) => cleanRememberedRoute(entry as Partial<RememberedTravelRoute>))
+        .filter((entry): entry is RememberedTravelRoute => Boolean(entry)),
+    ).slice(0, rememberedTravelRouteLimit);
+  } catch {
+    return [];
+  }
+}
+
+function writeRememberedTravelRoutes(
+  storage: Storage | undefined,
+  routes: RememberedTravelRoute[],
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(rememberedTravelRoutesStorageKey, JSON.stringify(routes));
+  } catch {
+    // Local route memory is a convenience only. Ignore quota/private-mode failures.
+  }
+}
+
+function browserStorage(): Storage | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function travelTimePresetFromSearch(value: string | null): TravelTimePreset {
@@ -2437,6 +2628,76 @@ function RoutePlaceInput({
   );
 }
 
+function RememberedTravelRoutesPanel({
+  routes,
+  loading,
+  onSelectRoute,
+  onToggleRoutePinned,
+  onRemoveRoute,
+}: {
+  routes: RememberedTravelRoute[];
+  loading: boolean;
+  onSelectRoute: (route: RememberedTravelRoute) => void;
+  onToggleRoutePinned: (routeId: string) => void;
+  onRemoveRoute: (routeId: string) => void;
+}) {
+  if (!routes.length) return null;
+  return (
+    <section className="remembered-routes" aria-labelledby="remembered-routes-heading">
+      <div className="remembered-routes-header">
+        <div>
+          <h2 id="remembered-routes-heading">Ruter</h2>
+          <p>Lagres bare i denne nettleseren.</p>
+        </div>
+      </div>
+      <div className="remembered-route-list">
+        {routes.map((route) => (
+          <article
+            key={route.id}
+            className={route.pinned ? "remembered-route pinned" : "remembered-route"}
+          >
+            <button
+              type="button"
+              className="remembered-route-main"
+              onClick={() => onSelectRoute(route)}
+              disabled={loading}
+            >
+              <strong>
+                {route.originInput} → {route.destinationInput}
+              </strong>
+              <span>
+                {travelTimePresetLabel(route.timePreset)} · brukt {route.useCount}{" "}
+                {route.useCount === 1 ? "gang" : "ganger"}
+              </span>
+            </button>
+            <div className="remembered-route-actions">
+              {route.pinned ? <span>Festet</span> : null}
+              <button
+                type="button"
+                onClick={() => onToggleRoutePinned(route.id)}
+                aria-label={
+                  route.pinned
+                    ? `Fjern festing av ${route.originInput} til ${route.destinationInput}`
+                    : `Fest ${route.originInput} til ${route.destinationInput}`
+                }
+              >
+                {route.pinned ? "Løsne" : "Fest"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemoveRoute(route.id)}
+                aria-label={`Fjern ${route.originInput} til ${route.destinationInput} fra ruter`}
+              >
+                Fjern
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function TravelPlannerPanel({
   originInput,
   destinationInput,
@@ -2453,6 +2714,7 @@ function TravelPlannerPanel({
   publicTransportVehiclesVisible,
   locationStatus,
   locationMessage,
+  rememberedRoutes,
   onOriginChange,
   onDestinationChange,
   onSuggestionSelect,
@@ -2462,6 +2724,9 @@ function TravelPlannerPanel({
   onUseCurrentLocation,
   onSelectItinerary,
   onSelectComparisonPreset,
+  onSelectRememberedRoute,
+  onToggleRememberedRoutePinned,
+  onRemoveRememberedRoute,
   onSubmit,
   onToggleDisruptions,
   onToggleVehicles,
@@ -2481,6 +2746,7 @@ function TravelPlannerPanel({
   publicTransportVehiclesVisible: boolean;
   locationStatus: LocationRequestStatus;
   locationMessage?: string;
+  rememberedRoutes: RememberedTravelRoute[];
   onOriginChange: (value: string) => void;
   onDestinationChange: (value: string) => void;
   onSuggestionSelect: (kind: RouteInputKind, suggestion: TravelPlaceSuggestion) => void;
@@ -2490,6 +2756,9 @@ function TravelPlannerPanel({
   onUseCurrentLocation: () => void;
   onSelectItinerary: (itineraryId: string) => void;
   onSelectComparisonPreset: (preset: TravelTimePreset) => void;
+  onSelectRememberedRoute: (route: RememberedTravelRoute) => void;
+  onToggleRememberedRoutePinned: (routeId: string) => void;
+  onRemoveRememberedRoute: (routeId: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onToggleDisruptions: () => void;
   onToggleVehicles: () => void;
@@ -2523,89 +2792,98 @@ function TravelPlannerPanel({
         </div>
       </div>
       <div className="travel-planner-workbench">
-        <form className="route-planner-form route-planner-form-primary" onSubmit={onSubmit}>
-          <div>
-            <RoutePlaceInput
-              id="travel-origin"
-              label="Hvor er du?"
-              value={originInput}
-              placeholder="F.eks. Munkegata eller 63.43, 10.39"
-              describedBy="travel-plan-result"
-              hasError={Boolean(travelPlanError)}
-              selectedSuggestion={selectedOriginSuggestion}
-              onChange={onOriginChange}
-              onSelectSuggestion={(suggestion) => onSuggestionSelect("origin", suggestion)}
-            />
-            <div className="route-input-tools">
-              <button
-                type="button"
-                className="route-location-button"
-                onClick={onUseCurrentLocation}
-                disabled={travelPlanLoading || locationStatus === "loading"}
-              >
-                {locationStatus === "loading" ? "Henter posisjon ..." : "Bruk min posisjon"}
-              </button>
-              {locationMessage ? (
-                <small className={`route-location-status ${locationStatus}`}>
-                  {locationMessage}
-                </small>
-              ) : null}
-            </div>
-          </div>
-          <div>
-            <RoutePlaceInput
-              id="travel-destination"
-              label="Hvor skal du?"
-              value={destinationInput}
-              placeholder="F.eks. Leangen"
-              describedBy="travel-plan-result"
-              hasError={Boolean(travelPlanError)}
-              selectedSuggestion={selectedDestinationSuggestion}
-              onChange={onDestinationChange}
-              onSelectSuggestion={(suggestion) => onSuggestionSelect("destination", suggestion)}
-            />
-            <div className="route-destination-presets" role="group" aria-label="Vanlige reisemål">
-              <span className="route-destination-presets-title">Vanlige mål</span>
-              {destinationPresets.map((preset) => (
+        <div className="route-planner-controls">
+          <form className="route-planner-form route-planner-form-primary" onSubmit={onSubmit}>
+            <div>
+              <RoutePlaceInput
+                id="travel-origin"
+                label="Hvor er du?"
+                value={originInput}
+                placeholder="F.eks. Munkegata eller 63.43, 10.39"
+                describedBy="travel-plan-result"
+                hasError={Boolean(travelPlanError)}
+                selectedSuggestion={selectedOriginSuggestion}
+                onChange={onOriginChange}
+                onSelectSuggestion={(suggestion) => onSuggestionSelect("origin", suggestion)}
+              />
+              <div className="route-input-tools">
                 <button
-                  key={preset.query}
                   type="button"
-                  className={destinationInput === preset.query ? "selected" : undefined}
-                  aria-pressed={destinationInput === preset.query}
-                  onClick={() => onDestinationPresetSelect(preset)}
-                  disabled={travelPlanLoading}
+                  className="route-location-button"
+                  onClick={onUseCurrentLocation}
+                  disabled={travelPlanLoading || locationStatus === "loading"}
                 >
-                  {preset.label}
+                  {locationStatus === "loading" ? "Henter posisjon ..." : "Bruk min posisjon"}
                 </button>
-              ))}
+                {locationMessage ? (
+                  <small className={`route-location-status ${locationStatus}`}>
+                    {locationMessage}
+                  </small>
+                ) : null}
+              </div>
             </div>
-          </div>
-          <button
-            type="button"
-            className="route-swap-button"
-            onClick={onSwapRoute}
-            disabled={travelPlanLoading || (!originInput.trim() && !destinationInput.trim())}
-          >
-            Bytt retning
-          </button>
-          <div>
-            <label htmlFor="travel-time">Når?</label>
-            <select
-              id="travel-time"
-              value={timePreset}
-              onChange={(event) => onTimePresetChange(event.target.value as TravelTimePreset)}
+            <div>
+              <RoutePlaceInput
+                id="travel-destination"
+                label="Hvor skal du?"
+                value={destinationInput}
+                placeholder="F.eks. Leangen"
+                describedBy="travel-plan-result"
+                hasError={Boolean(travelPlanError)}
+                selectedSuggestion={selectedDestinationSuggestion}
+                onChange={onDestinationChange}
+                onSelectSuggestion={(suggestion) => onSuggestionSelect("destination", suggestion)}
+              />
+              <div className="route-destination-presets" role="group" aria-label="Vanlige reisemål">
+                <span className="route-destination-presets-title">Vanlige mål</span>
+                {destinationPresets.map((preset) => (
+                  <button
+                    key={preset.query}
+                    type="button"
+                    className={destinationInput === preset.query ? "selected" : undefined}
+                    aria-pressed={destinationInput === preset.query}
+                    onClick={() => onDestinationPresetSelect(preset)}
+                    disabled={travelPlanLoading}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="route-swap-button"
+              onClick={onSwapRoute}
+              disabled={travelPlanLoading || (!originInput.trim() && !destinationInput.trim())}
             >
-              {travelTimePresets.map((preset) => (
-                <option key={preset} value={preset}>
-                  {travelTimePresetLabel(preset)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" disabled={travelPlanLoading}>
-            {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
-          </button>
-        </form>
+              Bytt retning
+            </button>
+            <div>
+              <label htmlFor="travel-time">Når?</label>
+              <select
+                id="travel-time"
+                value={timePreset}
+                onChange={(event) => onTimePresetChange(event.target.value as TravelTimePreset)}
+              >
+                {travelTimePresets.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {travelTimePresetLabel(preset)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button type="submit" disabled={travelPlanLoading}>
+              {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
+            </button>
+          </form>
+          <RememberedTravelRoutesPanel
+            routes={rememberedRoutes}
+            loading={travelPlanLoading}
+            onSelectRoute={onSelectRememberedRoute}
+            onToggleRoutePinned={onToggleRememberedRoutePinned}
+            onRemoveRoute={onRemoveRememberedRoute}
+          />
+        </div>
         <div id="travel-plan-result" className="travel-planner-result">
           <TravelPlanCard
             plan={travelPlan}
@@ -2659,8 +2937,13 @@ export function TrafficMapPage() {
   const [selectedOriginSuggestion, setSelectedOriginSuggestion] = useState<TravelPlaceSuggestion>();
   const [selectedDestinationSuggestion, setSelectedDestinationSuggestion] =
     useState<TravelPlaceSuggestion>();
+  const [activeTravelRouteQueryOverride, setActiveTravelRouteQueryOverride] =
+    useState<RememberedTravelRouteQueryOverride>();
   const [timePreset, setTimePreset] = useState<TravelTimePreset>(
     () => initialTravelSearch.timePreset,
+  );
+  const [rememberedRoutes, setRememberedRoutes] = useState<RememberedTravelRoute[]>(() =>
+    readRememberedTravelRoutes(browserStorage()),
   );
   const [locationStatus, setLocationStatus] = useState<LocationRequestStatus>("idle");
   const [locationMessage, setLocationMessage] = useState<string>();
@@ -2684,6 +2967,17 @@ export function TrafficMapPage() {
   const travelPlanAbortRef = useRef<AbortController | undefined>(undefined);
   const departureBoardAbortRef = useRef<AbortController | undefined>(undefined);
   const routeDepartureBoardsAbortRef = useRef<AbortController | undefined>(undefined);
+
+  const updateRememberedRoutes = useCallback(
+    (updater: (routes: RememberedTravelRoute[]) => RememberedTravelRoute[]) => {
+      setRememberedRoutes((current) => {
+        const next = updater(current);
+        writeRememberedTravelRoutes(browserStorage(), next);
+        return next;
+      });
+    },
+    [],
+  );
 
   const loadDepartureBoard = useCallback((context: DepartureBoardContext) => {
     departureBoardAbortRef.current?.abort();
@@ -2844,11 +3138,13 @@ export function TrafficMapPage() {
     setLocationStatus("idle");
     setLocationMessage(undefined);
     setSelectedOriginSuggestion(undefined);
+    setActiveTravelRouteQueryOverride(undefined);
     handleTravelInputChange(value, setOriginInput);
   }
 
   function handleDestinationInputChange(value: string): void {
     setSelectedDestinationSuggestion(undefined);
+    setActiveTravelRouteQueryOverride(undefined);
     handleTravelInputChange(value, setDestinationInput);
   }
 
@@ -2861,6 +3157,7 @@ export function TrafficMapPage() {
       setLocationStatus("idle");
       setLocationMessage(undefined);
       setSelectedOriginSuggestion(suggestion);
+      setActiveTravelRouteQueryOverride(undefined);
       setOriginInput(suggestion.label);
       if (travelPlanLoading || travelPlan) {
         invalidateTravelPlan();
@@ -2872,6 +3169,7 @@ export function TrafficMapPage() {
       }
     } else {
       setSelectedDestinationSuggestion(suggestion);
+      setActiveTravelRouteQueryOverride(undefined);
       setDestinationInput(suggestion.label);
       if (travelPlanLoading || travelPlan) {
         invalidateTravelPlan({ resetDepartureBoard: true });
@@ -2882,6 +3180,7 @@ export function TrafficMapPage() {
 
   function handleDestinationPresetSelect(preset: DestinationPreset): void {
     setSelectedDestinationSuggestion(undefined);
+    setActiveTravelRouteQueryOverride(undefined);
     handleTravelInputChange(preset.query, setDestinationInput);
   }
 
@@ -2889,6 +3188,7 @@ export function TrafficMapPage() {
     setLocationStatus("idle");
     setLocationMessage(undefined);
     setTravelPlanError(undefined);
+    setActiveTravelRouteQueryOverride(undefined);
     setOriginInput(destinationInput);
     setDestinationInput(originInput);
     setSelectedOriginSuggestion(selectedDestinationSuggestion);
@@ -2911,6 +3211,7 @@ export function TrafficMapPage() {
         destinationInput,
         timePreset: value,
         updateSearch: true,
+        routeQueryOverride: activeTravelRouteQueryOverride,
       });
       return;
     }
@@ -2926,6 +3227,39 @@ export function TrafficMapPage() {
           : undefined,
       );
     }
+  }
+
+  function handleSelectRememberedRoute(route: RememberedTravelRoute): void {
+    setLocationStatus("idle");
+    setLocationMessage(undefined);
+    setTravelPlanError(undefined);
+    setSelectedOriginSuggestion(undefined);
+    setSelectedDestinationSuggestion(undefined);
+    setOriginInput(route.originInput);
+    setDestinationInput(route.destinationInput);
+    setTimePreset(route.timePreset);
+    const routeQueryOverride: RememberedTravelRouteQueryOverride = {
+      from: route.originQuery,
+      to: route.destinationQuery,
+      ...(route.originLabel ? { fromLabel: route.originLabel } : {}),
+      ...(route.destinationLabel ? { toLabel: route.destinationLabel } : {}),
+    };
+    setActiveTravelRouteQueryOverride(routeQueryOverride);
+    void loadTravelPlanForInput({
+      originInput: route.originInput,
+      destinationInput: route.destinationInput,
+      timePreset: route.timePreset,
+      updateSearch: true,
+      routeQueryOverride,
+    });
+  }
+
+  function handleToggleRememberedRoutePinned(routeId: string): void {
+    updateRememberedRoutes((routes) => toggleRememberedTravelRoutePinned(routes, routeId));
+  }
+
+  function handleRemoveRememberedRoute(routeId: string): void {
+    updateRememberedRoutes((routes) => removeRememberedTravelRoute(routes, routeId));
   }
 
   const stableBounds = useMemo(
@@ -3210,6 +3544,7 @@ export function TrafficMapPage() {
         const nextOrigin = formatCoordinateInput({ lat, lon });
         setOriginInput(nextOrigin);
         setSelectedOriginSuggestion(undefined);
+        setActiveTravelRouteQueryOverride(undefined);
         setTravelPlanError(undefined);
         if (travelPlanLoading || travelPlan) {
           invalidateTravelPlan();
@@ -3255,6 +3590,7 @@ export function TrafficMapPage() {
     destinationInput: string;
     timePreset: TravelTimePreset;
     updateSearch: boolean;
+    routeQueryOverride?: RememberedTravelRouteQueryOverride;
     onAbort?: () => void;
   }) {
     const requestId = invalidateTravelPlan({
@@ -3269,12 +3605,18 @@ export function TrafficMapPage() {
       selectedDestinationSuggestion?.label === input.destinationInput
         ? selectedDestinationSuggestion
         : undefined;
-    const from = originSuggestion
-      ? travelSuggestionQuery(originSuggestion)
-      : cleanTravelSearchText(input.originInput);
-    const to = destinationSuggestion
-      ? travelSuggestionQuery(destinationSuggestion)
-      : cleanTravelSearchText(input.destinationInput);
+    const from =
+      input.routeQueryOverride?.from ??
+      (originSuggestion
+        ? travelSuggestionQuery(originSuggestion)
+        : cleanTravelSearchText(input.originInput));
+    const to =
+      input.routeQueryOverride?.to ??
+      (destinationSuggestion
+        ? travelSuggestionQuery(destinationSuggestion)
+        : cleanTravelSearchText(input.destinationInput));
+    const fromLabel = input.routeQueryOverride?.fromLabel ?? originSuggestion?.label;
+    const toLabel = input.routeQueryOverride?.toLabel ?? destinationSuggestion?.label;
     if (!from || !to) {
       setTravelPlanError("Skriv inn både start og mål.");
       if (input.updateSearch) updateTravelSearchParams();
@@ -3305,8 +3647,8 @@ export function TrafficMapPage() {
       const request = {
         from,
         to,
-        ...(originSuggestion ? { fromLabel: originSuggestion.label } : {}),
-        ...(destinationSuggestion ? { toLabel: destinationSuggestion.label } : {}),
+        ...(fromLabel ? { fromLabel } : {}),
+        ...(toLabel ? { toLabel } : {}),
         departAt: departureTimeForPreset(input.timePreset),
       };
       const comparisonPreset = isTravelTimeComparisonPreset(input.timePreset)
@@ -3336,6 +3678,26 @@ export function TrafficMapPage() {
       if (originContext) {
         loadDepartureBoard(originContext);
       }
+      const rememberedOriginLabel = fromLabel ?? payload.origin.label;
+      const rememberedDestinationLabel = toLabel ?? payload.destination.label;
+      const shouldRememberRoute = !(
+        looksLikeCoordinateQuery(from) &&
+        !originSuggestion &&
+        !input.routeQueryOverride?.fromLabel
+      );
+      if (shouldRememberRoute) {
+        updateRememberedRoutes((routes) =>
+          upsertRememberedTravelRoute(routes, {
+            originInput: input.originInput,
+            destinationInput: input.destinationInput,
+            originQuery: from,
+            destinationQuery: to,
+            ...(rememberedOriginLabel ? { originLabel: rememberedOriginLabel } : {}),
+            ...(rememberedDestinationLabel ? { destinationLabel: rememberedDestinationLabel } : {}),
+            timePreset: input.timePreset,
+          }),
+        );
+      }
       showPublicTransportDisruptions();
     } catch (reason) {
       if (controller.signal.aborted) {
@@ -3360,6 +3722,7 @@ export function TrafficMapPage() {
       destinationInput,
       timePreset,
       updateSearch: true,
+      routeQueryOverride: activeTravelRouteQueryOverride,
     });
   }
 
@@ -3393,6 +3756,7 @@ export function TrafficMapPage() {
         publicTransportVehiclesVisible={visibleContextLayers.publicTransportVehicles}
         locationStatus={locationStatus}
         locationMessage={locationMessage}
+        rememberedRoutes={rememberedRoutes}
         onOriginChange={handleOriginInputChange}
         onDestinationChange={handleDestinationInputChange}
         onSuggestionSelect={handleTravelSuggestionSelect}
@@ -3402,6 +3766,9 @@ export function TrafficMapPage() {
         onUseCurrentLocation={handleUseCurrentLocation}
         onSelectItinerary={handleSelectItinerary}
         onSelectComparisonPreset={handleTravelTimePresetChange}
+        onSelectRememberedRoute={handleSelectRememberedRoute}
+        onToggleRememberedRoutePinned={handleToggleRememberedRoutePinned}
+        onRemoveRememberedRoute={handleRemoveRememberedRoute}
         onSubmit={(event) => void handleTravelPlanSubmit(event)}
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}

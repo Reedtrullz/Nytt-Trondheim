@@ -9461,6 +9461,125 @@ button {
   min-width: 0;
 }
 
+.route-planner-controls {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.remembered-routes {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.remembered-routes-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.remembered-routes h2 {
+  margin: 0;
+  font: 22px/1.05 var(--serif);
+}
+
+.remembered-routes p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.remembered-route-list {
+  display: grid;
+  gap: 6px;
+}
+
+.remembered-route {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: #fbfbf8;
+}
+
+.remembered-route.pinned {
+  border-color: color-mix(in srgb, var(--green) 44%, var(--line));
+  background: color-mix(in srgb, var(--paper) 88%, var(--green) 12%);
+}
+
+.remembered-route-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.remembered-route-main:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.remembered-route-main strong,
+.remembered-route-main span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.remembered-route-main strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.remembered-route-main span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.remembered-route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.remembered-route-actions span,
+.remembered-route-actions button {
+  min-height: 28px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.remembered-route-actions span {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+}
+
+.remembered-route-actions button {
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.remembered-route-actions button:last-child {
+  color: var(--terracotta);
+}
+
 .route-departure-confidence {
   display: grid;
   gap: 12px;

@@ -38,6 +38,8 @@ import {
   mergeTrafficFilterSearch,
   mergeTravelPlannerSearch,
   parseTravelPlannerSearch,
+  readRememberedTravelRoutes,
+  removeRememberedTravelRoute,
   routeDepartureCheckpoints,
   routeDepartureConfidenceItems,
   routeDepartureConfidenceSummary,
@@ -45,9 +47,139 @@ import {
   selectedDepartureMatch,
   selectedDepartureStatus,
   selectedRouteWatchSummary,
+  sortRememberedTravelRoutes,
   timeWindowForPreset,
+  toggleRememberedTravelRoutePinned,
   travelPlanDecision,
+  upsertRememberedTravelRoute,
+  type RememberedTravelRoute,
 } from "./TrafficMapPage.js";
+
+function storageReturning(raw: string | null): Storage {
+  return {
+    getItem: () => raw,
+    setItem: () => undefined,
+    removeItem: () => undefined,
+    clear: () => undefined,
+    key: () => null,
+    length: raw ? 1 : 0,
+  } as Storage;
+}
+
+describe("remembered travel routes", () => {
+  it("deduplicates routes by actual query and preserves pinning", () => {
+    const first = upsertRememberedTravelRoute(
+      [],
+      {
+        originInput: "Munkegata",
+        destinationInput: "Lade",
+        originQuery: "63.43288, 10.39374",
+        destinationQuery: "63.43300, 10.46400",
+        originLabel: "Munkegata, Trondheim",
+        destinationLabel: "Leangen, Trondheim",
+        timePreset: "now",
+      },
+      "2026-07-07T08:00:00.000Z",
+    );
+
+    const pinned = toggleRememberedTravelRoutePinned(
+      first,
+      first[0]?.id ?? "",
+      "2026-07-07T08:01:00.000Z",
+    );
+    const next = upsertRememberedTravelRoute(
+      pinned,
+      {
+        originInput: "Munkegata",
+        destinationInput: "Lade Arena",
+        originQuery: "63.43288, 10.39374",
+        destinationQuery: "63.43300, 10.46400",
+        originLabel: "Munkegata, Trondheim",
+        destinationLabel: "Leangen, Trondheim",
+        timePreset: "in30",
+      },
+      "2026-07-07T08:02:00.000Z",
+    );
+
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({
+      destinationInput: "Lade Arena",
+      timePreset: "in30",
+      pinned: true,
+      useCount: 2,
+      lastUsedAt: "2026-07-07T08:02:00.000Z",
+    });
+  });
+
+  it("sorts pinned routes before recent routes", () => {
+    const routes: RememberedTravelRoute[] = [
+      {
+        id: "a",
+        originInput: "A",
+        destinationInput: "B",
+        originQuery: "A",
+        destinationQuery: "B",
+        timePreset: "now",
+        pinned: false,
+        useCount: 3,
+        createdAt: "2026-07-07T07:00:00.000Z",
+        lastUsedAt: "2026-07-07T09:00:00.000Z",
+      },
+      {
+        id: "c",
+        originInput: "C",
+        destinationInput: "D",
+        originQuery: "C",
+        destinationQuery: "D",
+        timePreset: "now",
+        pinned: true,
+        useCount: 1,
+        createdAt: "2026-07-07T07:00:00.000Z",
+        lastUsedAt: "2026-07-07T08:00:00.000Z",
+      },
+    ];
+
+    expect(sortRememberedTravelRoutes(routes).map((route) => route.id)).toEqual(["c", "a"]);
+  });
+
+  it("drops invalid storage rows and survives corrupt or blocked storage", () => {
+    const raw = JSON.stringify([
+      {
+        originInput: "Munkegata",
+        destinationInput: "Leangen",
+        originQuery: "63.43288, 10.39374",
+        destinationQuery: "63.43300, 10.46400",
+        timePreset: "later",
+      },
+      { originInput: "", destinationInput: "Leangen" },
+    ]);
+    expect(readRememberedTravelRoutes(storageReturning(raw))).toHaveLength(1);
+    expect(readRememberedTravelRoutes(storageReturning("{"))).toEqual([]);
+    expect(
+      readRememberedTravelRoutes({
+        getItem: () => {
+          throw new Error("blocked");
+        },
+      } as unknown as Storage),
+    ).toEqual([]);
+  });
+
+  it("removes routes by id", () => {
+    const routes = upsertRememberedTravelRoute(
+      [],
+      {
+        originInput: "Munkegata",
+        destinationInput: "Leangen",
+        originQuery: "Munkegata",
+        destinationQuery: "Leangen",
+        timePreset: "now",
+      },
+      "2026-07-07T08:00:00.000Z",
+    );
+
+    expect(removeRememberedTravelRoute(routes, routes[0]?.id ?? "")).toEqual([]);
+  });
+});
 
 const plan: TravelPlanPayload = {
   origin: { query: "start", label: "Start", coordinate: [10.39, 63.39] },
