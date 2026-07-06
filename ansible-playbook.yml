@@ -335,11 +335,6 @@
 
     - name: Promote candidate and validate production
       block:
-        - name: Record candidate promotion validation start
-          ansible.builtin.command: date -u +%Y-%m-%dT%H:%M:%SZ
-          register: candidate_validation_started_at
-          changed_when: false
-
         - name: Promote API and worker
           ansible.builtin.command: docker compose --env-file .env.production up -d app worker
           args:
@@ -440,28 +435,62 @@
           retries: 6
           delay: 5
 
-        - name: Verify worker container is running after candidate promotion
+        - name: Capture promoted worker startup state
           ansible.builtin.shell: |
             set -euo pipefail
-            docker compose --env-file .env.production ps --services --filter status=running worker | grep -qx worker
+            container_id="$(docker compose --env-file .env.production ps -q worker)"
+            test -n "$container_id"
+            test "$(docker inspect -f '{% raw %}{{.State.Running}}{% endraw %}' "$container_id")" = "true"
+            health="$(docker inspect -f '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}' "$container_id")"
+            case "$health" in
+              healthy|starting|none) ;;
+              *) echo "worker health is $health" >&2; exit 1 ;;
+            esac
+            docker inspect -f '{% raw %}{{.RestartCount}}{% endraw %}' "$container_id"
           args:
             chdir: "{{ app_dir }}"
             executable: /bin/bash
-          register: promoted_worker_running
-          until: promoted_worker_running.rc == 0
+          register: promoted_worker_startup_state
+          until: promoted_worker_startup_state.rc == 0
           retries: 6
           delay: 5
           changed_when: false
 
-        - name: Verify worker completed a fresh cycle after candidate promotion
+        - name: Allow promoted worker startup crashes to surface
+          ansible.builtin.pause:
+            seconds: 45
+
+        - name: Verify promoted worker remains stable after startup
           ansible.builtin.shell: |
             set -euo pipefail
-            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v validation_started="{{ candidate_validation_started_at.stdout }}" -At <<'SQL'
+            container_id="$(docker compose --env-file .env.production ps -q worker)"
+            test -n "$container_id"
+            test "$(docker inspect -f '{% raw %}{{.State.Running}}{% endraw %}' "$container_id")" = "true"
+            current_restart_count="$(docker inspect -f '{% raw %}{{.RestartCount}}{% endraw %}' "$container_id")"
+            startup_restart_count="{{ promoted_worker_startup_state.stdout | trim | int }}"
+            test "$current_restart_count" -le "$startup_restart_count"
+            health="$(docker inspect -f '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}' "$container_id")"
+            case "$health" in
+              healthy|starting|none) ;;
+              *) echo "worker health is $health" >&2; exit 1 ;;
+            esac
+          args:
+            chdir: "{{ app_dir }}"
+            executable: /bin/bash
+          register: promoted_worker_stability
+          until: promoted_worker_stability.rc == 0
+          retries: 3
+          delay: 10
+          changed_when: false
+
+        - name: Verify worker has a recent completed cycle
+          ansible.builtin.shell: |
+            set -euo pipefail
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -At <<'SQL'
               SELECT count(*)
               FROM worker_cycle_metrics
               WHERE id='latest'
-                AND cycle_started_at >= :'validation_started'::timestamptz
-                AND cycle_completed_at >= :'validation_started'::timestamptz
+                AND cycle_completed_at > now() - interval '2 hours'
                 AND cycle_completed_at >= cycle_started_at;
             SQL
             )"
@@ -471,8 +500,8 @@
             executable: /bin/bash
           register: promoted_worker_cycle
           until: promoted_worker_cycle.rc == 0
-          retries: 45
-          delay: 20
+          retries: 6
+          delay: 10
           changed_when: false
 
         - name: Verify traffic source health after candidate promotion

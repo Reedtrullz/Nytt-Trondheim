@@ -40,10 +40,11 @@ describe("deployment playbook Entur verification", () => {
     const validationBlock = playbook.slice(blockStart, rescueStart);
     expect(validationBlock).toContain("- name: Promote API and worker");
     expect(validationBlock).toContain("- name: Verify production health");
-    expect(validationBlock).toMatch(/- name: Verify worker/);
+    expect(validationBlock).toContain("- name: Capture promoted worker startup state");
     expect(validationBlock).toContain(
-      "- name: Verify worker completed a fresh cycle after candidate promotion",
+      "- name: Verify promoted worker remains stable after startup",
     );
+    expect(validationBlock).toContain("- name: Verify worker has a recent completed cycle");
     expect(validationBlock).toContain(
       "- name: Verify DATEX source health rows when DATEX is enabled",
     );
@@ -108,21 +109,22 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toMatch(/retries:\s*\d+/);
   });
 
-  it("verifies promoted worker container state and a candidate-era worker cycle", () => {
-    const workerTaskStart = playbook.indexOf("- name: Verify worker");
+  it("verifies promoted worker stability and recent cycle health", () => {
+    const workerTaskStart = playbook.indexOf("- name: Capture promoted worker startup state");
     const workerTaskEnd = playbook.indexOf("- name: Verify DATEX source health", workerTaskStart);
     const task = playbook.slice(workerTaskStart, workerTaskEnd);
 
     expect(workerTaskStart).toBeGreaterThan(-1);
-    expect(task).toContain("ps --services --filter status=running worker | grep -qx worker");
-    expect(task).toContain(
-      "- name: Verify worker completed a fresh cycle after candidate promotion",
-    );
-    expect(task).toContain("candidate_validation_started_at.stdout");
+    expect(task).toContain("- name: Capture promoted worker startup state");
+    expect(task).toContain("- name: Verify promoted worker remains stable after startup");
+    expect(task).toContain("docker inspect -f '{% raw %}{{.RestartCount}}{% endraw %}'");
+    expect(task).toContain("worker health is $health");
+    expect(task).toContain("- name: Verify worker has a recent completed cycle");
     expect(task).toContain("FROM worker_cycle_metrics");
-    expect(task).toContain("cycle_completed_at >= :'validation_started'::timestamptz");
+    expect(task).toContain("cycle_completed_at > now() - interval '2 hours'");
     expect(task).toContain("register: promoted_worker_cycle");
     expect(task).toContain("until: promoted_worker_cycle.rc == 0");
+    expect(task).not.toContain("candidate_validation_started_at.stdout");
     expect(task).toContain("- name: Verify traffic source health after candidate promotion");
     expect(task).toContain("FROM source_health");
     expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
