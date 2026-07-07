@@ -24,6 +24,7 @@ import {
   collectorRunFromMetric,
   normalizeDatexSituationEndpoint,
   prepareArticleCoverageAnalysis,
+  runWithConcurrency,
   sourceHealthFromDeepSeekAnalysis,
   sourceHealthFromPushDelivery,
   shouldResolveMissingDatexSituations,
@@ -145,6 +146,29 @@ function okXmlResponse(xml: string): Response {
 }
 
 describe("worker lifecycle helpers", () => {
+  it("bounds concurrent persistence work without dropping queued items", async () => {
+    let active = 0;
+    let peak = 0;
+    const completed: number[] = [];
+
+    await runWithConcurrency(
+      Array.from({ length: 40 }, (_, index) => index),
+      6,
+      async (item) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        completed.push(item);
+        active -= 1;
+      },
+    );
+
+    expect(peak).toBeLessThanOrEqual(6);
+    expect(completed.sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 40 }, (_, index) => index),
+    );
+  });
+
   it("turns DATEX travel-time anomalies into worker Web Push candidates", () => {
     const page = buildWorkerNotificationTriggerPage({
       situations: [],

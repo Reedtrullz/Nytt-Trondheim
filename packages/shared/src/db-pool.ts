@@ -11,16 +11,16 @@ type EnvMap = Record<string, string | undefined>;
 
 const defaults: Record<DatabasePoolRole, DatabasePoolOptions> = {
   server: {
-    max: 6,
-    connectionTimeoutMillis: 5_000,
+    max: 8,
+    connectionTimeoutMillis: 30_000,
     idleTimeoutMillis: 30_000,
     maxLifetimeSeconds: 300,
   },
   worker: {
-    max: 3,
-    connectionTimeoutMillis: 5_000,
-    idleTimeoutMillis: 15_000,
-    maxLifetimeSeconds: 180,
+    max: 8,
+    connectionTimeoutMillis: 120_000,
+    idleTimeoutMillis: 30_000,
+    maxLifetimeSeconds: 300,
   },
   migration: {
     max: 1,

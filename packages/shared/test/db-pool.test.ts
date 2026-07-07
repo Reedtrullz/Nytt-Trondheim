@@ -2,23 +2,23 @@ import { describe, expect, it } from "vitest";
 import { buildDatabasePoolOptions } from "../src/db-pool.js";
 
 describe("database pool policy", () => {
-  it("bounds server and worker pools with fast connection timeouts", () => {
+  it("bounds pools without timing out normal queued worker writes", () => {
     const server = buildDatabasePoolOptions("server", {});
     const worker = buildDatabasePoolOptions("worker", {});
 
     expect(server).toMatchObject({
-      max: 6,
-      connectionTimeoutMillis: 5_000,
+      max: 8,
+      connectionTimeoutMillis: 30_000,
       idleTimeoutMillis: 30_000,
       maxLifetimeSeconds: 300,
     });
     expect(worker).toMatchObject({
-      max: 3,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 15_000,
-      maxLifetimeSeconds: 180,
+      max: 8,
+      connectionTimeoutMillis: 120_000,
+      idleTimeoutMillis: 30_000,
+      maxLifetimeSeconds: 300,
     });
-    expect(worker.max).toBeLessThan(server.max);
+    expect(worker.connectionTimeoutMillis).toBeGreaterThan(server.connectionTimeoutMillis);
   });
 
   it("allows role-specific production overrides without accepting invalid values", () => {
@@ -42,6 +42,6 @@ describe("database pool policy", () => {
       maxLifetimeSeconds: 90,
     });
     expect(server.max).toBe(8);
-    expect(server.connectionTimeoutMillis).toBe(5_000);
+    expect(server.connectionTimeoutMillis).toBe(30_000);
   });
 });

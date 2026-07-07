@@ -473,6 +473,18 @@ function cleanTravelSearchText(value: string | null): string {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
+export function canonicalTravelPlannerQuery(value: string | null): string {
+  const cleaned = cleanTravelSearchText(value);
+  if (!cleaned || looksLikeCoordinateQuery(cleaned)) return cleaned;
+  const normalized = cleaned.toLocaleLowerCase("nb");
+  const preset = destinationPresets.find(
+    (candidate) =>
+      candidate.label.toLocaleLowerCase("nb") === normalized ||
+      candidate.query.toLocaleLowerCase("nb") === normalized,
+  );
+  return preset?.query ?? cleaned;
+}
+
 function looksLikeCoordinateQuery(value: string): boolean {
   return /^-?\d{1,2}(?:\.\d+)?,\s*-?\d{1,3}(?:\.\d+)?$/.test(cleanTravelSearchText(value));
 }
@@ -4365,12 +4377,12 @@ export function TrafficMapPage() {
       input.routeQueryOverride?.from ??
       (originSuggestion
         ? travelSuggestionQuery(originSuggestion)
-        : cleanTravelSearchText(input.originInput));
+        : canonicalTravelPlannerQuery(input.originInput));
     const to =
       input.routeQueryOverride?.to ??
       (destinationSuggestion
         ? travelSuggestionQuery(destinationSuggestion)
-        : cleanTravelSearchText(input.destinationInput));
+        : canonicalTravelPlannerQuery(input.destinationInput));
     const fromLabel = input.routeQueryOverride?.fromLabel ?? originSuggestion?.label;
     const toLabel = input.routeQueryOverride?.toLabel ?? destinationSuggestion?.label;
     if (!from || !to) {

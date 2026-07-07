@@ -141,6 +141,28 @@ function stripArticleCoverageBundle(article: Article): Article {
   return articleWithoutCoverageBundle;
 }
 
+export async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  work: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+  const workerCount = Math.max(1, Math.min(Math.floor(limit), items.length));
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const item = items[index];
+        if (item === undefined) continue;
+        await work(item, index);
+      }
+    }),
+  );
+}
+
 export function buildWorkerCycleMetrics({
   cycleStartedAt,
   cycleCompletedAt,
@@ -1524,7 +1546,9 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     ...resolvedNonPromotableDatexSituations,
     ...resolvedDatexSituations,
   ];
-  await Promise.all(situationsToPersist.map((situation) => repository.upsertSituation(situation)));
+  await runWithConcurrency(situationsToPersist, 6, (situation) =>
+    repository.upsertSituation(situation),
+  );
   const briefArticles = await repository.recentArticles(24);
   const briefSituations = await repository.homeSituationSummaries(3);
   const morningBrief = buildMorningBrief({
@@ -1558,8 +1582,8 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     sources: sourceMetrics,
   });
   try {
-    await Promise.all(
-      sourceMetrics.map((metric) => repository.recordCollectorRun(collectorRunFromMetric(metric))),
+    await runWithConcurrency(sourceMetrics, 4, (metric) =>
+      repository.recordCollectorRun(collectorRunFromMetric(metric)),
     );
     await repository.saveWorkerCycleMetrics(workerMetrics);
   } catch (error) {

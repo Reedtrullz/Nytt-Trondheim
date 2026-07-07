@@ -29,6 +29,7 @@ vi.mock("react-leaflet", () => ({
 import {
   buildRouteChoiceModel,
   buildTravelTimeComparisonModel,
+  canonicalTravelPlannerQuery,
   departureBoardContextFromPlan,
   departureBoardContextFromSuggestion,
   departureLineFilterKey,
@@ -613,6 +614,13 @@ describe("TrafficMapPage route overlay helpers", () => {
     expect(parseTravelPlannerSearch("fra=Munkegata&til=Lade&tid=in60").timePreset).toBe("in60");
     expect(parseTravelPlannerSearch("fra=Munkegata&til=Lade&tid=in120").timePreset).toBe("in120");
     expect(parseTravelPlannerSearch("fra=Munkegata&til=Lade&tid=weekend").timePreset).toBe("now");
+  });
+
+  it("resolves typed common travel shortcuts to precise planner queries", () => {
+    expect(canonicalTravelPlannerQuery("Heimdal")).toBe("Heimdal stasjon");
+    expect(canonicalTravelPlannerQuery("St. Olavs")).toBe("St. Olavs hospital");
+    expect(canonicalTravelPlannerQuery(" lade ")).toBe("Lade Arena");
+    expect(canonicalTravelPlannerQuery("Munkegata")).toBe("Munkegata");
   });
 
   it("keeps map filters and submitted travel plan params separate", () => {
