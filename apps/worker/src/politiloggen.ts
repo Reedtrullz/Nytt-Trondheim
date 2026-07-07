@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import type { Article, EvidenceItem, MapFeature, Situation } from "@nytt/shared";
+import {
+  hasPublicSafetyThreatSignal,
+  type Article,
+  type EvidenceItem,
+  type MapFeature,
+  type Situation,
+} from "@nytt/shared";
 import { articleTopics, categorize } from "./classify.js";
 import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
@@ -145,6 +151,7 @@ function categoryForThread(thread: PolitiloggenThread): Article["category"] {
 
 function typeForThread(thread: PolitiloggenThread): Situation["type"] {
   const text = `${thread.category ?? ""} ${excerptForThread(thread)}`.toLocaleLowerCase("nb");
+  if (hasPublicSafetyThreatSignal(text)) return "rescue";
   if (/\b(brann|røykutvikling)\b/.test(text)) return "fire";
   if (/\b(savnet|leteaksjon|forsvunnet)\b/.test(text)) return "missing_person";
   if (/\b(trafikk|kollisjon|påkjørt|bilstans|fartskontroll|uhell|fører|kjøring)\b/.test(text)) {

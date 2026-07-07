@@ -157,6 +157,40 @@ describe("Politiloggen ingestion", () => {
     });
   });
 
+  it("promotes armed police threat threads as high-priority official situations", () => {
+    const threatThread: PolitiloggenThread = {
+      ...activeThread,
+      id: "threat-1",
+      category: "Andre hendelser",
+      area: "Byåsen",
+      createdOn: "2026-07-07T17:46:00.0000000+00:00",
+      updatedOn: "2026-07-07T17:48:00.0000000+00:00",
+      lastMessageOn: "2026-07-07T17:48:00.0000000+00:00",
+      messages: [
+        {
+          id: "threat-1-0",
+          text: "Bevæpnet politi rykker ut til Byåsen etter melding om en trusselsituasjon.",
+          createdOn: "2026-07-07T17:46:00.0000000+00:00",
+          type: "Published",
+        },
+      ],
+    };
+
+    const situations = politiloggenSituationsFromThreads([threatThread]);
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]).toMatchObject({
+      id: "politiloggen-threat-1",
+      type: "rescue",
+      title: "Andre hendelser: Trondheim, Byåsen",
+      status: "active",
+      importance: "high",
+      verificationStatus: "Offentlig bekreftet",
+      locationLabel: "Byåsen",
+      incidentSignature: "politiloggen:threat-1",
+    });
+  });
+
   it("resolves active Politiloggen traffic threads when the latest message says normal again", () => {
     const situations = politiloggenSituationsFromThreads([activeThread]);
 

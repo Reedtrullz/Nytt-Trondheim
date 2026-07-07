@@ -192,6 +192,43 @@ describe("Trondheim relevance classification", () => {
     expect(situations[0]?.features[0]?.geometry.type).toBe("Point");
   });
 
+  it("opens armed police threat reports as high-priority public-safety situations", () => {
+    const base: Article = {
+      id: "armed-nrk",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Bevæpnet politi rykket ut i Trondheim",
+      excerpt: "Politiet rykket ut til en trusselsituasjon på Byåsen i Trondheim.",
+      url: "https://example.test/armed-nrk",
+      publishedAt: "2026-07-07T17:46:00Z",
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Byåsen", "Trondheim"],
+      location: { label: "Byåsen", lat: 63.405, lng: 10.356 },
+    };
+
+    const situations = detectPreliminarySituations([
+      base,
+      {
+        ...base,
+        id: "armed-adressa",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Trusselsituasjon i Trondheim",
+        url: "https://example.test/armed-adressa",
+        publishedAt: "2026-07-07T17:47:00Z",
+      },
+    ]);
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]).toMatchObject({
+      type: "rescue",
+      importance: "high",
+      incidentSignature: "rescue:byåsen",
+      locationLabel: "Byåsen",
+    });
+  });
+
   it("does not merge independent reporting outside the 12 hour activation window", () => {
     const base: Article = {
       id: "one",

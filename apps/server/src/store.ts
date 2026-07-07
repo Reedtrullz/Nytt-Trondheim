@@ -109,6 +109,7 @@ import {
   bootstrapWithMorningBrief,
   buildNotificationTriggerPage,
   cityPulseStoryFromGroup,
+  comparePublicHomeSituations,
   derivePublicVerificationForArticleGroup,
   groupHomeArticles,
   isLocalSportsCoverageText,
@@ -3818,10 +3819,7 @@ export class MemoryStore implements Store {
           (situation.status === "preliminary" || situation.status === "active") &&
           shouldFeaturePublicHomeSituation(situation, now),
       )
-      .sort(
-        (left, right) =>
-          right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
-      )
+      .sort((left, right) => comparePublicHomeSituations(left, right))
       .slice(0, 3)
       .map(homeSituationSummary);
     return {
@@ -4684,7 +4682,7 @@ export class PgStore implements Store {
   private async listHomeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
     const now = new Date();
     const staleCutoff = new Date(now.getTime() - publicLeadLongRunningSituationAgeMs).toISOString();
-    const candidateLimit = Math.max(limit * 4, limit + 6);
+    const candidateLimit = Math.max(limit * 30, 100);
     const result = await this.pool.query<{ payload: Situation }>(
       `SELECT payload
        FROM situations
@@ -4706,6 +4704,7 @@ export class PgStore implements Store {
     return result.rows
       .map((row) => row.payload)
       .filter((situation) => shouldFeaturePublicHomeSituation(situation, now))
+      .sort(comparePublicHomeSituations)
       .slice(0, limit)
       .map(homeSituationSummary);
   }

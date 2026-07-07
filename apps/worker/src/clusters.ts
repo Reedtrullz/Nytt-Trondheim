@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  hasPublicSafetyThreatSignal,
   isFootballClubBrannContext,
   type Article,
   type EvidenceItem,
@@ -631,6 +632,9 @@ export function detectPreliminarySituations(
       (article) => article.source === "trondheim_kommune",
     );
     const corroborated = municipalReports.length > 0;
+    const publicSafetyThreat = currentReports.some((article) =>
+      hasPublicSafetyThreatSignal(articleIncidentText(article)),
+    );
     const resolved = municipalReports.some((article) =>
       /\b(slukket|slokket|avsluttet|opphevet|funnet i god behold)\b/i.test(
         `${article.title} ${article.excerpt}`,
@@ -659,7 +663,8 @@ export function detectPreliminarySituations(
           "Foreløpig samling av relaterte, publiserte saker. Opplysninger må verifiseres mot originalkildene.",
         status: resolved ? "resolved" : corroborated ? "active" : "preliminary",
         verificationStatus: corroborated ? "Offentlig bekreftet" : "Foreløpig fra rapportering",
-        importance: contextualWarnings.length > 0 || corroborated ? "high" : "normal",
+        importance:
+          contextualWarnings.length > 0 || corroborated || publicSafetyThreat ? "high" : "normal",
         updatedAt: latest.publishedAt,
         createdAt:
           existing?.createdAt ??
@@ -806,8 +811,13 @@ function specificPlace(article: Article): string | undefined {
   return place ? canonicalPlaceName(place) : undefined;
 }
 
+function articleIncidentText(article: Article): string {
+  return `${article.title} ${article.excerpt}`;
+}
+
 function detectType(article: Article): Situation["type"] | undefined {
-  const text = `${article.title} ${article.excerpt}`.toLocaleLowerCase("nb");
+  const text = articleIncidentText(article).toLocaleLowerCase("nb");
+  if (hasPublicSafetyThreatSignal(text)) return "rescue";
   if (incidentEventDescriptor(article)) return "fire";
   if (/\b(brann|skogbrann|røykutvikling)\b/.test(text) && !isFootballClubBrannContext(article)) {
     return "fire";
