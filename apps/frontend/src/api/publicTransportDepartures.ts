@@ -1,5 +1,8 @@
-import type { PublicTransportDepartureBoardPayload } from "@nytt/shared";
-import { ApiError } from "../api.js";
+import type {
+  PublicTransportDepartureBoardBatchPayload,
+  PublicTransportDepartureBoardPayload,
+} from "@nytt/shared";
+import { ApiError, apiRequest } from "../api.js";
 
 export interface PublicTransportDepartureBoardRequest {
   center?: { lat: number; lon: number };
@@ -48,4 +51,24 @@ export async function fetchPublicTransportDepartureBoard(
     throw new ApiError(body.error ?? "Kunne ikke hente avganger.", response.status, retryAfter);
   }
   return (await response.json()) as PublicTransportDepartureBoardPayload;
+}
+
+export async function fetchPublicTransportDepartureBoards(
+  request: {
+    checks: Array<{
+      id: string;
+      center?: { lat: number; lon: number };
+      startTime?: string;
+    }>;
+  },
+  options: { signal?: AbortSignal } = {},
+): Promise<PublicTransportDepartureBoardBatchPayload> {
+  return apiRequest<PublicTransportDepartureBoardBatchPayload>(
+    "/api/map/public-transport/departure-boards",
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+      signal: options.signal,
+    },
+  );
 }

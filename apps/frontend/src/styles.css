@@ -9389,6 +9389,12 @@ button {
   font: 28px/1.1 var(--serif);
 }
 
+.travel-plan-context-heading {
+  margin: 0;
+  color: var(--ink);
+  font: 22px/1.15 var(--serif);
+}
+
 .traffic-filter-panel h3,
 .travel-planner-panel h3,
 .departure-board-panel h3,
@@ -10295,6 +10301,76 @@ button {
 
 .travel-plan-card-warning {
   border-left-color: var(--terracotta);
+}
+
+.traffic-dependency-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  background: #fbfbf8;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.traffic-dependency-banner strong {
+  color: var(--ink);
+}
+
+.traffic-dependency-banner-warning {
+  border-left-color: var(--terracotta);
+  background: #fff8f3;
+}
+
+.traffic-dependency-banner-watch {
+  border-left-color: var(--blue);
+}
+
+.travel-advice-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  background: #fbfbf8;
+}
+
+.travel-advice-card-warning,
+.travel-advice-card-critical {
+  border-left-color: var(--terracotta);
+  background: #fff8f3;
+}
+
+.travel-advice-card-watch {
+  border-left-color: var(--blue);
+}
+
+.travel-advice-card h2 {
+  margin: 0;
+  font: 24px/1.12 var(--serif);
+}
+
+.travel-advice-card p:not(.label) {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.travel-advice-card > span {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid #b9cfc4;
+  color: var(--green);
+  font-weight: 800;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .travel-plan-decision-grid {
@@ -13408,14 +13484,27 @@ button {
     gap: 14px;
   }
 
-  .route-departure-confidence {
+  .traffic-dependency-banner {
     order: 2;
+  }
+
+  .route-departure-confidence {
+    order: 3;
     padding: 14px;
   }
 
   .departure-board-panel {
-    order: 3;
+    order: 4;
     padding: 14px;
+  }
+
+  .travel-advice-card {
+    display: grid;
+  }
+
+  .travel-advice-card > span {
+    justify-self: flex-start;
+    white-space: normal;
   }
 
   .route-departure-confidence > header,

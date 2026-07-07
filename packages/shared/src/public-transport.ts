@@ -1,5 +1,6 @@
 import type { MultiPoint, Point } from "geojson";
 import type { SourceHealth } from "./types.js";
+import type { TrafficDependencyStatus } from "./traffic-map.js";
 
 export type PublicTransportVehicleMode = "bus" | "tram" | "rail" | "water" | "metro" | "unknown";
 export type PublicTransportAlertState = "active" | "expired" | "cancelled";
@@ -62,6 +63,7 @@ export interface PublicTransportMapPayload {
   vehicles: PublicTransportVehicle[];
   alerts: PublicTransportServiceAlert[];
   sources: SourceHealth[];
+  dependencies?: TrafficDependencyStatus[];
   generatedAt: string;
 }
 
@@ -115,6 +117,25 @@ export interface PublicTransportDepartureBoardPayload {
   stops: PublicTransportDepartureStop[];
   departures: PublicTransportDeparture[];
   sources: SourceHealth[];
+  dependencies?: TrafficDependencyStatus[];
   generatedAt: string;
   handoffUrl: string;
+}
+
+export interface PublicTransportDepartureBoardBatchCheck {
+  id: string;
+  center?: { lat: number; lon: number };
+  startTime?: string;
+}
+
+export interface PublicTransportDepartureBoardBatchResult {
+  checkpointId: string;
+  board?: PublicTransportDepartureBoardPayload;
+  error?: string;
+}
+
+export interface PublicTransportDepartureBoardBatchPayload {
+  boards: PublicTransportDepartureBoardBatchResult[];
+  dependencies?: TrafficDependencyStatus[];
+  generatedAt: string;
 }

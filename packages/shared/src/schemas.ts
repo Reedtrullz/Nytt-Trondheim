@@ -1270,6 +1270,28 @@ export type PublicTransportDepartureBoardQueryInput = z.infer<
   typeof publicTransportDepartureBoardQuerySchema
 >;
 
+export const publicTransportDepartureBoardBatchSchema = z.object({
+  checks: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(120),
+        center: z
+          .object({
+            lat: z.coerce.number().min(-90).max(90).finite(),
+            lon: z.coerce.number().min(-180).max(180).finite(),
+          })
+          .optional(),
+        startTime: z.string().datetime({ offset: true }).optional(),
+      }),
+    )
+    .min(1)
+    .max(6),
+});
+
+export type PublicTransportDepartureBoardBatchInput = z.infer<
+  typeof publicTransportDepartureBoardBatchSchema
+>;
+
 export const travelPlanQuerySchema = z.object({
   from: z.string().trim().min(2).max(160),
   to: z.string().trim().min(2).max(160),

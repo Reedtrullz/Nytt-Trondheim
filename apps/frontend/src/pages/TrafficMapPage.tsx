@@ -6,6 +6,7 @@ import type {
   PublicTransportDeparture,
   PublicTransportDepartureBoardPayload,
   TrafficCorridorImpact,
+  TrafficDependencyStatus,
   TrafficEventCategory,
   TrafficEventState,
   TrafficEventSeverity,
@@ -37,7 +38,10 @@ import {
 import { TrafficLayer } from "../components/map/TrafficLayer.js";
 import { TrafficLegend } from "../components/map/TrafficLegend.js";
 import { TrafficNowSummary } from "../components/map/TrafficNowSummary.js";
-import { fetchPublicTransportDepartureBoard } from "../api/publicTransportDepartures.js";
+import {
+  fetchPublicTransportDepartureBoard,
+  fetchPublicTransportDepartureBoards,
+} from "../api/publicTransportDepartures.js";
 import {
   fetchTravelPlaceSuggestions,
   fetchTravelPlan,
@@ -1898,6 +1902,146 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   };
 }
 
+function dependencyDisplayState(state: TrafficDependencyStatus["state"]): {
+  label: string;
+  severity: "ok" | "watch" | "warning";
+} {
+  if (state === "ok") return { label: "fersk", severity: "ok" };
+  if (state === "unknown") return { label: "ikke sjekket", severity: "watch" };
+  if (state === "degraded") return { label: "tregt", severity: "watch" };
+  return { label: "tregt", severity: "warning" };
+}
+
+function latestTrafficDependencies(
+  dependencyGroups: Array<TrafficDependencyStatus[] | undefined>,
+): TrafficDependencyStatus[] {
+  const byId = new Map<string, TrafficDependencyStatus>();
+  for (const dependency of dependencyGroups.flatMap((group) => group ?? [])) {
+    const current = byId.get(dependency.id);
+    if (!current || dependency.checkedAt.localeCompare(current.checkedAt) > 0) {
+      byId.set(dependency.id, dependency);
+    }
+  }
+  return [...byId.values()];
+}
+
+function TrafficDependencyBanner({ dependencies }: { dependencies: TrafficDependencyStatus[] }) {
+  if (!dependencies.length) return null;
+  const byId = new Map(dependencies.map((dependency) => [dependency.id, dependency]));
+  const reisesok = byId.get("entur_journey_planner");
+  const avganger = byId.get("entur_departure_board");
+  const vegdata = byId.get("traffic_map_read") ?? byId.get("postgres");
+  const entries = [
+    reisesok ? ["Reisesøk", dependencyDisplayState(reisesok.state)] : undefined,
+    avganger ? ["Avganger", dependencyDisplayState(avganger.state)] : undefined,
+    vegdata ? ["Vegdata", dependencyDisplayState(vegdata.state)] : undefined,
+  ].filter((entry): entry is [string, ReturnType<typeof dependencyDisplayState>] => Boolean(entry));
+  const severity = entries.some(([, state]) => state.severity === "warning")
+    ? "warning"
+    : entries.some(([, state]) => state.severity === "watch")
+      ? "watch"
+      : "ok";
+  return (
+    <section className={`traffic-dependency-banner traffic-dependency-banner-${severity}`}>
+      <strong>{severity === "warning" ? "Sjekk operatør før avreise" : "Datagrunnlag nå"}</strong>
+      <span>
+        {entries.map(([label, state]) => `${label} ${state.label}`).join(" · ")}
+        {" · "}Bruk AtB/Entur for endelig bekreftelse.
+      </span>
+    </section>
+  );
+}
+
+function fallbackTravelAdvice(plan: TravelPlanPayload): TravelPlanPayload["travelAdvice"] {
+  const firstItinerary = plan.itineraries[0];
+  const hasTrafficContext =
+    plan.trafficImpacts.length > 0 || (firstItinerary?.disruptionCount ?? 0) > 0;
+  if (plan.journeyPlanner.status === "unavailable") {
+    return {
+      action: "check_operator",
+      headline: "Sjekk AtB/Entur før du drar",
+      reason: "Entur reisesøk er ikke tilgjengelig akkurat nå.",
+      primaryItineraryId: firstItinerary?.id,
+      severity: "warning",
+      confidence: 0.55,
+      updatedAt: plan.generatedAt,
+    };
+  }
+  if (!firstItinerary) {
+    return {
+      action: "check_operator",
+      headline: "Ingen konkrete Entur-reiser funnet",
+      reason: plan.journeyPlanner.detail,
+      severity: "warning",
+      confidence: 0.5,
+      updatedAt: plan.generatedAt,
+    };
+  }
+  if (firstItinerary.decision === "avoid") {
+    return {
+      action: "avoid",
+      headline: "Unngå valgt forslag",
+      reason: firstItinerary.decisionReason,
+      primaryItineraryId: firstItinerary.id,
+      severity: "critical",
+      confidence: 0.84,
+      updatedAt: plan.generatedAt,
+    };
+  }
+  if (firstItinerary.decision === "watch" || hasTrafficContext) {
+    return {
+      action: "check_operator",
+      headline: "Sjekk ruten før du drar",
+      reason: firstItinerary.decisionReason,
+      primaryItineraryId: firstItinerary.id,
+      severity: "warning",
+      confidence: 0.72,
+      updatedAt: plan.generatedAt,
+    };
+  }
+  if (firstItinerary.decision === "good") {
+    return {
+      action: "choose_robust",
+      headline: "Velg det robuste reiseforslaget",
+      reason: firstItinerary.decisionReason,
+      primaryItineraryId: firstItinerary.id,
+      severity: "watch",
+      confidence: 0.68,
+      updatedAt: plan.generatedAt,
+    };
+  }
+  return {
+    action: "leave_now",
+    headline: "Dra nå",
+    reason: firstItinerary.decisionReason,
+    primaryItineraryId: firstItinerary.id,
+    severity: "ok",
+    confidence: 0.78,
+    updatedAt: plan.generatedAt,
+  };
+}
+
+function TravelAdviceCard({ plan }: { plan: TravelPlanPayload }) {
+  const advice = plan.travelAdvice ?? fallbackTravelAdvice(plan);
+  const actionLabels: Record<TravelPlanPayload["travelAdvice"]["action"], string> = {
+    leave_now: "Dra nå",
+    wait: "Vent",
+    choose_robust: "Velg robust",
+    check_operator: "Sjekk operatør",
+    avoid: "Unngå",
+  };
+  return (
+    <section className={`travel-advice-card travel-advice-card-${advice.severity}`}>
+      <div>
+        <p className="label">Reiseråd nå</p>
+        <h2>{advice.headline}</h2>
+        <p>{advice.reason}</p>
+      </div>
+      <span>{actionLabels[advice.action]}</span>
+    </section>
+  );
+}
+
 function trafficEventListCopy(
   selectedPreset: TrafficMapPreset,
   showAll: boolean,
@@ -2403,9 +2547,10 @@ function TravelPlanCard({
       className={`travel-plan-card travel-plan-card-${decision.severity}`}
       aria-live="polite"
     >
+      <TravelAdviceCard plan={plan} />
       <header>
-        <p className="label">Reiseråd</p>
-        <h2>{decision.heading}</h2>
+        <p className="label">Rutekontekst</p>
+        <p className="travel-plan-context-heading">{decision.heading}</p>
         <p>{decision.detail}</p>
         <div className="travel-plan-decision-grid" aria-label="Rutevurdering">
           <article>
@@ -2440,9 +2585,6 @@ function TravelPlanCard({
       </header>
       <section>
         <h3>Kollektivvalg</h3>
-        {plan.journeyPlanner.status === "unavailable" ? (
-          <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
-        ) : null}
         {plan.journeyPlanner.status === "empty" ? (
           <p className="route-planner-status">Ingen konkrete Entur-reiser funnet for valgt tid.</p>
         ) : null}
@@ -3688,45 +3830,55 @@ export function TrafficMapPage() {
     routeDepartureBoardsAbortRef.current = controller;
     setRouteDepartureBoards([]);
     setRouteDepartureBoardStatus("loading");
-    Promise.allSettled(
-      checkpoints.map(async (checkpoint) => ({
-        checkpointId: checkpoint.id,
-        board: await fetchPublicTransportDepartureBoard(
-          {
-            center: checkpoint.context.center,
-            radiusMeters: 900,
-            stopLimit: 3,
-            departureLimit: 8,
-            startTime: checkpoint.context.startTime,
-          },
-          { signal: controller.signal },
-        ),
-      })),
+    fetchPublicTransportDepartureBoards(
+      {
+        checks: checkpoints.map((checkpoint) => ({
+          id: checkpoint.id,
+          center: checkpoint.context.center,
+          startTime: checkpoint.context.startTime,
+        })),
+      },
+      { signal: controller.signal },
     )
-      .then((settled) => {
+      .then((payload) => {
         if (routeDepartureBoardsAbortRef.current !== controller) return;
-        const results: RouteDepartureBoardResult[] = settled.map((result, index) => {
-          const checkpoint = checkpoints[index];
-          if (!checkpoint) {
+        const results: RouteDepartureBoardResult[] = checkpoints.map((checkpoint, index) => {
+          const result = payload.boards[index];
+          if (!result) {
             return {
-              checkpointId: `unknown:${index}`,
-              error: "Ukjent byttepunkt.",
+              checkpointId: checkpoint.id,
+              error: "Live-tavla manglet i batch-svaret.",
             };
           }
-          if (result.status === "fulfilled") return result.value;
+          return result;
+        });
+        const unknownResults = payload.boards.slice(checkpoints.length).map((result, index) => {
+          const checkpoint = checkpoints[index];
           return {
-            checkpointId: checkpoint.id,
-            error:
-              result.reason instanceof Error
-                ? result.reason.message
-                : "Kunne ikke hente live-tavla.",
+            checkpointId: result.checkpointId || `unknown:${index}`,
+            error: checkpoint
+              ? "Ukjent ekstra batch-resultat."
+              : (result.error ?? "Ukjent ekstra batch-resultat."),
           };
         });
-        const failures = results.filter((result) => result.error).length;
-        setRouteDepartureBoards(results);
+        const allResults = [...results, ...unknownResults];
+        const failures = allResults.filter((result) => result.error).length;
+        setRouteDepartureBoards(allResults);
         setRouteDepartureBoardStatus(
-          failures === 0 ? "ready" : failures === results.length ? "error" : "partial",
+          failures === 0 ? "ready" : failures === allResults.length ? "error" : "partial",
         );
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted || routeDepartureBoardsAbortRef.current !== controller) {
+          return;
+        }
+        setRouteDepartureBoards(
+          checkpoints.map((checkpoint) => ({
+            checkpointId: checkpoint.id,
+            error: reason instanceof Error ? reason.message : "Kunne ikke hente live-tavla.",
+          })),
+        );
+        setRouteDepartureBoardStatus("error");
       })
       .finally(() => {
         if (routeDepartureBoardsAbortRef.current === controller) {
@@ -4032,6 +4184,23 @@ export function TrafficMapPage() {
           ]
         : [],
     [travelPlan],
+  );
+  const trafficDependencies = useMemo(
+    () =>
+      latestTrafficDependencies([
+        data?.dependencies,
+        publicTransportDisplayData?.dependencies,
+        travelPlan?.dependencies,
+        departureBoard?.dependencies,
+        ...routeDepartureBoards.map((result) => result.board?.dependencies),
+      ]),
+    [
+      data?.dependencies,
+      departureBoard?.dependencies,
+      publicTransportDisplayData?.dependencies,
+      routeDepartureBoards,
+      travelPlan?.dependencies,
+    ],
   );
 
   const visibleTrafficEvents = useMemo(() => {
@@ -4530,6 +4699,7 @@ export function TrafficMapPage() {
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}
       />
+      <TrafficDependencyBanner dependencies={trafficDependencies} />
       <RouteDepartureConfidencePanel
         checkpoints={routeDepartureCheckpointsForSelection}
         results={routeDepartureBoards}

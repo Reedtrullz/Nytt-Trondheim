@@ -1,5 +1,6 @@
 import type { TravelPlaceSuggestion, TravelPlaceSuggestionPayload } from "@nytt/shared";
 import type { Bounds, Coordinate } from "./geo.js";
+import { runtimeHealth } from "../runtime-health.js";
 
 const ENTUR_GEOCODER_ENDPOINT = "https://api.entur.io/geocoder/v3/autocomplete";
 const ENTUR_GEOCODER_TIMEOUT_MS = 2_500;
@@ -186,6 +187,12 @@ function pruneSuggestionState(nowMs: number): void {
 
 function consumeSuggestionSlot(nowMs: number): void {
   if (suggestionRequestTimestamps.length >= ENTUR_GEOCODER_RATE_MAX) {
+    runtimeHealth.recordDependency(
+      "entur_geocoder",
+      "rate_limited",
+      "Entur stedsøk er midlertidig begrenset av lokal budsjettvakt.",
+      { retryAfterSeconds: 30 },
+    );
     throw new EnturTravelSuggestionError("Entur stedsøk er midlertidig begrenset.");
   }
   suggestionRequestTimestamps.push(nowMs);
@@ -233,6 +240,8 @@ export async function fetchEnturTravelPlaceSuggestions(input: {
   const promise = (async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), ENTUR_GEOCODER_TIMEOUT_MS);
+    const startedAt = Date.now();
+    let dependencyState: "rate_limited" | "unavailable" | undefined;
     try {
       const url = new URL(input.endpoint ?? ENTUR_GEOCODER_ENDPOINT);
       url.searchParams.set("q", normalizedQuery);
@@ -257,14 +266,33 @@ export async function fetchEnturTravelPlaceSuggestions(input: {
         signal: controller.signal,
       });
       if (!response.ok) {
+        dependencyState = response.status === 429 ? "rate_limited" : "unavailable";
         throw new EnturTravelSuggestionError(`Entur svarte ${response.status}.`);
       }
-      return travelPlaceSuggestionsFromEntur({
+      const payload = travelPlaceSuggestionsFromEntur({
         payload: await response.json(),
         query: normalizedQuery,
         limit: input.limit,
       });
+      runtimeHealth.recordDependency(
+        "entur_geocoder",
+        "ok",
+        payload.suggestions.length
+          ? "Entur stedsøk returnerte forslag."
+          : "Entur stedsøk svarte uten forslag.",
+        { latencyMs: Date.now() - startedAt },
+      );
+      return payload;
     } catch (error) {
+      runtimeHealth.recordDependency(
+        "entur_geocoder",
+        dependencyState ??
+          (error instanceof Error && error.name === "AbortError" ? "timeout" : "unavailable"),
+        error instanceof EnturTravelSuggestionError
+          ? error.message
+          : "Entur stedsøk er ikke tilgjengelig akkurat nå.",
+        { latencyMs: Date.now() - startedAt },
+      );
       if (error instanceof EnturTravelSuggestionError) throw error;
       throw new EnturTravelSuggestionError("Entur stedsøk er ikke tilgjengelig akkurat nå.");
     } finally {

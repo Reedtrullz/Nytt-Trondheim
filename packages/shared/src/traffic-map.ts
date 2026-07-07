@@ -173,6 +173,36 @@ export interface TrafficMapSourceStatus {
   lastCheckedAt?: string;
 }
 
+export type TrafficDependencyId =
+  | "entur_journey_planner"
+  | "entur_departure_board"
+  | "entur_geocoder"
+  | "nominatim"
+  | "osrm"
+  | "postgres"
+  | "traffic_map_read";
+
+export type TrafficDependencyState =
+  | "ok"
+  | "degraded"
+  | "unavailable"
+  | "timeout"
+  | "rate_limited"
+  | "circuit_open"
+  | "unknown";
+
+export interface TrafficDependencyStatus {
+  id: TrafficDependencyId;
+  label: string;
+  state: TrafficDependencyState;
+  detail: string;
+  checkedAt: string;
+  latencyMs?: number;
+  retryAfterSeconds?: number;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+}
+
 export interface TrafficMapPayload {
   events: TrafficMapEvent[];
   brief: TrafficBrief;
@@ -181,6 +211,7 @@ export interface TrafficMapPayload {
   cameras?: RoadCamera[];
   counters?: TrafficCounterSnapshot[];
   sources?: TrafficMapSourceStatus[];
+  dependencies?: TrafficDependencyStatus[];
 }
 
 export interface TravelPlanPlace {
@@ -317,6 +348,23 @@ export interface TravelPlanJourneyStatusPayload {
   source: "Entur Journey Planner";
 }
 
+export type TravelAdviceAction =
+  | "leave_now"
+  | "wait"
+  | "choose_robust"
+  | "check_operator"
+  | "avoid";
+
+export interface TravelAdvicePayload {
+  action: TravelAdviceAction;
+  headline: string;
+  reason: string;
+  severity: "ok" | "watch" | "warning" | "critical";
+  confidence: number;
+  updatedAt: string;
+  primaryItineraryId?: string;
+}
+
 export interface TravelPlanPayload {
   origin: TravelPlanPlace;
   destination: TravelPlanPlace;
@@ -325,7 +373,9 @@ export interface TravelPlanPayload {
   publicTransportSuggestions: TravelPlanTransitSuggestion[];
   itineraries: TravelPlanItinerary[];
   journeyPlanner: TravelPlanJourneyStatusPayload;
+  travelAdvice: TravelAdvicePayload;
   sources: TrafficMapSourceStatus[];
+  dependencies?: TrafficDependencyStatus[];
   generatedAt: string;
 }
 
@@ -341,6 +391,7 @@ export interface TravelPlanComparisonPayload {
   activePreset: TravelPlanComparisonPreset;
   selectedPlan: TravelPlanPayload;
   sources: TravelPlanComparisonSource[];
+  dependencies?: TrafficDependencyStatus[];
   generatedAt: string;
 }
 

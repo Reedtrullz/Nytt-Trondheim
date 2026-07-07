@@ -11,10 +11,10 @@ describe("deployment playbook Entur verification", () => {
     const appBlock = compose.slice(appStart, workerStart);
     const workerBlock = compose.slice(workerStart);
 
-    expect(appBlock).toContain("curl -f http://localhost:8080/health");
+    expect(appBlock).toContain("curl -f http://localhost:8080/health/live");
     expect(appBlock).not.toContain("worker_cycle_metrics");
     expect(workerBlock).toContain("worker_cycle_metrics");
-    expect(workerBlock).not.toContain("curl -f http://localhost:8080/health");
+    expect(workerBlock).not.toContain("curl -f http://localhost:8080/health/live");
   });
 
   it("waits for healthy Entur source rows instead of passing on degraded placeholders", () => {

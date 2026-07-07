@@ -16,6 +16,9 @@ import type {
   TravelPlanRoute,
   TravelPlanTrafficImpact,
   TravelPlanTransitSuggestion,
+  TravelAdvicePayload,
+  TrafficDependencyId,
+  TrafficDependencyState,
 } from "@nytt/shared";
 import type { Geometry, LineString } from "geojson";
 import type { Bounds, Coordinate, CoordinateSegment } from "./geo.js";
@@ -26,6 +29,7 @@ import {
   distancePointToSegmentMeters,
   distanceSegmentToSegmentMeters,
 } from "./geo.js";
+import { runtimeHealth } from "../runtime-health.js";
 
 const USER_AGENT = "NyttTrondheim/0.1 (traffic travel planner; contact reidar.tech)";
 const GEOCODE_TIMEOUT_MS = 4_000;
@@ -152,19 +156,39 @@ function parseCoordinateInput(query: string): Coordinate | undefined {
   return undefined;
 }
 
-async function fetchJsonWithTimeout(url: URL, timeoutMs: number): Promise<unknown> {
+async function fetchJsonWithTimeout(
+  url: URL,
+  timeoutMs: number,
+  dependencyId: TrafficDependencyId,
+): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  let failureState: TrafficDependencyState | undefined;
   try {
     const response = await fetch(url, {
       headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
       signal: controller.signal,
     });
     if (!response.ok) {
+      failureState = response.status === 429 ? "rate_limited" : "unavailable";
       throw new TravelPlanDependencyError(`Klarte ikke å hente ${url.hostname}.`);
     }
+    runtimeHealth.recordDependency(
+      dependencyId,
+      "ok",
+      `${url.hostname} svarte på reisesøk-kontekst.`,
+      { latencyMs: Date.now() - startedAt },
+    );
     return await response.json();
   } catch (error) {
+    runtimeHealth.recordDependency(
+      dependencyId,
+      failureState ??
+        (error instanceof Error && error.name === "AbortError" ? "timeout" : "unavailable"),
+      `Klarte ikke å hente ${url.hostname}.`,
+      { latencyMs: Date.now() - startedAt },
+    );
     if (error instanceof TravelPlanDependencyError) throw error;
     throw new TravelPlanDependencyError(`Klarte ikke å hente ${url.hostname}.`);
   } finally {
@@ -190,7 +214,7 @@ async function geocodeTravelPlanPlaceUncached(query: string): Promise<TravelPlan
   url.searchParams.set("bounded", "1");
   url.searchParams.set("q", `${query.trim()}, Trondheim, Norway`);
 
-  const payload = await fetchJsonWithTimeout(url, GEOCODE_TIMEOUT_MS);
+  const payload = await fetchJsonWithTimeout(url, GEOCODE_TIMEOUT_MS, "nominatim");
   const first = Array.isArray(payload)
     ? (payload[0] as Record<string, unknown> | undefined)
     : undefined;
@@ -260,7 +284,7 @@ async function resolveTravelPlanRouteUncached(
   url.searchParams.set("steps", "false");
 
   try {
-    const payload = (await fetchJsonWithTimeout(url, ROUTE_TIMEOUT_MS)) as {
+    const payload = (await fetchJsonWithTimeout(url, ROUTE_TIMEOUT_MS, "osrm")) as {
       routes?: Array<{ distance?: unknown; duration?: unknown; geometry?: unknown }>;
     };
     const route = payload.routes?.[0];
@@ -1196,11 +1220,22 @@ function recordEnturJourneyFailure(nowMs: number): void {
 
 function consumeEnturJourneyRequestSlot(nowMs: number): void {
   if (enturJourneyCircuitOpenUntil > nowMs) {
+    runtimeHealth.recordDependency(
+      "entur_journey_planner",
+      "circuit_open",
+      "Entur reisesøk er midlertidig satt på pause etter upstream-feil.",
+    );
     throw new EnturJourneyPlannerError(
       "Entur reisesøk er midlertidig satt på pause etter upstream-feil.",
     );
   }
   if (enturJourneyRequestTimestamps.length >= ENTUR_JOURNEY_RATE_MAX) {
+    runtimeHealth.recordDependency(
+      "entur_journey_planner",
+      "rate_limited",
+      "Entur reisesøk er midlertidig begrenset av lokal budsjettvakt.",
+      { retryAfterSeconds: 30 },
+    );
     throw new EnturJourneyPlannerError("Entur reisesøk er midlertidig begrenset.");
   }
   enturJourneyRequestTimestamps.push(nowMs);
@@ -1228,6 +1263,8 @@ export async function fetchEnturJourneyItineraries(input: {
   const promise = (async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), ENTUR_JOURNEY_TIMEOUT_MS);
+    const startedAt = Date.now();
+    let dependencyState: TrafficDependencyState | undefined;
     try {
       const response = await fetch(input.endpoint ?? ENTUR_JOURNEY_PLANNER_ENDPOINT, {
         method: "POST",
@@ -1258,6 +1295,7 @@ export async function fetchEnturJourneyItineraries(input: {
         signal: controller.signal,
       });
       if (!response.ok) {
+        dependencyState = response.status === 429 ? "rate_limited" : "unavailable";
         throw new EnturJourneyPlannerError(`Entur svarte ${response.status}.`, {
           countsForCircuit: response.status === 429 || response.status >= 500,
         });
@@ -1267,16 +1305,35 @@ export async function fetchEnturJourneyItineraries(input: {
         errors?: unknown;
       };
       if (payload.errors) {
+        dependencyState = "unavailable";
         throw new EnturJourneyPlannerError("Entur returnerte ikke et gyldig reisesøk.", {
           countsForCircuit: true,
         });
       }
-      return (payload.data?.trip?.tripPatterns ?? [])
+      const itineraries = (payload.data?.trip?.tripPatterns ?? [])
         .slice(0, ENTUR_JOURNEY_MAX_PATTERNS)
         .map(itineraryFromRaw)
         .filter((itinerary): itinerary is TravelPlanItinerary => Boolean(itinerary));
+      runtimeHealth.recordDependency(
+        "entur_journey_planner",
+        "ok",
+        itineraries.length
+          ? "Entur Journey Planner returnerte konkrete reiseforslag."
+          : "Entur Journey Planner svarte uten konkrete reiseforslag.",
+        { latencyMs: Date.now() - startedAt },
+      );
+      return itineraries;
     } catch (error) {
       enturJourneyCache.delete(cacheKey);
+      runtimeHealth.recordDependency(
+        "entur_journey_planner",
+        dependencyState ??
+          (error instanceof Error && error.name === "AbortError" ? "timeout" : "unavailable"),
+        error instanceof EnturJourneyPlannerError
+          ? error.message
+          : "Kunne ikke hente reiser fra Entur.",
+        { latencyMs: Date.now() - startedAt },
+      );
       if (
         (error instanceof EnturJourneyPlannerError && error.countsForCircuit) ||
         !(error instanceof EnturJourneyPlannerError)
@@ -1319,6 +1376,95 @@ function sourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourceStatus[] 
     }));
 }
 
+function buildTravelAdvice(input: {
+  journeyPlanner: TravelPlanPayload["journeyPlanner"];
+  itineraries: TravelPlanItinerary[];
+  trafficImpacts: TravelPlanTrafficImpact[];
+  publicTransportSuggestions: TravelPlanTransitSuggestion[];
+  generatedAt: Date;
+}): TravelAdvicePayload {
+  const best = input.itineraries[0];
+  const robust =
+    input.itineraries.find((itinerary) => itinerary.labels.includes("most_robust")) ?? best;
+  const alertCount = input.publicTransportSuggestions.filter(
+    (suggestion) => suggestion.kind === "alert",
+  ).length;
+  const highRoadImpact = input.trafficImpacts.some(
+    (impact) => impact.severity === "critical" || impact.severity === "high",
+  );
+
+  if (input.journeyPlanner.status === "unavailable") {
+    return {
+      action: "check_operator",
+      headline: "Sjekk AtB/Entur før du drar",
+      reason:
+        "Entur reisesøk er ikke tilgjengelig akkurat nå. Nytt viser fortsatt vegmeldinger og kjente avvik.",
+      severity: "warning",
+      confidence: 0.55,
+      updatedAt: input.generatedAt.toISOString(),
+    };
+  }
+
+  if (!best) {
+    return {
+      action: "check_operator",
+      headline: "Sjekk reise hos AtB/Entur",
+      reason:
+        input.journeyPlanner.status === "empty"
+          ? "Nytt fant ingen konkrete Entur-reiser for valgt tidspunkt."
+          : "Nytt har ikke et sikkert reiseforslag å vurdere.",
+      severity: highRoadImpact || alertCount > 0 ? "warning" : "watch",
+      confidence: 0.5,
+      updatedAt: input.generatedAt.toISOString(),
+    };
+  }
+
+  if (best.decision === "avoid") {
+    return {
+      action: "avoid",
+      headline: "Unngå valgt forslag",
+      reason: best.decisionReason,
+      severity: "critical",
+      confidence: 0.84,
+      primaryItineraryId: best.id,
+      updatedAt: input.generatedAt.toISOString(),
+    };
+  }
+
+  if (best.decision === "watch" || highRoadImpact || alertCount > 0 || best.disruptionCount > 0) {
+    if (robust && robust.id !== best.id && robust.decision !== "avoid") {
+      return {
+        action: "choose_robust",
+        headline: "Velg mest robust reiseforslag",
+        reason: robust.decisionReason,
+        severity: "warning",
+        confidence: 0.72,
+        primaryItineraryId: robust.id,
+        updatedAt: input.generatedAt.toISOString(),
+      };
+    }
+    return {
+      action: "check_operator",
+      headline: "Sjekk ruten før du drar",
+      reason: best.decisionReason,
+      severity: "warning",
+      confidence: 0.68,
+      primaryItineraryId: best.id,
+      updatedAt: input.generatedAt.toISOString(),
+    };
+  }
+
+  return {
+    action: "leave_now",
+    headline: "Dra når det passer",
+    reason: "Nytt fant ingen alvorlige avvik på beste reiseforslag.",
+    severity: "ok",
+    confidence: 0.78,
+    primaryItineraryId: best.id,
+    updatedAt: input.generatedAt.toISOString(),
+  };
+}
+
 export function buildTravelPlanPayload(input: {
   origin: TravelPlanPlace;
   destination: TravelPlanPlace;
@@ -1345,26 +1491,35 @@ export function buildTravelPlanPayload(input: {
       input.alerts,
     ),
   );
+  const journeyPlanner: TravelPlanPayload["journeyPlanner"] = {
+    status:
+      input.journeyPlanner?.status ??
+      (input.itineraries === undefined ? "unavailable" : itineraries.length ? "ok" : "empty"),
+    detail:
+      input.journeyPlanner?.detail ??
+      (itineraries.length
+        ? "Entur Journey Planner returnerte konkrete reiseforslag."
+        : "Ingen konkrete Entur-reiser funnet for valgt tidspunkt."),
+    requestedDepartureTime:
+      input.journeyPlanner?.requestedDepartureTime ?? generatedAt.toISOString(),
+    source: "Entur Journey Planner",
+  };
+  const publicTransportSuggestions = transitSuggestions(input.vehicles, input.alerts, input.route);
   return {
     origin: input.origin,
     destination: input.destination,
     route: input.route,
     trafficImpacts: trafficImpactsForRoute,
-    publicTransportSuggestions: transitSuggestions(input.vehicles, input.alerts, input.route),
+    publicTransportSuggestions,
     itineraries,
-    journeyPlanner: {
-      status:
-        input.journeyPlanner?.status ??
-        (input.itineraries === undefined ? "unavailable" : itineraries.length ? "ok" : "empty"),
-      detail:
-        input.journeyPlanner?.detail ??
-        (itineraries.length
-          ? "Entur Journey Planner returnerte konkrete reiseforslag."
-          : "Ingen konkrete Entur-reiser funnet for valgt tidspunkt."),
-      requestedDepartureTime:
-        input.journeyPlanner?.requestedDepartureTime ?? generatedAt.toISOString(),
-      source: "Entur Journey Planner",
-    },
+    journeyPlanner,
+    travelAdvice: buildTravelAdvice({
+      journeyPlanner,
+      itineraries,
+      trafficImpacts: trafficImpactsForRoute,
+      publicTransportSuggestions,
+      generatedAt,
+    }),
     sources: sourceStatuses(input.sourceHealth),
     generatedAt: generatedAt.toISOString(),
   };

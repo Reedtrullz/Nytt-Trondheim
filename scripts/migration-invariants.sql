@@ -245,7 +245,9 @@ FROM unnest(ARRAY[
   'datex_weather',
   'datex_cctv',
   'trafikkdata',
-  'entur_vehicle_positions'
+  'entur',
+  'entur_vehicle_positions',
+  'entur_service_alerts'
 ]::text[]) AS forbidden(source_id);
 
 SELECT pg_temp.expect_check_violation(

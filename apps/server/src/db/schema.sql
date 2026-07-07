@@ -305,7 +305,9 @@ BEGIN
       'datex_weather',
       'datex_cctv',
       'trafikkdata',
-      'entur_vehicle_positions'
+      'entur',
+      'entur_vehicle_positions',
+      'entur_service_alerts'
     )
   ) THEN
     RAISE EXCEPTION 'telemetry-only sources already exist in evidence_items';
@@ -319,7 +321,9 @@ ALTER TABLE evidence_items ADD CONSTRAINT evidence_items_no_telemetry_source_che
     'datex_weather',
     'datex_cctv',
     'trafikkdata',
-    'entur_vehicle_positions'
+    'entur',
+    'entur_vehicle_positions',
+    'entur_service_alerts'
   ));
 DO $$
 BEGIN

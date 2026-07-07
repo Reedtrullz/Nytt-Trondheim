@@ -24,6 +24,7 @@ import {
   operationsTimelineQuerySchema,
   privateAnnotationUpdateRequestSchema,
   privateMapFeatureInputSchema,
+  publicTransportDepartureBoardBatchSchema,
   publicTransportDepartureBoardQuerySchema,
   publicTransportMapQuerySchema,
   pushSubscriptionInputSchema,
@@ -76,6 +77,8 @@ import {
   type TravelPlanRoute,
   type UnexplainedDelayCandidate,
   type PublicTransportServiceAlert,
+  type TrafficDependencyId,
+  type TrafficDependencyStatus,
 } from "@nytt/shared";
 import type { AppConfig } from "./config.js";
 import {
@@ -94,8 +97,10 @@ import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
 import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import {
+  DepartureBoardRequestError,
   enrichDepartureBoardWithServiceAlerts,
   fetchEnturDepartureBoard,
+  resolveDepartureBoardStartTime,
   unavailableDepartureBoard,
 } from "./traffic/departure-board.js";
 import { geometryIntersectsBounds } from "./traffic/geo.js";
@@ -118,6 +123,7 @@ import {
 } from "./traffic/travel-suggestions.js";
 import { buildTrafficBrief } from "./traffic/traffic-brief.js";
 import { loadWeatherPreparedness } from "./weather/preparedness.js";
+import { runtimeHealth, runtimePoolStats } from "./runtime-health.js";
 
 const EXPORT_ATTACHMENT_COUNT_LIMIT = 25;
 const EXPORT_ATTACHMENT_BYTE_LIMIT = 50 * 1024 * 1024;
@@ -991,6 +997,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   const frontendDist = path.resolve(here, "../../frontend/dist");
   const frontendIndex = path.join(frontendDist, "index.html");
   app.set("trust proxy", 1);
+  runtimeHealth.reset();
+  app.use(runtimeHealth.middleware());
   if (config.rateLimitEnabled) {
     app.use(createRateLimiter());
   }
@@ -1023,13 +1031,71 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }),
   );
 
-  app.get("/health", async (_req, res) => {
-    try {
-      if (pool) await pool.query("SELECT 1");
-      res.json({ status: "ok", storage: pool ? "postgres" : "development-memory" });
-    } catch {
-      res.status(503).json({ status: "degraded" });
+  async function readinessPayload(): Promise<{
+    status: "ok" | "degraded";
+    storage: "postgres" | "development-memory";
+    pool: ReturnType<typeof runtimePoolStats>;
+    checkedAt: string;
+    detail?: string;
+  }> {
+    if (!pool) {
+      return {
+        status: "ok",
+        storage: "development-memory",
+        pool: runtimePoolStats(pool),
+        checkedAt: new Date().toISOString(),
+      };
     }
+    const startedAt = Date.now();
+    try {
+      await Promise.race([
+        pool.query("SELECT 1"),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Postgres readiness timed out.")), 1_000),
+        ),
+      ]);
+      runtimeHealth.recordDependency("postgres", "ok", "Postgres readiness svarte.", {
+        latencyMs: Date.now() - startedAt,
+      });
+      return {
+        status: "ok",
+        storage: "postgres",
+        pool: runtimePoolStats(pool),
+        checkedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      runtimeHealth.recordDependency(
+        "postgres",
+        error instanceof Error && /timed out/i.test(error.message) ? "timeout" : "unavailable",
+        error instanceof Error ? error.message : "Postgres readiness feilet.",
+        { latencyMs: Date.now() - startedAt },
+      );
+      return {
+        status: "degraded",
+        storage: "postgres",
+        pool: runtimePoolStats(pool),
+        checkedAt: new Date().toISOString(),
+        detail: "Postgres readiness feilet.",
+      };
+    }
+  }
+
+  app.get("/health/live", (_req, res) => {
+    res.json({
+      status: "ok",
+      storage: pool ? "postgres" : "development-memory",
+      checkedAt: new Date().toISOString(),
+    });
+  });
+
+  app.get("/health/ready", async (_req, res) => {
+    const payload = await readinessPayload();
+    res.status(payload.status === "ok" ? 200 : 503).json(payload);
+  });
+
+  app.get("/health", async (_req, res) => {
+    const payload = await readinessPayload();
+    res.status(payload.status === "ok" ? 200 : 503).json(payload);
   });
 
   app.use(express.static(frontendDist, { index: false }));
@@ -1119,6 +1185,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.use("/api/saved", requireOwner);
   app.use("/api/source-items", requireOwner);
   app.use("/api/users", requireOwner);
+
+  app.get("/api/operations/runtime-health", (_req, res) => {
+    res.json(runtimeHealth.snapshot(pool));
+  });
 
   app.get("/api/notifications/settings", async (req, res, next) => {
     try {
@@ -1265,6 +1335,23 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
   });
 
+  const travellerDependencyIds: TrafficDependencyId[] = [
+    "entur_journey_planner",
+    "entur_departure_board",
+    "entur_geocoder",
+    "nominatim",
+    "osrm",
+    "postgres",
+    "traffic_map_read",
+  ];
+
+  const trafficMapDependencyIds: TrafficDependencyId[] = ["postgres", "traffic_map_read"];
+  const departureBoardDependencyIds: TrafficDependencyId[] = ["entur_departure_board", "postgres"];
+
+  function dependencySnapshot(ids: TrafficDependencyId[]): TrafficDependencyStatus[] {
+    return runtimeHealth.dependencySnapshot(ids);
+  }
+
   app.get("/api/map/traffic-events", async (req, res, next) => {
     try {
       const query = trafficMapQuerySchema.parse(req.query);
@@ -1277,6 +1364,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         typeof query.west === "number"
           ? { north: query.north, south: query.south, east: query.east, west: query.west }
           : undefined;
+      const trafficMapReadStartedAt = Date.now();
       const [
         trafficInfoEvents,
         officialEvents,
@@ -1307,6 +1395,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         store.listRoadCameras(bounds),
         store.listTrafficCounterSnapshots(bounds),
       ]);
+      runtimeHealth.recordDependency("traffic_map_read", "ok", "Trafikkartdata ble lest.", {
+        latencyMs: Date.now() - trafficMapReadStartedAt,
+      });
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
 
@@ -1329,11 +1420,13 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         const relatedArticles = relatedTrafficArticlesForEvent(event, articlesPage.items);
         return relatedArticles.length > 0 ? { ...event, relatedArticles } : event;
       });
+      res.set("Cache-Control", "private, max-age=15");
       res.json({
         events,
         brief: buildTrafficBrief(events),
         corridorImpacts: buildCorridorImpacts(events, trafficPulse),
         sources: trafficMapSourceStatuses(sourceHealth),
+        dependencies: dependencySnapshot(trafficMapDependencyIds),
         weather,
         cameras,
         counters,
@@ -1457,17 +1550,22 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         requestedDepartureTime: departureTime.toISOString(),
       };
     }
-    return buildTravelPlanPayload({
+    const plan = buildTravelPlanPayload({
       ...context,
       itineraries,
       journeyPlanner,
     });
+    return {
+      ...plan,
+      dependencies: dependencySnapshot(travellerDependencyIds),
+    };
   }
 
   app.get("/api/map/travel-plan", async (req, res, next) => {
     try {
       const query = travelPlanQuerySchema.parse(req.query);
       const context = await loadTravelPlanRequestContext(query, currentLogin(req));
+      res.set("Cache-Control", "private, max-age=10");
       res.json(
         await buildTravelPlanForDeparture(context, resolveTravelPlanDepartureTime(query.departAt)),
       );
@@ -1500,14 +1598,22 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           }
         }),
       );
-      const selectedPlan = sources.find((source) => source.preset === query.preset)?.plan;
+      const selectedPlan =
+        sources.find((source) => source.preset === query.preset)?.plan ??
+        sources.find((source) => source.plan)?.plan;
       if (!selectedPlan) {
         throw new Error("Kunne ikke hente valgt reisesøk.");
       }
+      if (sources.some((source) => source.error)) {
+        const enturDependency = dependencySnapshot(["entur_journey_planner"])[0];
+        if (enturDependency?.state === "rate_limited") res.set("Retry-After", "30");
+      }
+      res.set("Cache-Control", "private, max-age=10");
       res.json({
         activePreset: query.preset,
         selectedPlan,
         sources,
+        dependencies: dependencySnapshot(travellerDependencyIds),
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -1565,10 +1671,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           : store.listPublicTransportServiceAlerts({ states: ["active"], bounds }),
         store.listSourceHealth(),
       ]);
+      res.set("Cache-Control", "private, max-age=15");
       res.json({
         vehicles,
         alerts,
         sources: sourceHealth.filter((source) => publicTransportSourceIdSet.has(source.source)),
+        dependencies: dependencySnapshot(["postgres"]),
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -1597,6 +1705,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           limit: 80,
         }),
       ]);
+      const startTime = resolveDepartureBoardStartTime(query.startTime);
       try {
         const board = await fetchEnturDepartureBoard({
           clientName: config.enturClientName ?? "reidar-nytt-trondheim",
@@ -1605,13 +1714,81 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           radiusMeters: query.radiusMeters,
           stopLimit: query.stopLimit,
           departureLimit: query.departureLimit,
-          startTime: query.startTime ? new Date(query.startTime) : undefined,
+          startTime,
           sources,
         });
-        res.json(enrichDepartureBoardWithServiceAlerts(board, alerts));
-      } catch {
-        res.json(unavailableDepartureBoard({ center, areaLabel, sources }));
+        res.set("Cache-Control", "private, max-age=10");
+        res.json({
+          ...enrichDepartureBoardWithServiceAlerts(board, alerts),
+          dependencies: dependencySnapshot(departureBoardDependencyIds),
+        });
+      } catch (error) {
+        if (error instanceof DepartureBoardRequestError) throw error;
+        res.set("Cache-Control", "private, max-age=10");
+        res.json({
+          ...unavailableDepartureBoard({ center, areaLabel, sources }),
+          dependencies: dependencySnapshot(departureBoardDependencyIds),
+        });
       }
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/map/public-transport/departure-boards", async (req, res, next) => {
+    try {
+      const input = publicTransportDepartureBoardBatchSchema.parse(req.body);
+      const sources = await store
+        .listSourceHealth()
+        .then((sourceHealth) =>
+          sourceHealth.filter((source) => publicTransportSourceIdSet.has(source.source)),
+        );
+      const boards = [];
+      for (const check of input.checks) {
+        const center = check.center;
+        const startTime = resolveDepartureBoardStartTime(check.startTime);
+        const alertBounds = boundsAroundPublicTransportCenter(center, 900);
+        const alerts = await store.listPublicTransportServiceAlerts({
+          states: ["active"],
+          bounds: alertBounds,
+          limit: 80,
+        });
+        try {
+          const board = await fetchEnturDepartureBoard({
+            clientName: config.enturClientName ?? "reidar-nytt-trondheim",
+            center,
+            areaLabel: center ? "Valgt område" : undefined,
+            radiusMeters: 900,
+            stopLimit: 3,
+            departureLimit: 8,
+            startTime,
+            sources,
+          });
+          boards.push({
+            checkpointId: check.id,
+            board: {
+              ...enrichDepartureBoardWithServiceAlerts(board, alerts),
+              dependencies: dependencySnapshot(departureBoardDependencyIds),
+            },
+          });
+        } catch (error) {
+          boards.push({
+            checkpointId: check.id,
+            error:
+              error instanceof Error ? error.message : "Kunne ikke hente live-tavla for stoppet.",
+          });
+        }
+      }
+      const dependencies = dependencySnapshot(departureBoardDependencyIds);
+      if (dependencies.some((dependency) => dependency.state === "rate_limited")) {
+        res.set("Retry-After", "30");
+      }
+      res.set("Cache-Control", "private, max-age=10");
+      res.json({
+        boards,
+        dependencies,
+        generatedAt: new Date().toISOString(),
+      });
     } catch (error) {
       next(error);
     }

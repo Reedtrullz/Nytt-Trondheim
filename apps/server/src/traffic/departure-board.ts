@@ -6,7 +6,9 @@ import type {
   PublicTransportServiceAlert,
   PublicTransportVehicleMode,
   SourceHealth,
+  TrafficDependencyState,
 } from "@nytt/shared";
+import { runtimeHealth } from "../runtime-health.js";
 
 const ENTUR_JOURNEY_PLANNER_ENDPOINT = "https://api.entur.io/journey-planner/v3/graphql";
 const ENTUR_DEPARTURE_TIMEOUT_MS = 3_500;
@@ -33,6 +35,10 @@ type TimedFailureEntry = {
 };
 
 export class EnturDepartureBoardError extends Error {}
+
+export class DepartureBoardRequestError extends Error {
+  status = 400;
+}
 
 const departureBoardCache = new Map<
   string,
@@ -484,6 +490,12 @@ function pruneDepartureBoardState(nowMs: number): void {
 
 function consumeDepartureBoardSlot(nowMs: number): void {
   if (departureBoardRequestTimestamps.length >= ENTUR_DEPARTURE_RATE_MAX) {
+    runtimeHealth.recordDependency(
+      "entur_departure_board",
+      "rate_limited",
+      "Entur avgangstavle er midlertidig begrenset av lokal budsjettvakt.",
+      { retryAfterSeconds: 30 },
+    );
     throw new EnturDepartureBoardError("Entur avgangstavle er midlertidig begrenset.");
   }
   departureBoardRequestTimestamps.push(nowMs);
@@ -515,6 +527,23 @@ export function clearEnturDepartureBoardCache(): void {
   departureBoardCache.clear();
   departureBoardFailures.clear();
   departureBoardRequestTimestamps.length = 0;
+}
+
+export function resolveDepartureBoardStartTime(
+  value: string | undefined,
+  now = new Date(),
+): Date | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new DepartureBoardRequestError("Ugyldig avgangstid.");
+  }
+  const earliest = now.getTime() - 5 * 60 * 1000;
+  const latest = now.getTime() + 24 * 60 * 60 * 1000;
+  if (parsed.getTime() < earliest || parsed.getTime() > latest) {
+    throw new DepartureBoardRequestError("Avgangstavle kan bare sjekkes innen det neste døgnet.");
+  }
+  return parsed;
 }
 
 export async function fetchEnturDepartureBoard(input: {
@@ -556,6 +585,8 @@ export async function fetchEnturDepartureBoard(input: {
   const promise = (async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), ENTUR_DEPARTURE_TIMEOUT_MS);
+    const startedAt = Date.now();
+    let dependencyState: TrafficDependencyState | undefined;
     try {
       const response = await fetch(input.endpoint ?? ENTUR_JOURNEY_PLANNER_ENDPOINT, {
         method: "POST",
@@ -577,13 +608,15 @@ export async function fetchEnturDepartureBoard(input: {
         signal: controller.signal,
       });
       if (!response.ok) {
+        dependencyState = response.status === 429 ? "rate_limited" : "unavailable";
         throw new EnturDepartureBoardError(`Entur svarte ${response.status}.`);
       }
       const payload = (await response.json()) as { data?: unknown; errors?: unknown };
       if (payload.errors) {
+        dependencyState = "unavailable";
         throw new EnturDepartureBoardError("Entur returnerte ikke en gyldig avgangstavle.");
       }
-      return publicTransportDepartureBoardFromEntur({
+      const board = publicTransportDepartureBoardFromEntur({
         payload,
         center,
         areaLabel: input.areaLabel,
@@ -591,12 +624,28 @@ export async function fetchEnturDepartureBoard(input: {
         sources: input.sources,
         departureLimit,
       });
+      runtimeHealth.recordDependency(
+        "entur_departure_board",
+        "ok",
+        board.departures.length
+          ? "Entur returnerte avganger for valgt område."
+          : "Entur svarte uten avganger for valgt område.",
+        { latencyMs: Date.now() - startedAt },
+      );
+      return board;
     } catch (error) {
       departureBoardCache.delete(cacheKey);
       const message =
         error instanceof EnturDepartureBoardError
           ? error.message
           : "Kunne ikke hente avganger fra Entur.";
+      runtimeHealth.recordDependency(
+        "entur_departure_board",
+        dependencyState ??
+          (error instanceof Error && error.name === "AbortError" ? "timeout" : "unavailable"),
+        message,
+        { latencyMs: Date.now() - startedAt },
+      );
       departureBoardFailures.set(cacheKey, {
         expiresAt: Date.now() + ENTUR_DEPARTURE_FAILURE_CACHE_MS,
         message,

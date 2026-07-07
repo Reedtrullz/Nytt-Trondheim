@@ -367,6 +367,14 @@ const plan: TravelPlanPayload = {
     requestedDepartureTime: "2026-06-01T16:42:00.000Z",
     source: "Entur Journey Planner",
   },
+  travelAdvice: {
+    action: "check_operator",
+    headline: "Sjekk reise hos AtB/Entur",
+    reason: "Nytt fant ingen konkrete Entur-reiser for valgt tidspunkt.",
+    severity: "watch",
+    confidence: 0.5,
+    updatedAt: "2026-06-01T16:42:00.000Z",
+  },
   sources: [],
   generatedAt: "2026-06-01T16:42:00.000Z",
 };
@@ -433,6 +441,15 @@ const planWithItinerary: TravelPlanPayload = {
     detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
     requestedDepartureTime: "2026-06-01T09:05:00.000Z",
     source: "Entur Journey Planner",
+  },
+  travelAdvice: {
+    action: "leave_now",
+    headline: "Dra når det passer",
+    reason: "Nytt fant ingen alvorlige avvik på beste reiseforslag.",
+    severity: "ok",
+    confidence: 0.78,
+    primaryItineraryId: "itinerary-1",
+    updatedAt: "2026-06-01T09:06:00.000Z",
   },
 };
 

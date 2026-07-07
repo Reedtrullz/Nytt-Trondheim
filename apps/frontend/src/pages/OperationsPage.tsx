@@ -6,10 +6,11 @@ import type {
   OperationsStatus,
   RuntimeFreshness,
   SourceHealth,
+  TrafficDependencyStatus,
   TrafficPulseCorridor,
   WorkerCycleMetrics,
 } from "@nytt/shared";
-import { api } from "../api.js";
+import { api, apiRequest } from "../api.js";
 import { DashboardGrid, type DashboardWidgetDefinition } from "../components/DashboardGrid.js";
 import { analysisModeSummary } from "./CommandBriefingPage.js";
 
@@ -87,6 +88,46 @@ function sourceItemCount(metrics?: WorkerCycleMetrics) {
   return Object.values(metrics.sourceItemCounts).reduce((sum, count) => sum + count, 0);
 }
 
+interface RuntimeHealthPayload {
+  status: "ok" | "degraded";
+  generatedAt: string;
+  eventLoop: {
+    lagMs: number;
+    p95Ms: number;
+  };
+  pool: {
+    total: number;
+    idle: number;
+    waiting: number;
+  };
+  dependencies: TrafficDependencyStatus[];
+  requests: {
+    slow: Array<{
+      method: string;
+      route: string;
+      status: number;
+      durationMs: number;
+      finishedAt: string;
+    }>;
+    recent: Array<{
+      method: string;
+      route: string;
+      status: number;
+      durationMs: number;
+      finishedAt: string;
+    }>;
+    summary: Array<{
+      method: string;
+      route: string;
+      count: number;
+      errorCount: number;
+      averageMs: number;
+      maxMs: number;
+      p95Ms: number;
+    }>;
+  };
+}
+
 const nonActionableAttentionSources = new Set<SourceHealth["source"]>([
   "deepseek",
   "internal",
@@ -107,6 +148,10 @@ function freshnessLabel(entry?: RuntimeFreshness) {
   if (entry.status === "ok") return "OK";
   if (entry.status === "stale") return "Utdatert";
   return "Mangler";
+}
+
+function fetchRuntimeHealth(): Promise<RuntimeHealthPayload> {
+  return apiRequest<RuntimeHealthPayload>("/api/operations/runtime-health");
 }
 
 function freshnessDetail(entry?: RuntimeFreshness) {
@@ -457,6 +502,59 @@ function WorkerMetricsWidget({
   );
 }
 
+function RuntimeHealthWidget({ runtimeHealth }: { runtimeHealth?: RuntimeHealthPayload }) {
+  if (!runtimeHealth) {
+    return <p className="dashboard-widget-note">Runtime-måling er ikke hentet ennå.</p>;
+  }
+  const slowest = runtimeHealth.requests.summary[0];
+  const failingDependencies = runtimeHealth.dependencies.filter((dependency) =>
+    ["unavailable", "timeout", "rate_limited", "circuit_open"].includes(dependency.state),
+  );
+  return (
+    <>
+      <p className="dashboard-widget-note">
+        Serverlatens og reiseavhengigheter. Dette er driftshelse, ikke kildemateriale.
+      </p>
+      <div className="worker-metrics-grid">
+        <article>
+          <span>Runtime</span>
+          <strong>{runtimeHealth.status === "ok" ? "OK" : "Degradert"}</strong>
+          <small>Oppdatert {time(runtimeHealth.generatedAt)}</small>
+        </article>
+        <article>
+          <span>Event loop</span>
+          <strong>{milliseconds(runtimeHealth.eventLoop.p95Ms)}</strong>
+          <small>p95 lag</small>
+        </article>
+        <article>
+          <span>Postgres-pool</span>
+          <strong>
+            {runtimeHealth.pool.total}/{runtimeHealth.pool.idle}
+          </strong>
+          <small>{runtimeHealth.pool.waiting} venter</small>
+        </article>
+        <article>
+          <span>Avhengigheter</span>
+          <strong>{failingDependencies.length}</strong>
+          <small>trenger tilsyn</small>
+        </article>
+        <article>
+          <span>Tregeste endepunkt</span>
+          <strong>{slowest ? slowest.route : "—"}</strong>
+          <small>
+            {slowest ? `${slowest.method} · p95 ${milliseconds(slowest.p95Ms)}` : "Ingen måling"}
+          </small>
+        </article>
+        <article>
+          <span>Siste treg/feil</span>
+          <strong>{runtimeHealth.requests.slow[0]?.route ?? "—"}</strong>
+          <small>{milliseconds(runtimeHealth.requests.slow[0]?.durationMs)}</small>
+        </article>
+      </div>
+    </>
+  );
+}
+
 function TrafficPulseWidget({ trafficPulse }: { trafficPulse: TrafficPulseCorridor[] }) {
   if (trafficPulse.length === 0) {
     return <p className="traffic-pulse-empty">Ingen reisetidskorridorer registrert ennå.</p>;
@@ -587,6 +685,7 @@ export function OperationsDashboard({
   status,
   briefing,
   notificationTriggers,
+  runtimeHealth,
   refreshing,
   refreshError,
   lastFetchedAt,
@@ -595,6 +694,7 @@ export function OperationsDashboard({
   status: OperationsStatus;
   briefing?: CommandCenterBriefingPayload;
   notificationTriggers?: NotificationTriggerPage;
+  runtimeHealth?: RuntimeHealthPayload;
   refreshing?: boolean;
   refreshError?: string;
   lastFetchedAt?: string;
@@ -631,6 +731,13 @@ export function OperationsDashboard({
             status={status}
           />
         ),
+      },
+      {
+        id: "runtime",
+        title: "Runtime og avhengigheter",
+        description: "Serverlatens, databasepool og reiseavhengigheter for /trafikk.",
+        defaultSize: "large",
+        children: <RuntimeHealthWidget runtimeHealth={runtimeHealth} />,
       },
       {
         id: "briefing",
@@ -687,6 +794,7 @@ export function OperationsDashboard({
       briefing,
       notificationTriggers,
       parseFailures,
+      runtimeHealth,
       slowest,
       sourceItems,
       staleSources,
@@ -738,6 +846,7 @@ export function OperationsPage() {
   const [status, setStatus] = useState<OperationsStatus>();
   const [briefing, setBriefing] = useState<CommandCenterBriefingPayload>();
   const [notificationTriggers, setNotificationTriggers] = useState<NotificationTriggerPage>();
+  const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealthPayload>();
   const [error, setError] = useState<string>();
   const [refreshError, setRefreshError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
@@ -761,6 +870,7 @@ export function OperationsPage() {
         setStatus(undefined);
         setBriefing(undefined);
         setNotificationTriggers(undefined);
+        setRuntimeHealth(undefined);
       }
       if (!silent) setRefreshing(true);
 
@@ -775,9 +885,10 @@ export function OperationsPage() {
           setLastFetchedAt(fetchedAt);
         }
 
-        const [nextBriefing, nextTriggers] = await Promise.allSettled([
+        const [nextBriefing, nextTriggers, nextRuntimeHealth] = await Promise.allSettled([
           api.commandBriefing(),
           api.notificationTriggers({ limit: 4 }),
+          fetchRuntimeHealth(),
         ]);
 
         if (!mountedRef.current) return;
@@ -794,7 +905,17 @@ export function OperationsPage() {
           setNotificationTriggers(undefined);
         }
 
-        if (nextBriefing.status === "rejected" || nextTriggers.status === "rejected") {
+        if (nextRuntimeHealth.status === "fulfilled") {
+          setRuntimeHealth(nextRuntimeHealth.value);
+        } else if (initial) {
+          setRuntimeHealth(undefined);
+        }
+
+        if (
+          nextBriefing.status === "rejected" ||
+          nextTriggers.status === "rejected" ||
+          nextRuntimeHealth.status === "rejected"
+        ) {
           setRefreshError("Driftstatus er oppdatert, men en støtteanalyse mangler.");
         } else {
           setRefreshError(undefined);
@@ -852,6 +973,7 @@ export function OperationsPage() {
       status={status}
       briefing={briefing}
       notificationTriggers={notificationTriggers}
+      runtimeHealth={runtimeHealth}
       refreshing={refreshing}
       refreshError={refreshError}
       lastFetchedAt={lastFetchedAt}

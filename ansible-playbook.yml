@@ -323,7 +323,7 @@
 
     - name: Wait for canary health
       ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ canary_port }}/health"
+        url: "http://127.0.0.1:{{ canary_port }}/health/ready"
         return_content: true
       register: canary_health
       until:
@@ -426,7 +426,7 @@
 
         - name: Verify production health
           ansible.builtin.uri:
-            url: "https://nytt.reidar.tech/health"
+            url: "https://nytt.reidar.tech/health/ready"
             return_content: true
           register: production_health
           until:

@@ -2899,6 +2899,7 @@ test("traffic map explains selected route departures that are missing from the l
 
 test("traffic map checks transfer legs against live departure boards", async ({ page }) => {
   const departureRequestUrls: URL[] = [];
+  const departureBoardChecks: Array<{ lat?: string; lon?: string; startTime?: string }> = [];
   await page.route("**/api/map/public-transport/departures**", async (route) => {
     const url = new URL(route.request().url());
     departureRequestUrls.push(url);
@@ -2967,6 +2968,93 @@ test("traffic map checks transfer legs against live departure boards", async ({ 
         sources: [],
         generatedAt: "2026-06-01T09:06:00.000Z",
         handoffUrl: "https://www.atb.no/reiseplanlegger/",
+      }),
+    });
+  });
+  await page.route("**/api/map/public-transport/departure-boards", async (route) => {
+    const payload = route.request().postDataJSON() as {
+      checks?: Array<{
+        id: string;
+        center?: { lat: number; lon: number };
+        startTime?: string;
+      }>;
+    };
+    const checks = payload.checks ?? [];
+    const boards = checks.map((check) => {
+      const lat = check.center ? String(check.center.lat) : undefined;
+      const lon = check.center ? String(check.center.lon) : undefined;
+      departureBoardChecks.push({ lat, lon, startTime: check.startTime });
+      const isStart = lat === "63.4305" && lon === "10.3951";
+      const isTransfer = lat === "63.433" && lon === "10.447";
+      const departures = isStart
+        ? [
+            {
+              id: "departure:3",
+              stopId: "NSR:StopPlace:41613",
+              stopName: "Munkegata",
+              stopDistanceMeters: 42,
+              mode: "bus",
+              lineId: "ATB:Line:3",
+              publicCode: "3",
+              lineName: "Lade - Hallset",
+              serviceJourneyId: "ATB:ServiceJourney:3",
+              destinationName: "Strindheim",
+              aimedDepartureTime: "2026-06-01T09:10:00.000Z",
+              expectedDepartureTime: "2026-06-01T09:10:00.000Z",
+              delaySeconds: 0,
+              realtime: true,
+              cancelled: false,
+              notices: [],
+              handoffUrl: "https://www.atb.no/reiseplanlegger/",
+            },
+          ]
+        : isTransfer
+          ? [
+              {
+                id: "departure:4",
+                stopId: "NSR:StopPlace:41000",
+                stopName: "Strindheim",
+                stopDistanceMeters: 30,
+                mode: "bus",
+                lineId: "ATB:Line:4",
+                publicCode: "4",
+                lineName: "Strindheim - Lade",
+                serviceJourneyId: "ATB:ServiceJourney:4",
+                destinationName: "Lade",
+                aimedDepartureTime: "2026-06-01T09:20:00.000Z",
+                expectedDepartureTime: "2026-06-01T09:20:00.000Z",
+                delaySeconds: 0,
+                realtime: true,
+                cancelled: true,
+                notices: [],
+                handoffUrl: "https://www.atb.no/reiseplanlegger/",
+              },
+            ]
+          : [];
+      return {
+        checkpointId: check.id,
+        board: {
+          status: departures.length ? "ok" : "empty",
+          detail: departures.length
+            ? "Entur viser konkrete avganger nær valgt område."
+            : "Ingen avganger funnet nær valgt område.",
+          areaLabel: isTransfer ? "Strindheim" : isStart ? "Munkegata" : "Trondheim sentrum",
+          center: { lat: Number(lat ?? 63.4305), lon: Number(lon ?? 10.3951) },
+          stops: [],
+          departures,
+          sources: [],
+          generatedAt: "2026-06-01T09:06:00.000Z",
+          handoffUrl: "https://www.atb.no/reiseplanlegger/",
+        },
+      };
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        boards,
+        dependencies: [],
+        generatedAt: "2026-06-01T09:06:00.000Z",
       }),
     });
   });
@@ -3126,11 +3214,11 @@ test("traffic map checks transfer legs against live departure boards", async ({ 
   await expect(comparison).toContainText("Live-sjekken for valgt reise gir usikkerhet");
   await expect(comparison.getByRole("button", { name: /Om 30 min · anbefalt/ })).toBeVisible();
   expect(
-    departureRequestUrls.some(
-      (url) =>
-        url.searchParams.get("lat") === "63.433" &&
-        url.searchParams.get("lon") === "10.447" &&
-        url.searchParams.get("startTime") === "2026-06-01T09:20:00.000Z",
+    departureBoardChecks.some(
+      (check) =>
+        check.lat === "63.433" &&
+        check.lon === "10.447" &&
+        check.startTime === "2026-06-01T09:20:00.000Z",
     ),
   ).toBe(true);
 });

@@ -575,11 +575,76 @@ describe("traffic travel planner API", () => {
       "entur_vehicle_positions",
       "entur_service_alerts",
     ]);
+    expect(first.body.dependencies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "entur_departure_board",
+          state: "ok",
+          latencyMs: expect.any(Number),
+        }),
+      ]),
+    );
     expect(enturRequestCount).toBe(1);
   });
 
+  it("batches selected-route departure-board checks server-side", async () => {
+    let enturRequestCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+        );
+        expect(url.hostname).toBe("api.entur.io");
+        enturRequestCount += 1;
+        return enturDepartureBoardResponse();
+      }),
+    );
+    const { app, store } = await testApp();
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue(sourceHealth);
+    vi.spyOn(store, "listPublicTransportServiceAlerts").mockResolvedValue([]);
+    const agent = request.agent(app);
+    const session = await agent.get("/api/session").expect(200);
+
+    const firstStartTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const secondStartTime = new Date(Date.now() + 70 * 60 * 1000).toISOString();
+
+    const response = await agent
+      .post("/api/map/public-transport/departure-boards")
+      .set("x-csrf-token", session.body.csrfToken)
+      .send({
+        checks: [
+          {
+            id: "leg-1",
+            center: { lat: 63.4305, lon: 10.3951 },
+            startTime: firstStartTime,
+          },
+          {
+            id: "leg-2",
+            center: { lat: 63.433, lon: 10.464 },
+            startTime: secondStartTime,
+          },
+        ],
+      })
+      .expect(200);
+
+    expect(response.body.boards).toHaveLength(2);
+    expect(response.body.boards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ checkpointId: "leg-1", board: expect.any(Object) }),
+        expect.objectContaining({ checkpointId: "leg-2", board: expect.any(Object) }),
+      ]),
+    );
+    expect(response.body.dependencies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "entur_departure_board", state: "ok" }),
+      ]),
+    );
+    expect(enturRequestCount).toBe(2);
+  });
+
   it("forwards explicit departure-board start time to Entur", async () => {
-    const requestedStartTime = "2026-07-05T08:30:00.000Z";
+    const requestedStartTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     let enturStartTime: string | undefined;
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(
@@ -608,6 +673,29 @@ describe("traffic travel planner API", () => {
 
     expect(enturStartTime).toBe(requestedStartTime);
     expect(response.body.generatedAt).not.toBe(requestedStartTime);
+  });
+
+  it("rejects stale and far-future departure-board start times before calling Entur", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("Entur should not be called for invalid departure-board startTime");
+      }),
+    );
+    const { app } = await testApp();
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+
+    await agent
+      .get(
+        `/api/map/public-transport/departures?lat=63.4305&lon=10.3951&startTime=${encodeURIComponent("2000-01-01T10:00:00.000Z")}`,
+      )
+      .expect(400);
+    await agent
+      .get(
+        `/api/map/public-transport/departures?lat=63.4305&lon=10.3951&startTime=${encodeURIComponent("2099-01-01T10:00:00.000Z")}`,
+      )
+      .expect(400);
   });
 
   it("keeps /trafikk useful when the Entur departure board fails", async () => {
@@ -1037,6 +1125,19 @@ describe("traffic travel planner API", () => {
       status: "unavailable",
       detail: expect.stringContaining("Entur reisesøk er ikke tilgjengelig"),
     });
+    expect(response.body.travelAdvice).toMatchObject({
+      action: "check_operator",
+      severity: "warning",
+      headline: "Sjekk AtB/Entur før du drar",
+    });
+    expect(response.body.dependencies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "entur_journey_planner",
+          state: "rate_limited",
+        }),
+      ]),
+    );
     expect(response.body.itineraries).toEqual([]);
     expect(response.body.publicTransportSuggestions).toEqual(
       expect.arrayContaining([
@@ -1162,6 +1263,12 @@ describe("traffic travel planner API", () => {
       ],
     });
     expect(payload.itineraries[0]?.decisionReason).toContain("innstilt");
+    expect(payload.travelAdvice).toMatchObject({
+      action: "avoid",
+      severity: "critical",
+      primaryItineraryId: payload.itineraries[0]?.id,
+      headline: expect.stringMatching(/unngå/i),
+    });
   });
 
   it("marks replacement transport as a route choice to watch", async () => {

@@ -126,6 +126,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
+export { request as apiRequest };
+
 async function publicJsonRequest<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, {
     credentials: "include",

@@ -185,6 +185,53 @@ function addMemorySituation(store: Store, situation: Situation): void {
 }
 
 describe("private situation API", () => {
+  it("exposes split liveness, readiness and owner runtime health", async () => {
+    const { app } = await testApp();
+    const agent = request.agent(app);
+
+    const live = await request(app).get("/health/live").expect(200);
+    expect(live.body).toMatchObject({
+      status: "ok",
+      storage: "development-memory",
+    });
+
+    const ready = await request(app).get("/health/ready").expect(200);
+    expect(ready.body).toMatchObject({
+      status: "ok",
+      storage: "development-memory",
+      pool: {
+        total: 0,
+        idle: 0,
+        waiting: 0,
+      },
+    });
+
+    await agent.get("/api/session").expect(200);
+    const runtime = await agent.get("/api/operations/runtime-health").expect(200);
+    expect(runtime.body).toMatchObject({
+      status: "ok",
+      generatedAt: expect.any(String),
+      eventLoop: {
+        lagMs: expect.any(Number),
+      },
+      pool: {
+        total: 0,
+        idle: 0,
+        waiting: 0,
+      },
+    });
+    expect(runtime.body.requests.recent).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: "GET",
+          route: "/health/live",
+          status: 200,
+          durationMs: expect.any(Number),
+        }),
+      ]),
+    );
+  });
+
   it("defaults rate limiting on unless RATE_LIMIT_ENABLED explicitly disables it", () => {
     expect(withEnvValue("RATE_LIMIT_ENABLED", undefined, () => loadConfig().rateLimitEnabled)).toBe(
       true,
