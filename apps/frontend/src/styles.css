@@ -10489,6 +10489,123 @@ button {
   background: color-mix(in srgb, var(--paper) 86%, var(--green) 14%);
 }
 
+.route-choice-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  background: #fbfbf8;
+}
+
+.route-choice-panel header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.route-choice-panel header div {
+  min-width: 0;
+}
+
+.route-choice-panel header h3 {
+  margin: 2px 0 0;
+  font: 20px/1.05 var(--serif);
+  letter-spacing: 0;
+}
+
+.route-choice-panel header p:not(.label),
+.route-choice-panel footer,
+.route-choice-option small,
+.route-choice-option em {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.route-choice-panel header p:not(.label) {
+  margin: 4px 0 0;
+}
+
+.route-choice-panel header > span {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  color: var(--green);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.route-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.route-choice-option {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px;
+  color: inherit;
+  border: 1px solid var(--line);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.route-choice-option:disabled {
+  cursor: default;
+  opacity: 0.82;
+}
+
+.route-choice-option.selected {
+  outline: 2px solid color-mix(in srgb, var(--blue) 34%, transparent);
+  outline-offset: -2px;
+}
+
+.route-choice-option.recommended {
+  border-color: color-mix(in srgb, var(--green) 44%, var(--line));
+  background: color-mix(in srgb, #fff 90%, var(--green) 10%);
+}
+
+.route-choice-option-watch {
+  border-left: 3px solid var(--amber);
+}
+
+.route-choice-option-warning {
+  border-left: 3px solid var(--terracotta);
+}
+
+.route-choice-option span {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.route-choice-option strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.route-choice-option small,
+.route-choice-option em,
+.route-choice-option strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.route-choice-option em {
+  font-style: normal;
+  font-weight: 750;
+}
+
 .selected-route-watch {
   display: grid;
   gap: 10px;
@@ -12383,6 +12500,7 @@ button {
   }
 
   .itinerary-grid,
+  .route-choice-grid,
   .traffic-data-disclosure div {
     grid-template-columns: 1fr;
   }
@@ -13372,6 +13490,11 @@ button {
     display: grid;
   }
 
+  .route-choice-panel header {
+    display: grid;
+  }
+
+  .route-choice-panel header > span,
   .travel-time-comparison header > span {
     max-width: 100%;
     text-align: left;

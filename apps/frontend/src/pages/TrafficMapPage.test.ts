@@ -27,6 +27,7 @@ vi.mock("react-leaflet", () => ({
 }));
 
 import {
+  buildRouteChoiceModel,
   buildTravelTimeComparisonModel,
   departureBoardContextFromPlan,
   departureBoardContextFromSuggestion,
@@ -1005,6 +1006,205 @@ describe("TrafficMapPage route overlay helpers", () => {
         "ready",
       ),
     ).toBeUndefined();
+  });
+
+  it("recommends a slower itinerary when the selected fastest departure is cancelled live", () => {
+    const fastest = planWithItinerary.itineraries[0]!;
+    const robust = {
+      ...fastest,
+      id: "itinerary-robust",
+      labels: [
+        "fewest_transfers",
+        "most_robust",
+      ] as TravelPlanPayload["itineraries"][number]["labels"],
+      departureTime: "2026-06-01T09:16:00.000Z",
+      arrivalTime: "2026-06-01T09:38:00.000Z",
+      durationSeconds: 1320,
+      legs: [
+        {
+          ...fastest.legs[0]!,
+          id: "leg-bus-71",
+          publicCode: "71",
+          lineId: "ATB:Line:71",
+          lineName: "MelhusSkyss-Trondheim",
+          serviceJourneyId: "ATB:ServiceJourney:71",
+          aimedStartTime: "2026-06-01T09:16:00.000Z",
+          expectedStartTime: "2026-06-01T09:16:00.000Z",
+          aimedEndTime: "2026-06-01T09:38:00.000Z",
+          expectedEndTime: "2026-06-01T09:38:00.000Z",
+          durationSeconds: 1320,
+        },
+      ],
+    };
+    const model = buildRouteChoiceModel({
+      plan: {
+        ...planWithItinerary,
+        itineraries: [
+          {
+            ...fastest,
+            id: "itinerary-fastest",
+            labels: ["best_now", "soonest_departure"],
+            durationSeconds: 900,
+            arrivalTime: "2026-06-01T09:25:00.000Z",
+          },
+          robust,
+        ],
+      },
+      selectedItineraryId: "itinerary-fastest",
+      departureBoard: {
+        ...departureBoard,
+        departures: [
+          departureFixture({
+            id: "departure:3-cancelled",
+            cancelled: true,
+          }),
+        ],
+      },
+    });
+
+    expect(model?.recommendedItineraryId).toBe("itinerary-robust");
+    expect(model?.heading).toBe("Et annet reiseforslag ser tryggere ut");
+    expect(model?.options.find((option) => option.kind === "fastest")).toMatchObject({
+      itineraryId: "itinerary-fastest",
+      selected: true,
+      severity: "warning",
+      detail:
+        "Live-tavle: Avgangen mot Leangen er innstilt. Velg et annet reiseforslag hos AtB/Entur.",
+    });
+    expect(model?.options.find((option) => option.kind === "recommended")).toMatchObject({
+      itineraryId: "itinerary-robust",
+      recommended: true,
+      severity: "ok",
+    });
+  });
+
+  it("does not apply selected-route live-board uncertainty to unselected route choices", () => {
+    const fastest = planWithItinerary.itineraries[0]!;
+    const robust = {
+      ...fastest,
+      id: "itinerary-robust",
+      labels: ["most_robust"] as TravelPlanPayload["itineraries"][number]["labels"],
+      departureTime: "2026-06-01T09:40:00.000Z",
+      arrivalTime: "2026-06-01T10:00:00.000Z",
+      durationSeconds: 1200,
+    };
+
+    const model = buildRouteChoiceModel({
+      plan: {
+        ...planWithItinerary,
+        itineraries: [
+          {
+            ...fastest,
+            id: "itinerary-fastest",
+            labels: ["best_now", "soonest_departure"],
+            durationSeconds: 900,
+            arrivalTime: "2026-06-01T09:25:00.000Z",
+          },
+          robust,
+        ],
+      },
+      selectedItineraryId: "itinerary-fastest",
+      departureBoard: {
+        ...departureBoard,
+        departures: [
+          departureFixture({
+            id: "departure:3-cancelled",
+            cancelled: true,
+          }),
+        ],
+      },
+    });
+
+    expect(model?.options.find((option) => option.kind === "fastest")).toMatchObject({
+      severity: "warning",
+    });
+    expect(model?.options.find((option) => option.kind === "robust")).toMatchObject({
+      itineraryId: "itinerary-robust",
+      severity: "ok",
+      detail: "Velg for live-sjekk av start og eventuelle bytter.",
+    });
+  });
+
+  it("keeps remembered live-board failures on route choices after another itinerary is selected", () => {
+    const fastest = planWithItinerary.itineraries[0]!;
+    const robust = {
+      ...fastest,
+      id: "itinerary-robust",
+      labels: ["most_robust"] as TravelPlanPayload["itineraries"][number]["labels"],
+      departureTime: "2026-06-01T09:40:00.000Z",
+      arrivalTime: "2026-06-01T10:02:00.000Z",
+      durationSeconds: 1320,
+    };
+
+    const model = buildRouteChoiceModel({
+      plan: {
+        ...planWithItinerary,
+        itineraries: [
+          {
+            ...fastest,
+            id: "itinerary-fastest",
+            labels: ["best_now", "soonest_departure"],
+            durationSeconds: 900,
+            arrivalTime: "2026-06-01T09:25:00.000Z",
+          },
+          robust,
+        ],
+      },
+      selectedItineraryId: "itinerary-robust",
+      liveStatuses: {
+        "itinerary-fastest": {
+          label: "Innstilt",
+          detail: "Avgangen mot Leangen er innstilt. Velg et annet reiseforslag hos AtB/Entur.",
+          severity: "warning",
+        },
+        "itinerary-robust": {
+          label: "Sanntid",
+          detail: "Matcher sanntidsavgang mot Leangen.",
+          severity: "ok",
+        },
+      },
+    });
+
+    expect(model?.recommendedItineraryId).toBe("itinerary-robust");
+    expect(model?.heading).toBe("Valgt reiseforslag ser best ut");
+    expect(model?.options.find((option) => option.kind === "fastest")).toMatchObject({
+      itineraryId: "itinerary-fastest",
+      severity: "warning",
+    });
+  });
+
+  it("keeps walk-only itinerary choices calm instead of inventing live-board warnings", () => {
+    const walkingLeg = {
+      ...planWithItinerary.itineraries[0]!.legs[0]!,
+      id: "leg-walk",
+      mode: "walk" as const,
+      publicCode: undefined,
+      lineId: undefined,
+      lineName: undefined,
+      serviceJourneyId: undefined,
+    };
+    const walkingPlan: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [
+        {
+          ...planWithItinerary.itineraries[0]!,
+          id: "itinerary-walk",
+          modes: ["walk"],
+          legs: [walkingLeg],
+        },
+      ],
+    };
+
+    expect(
+      buildRouteChoiceModel({
+        plan: walkingPlan,
+        selectedItineraryId: "itinerary-walk",
+        departureBoard,
+      })?.options[0],
+    ).toMatchObject({
+      itineraryId: "itinerary-walk",
+      severity: "ok",
+    });
   });
 
   it("keeps the matched itinerary departure visible when it falls outside the first rows", () => {

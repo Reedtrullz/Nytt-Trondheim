@@ -419,6 +419,29 @@ interface TravelTimeComparisonState {
   activePreset?: TravelPlanComparisonPreset;
 }
 
+export type RouteChoiceKind = "recommended" | "fastest" | "fewest_transfers" | "robust";
+
+export interface RouteChoiceOption {
+  kind: RouteChoiceKind;
+  label: string;
+  itineraryId: string;
+  selected: boolean;
+  recommended: boolean;
+  severity: SelectedDepartureStatusSeverity;
+  score: number;
+  summary: string;
+  lineSummary: string;
+  detail: string;
+  meta: string;
+}
+
+export interface RouteChoiceModel {
+  heading: string;
+  detail: string;
+  recommendedItineraryId: string;
+  options: RouteChoiceOption[];
+}
+
 const destinationPresets: DestinationPreset[] = [
   { label: "Trondheim S", query: "Trondheim S" },
   { label: "St. Olavs", query: "St. Olavs hospital" },
@@ -1546,6 +1569,229 @@ export function buildTravelTimeComparisonModel(
   };
 }
 
+const routeChoiceKindOrder: RouteChoiceKind[] = [
+  "recommended",
+  "fastest",
+  "fewest_transfers",
+  "robust",
+];
+
+const routeChoiceKindLabel: Record<RouteChoiceKind, string> = {
+  recommended: "Anbefalt",
+  fastest: "Raskest",
+  fewest_transfers: "Færrest bytter",
+  robust: "Mest robust",
+};
+
+function itineraryTransferLabel(itinerary: TravelPlanItinerary): string {
+  return itinerary.transferCount === 0
+    ? "Direkte"
+    : `${itinerary.transferCount} ${itinerary.transferCount === 1 ? "bytte" : "bytter"}`;
+}
+
+function itineraryChoiceSeverity(input: {
+  plan: TravelPlanPayload;
+  itinerary: TravelPlanItinerary;
+  selectedItineraryId?: string;
+  departureBoard?: PublicTransportDepartureBoardPayload;
+  confidenceItems?: RouteDepartureConfidenceItem[];
+  fetchStatus?: RouteDepartureBoardStatus;
+  liveStatuses?: Record<string, SelectedDepartureStatus>;
+}): { severity: SelectedDepartureStatusSeverity; detail: string } {
+  const selected = input.itinerary.id === input.selectedItineraryId;
+  const watchSummary = selectedRouteWatchSummary(
+    input.plan,
+    input.itinerary.id,
+    selected ? (input.confidenceItems ?? []) : [],
+    selected ? (input.fetchStatus ?? "idle") : "idle",
+  );
+  let severity = watchSummary?.severity ?? "ok";
+  let detail =
+    watchSummary && watchSummary.severity !== "ok"
+      ? watchSummary.detail
+      : selected
+        ? input.itinerary.decisionReason
+        : "Velg for live-sjekk av start og eventuelle bytter.";
+
+  const knownLiveStatus = input.liveStatuses?.[input.itinerary.id];
+  if (knownLiveStatus) {
+    severity = strongestDepartureSeverity(severity, knownLiveStatus.severity);
+    if (knownLiveStatus.severity !== "ok") {
+      detail = `Live-tavle: ${knownLiveStatus.detail}`;
+    } else if (selected && watchSummary?.severity === "ok") {
+      detail = `Live-tavle: ${knownLiveStatus.detail}`;
+    }
+  }
+
+  if (selected && input.departureBoard) {
+    const departureMatch = selectedDepartureMatch(
+      input.plan,
+      input.itinerary.id,
+      input.departureBoard,
+    );
+    if (departureMatch) {
+      const departureStatus = selectedDepartureStatus(
+        departureMatch.departure,
+        departureMatch.leg,
+        input.departureBoard,
+      );
+      severity = strongestDepartureSeverity(severity, departureStatus.severity);
+      detail =
+        departureStatus.severity === "ok" && watchSummary?.severity === "ok"
+          ? `Live-tavle: ${departureStatus.detail}`
+          : departureStatus.severity !== "ok"
+            ? `Live-tavle: ${departureStatus.detail}`
+            : detail;
+    }
+  }
+
+  return { severity, detail };
+}
+
+function routeChoiceScore(
+  itinerary: TravelPlanItinerary,
+  severity: SelectedDepartureStatusSeverity,
+): number {
+  return (
+    Math.round(itinerary.durationSeconds / 60) +
+    Math.round(itinerary.walkTimeSeconds / 300) +
+    itinerary.transferCount * 8 +
+    itinerary.disruptionCount * 14 +
+    comparisonDecisionPenalty[itinerary.decision] +
+    comparisonSeverityPenalty[severity] +
+    (itinerary.realtime ? 0 : 4)
+  );
+}
+
+function routeChoiceRobustScore(
+  itinerary: TravelPlanItinerary,
+  severity: SelectedDepartureStatusSeverity,
+): number {
+  return (
+    comparisonSeverityPenalty[severity] * 2 +
+    comparisonDecisionPenalty[itinerary.decision] * 2 +
+    itinerary.transferCount * 18 +
+    itinerary.disruptionCount * 24 +
+    Math.round(itinerary.durationSeconds / 240) +
+    Math.round(itinerary.walkTimeSeconds / 300) +
+    (itinerary.realtime ? 0 : 8)
+  );
+}
+
+function sortedItineraries(
+  itineraries: TravelPlanItinerary[],
+  scoreFor: (itinerary: TravelPlanItinerary) => number,
+): TravelPlanItinerary[] {
+  return [...itineraries].sort((left, right) => {
+    const scoreDelta = scoreFor(left) - scoreFor(right);
+    if (scoreDelta !== 0) return scoreDelta;
+    return (
+      Date.parse(left.departureTime) - Date.parse(right.departureTime) ||
+      left.id.localeCompare(right.id, "nb")
+    );
+  });
+}
+
+export function buildRouteChoiceModel(input: {
+  plan?: TravelPlanPayload;
+  selectedItineraryId?: string;
+  departureBoard?: PublicTransportDepartureBoardPayload;
+  confidenceItems?: RouteDepartureConfidenceItem[];
+  fetchStatus?: RouteDepartureBoardStatus;
+  liveStatuses?: Record<string, SelectedDepartureStatus>;
+}): RouteChoiceModel | undefined {
+  const plan = input.plan;
+  const itineraries = plan?.itineraries ?? [];
+  if (!plan || !itineraries.length) return undefined;
+
+  const evaluated = new Map(
+    itineraries.map((itinerary) => {
+      const choice = itineraryChoiceSeverity({
+        plan,
+        itinerary,
+        selectedItineraryId: input.selectedItineraryId,
+        departureBoard: input.departureBoard,
+        confidenceItems: input.confidenceItems,
+        fetchStatus: input.fetchStatus,
+        liveStatuses: input.liveStatuses,
+      });
+      return [
+        itinerary.id,
+        {
+          itinerary,
+          severity: choice.severity,
+          detail: choice.detail,
+          score: routeChoiceScore(itinerary, choice.severity),
+          robustScore: routeChoiceRobustScore(itinerary, choice.severity),
+        },
+      ];
+    }),
+  );
+  const evaluatedFor = (itinerary: TravelPlanItinerary) => evaluated.get(itinerary.id)!;
+  const recommendedItinerary = sortedItineraries(itineraries, (itinerary) => {
+    const item = evaluatedFor(itinerary);
+    return item.score;
+  })[0]!;
+  const fastestItinerary = sortedItineraries(itineraries, (itinerary) =>
+    Math.round(itinerary.durationSeconds / 60),
+  )[0]!;
+  const fewestTransfersItinerary =
+    itineraries.find((itinerary) => itinerary.labels.includes("fewest_transfers")) ??
+    sortedItineraries(
+      itineraries,
+      (itinerary) => itinerary.transferCount * 30 + Math.round(itinerary.durationSeconds / 60),
+    )[0]!;
+  const robustItinerary =
+    itineraries.find((itinerary) => itinerary.labels.includes("most_robust")) ??
+    sortedItineraries(itineraries, (itinerary) => evaluatedFor(itinerary).robustScore)[0]!;
+  const itineraryByKind: Record<RouteChoiceKind, TravelPlanItinerary> = {
+    recommended: recommendedItinerary,
+    fastest: fastestItinerary,
+    fewest_transfers: fewestTransfersItinerary,
+    robust: robustItinerary,
+  };
+
+  const recommendedId = recommendedItinerary.id;
+  const options = routeChoiceKindOrder.map((kind): RouteChoiceOption => {
+    const itinerary = itineraryByKind[kind];
+    const item = evaluatedFor(itinerary);
+    return {
+      kind,
+      label: routeChoiceKindLabel[kind],
+      itineraryId: itinerary.id,
+      selected: itinerary.id === input.selectedItineraryId,
+      recommended: itinerary.id === recommendedId,
+      severity: item.severity,
+      score: item.score,
+      summary: `${formatTravelDateTime(itinerary.departureTime)}-${formatTravelDateTime(
+        itinerary.arrivalTime,
+      )}`,
+      lineSummary: comparisonLineSummary(itinerary),
+      detail: item.detail,
+      meta: [
+        formatDuration(itinerary.durationSeconds),
+        itineraryTransferLabel(itinerary),
+        `${formatDuration(itinerary.walkTimeSeconds)} gange`,
+        comparisonSeverityLabel(item.severity),
+      ].join(" · "),
+    };
+  });
+
+  const selectedOption = options.find((option) => option.selected);
+  const recommendedOption = options.find((option) => option.kind === "recommended") ?? options[0];
+  return {
+    heading:
+      recommendedOption?.itineraryId === input.selectedItineraryId
+        ? "Valgt reiseforslag ser best ut"
+        : "Et annet reiseforslag ser tryggere ut",
+    detail: selectedOption?.selected
+      ? selectedOption.detail
+      : "Nytt sammenligner reiseforslagene med varsel, bytter, reisetid og live-tavla for valgt avreise.",
+    recommendedItineraryId: recommendedId,
+    options,
+  };
+}
+
 export function travelPlanDecision(plan?: TravelPlanPayload): {
   heading: string;
   detail: string;
@@ -2050,11 +2296,72 @@ function TravelTimeComparisonPanel({
   );
 }
 
+function RouteChoicePanel({
+  model,
+  onSelectItinerary,
+}: {
+  model?: RouteChoiceModel;
+  onSelectItinerary: (itineraryId: string) => void;
+}) {
+  if (!model) return null;
+  const displayOptions = model.options.reduce<RouteChoiceOption[]>((items, option) => {
+    const existing = items.find((item) => item.itineraryId === option.itineraryId);
+    if (!existing) {
+      items.push({ ...option });
+      return items;
+    }
+    const labels = new Set([...existing.label.split(" · "), option.label]);
+    existing.label = [...labels].join(" · ");
+    existing.recommended = existing.recommended || option.recommended;
+    existing.selected = existing.selected || option.selected;
+    existing.severity = strongestDepartureSeverity(existing.severity, option.severity);
+    existing.score = Math.min(existing.score, option.score);
+    return items;
+  }, []);
+  return (
+    <section className="route-choice-panel" aria-label="Velg reiseforslag">
+      <header>
+        <div>
+          <p className="label">Reisevalg</p>
+          <h3>{model.heading}</h3>
+          <p>{model.detail}</p>
+        </div>
+        <span>{displayOptions.length} valg</span>
+      </header>
+      <div className="route-choice-grid">
+        {displayOptions.map((option) => (
+          <button
+            key={option.itineraryId}
+            type="button"
+            className={`route-choice-option route-choice-option-${option.severity}${
+              option.recommended ? " recommended" : ""
+            }${option.selected ? " selected" : ""}`}
+            aria-pressed={option.selected}
+            onClick={() => onSelectItinerary(option.itineraryId)}
+            disabled={option.selected}
+          >
+            <span>{option.label}</span>
+            <strong>{option.summary}</strong>
+            <small>{option.lineSummary}</small>
+            <em>{option.meta}</em>
+            <small>{option.detail}</small>
+          </button>
+        ))}
+      </div>
+      <footer>
+        Live-tavla vektes for valgt reiseforslag. Velg et annet forslag for å sjekke start og
+        eventuelle bytter.
+      </footer>
+    </section>
+  );
+}
+
 function TravelPlanCard({
   plan,
   loading,
   error,
   selectedItineraryId,
+  routeChoiceModel,
   routeWatchSummary,
   onSelectItinerary,
 }: {
@@ -2062,6 +2369,7 @@ function TravelPlanCard({
   loading: boolean;
   error?: string;
   selectedItineraryId?: string;
+  routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
   onSelectItinerary: (itineraryId: string) => void;
 }) {
@@ -2139,16 +2447,19 @@ function TravelPlanCard({
           <p className="route-planner-status">Ingen konkrete Entur-reiser funnet for valgt tid.</p>
         ) : null}
         {plan.itineraries.length ? (
-          <div className="itinerary-grid">
-            {plan.itineraries.map((itinerary) => (
-              <ItineraryCard
-                key={itinerary.id}
-                itinerary={itinerary}
-                selected={itinerary.id === selectedItineraryId}
-                onSelect={() => onSelectItinerary(itinerary.id)}
-              />
-            ))}
-          </div>
+          <>
+            <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
+            <div className="itinerary-grid">
+              {plan.itineraries.map((itinerary) => (
+                <ItineraryCard
+                  key={itinerary.id}
+                  itinerary={itinerary}
+                  selected={itinerary.id === selectedItineraryId}
+                  onSelect={() => onSelectItinerary(itinerary.id)}
+                />
+              ))}
+            </div>
+          </>
         ) : null}
       </section>
       <SelectedRouteWatchPanel summary={routeWatchSummary} />
@@ -3021,6 +3332,7 @@ function TravelPlannerPanel({
   travelPlanLoading,
   travelPlanError,
   selectedItineraryId,
+  routeChoiceModel,
   routeWatchSummary,
   travelTimeComparison,
   selectedOriginSuggestion,
@@ -3053,6 +3365,7 @@ function TravelPlannerPanel({
   travelPlanLoading: boolean;
   travelPlanError?: string;
   selectedItineraryId?: string;
+  routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
   travelTimeComparison: TravelTimeComparisonState;
   selectedOriginSuggestion?: TravelPlaceSuggestion;
@@ -3205,6 +3518,7 @@ function TravelPlannerPanel({
             loading={travelPlanLoading}
             error={travelPlanError}
             selectedItineraryId={selectedItineraryId}
+            routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
             onSelectItinerary={onSelectItinerary}
           />
@@ -3282,6 +3596,9 @@ export function TrafficMapPage() {
   const [routeDepartureBoards, setRouteDepartureBoards] = useState<RouteDepartureBoardResult[]>([]);
   const [routeDepartureBoardStatus, setRouteDepartureBoardStatus] =
     useState<RouteDepartureBoardStatus>("idle");
+  const [itineraryLiveStatuses, setItineraryLiveStatuses] = useState<
+    Record<string, SelectedDepartureStatus>
+  >({});
   const travelPlanRequestIdRef = useRef(0);
   const travelPlanAbortRef = useRef<AbortController | undefined>(undefined);
   const departureBoardAbortRef = useRef<AbortController | undefined>(undefined);
@@ -3448,6 +3765,7 @@ export function TrafficMapPage() {
     setTravelTimeComparison({ status: "idle" });
     setRouteDepartureBoards([]);
     setRouteDepartureBoardStatus("idle");
+    setItineraryLiveStatuses({});
     setTravelPlanLoading(false);
     if (options.resetDepartureBoard) {
       loadDepartureBoard(defaultDepartureBoardContext);
@@ -3763,10 +4081,34 @@ export function TrafficMapPage() {
     () => selectedDepartureMatch(travelPlan, selectedItineraryId, departureBoard),
     [departureBoard, selectedItineraryId, travelPlan],
   );
+  useEffect(() => {
+    if (!selectedItineraryId || !selectedDeparture) return;
+    const status = selectedDepartureStatus(
+      selectedDeparture.departure,
+      selectedDeparture.leg,
+      departureBoard,
+    );
+    setItineraryLiveStatuses((current) => {
+      const existing = current[selectedItineraryId];
+      if (
+        existing?.label === status.label &&
+        existing.detail === status.detail &&
+        existing.severity === status.severity
+      ) {
+        return current;
+      }
+      return { ...current, [selectedItineraryId]: status };
+    });
+  }, [departureBoard, selectedDeparture, selectedItineraryId]);
   const routeDepartureConfidenceItemsForSelection = useMemo(
     () =>
-      routeDepartureConfidenceItems(routeDepartureCheckpointsForSelection, routeDepartureBoards),
-    [routeDepartureBoards, routeDepartureCheckpointsForSelection],
+      routeDepartureBoardStatus === "idle"
+        ? []
+        : routeDepartureConfidenceItems(
+            routeDepartureCheckpointsForSelection,
+            routeDepartureBoards,
+          ),
+    [routeDepartureBoardStatus, routeDepartureBoards, routeDepartureCheckpointsForSelection],
   );
   const routeWatchSummary = useMemo(
     () =>
@@ -3777,6 +4119,25 @@ export function TrafficMapPage() {
         routeDepartureBoardStatus,
       ),
     [
+      routeDepartureBoardStatus,
+      routeDepartureConfidenceItemsForSelection,
+      selectedItineraryId,
+      travelPlan,
+    ],
+  );
+  const routeChoiceModel = useMemo(
+    () =>
+      buildRouteChoiceModel({
+        plan: travelPlan,
+        selectedItineraryId,
+        departureBoard,
+        confidenceItems: routeDepartureConfidenceItemsForSelection,
+        fetchStatus: routeDepartureBoardStatus,
+        liveStatuses: itineraryLiveStatuses,
+      }),
+    [
+      departureBoard,
+      itineraryLiveStatuses,
       routeDepartureBoardStatus,
       routeDepartureConfidenceItemsForSelection,
       selectedItineraryId,
@@ -4143,6 +4504,7 @@ export function TrafficMapPage() {
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
         selectedItineraryId={selectedItineraryId}
+        routeChoiceModel={routeChoiceModel}
         routeWatchSummary={routeWatchSummary}
         travelTimeComparison={travelTimeComparison}
         selectedOriginSuggestion={selectedOriginSuggestion}
