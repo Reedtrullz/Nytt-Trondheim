@@ -358,9 +358,18 @@ export interface RememberedDepartureBoard {
   id: string;
   label: string;
   center: { lat: number; lon: number };
+  preferredLineFilterKey?: string;
+  preferredLineFilterLabel?: string;
   useCount: number;
   createdAt: string;
   lastUsedAt: string;
+}
+
+export interface RememberedDepartureBoardCandidate {
+  label: string;
+  center: { lat: number; lon: number };
+  preferredLineFilterKey?: string;
+  preferredLineFilterLabel?: string;
 }
 
 interface RememberedTravelRouteQueryOverride {
@@ -577,8 +586,18 @@ export function readRememberedTravelRoutes(storage: Storage | undefined): Rememb
   }
 }
 
-function rememberedDepartureBoardId(input: { center: { lat: number; lon: number } }): string {
-  return `${input.center.lat.toFixed(5)},${input.center.lon.toFixed(5)}`;
+function cleanDepartureLineFilterText(value: string | undefined): string | undefined {
+  const cleaned = cleanTravelSearchText(value ?? null);
+  return cleaned || undefined;
+}
+
+function rememberedDepartureBoardId(input: {
+  center: { lat: number; lon: number };
+  preferredLineFilterKey?: string;
+}): string {
+  const base = `${input.center.lat.toFixed(5)},${input.center.lon.toFixed(5)}`;
+  const lineKey = cleanDepartureLineFilterText(input.preferredLineFilterKey);
+  return lineKey ? `${base}|line:${lineKey.toLocaleLowerCase("nb")}` : base;
 }
 
 function cleanRememberedDepartureBoard(
@@ -593,10 +612,16 @@ function cleanRememberedDepartureBoard(
     return undefined;
   }
   const now = new Date().toISOString();
+  const preferredLineFilterKey = cleanDepartureLineFilterText(board.preferredLineFilterKey);
+  const preferredLineFilterLabel = preferredLineFilterKey
+    ? cleanDepartureLineFilterText(board.preferredLineFilterLabel)
+    : undefined;
   return {
-    id: rememberedDepartureBoardId({ center }),
+    id: rememberedDepartureBoardId({ center, preferredLineFilterKey }),
     label,
     center,
+    ...(preferredLineFilterKey ? { preferredLineFilterKey } : {}),
+    ...(preferredLineFilterLabel ? { preferredLineFilterLabel } : {}),
     useCount: Math.max(1, Math.floor(board.useCount ?? 1)),
     createdAt:
       board.createdAt && Number.isFinite(Date.parse(board.createdAt)) ? board.createdAt : now,
@@ -618,7 +643,7 @@ export function sortRememberedDepartureBoards(
 
 export function upsertRememberedDepartureBoard(
   boards: RememberedDepartureBoard[],
-  candidate: Pick<RememberedDepartureBoard, "label" | "center">,
+  candidate: RememberedDepartureBoardCandidate,
   now = new Date().toISOString(),
 ): RememberedDepartureBoard[] {
   const cleaned = cleanRememberedDepartureBoard({
@@ -2353,12 +2378,19 @@ function departureBoardHeading(context: DepartureBoardContext): string {
 
 function rememberedDepartureBoardFromContext(
   context: DepartureBoardContext,
-): Pick<RememberedDepartureBoard, "label" | "center"> | undefined {
+  lineFilter?: DepartureLineFilterOption,
+): RememberedDepartureBoardCandidate | undefined {
   if (!context.center) return undefined;
   if (context.label === "Din posisjon" || looksLikeCoordinateQuery(context.label)) return undefined;
   return {
     label: context.label,
     center: context.center,
+    ...(lineFilter
+      ? {
+          preferredLineFilterKey: lineFilter.key,
+          preferredLineFilterLabel: lineFilter.label,
+        }
+      : {}),
   };
 }
 
@@ -2368,6 +2400,12 @@ function rememberedDepartureBoardContext(board: RememberedDepartureBoard): Depar
     label: board.label,
     center: board.center,
   };
+}
+
+function rememberedDepartureBoardDisplayLabel(board: RememberedDepartureBoard): string {
+  return board.preferredLineFilterLabel
+    ? `${board.label} · ${board.preferredLineFilterLabel}`
+    : board.label;
 }
 
 function RouteDepartureConfidencePanel({
@@ -2438,9 +2476,11 @@ function DepartureBoardPanel({
   context,
   routeOriginContext,
   rememberedBoards,
+  requestedLineFilterKey,
   selectedDeparture,
   onReload,
   onContextChange,
+  onClearRequestedLineFilter,
   onRememberCurrentBoard,
   onSelectRememberedBoard,
   onRemoveRememberedBoard,
@@ -2451,17 +2491,24 @@ function DepartureBoardPanel({
   context: DepartureBoardContext;
   routeOriginContext?: DepartureBoardContext;
   rememberedBoards: RememberedDepartureBoard[];
+  requestedLineFilterKey?: string;
   selectedDeparture?: SelectedDepartureMatch;
   onReload: () => void;
   onContextChange: (context: DepartureBoardContext) => void;
-  onRememberCurrentBoard: (context: DepartureBoardContext) => void;
+  onClearRequestedLineFilter: () => void;
+  onRememberCurrentBoard: (candidate: RememberedDepartureBoardCandidate) => void;
   onSelectRememberedBoard: (board: RememberedDepartureBoard) => void;
   onRemoveRememberedBoard: (boardId: string) => void;
 }) {
   const [activeDepartureFilterKey, setActiveDepartureFilterKey] = useState("all");
   const safeHandoff = safeExternalUrl(board?.handoffUrl ?? "https://www.atb.no/reiseplanlegger/");
   const departures = Array.isArray(board?.departures) ? board.departures : [];
-  const currentRememberedBoard = rememberedDepartureBoardFromContext(context);
+  const departureFilters = useMemo(() => departureLineFilterOptions(departures), [departures]);
+  const activeLineFilter =
+    activeDepartureFilterKey === "all"
+      ? undefined
+      : departureFilters.find((option) => option.key === activeDepartureFilterKey);
+  const currentRememberedBoard = rememberedDepartureBoardFromContext(context, activeLineFilter);
   const currentRememberedBoardId = currentRememberedBoard
     ? rememberedDepartureBoardId(currentRememberedBoard)
     : undefined;
@@ -2479,7 +2526,6 @@ function DepartureBoardPanel({
   const selectedLeg = selectedDeparture?.leg;
   const selectedStatus = selectedDepartureStatus(matchedDeparture, selectedLeg, board);
   const selectedPlannedTime = legDepartureTime(selectedLeg);
-  const departureFilters = useMemo(() => departureLineFilterOptions(departures), [departures]);
   const displayedDepartures = useMemo(
     () =>
       displayDepartureRows({
@@ -2489,12 +2535,44 @@ function DepartureBoardPanel({
       }),
     [activeDepartureFilterKey, departures, matchedDeparture],
   );
+  const contextKey = context.center
+    ? `${context.scope}:${context.label}:${context.center.lat.toFixed(5)},${context.center.lon.toFixed(5)}`
+    : `${context.scope}:${context.label}`;
+  const saveBoardLabel = activeLineFilter ? "Lagre linje" : "Lagre tavle";
+  const savedBoardLabel = activeLineFilter ? "Linje lagret" : "Tavle lagret";
+  const visibleDepartureFilters = useMemo(() => {
+    const visible = departureFilters.slice(0, 8);
+    if (
+      activeDepartureFilterKey === "all" ||
+      visible.some((option) => option.key === activeDepartureFilterKey)
+    ) {
+      return visible;
+    }
+    const activeOption = departureFilters.find((option) => option.key === activeDepartureFilterKey);
+    return activeOption ? [activeOption, ...visible.slice(0, 7)] : visible;
+  }, [activeDepartureFilterKey, departureFilters]);
 
   useEffect(() => {
     if (activeDepartureFilterKey === "all") return;
     if (departureFilters.some((option) => option.key === activeDepartureFilterKey)) return;
     setActiveDepartureFilterKey("all");
   }, [activeDepartureFilterKey, departureFilters]);
+
+  useEffect(() => {
+    if (requestedLineFilterKey) return;
+    setActiveDepartureFilterKey("all");
+  }, [contextKey, requestedLineFilterKey]);
+
+  useEffect(() => {
+    if (!requestedLineFilterKey) return;
+    if (departureFilters.some((option) => option.key === requestedLineFilterKey)) {
+      setActiveDepartureFilterKey(requestedLineFilterKey);
+      return;
+    }
+    if (!loading && board) {
+      setActiveDepartureFilterKey("all");
+    }
+  }, [board, departureFilters, loading, requestedLineFilterKey]);
 
   return (
     <section className="departure-board-panel" aria-labelledby="departure-board-heading">
@@ -2529,10 +2607,10 @@ function DepartureBoardPanel({
           </div>
           <button
             type="button"
-            onClick={() => currentRememberedBoard && onRememberCurrentBoard(context)}
+            onClick={() => currentRememberedBoard && onRememberCurrentBoard(currentRememberedBoard)}
             disabled={loading || !currentRememberedBoard || currentBoardSaved}
           >
-            {currentBoardSaved ? "Tavle lagret" : "Lagre tavle"}
+            {currentBoardSaved ? savedBoardLabel : saveBoardLabel}
           </button>
           <button type="button" onClick={onReload} disabled={loading}>
             {loading ? "Oppdaterer ..." : "Oppdater"}
@@ -2546,24 +2624,27 @@ function DepartureBoardPanel({
         {rememberedBoards.length ? (
           <div className="departure-board-favorites" aria-label="Lagrede avgangstavler">
             <span>Lagrede tavler</span>
-            {rememberedBoards.map((rememberedBoard) => (
-              <div key={rememberedBoard.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelectRememberedBoard(rememberedBoard)}
-                  disabled={loading && currentRememberedBoardId === rememberedBoard.id}
-                >
-                  {rememberedBoard.label}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onRemoveRememberedBoard(rememberedBoard.id)}
-                  aria-label={`Fjern ${rememberedBoard.label} fra lagrede avgangstavler`}
-                >
-                  Fjern
-                </button>
-              </div>
-            ))}
+            {rememberedBoards.map((rememberedBoard) => {
+              const label = rememberedDepartureBoardDisplayLabel(rememberedBoard);
+              return (
+                <div key={rememberedBoard.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectRememberedBoard(rememberedBoard)}
+                    disabled={loading && currentRememberedBoardId === rememberedBoard.id}
+                  >
+                    {label}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveRememberedBoard(rememberedBoard.id)}
+                    aria-label={`Fjern ${label} fra lagrede avgangstavler`}
+                  >
+                    Fjern
+                  </button>
+                </div>
+              );
+            })}
           </div>
         ) : null}
       </header>
@@ -2611,17 +2692,23 @@ function DepartureBoardPanel({
             type="button"
             className={activeDepartureFilterKey === "all" ? "selected" : undefined}
             aria-pressed={activeDepartureFilterKey === "all"}
-            onClick={() => setActiveDepartureFilterKey("all")}
+            onClick={() => {
+              onClearRequestedLineFilter();
+              setActiveDepartureFilterKey("all");
+            }}
           >
             Alle <span>{departures.length}</span>
           </button>
-          {departureFilters.slice(0, 8).map((option) => (
+          {visibleDepartureFilters.map((option) => (
             <button
               key={option.key}
               type="button"
               className={`${option.severity}${activeDepartureFilterKey === option.key ? " selected" : ""}`}
               aria-pressed={activeDepartureFilterKey === option.key}
-              onClick={() => setActiveDepartureFilterKey(option.key)}
+              onClick={() => {
+                onClearRequestedLineFilter();
+                setActiveDepartureFilterKey(option.key);
+              }}
             >
               {option.label} <span>{option.count}</span>
             </button>
@@ -3189,6 +3276,7 @@ export function TrafficMapPage() {
   const [departureBoardContext, setDepartureBoardContext] = useState<DepartureBoardContext>(
     defaultDepartureBoardContext,
   );
+  const [requestedDepartureLineFilterKey, setRequestedDepartureLineFilterKey] = useState<string>();
   const [departureBoardLoading, setDepartureBoardLoading] = useState(false);
   const [departureBoardError, setDepartureBoardError] = useState<string>();
   const [routeDepartureBoards, setRouteDepartureBoards] = useState<RouteDepartureBoardResult[]>([]);
@@ -3221,44 +3309,53 @@ export function TrafficMapPage() {
     [],
   );
 
-  const loadDepartureBoard = useCallback((context: DepartureBoardContext) => {
-    departureBoardAbortRef.current?.abort();
-    const controller = new AbortController();
-    departureBoardAbortRef.current = controller;
-    setDepartureBoardContext(context);
-    setDepartureBoard(undefined);
-    setDepartureBoardLoading(true);
-    setDepartureBoardError(undefined);
-    fetchPublicTransportDepartureBoard(
-      {
-        center: context.center,
-        radiusMeters: 1_200,
-        stopLimit: 4,
-        departureLimit: 12,
-        startTime: context.startTime,
-      },
-      { signal: controller.signal },
-    )
-      .then((payload) => {
-        if (departureBoardAbortRef.current !== controller) return;
-        setDepartureBoard(payload);
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted || departureBoardAbortRef.current !== controller) return;
-        setDepartureBoardError(
-          reason instanceof Error ? reason.message : "Kunne ikke hente avganger.",
-        );
-      })
-      .finally(() => {
-        if (departureBoardAbortRef.current === controller) {
-          setDepartureBoardLoading(false);
-          departureBoardAbortRef.current = undefined;
-        }
-      });
-  }, []);
+  const loadDepartureBoard = useCallback(
+    (
+      context: DepartureBoardContext,
+      options: { preferredLineFilterKey?: string; preserveLineFilter?: boolean } = {},
+    ) => {
+      departureBoardAbortRef.current?.abort();
+      const controller = new AbortController();
+      departureBoardAbortRef.current = controller;
+      if (!options.preserveLineFilter) {
+        setRequestedDepartureLineFilterKey(options.preferredLineFilterKey);
+      }
+      setDepartureBoardContext(context);
+      setDepartureBoard(undefined);
+      setDepartureBoardLoading(true);
+      setDepartureBoardError(undefined);
+      fetchPublicTransportDepartureBoard(
+        {
+          center: context.center,
+          radiusMeters: 1_200,
+          stopLimit: 4,
+          departureLimit: 12,
+          startTime: context.startTime,
+        },
+        { signal: controller.signal },
+      )
+        .then((payload) => {
+          if (departureBoardAbortRef.current !== controller) return;
+          setDepartureBoard(payload);
+        })
+        .catch((reason) => {
+          if (controller.signal.aborted || departureBoardAbortRef.current !== controller) return;
+          setDepartureBoardError(
+            reason instanceof Error ? reason.message : "Kunne ikke hente avganger.",
+          );
+        })
+        .finally(() => {
+          if (departureBoardAbortRef.current === controller) {
+            setDepartureBoardLoading(false);
+            departureBoardAbortRef.current = undefined;
+          }
+        });
+    },
+    [],
+  );
 
   const reloadDepartureBoard = useCallback(() => {
-    loadDepartureBoard(departureBoardContext);
+    loadDepartureBoard(departureBoardContext, { preserveLineFilter: true });
   }, [departureBoardContext, loadDepartureBoard]);
 
   const loadRouteDepartureBoards = useCallback((checkpoints: RouteDepartureCheckpoint[]) => {
@@ -3504,9 +3601,11 @@ export function TrafficMapPage() {
     updateRememberedRoutes((routes) => removeRememberedTravelRoute(routes, routeId));
   }
 
-  function handleRememberCurrentDepartureBoard(context: DepartureBoardContext): void {
-    const candidate = rememberedDepartureBoardFromContext(context);
-    if (!candidate) return;
+  function handleDepartureBoardContextChange(context: DepartureBoardContext): void {
+    loadDepartureBoard(context);
+  }
+
+  function handleRememberCurrentDepartureBoard(candidate: RememberedDepartureBoardCandidate): void {
     updateRememberedDepartureBoards((boards) => upsertRememberedDepartureBoard(boards, candidate));
   }
 
@@ -3515,9 +3614,19 @@ export function TrafficMapPage() {
       upsertRememberedDepartureBoard(boards, {
         label: board.label,
         center: board.center,
+        ...(board.preferredLineFilterKey
+          ? {
+              preferredLineFilterKey: board.preferredLineFilterKey,
+              ...(board.preferredLineFilterLabel
+                ? { preferredLineFilterLabel: board.preferredLineFilterLabel }
+                : {}),
+            }
+          : {}),
       }),
     );
-    loadDepartureBoard(rememberedDepartureBoardContext(board));
+    loadDepartureBoard(rememberedDepartureBoardContext(board), {
+      preferredLineFilterKey: board.preferredLineFilterKey,
+    });
   }
 
   function handleRemoveRememberedDepartureBoard(boardId: string): void {
@@ -4071,9 +4180,11 @@ export function TrafficMapPage() {
         context={departureBoardContext}
         routeOriginContext={routeOriginDepartureBoardContext}
         rememberedBoards={rememberedDepartureBoards}
+        requestedLineFilterKey={requestedDepartureLineFilterKey}
         selectedDeparture={selectedDeparture}
         onReload={reloadDepartureBoard}
-        onContextChange={loadDepartureBoard}
+        onContextChange={handleDepartureBoardContextChange}
+        onClearRequestedLineFilter={() => setRequestedDepartureLineFilterKey(undefined)}
         onRememberCurrentBoard={handleRememberCurrentDepartureBoard}
         onSelectRememberedBoard={handleSelectRememberedDepartureBoard}
         onRemoveRememberedBoard={handleRemoveRememberedDepartureBoard}

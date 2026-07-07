@@ -223,6 +223,54 @@ describe("remembered departure boards", () => {
     });
   });
 
+  it("stores line-focused boards separately from the general board at the same stop", () => {
+    const general = upsertRememberedDepartureBoard(
+      [],
+      {
+        label: "Munkegata, Trondheim",
+        center: { lat: 63.432883, lon: 10.393742 },
+      },
+      "2026-07-07T08:00:00.000Z",
+    );
+    const focused = upsertRememberedDepartureBoard(
+      general,
+      {
+        label: "Munkegata, Trondheim",
+        center: { lat: 63.432883, lon: 10.393742 },
+        preferredLineFilterKey: "bus|3|Leangen",
+        preferredLineFilterLabel: "Buss 3 mot Leangen",
+      },
+      "2026-07-07T08:02:00.000Z",
+    );
+    const usedAgain = upsertRememberedDepartureBoard(
+      focused,
+      {
+        label: "Munkegata, Trondheim",
+        center: { lat: 63.432883, lon: 10.393742 },
+        preferredLineFilterKey: "bus|3|Leangen",
+        preferredLineFilterLabel: "Buss 3 mot Leangen",
+      },
+      "2026-07-07T08:04:00.000Z",
+    );
+
+    expect(usedAgain).toHaveLength(2);
+    expect(new Set(usedAgain.map((board) => board.id)).size).toBe(2);
+    const focusedBoard = usedAgain.find((board) => board.preferredLineFilterKey);
+    const generalBoard = usedAgain.find((board) => !board.preferredLineFilterKey);
+    expect(focusedBoard).toMatchObject({
+      label: "Munkegata, Trondheim",
+      preferredLineFilterKey: "bus|3|Leangen",
+      preferredLineFilterLabel: "Buss 3 mot Leangen",
+      useCount: 2,
+      createdAt: "2026-07-07T08:02:00.000Z",
+      lastUsedAt: "2026-07-07T08:04:00.000Z",
+    });
+    expect(generalBoard).toMatchObject({
+      label: "Munkegata, Trondheim",
+      useCount: 1,
+    });
+  });
+
   it("sorts boards by recency, use count, then label", () => {
     const boards: RememberedDepartureBoard[] = [
       {
@@ -254,6 +302,8 @@ describe("remembered departure boards", () => {
       {
         label: "Munkegata",
         center: { lat: 63.432883, lon: 10.393742 },
+        preferredLineFilterKey: "bus|3|Leangen",
+        preferredLineFilterLabel: "Buss 3 mot Leangen",
         useCount: 2,
         createdAt: "2026-07-07T07:00:00.000Z",
         lastUsedAt: "2026-07-07T08:00:00.000Z",
@@ -263,6 +313,10 @@ describe("remembered departure boards", () => {
     ]);
 
     expect(readRememberedDepartureBoards(storageReturning(raw))).toHaveLength(1);
+    expect(readRememberedDepartureBoards(storageReturning(raw))[0]).toMatchObject({
+      preferredLineFilterKey: "bus|3|Leangen",
+      preferredLineFilterLabel: "Buss 3 mot Leangen",
+    });
     expect(readRememberedDepartureBoards(storageReturning("{"))).toEqual([]);
     expect(
       readRememberedDepartureBoards({

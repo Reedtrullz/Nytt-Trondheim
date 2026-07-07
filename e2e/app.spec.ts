@@ -2063,7 +2063,48 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
         areaLabel: hasCenter ? "Munkegata, Trondheim" : "Trondheim sentrum",
         center: hasCenter ? { lat: Number(lat), lon: Number(lon) } : { lat: 63.4305, lon: 10.3951 },
         stops: [],
-        departures: [],
+        departures: hasCenter
+          ? [
+              {
+                id: "departure:3",
+                stopId: "NSR:StopPlace:41613",
+                stopName: "Munkegata",
+                stopDistanceMeters: 42,
+                mode: "bus",
+                lineId: "ATB:Line:3",
+                publicCode: "3",
+                lineName: "Lade - Hallset",
+                serviceJourneyId: "ATB:ServiceJourney:3",
+                destinationName: "Leangen",
+                aimedDepartureTime: "2026-07-05T16:24:00.000Z",
+                expectedDepartureTime: "2026-07-05T16:24:00.000Z",
+                delaySeconds: 0,
+                realtime: true,
+                cancelled: false,
+                notices: [],
+                handoffUrl: "https://www.atb.no/reiseplanlegger/",
+              },
+              {
+                id: "departure:71",
+                stopId: "NSR:StopPlace:41613",
+                stopName: "Munkegata",
+                stopDistanceMeters: 42,
+                mode: "bus",
+                lineId: "ATB:Line:71",
+                publicCode: "71",
+                lineName: "MelhusSkyss-Trondheim",
+                serviceJourneyId: "ATB:ServiceJourney:71",
+                destinationName: "Dora",
+                aimedDepartureTime: "2026-07-05T16:26:00.000Z",
+                expectedDepartureTime: "2026-07-05T16:26:00.000Z",
+                delaySeconds: 0,
+                realtime: true,
+                cancelled: false,
+                notices: [],
+                handoffUrl: "https://www.atb.no/reiseplanlegger/",
+              },
+            ]
+          : [],
         sources: [],
         generatedAt: "2026-07-05T16:20:00.000Z",
         handoffUrl: "https://www.atb.no/reiseplanlegger/",
@@ -2171,6 +2212,43 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
       })),
     )
     .toContainEqual({ lat: "63.432883", lon: "10.393742" });
+  await departureBoard.getByRole("button", { name: "Buss 3 mot Leangen 1" }).click();
+  await expect(departureBoard.locator(".departure-board-grid")).toContainText("Leangen");
+  await expect(departureBoard.locator(".departure-board-grid")).not.toContainText("Dora");
+  await departureBoard.getByRole("button", { name: "Lagre linje" }).click();
+  await expect(departureBoard.getByRole("button", { name: "Linje lagret" })).toBeDisabled();
+  await expect(
+    departureBoard.getByRole("button", {
+      name: "Munkegata, Trondheim · Buss 3 mot Leangen",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await departureBoard.getByRole("button", { name: "Sentrum" }).click();
+  const focusedBoardLoadsBeforeSelect = departureRequestUrls.length;
+  await departureBoard
+    .getByRole("button", {
+      name: "Munkegata, Trondheim · Buss 3 mot Leangen",
+      exact: true,
+    })
+    .click();
+  await expect
+    .poll(() =>
+      departureRequestUrls.slice(focusedBoardLoadsBeforeSelect).map((url) => ({
+        lat: url.searchParams.get("lat"),
+        lon: url.searchParams.get("lon"),
+      })),
+    )
+    .toContainEqual({ lat: "63.432883", lon: "10.393742" });
+  await expect(
+    departureBoard.getByRole("button", { name: "Buss 3 mot Leangen 1" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(departureBoard.locator(".departure-board-grid")).toContainText("Leangen");
+  await expect(departureBoard.locator(".departure-board-grid")).not.toContainText("Dora");
+  await departureBoard
+    .getByRole("button", {
+      name: "Fjern Munkegata, Trondheim · Buss 3 mot Leangen fra lagrede avgangstavler",
+    })
+    .click();
   await departureBoard
     .getByRole("button", { name: "Fjern Munkegata, Trondheim fra lagrede avgangstavler" })
     .click();
