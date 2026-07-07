@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import pg from "pg";
+import { buildDatabasePoolOptions } from "@nytt/shared";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -11,7 +12,10 @@ if (!databaseUrl) {
 const filename = fileURLToPath(import.meta.url);
 const schemaPath = path.resolve(path.dirname(filename), "schema.sql");
 const sql = await readFile(schemaPath, "utf8");
-const pool = new pg.Pool({ connectionString: databaseUrl });
+const pool = new pg.Pool({
+  connectionString: databaseUrl,
+  ...buildDatabasePoolOptions("migration"),
+});
 const migrationLockName = "nytt-trondheim:schema-migrations";
 
 const client = await pool.connect();

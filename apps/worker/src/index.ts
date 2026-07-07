@@ -19,6 +19,7 @@ import type {
 } from "@nytt/shared";
 import {
   analyzeArticleCoverage,
+  buildDatabasePoolOptions,
   buildMorningBrief,
   buildNotificationTriggerPage,
 } from "@nytt/shared";
@@ -1570,7 +1571,10 @@ export async function runWorker(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required for the collection worker.");
 
-  const pool = new pg.Pool({ connectionString: databaseUrl });
+  const pool = new pg.Pool({
+    connectionString: databaseUrl,
+    ...buildDatabasePoolOptions("worker"),
+  });
   const repository = new WorkerRepository(pool);
   const analyzer = createAnalyzer();
   const once = process.argv.includes("--once");
