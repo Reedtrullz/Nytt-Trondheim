@@ -292,6 +292,13 @@ const sportsResultPattern =
 const sportsMatchContextPattern =
   /\b(?:borte|divisjon\w*|eliteserien|fotball\w*|hjemme(?:laget)?|kamp(?:en)?|lag(?:et)?|liga(?:en)?|m[åa]l(?:et|ene)?|obos|poeng\w*|resultat(?:et)?)\b|bortekompleks\w*|bortesmell\w*|bortetap\w*/iu;
 const localSportsClubKeys = new Set(localSportsClubSignals.map(([club]) => club));
+const articleTextCache = new WeakMap<Article, string>();
+const articleTextTokensCache = new WeakMap<Article, Set<string>>();
+const articleTitleTokensCache = new WeakMap<Article, Set<string>>();
+const articleDistinctiveTokensCache = new WeakMap<Article, Set<string>>();
+const articlePlaceTokensCache = new WeakMap<Article, Set<string>>();
+const articleIncidentSignalsCache = new WeakMap<Article, Set<string>>();
+const articleTopicSignalsCache = new WeakMap<Article, Set<string>>();
 
 function normalizeText(value: string): string {
   return value
@@ -331,6 +338,8 @@ function tokenSimilarity(
 }
 
 function articlePlaceTokens(article: Article): Set<string> {
+  const cached = articlePlaceTokensCache.get(article);
+  if (cached) return cached;
   const placeValues = [article.location?.label, ...article.places].filter(
     (place): place is string => Boolean(place),
   );
@@ -379,6 +388,7 @@ function articlePlaceTokens(article: Article): Set<string> {
   });
   genericPlaceTokens.forEach((token) => placeTokens.delete(token));
   nonIncidentPlaceTokens.forEach((token) => placeTokens.delete(token));
+  articlePlaceTokensCache.set(article, placeTokens);
   return placeTokens;
 }
 
@@ -413,17 +423,48 @@ function sameCanonicalUrl(left: Article, right: Article): boolean {
 }
 
 function articleText(article: Article): string {
-  return [article.title, article.excerpt, article.location?.label, ...article.places]
+  const cached = articleTextCache.get(article);
+  if (cached !== undefined) return cached;
+  const text = [article.title, article.excerpt, article.location?.label, ...article.places]
     .filter(Boolean)
     .join(" ");
+  articleTextCache.set(article, text);
+  return text;
+}
+
+function articleTextTokens(article: Article): Set<string> {
+  const cached = articleTextTokensCache.get(article);
+  if (cached) return cached;
+  const value = tokens(articleText(article));
+  articleTextTokensCache.set(article, value);
+  return value;
+}
+
+function articleTitleTokens(article: Article): Set<string> {
+  const cached = articleTitleTokensCache.get(article);
+  if (cached) return cached;
+  const value = tokens(article.title);
+  articleTitleTokensCache.set(article, value);
+  return value;
+}
+
+function articleDistinctiveIncidentTokens(article: Article): Set<string> {
+  const cached = articleDistinctiveTokensCache.get(article);
+  if (cached) return cached;
+  const value = distinctiveIncidentTokens(articleText(article));
+  articleDistinctiveTokensCache.set(article, value);
+  return value;
 }
 
 function articleIncidentSignals(article: Article): Set<string> {
+  const cached = articleIncidentSignalsCache.get(article);
+  if (cached) return cached;
   const text = articleText(article);
   const signals = new Set(
     incidentSignals.flatMap(([signal, pattern]) => (pattern.test(text) ? [signal] : [])),
   );
   if (signals.has("brann") && isFootballClubBrannContext(article)) signals.delete("brann");
+  articleIncidentSignalsCache.set(article, signals);
   return signals;
 }
 
@@ -465,11 +506,15 @@ function isSportsResultTopic(signal: string): boolean {
 }
 
 function articleTopicSignals(article: Article): Set<string> {
+  const cached = articleTopicSignalsCache.get(article);
+  if (cached) return cached;
   const text = articleText(article);
-  return new Set([
+  const signals = new Set([
     ...topicSignals.flatMap(([signal, matches]) => (matches(text) ? [signal] : [])),
     ...sportsResultTopicSignals(text),
   ]);
+  articleTopicSignalsCache.set(article, signals);
+  return signals;
 }
 
 function sharedIncidentSignals(left: Article, right: Article): Set<string> {
@@ -496,10 +541,10 @@ function compatibleDifferentSituationSignal(
     return undefined;
   }
   if (!sameBroadCategory(left, right) || !hasSharedPlace(left, right)) return undefined;
-  const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
+  const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
   const distinctive = tokenSimilarity(
-    distinctiveIncidentTokens(articleText(left)),
-    distinctiveIncidentTokens(articleText(right)),
+    articleDistinctiveIncidentTokens(left),
+    articleDistinctiveIncidentTokens(right),
   );
 
   for (const signal of sharedIncidentSignals(left, right)) {
@@ -542,8 +587,8 @@ function genericPlaceIncidentSignals(
   if (!sameBroadCategory(left, right)) return [];
   const distance = publishedDistanceMs(left, right);
   const distinctive = tokenSimilarity(
-    distinctiveIncidentTokens(articleText(left)),
-    distinctiveIncidentTokens(articleText(right)),
+    articleDistinctiveIncidentTokens(left),
+    articleDistinctiveIncidentTokens(right),
   );
   return [...sharedIncidentSignals(left, right)].flatMap((signal) => {
     const rule = genericPlaceIncidentSignalRules.get(signal);
@@ -634,7 +679,7 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
   }
   if (publishedDistanceMs(left, right) > maxGroupAgeMs) return [];
 
-  const title = tokenSimilarity(tokens(left.title), tokens(right.title));
+  const title = tokenSimilarity(articleTitleTokens(left), articleTitleTokens(right));
   if (title.overlap >= 3 && title.score >= 0.56) {
     signals.push({
       kind: "title_similarity",
@@ -649,7 +694,7 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
     return signals;
   }
 
-  const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
+  const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
   if (
     publishedDistanceMs(left, right) <= nearDuplicateTextWindowMs &&
     body.overlap >= 10 &&
@@ -731,7 +776,7 @@ function nearMissForPair(left: Article, right: Article): ArticleCoverageNearMiss
   if (publishedDistanceMs(left, right) > maxGroupAgeMs) {
     return { articleIds, reason: "outside_time_window" };
   }
-  const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
+  const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
   if (
     sameBroadCategory(left, right) &&
     (hasSharedPlace(left, right) || hasSharedIncidentSignal(left, right))
@@ -748,6 +793,33 @@ function nearMissForPair(left: Article, right: Article): ArticleCoverageNearMiss
 
 function articlesSimilar(left: Article, right: Article): boolean {
   return articlePairSignals(left, right).length > 0;
+}
+
+function pairKey(left: Article, right: Article): string {
+  return left.id < right.id ? `${left.id}\u0000${right.id}` : `${right.id}\u0000${left.id}`;
+}
+
+interface GroupPairMemo {
+  conflicts: Map<string, boolean>;
+  similarities: Map<string, boolean>;
+}
+
+function memoizedArticlesConflict(left: Article, right: Article, memo: GroupPairMemo): boolean {
+  const key = pairKey(left, right);
+  const existing = memo.conflicts.get(key);
+  if (existing !== undefined) return existing;
+  const value = articlesConflict(left, right);
+  memo.conflicts.set(key, value);
+  return value;
+}
+
+function memoizedArticlesSimilar(left: Article, right: Article, memo: GroupPairMemo): boolean {
+  const key = pairKey(left, right);
+  const existing = memo.similarities.get(key);
+  if (existing !== undefined) return existing;
+  const value = articlesSimilar(left, right);
+  memo.similarities.set(key, value);
+  return value;
 }
 
 function sortArticles(left: Article, right: Article): number {
@@ -774,14 +846,22 @@ function bundleFor(articles: Article[]): ArticleCoverageBundle | undefined {
   return articles.find((article) => article.coverageBundle)?.coverageBundle;
 }
 
-function articleFitsGroup(article: Article, group: HomeArticleGroup): boolean {
-  if (group.articles.some((existing) => articlesConflict(article, existing))) return false;
-  return group.articles.some((existing) => articlesSimilar(article, existing));
+function articleFitsGroup(article: Article, group: HomeArticleGroup, memo: GroupPairMemo): boolean {
+  if (group.articles.some((existing) => memoizedArticlesConflict(article, existing, memo))) {
+    return false;
+  }
+  return group.articles.some((existing) => memoizedArticlesSimilar(article, existing, memo));
 }
 
-function groupsConflict(left: HomeArticleGroup, right: HomeArticleGroup): boolean {
+function groupsConflict(
+  left: HomeArticleGroup,
+  right: HomeArticleGroup,
+  memo: GroupPairMemo,
+): boolean {
   return left.articles.some((leftArticle) =>
-    right.articles.some((rightArticle) => articlesConflict(leftArticle, rightArticle)),
+    right.articles.some((rightArticle) =>
+      memoizedArticlesConflict(leftArticle, rightArticle, memo),
+    ),
   );
 }
 
@@ -799,10 +879,11 @@ function groupFromArticles(id: string, articles: Article[]): HomeArticleGroup {
 function mergeCandidateGroups(
   article: Article,
   candidateGroups: HomeArticleGroup[],
+  memo: GroupPairMemo,
 ): HomeArticleGroup[] {
   const mergeableGroups: HomeArticleGroup[] = [];
   for (const candidate of candidateGroups) {
-    if (mergeableGroups.some((existing) => groupsConflict(existing, candidate))) continue;
+    if (mergeableGroups.some((existing) => groupsConflict(existing, candidate, memo))) continue;
     mergeableGroups.push(candidate);
   }
   return mergeableGroups;
@@ -811,11 +892,14 @@ function mergeCandidateGroups(
 export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
   const groups: HomeArticleGroup[] = [];
   const sorted = [...articles].sort(sortArticles);
+  const memo: GroupPairMemo = { conflicts: new Map(), similarities: new Map() };
 
   sorted.forEach((article) => {
-    const candidateGroups = groups.filter((candidate) => articleFitsGroup(article, candidate));
+    const candidateGroups = groups.filter((candidate) =>
+      articleFitsGroup(article, candidate, memo),
+    );
     if (candidateGroups.length > 0) {
-      const mergeableGroups = mergeCandidateGroups(article, candidateGroups);
+      const mergeableGroups = mergeCandidateGroups(article, candidateGroups, memo);
       const mergeableGroupIds = new Set(mergeableGroups.map((candidate) => candidate.id));
       const mergedGroupId = mergeableGroups[0]?.id ?? groupId(article);
       const mergedGroup = groupFromArticles(mergedGroupId, [
