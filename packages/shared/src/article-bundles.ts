@@ -130,7 +130,12 @@ const genericPlaceIncidentSignalRules = new Map<
   ],
   ["street_order", { windowMs: 90 * 60 * 1000, minBodyOverlap: 2, minDistinctiveOverlap: 1 }],
   ["tyveri", { windowMs: nearDuplicateTextWindowMs, minBodyOverlap: 4, minDistinctiveOverlap: 2 }],
+  [
+    "traffic_collision",
+    { windowMs: crossSourceIncidentWindowMs, minBodyOverlap: 3, minDistinctiveOverlap: 1 },
+  ],
 ]);
+const compatibleDifferentSituationSignals = new Set(["street_order", "traffic_collision"]);
 const genericPlaceTokens = new Set(["trondheim", "trøndelag", "trondelag"]);
 const nonIncidentPlaceTokens = new Set(["olavs"]);
 const centralTrondheimPlaceAliases = new Set([
@@ -175,6 +180,15 @@ const genericIncidentTokens = new Set([
   "sloss",
   "slåss",
   "slåssing",
+  "trafikk",
+  "trafikkuhell",
+  "trafikkulykke",
+  "kollisjon",
+  "kolliderte",
+  "kollidert",
+  "påkjørsel",
+  "påkjørt",
+  "sammenstøt",
   "tyveri",
   "ulykke",
   "vold",
@@ -228,6 +242,10 @@ const incidentSignals: Array<[string, RegExp]> = [
   [
     "fallulykke",
     /\b(fallulykke\w*|falt\s+(?:ned|ca|cirka)|fall(?:et)?\s+(?:p[åa]|fra)|rop\s+om\s+hjelp)\b/iu,
+  ],
+  [
+    "traffic_collision",
+    /\b(trafikkuhell\w*|trafikkulykke\w*|kollisj\w*|kollider\w*|p[åa]kj[øo]r\w*|p[åa]k[øo]yr\w*|sammenst[øo]t\w*)\b/iu,
   ],
   ["trafikk", /\b(trafikk|kollisjon|ulykke|påkjør\w*|bilstans)\b/iu],
   ["orden", /\b(ro og orden|ordensforstyrrelse)\b/iu],
@@ -470,37 +488,47 @@ function hasSharedIncidentSignal(left: Article, right: Article): boolean {
   return sharedIncidentSignals(left, right).size > 0;
 }
 
-function compatibleStreetOrderSituationSignal(
+function compatibleDifferentSituationSignal(
   left: Article,
   right: Article,
 ): ArticleCoverageDecisionSignal | undefined {
   if (!left.situationId || !right.situationId || left.situationId === right.situationId) {
     return undefined;
   }
-  const rule = genericPlaceIncidentSignalRules.get("street_order");
-  if (!rule || publishedDistanceMs(left, right) > rule.windowMs) return undefined;
   if (!sameBroadCategory(left, right) || !hasSharedPlace(left, right)) return undefined;
-  if (!sharedIncidentSignals(left, right).has("street_order")) return undefined;
   const body = tokenSimilarity(tokens(articleText(left)), tokens(articleText(right)));
   const distinctive = tokenSimilarity(
     distinctiveIncidentTokens(articleText(left)),
     distinctiveIncidentTokens(articleText(right)),
   );
-  if (body.overlap < rule.minBodyOverlap || distinctive.overlap < rule.minDistinctiveOverlap) {
-    return undefined;
+
+  for (const signal of sharedIncidentSignals(left, right)) {
+    if (!compatibleDifferentSituationSignals.has(signal)) continue;
+    const rule = genericPlaceIncidentSignalRules.get(signal);
+    if (
+      !rule ||
+      publishedDistanceMs(left, right) > rule.windowMs ||
+      body.overlap < rule.minBodyOverlap ||
+      distinctive.overlap < rule.minDistinctiveOverlap
+    ) {
+      continue;
+    }
+    return {
+      kind: "generic_place_incident",
+      articleIds: [left.id, right.id],
+      detail: signal,
+      overlap: body.overlap,
+      score: body.score,
+    };
   }
-  return {
-    kind: "generic_place_incident",
-    articleIds: [left.id, right.id],
-    detail: "street_order",
-    overlap: body.overlap,
-    score: body.score,
-  };
+
+  return undefined;
 }
 
 function articlesConflict(left: Article, right: Article): boolean {
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
-    return !compatibleStreetOrderSituationSignal(left, right);
+    if (compatibleDifferentSituationSignal(left, right)) return false;
+    return !coverageBundlesCompatible(left, right);
   }
   return hasConflictingSpecificPlaces(left, right) && hasSharedIncidentSignal(left, right);
 }
@@ -575,8 +603,17 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
   }
   if (left.situationId && left.situationId === right.situationId) return signals;
   if (left.situationId && right.situationId) {
-    const compatibleStreetOrderSignal = compatibleStreetOrderSituationSignal(left, right);
-    return compatibleStreetOrderSignal ? [...signals, compatibleStreetOrderSignal] : [];
+    const compatibleSignal = compatibleDifferentSituationSignal(left, right);
+    if (compatibleSignal) return [...signals, compatibleSignal];
+    if (coverageBundlesCompatible(left, right)) {
+      signals.push({
+        kind: "persisted_bundle",
+        articleIds: [left.id, right.id],
+        detail: left.coverageBundle?.id,
+      });
+      return signals;
+    }
+    return [];
   }
   const topics = sharedTopicSignals(left, right);
   const hasSportsResultTopic = [...topics].some(isSportsResultTopic);

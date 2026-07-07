@@ -363,6 +363,125 @@ describe("article coverage analysis", () => {
     );
   });
 
+  it("merges a Tyholt traffic collision bundle with the Politiloggen situation update", () => {
+    const generatedAt = "2026-07-07T18:45:00.000Z";
+    const newsBundle = {
+      id: "coverage:traffic:tyholt-collision",
+      kind: "incident" as const,
+      confidence: "high" as const,
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt,
+    };
+
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-tyholt-collision",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "To biler kolliderte i Trondheim",
+          excerpt:
+            "Politi og ambulanse har rykket ut til et trafikkuhell på Tyholt tirsdag kveld. To biler er involvert og det skal ha skjedd en påkjørsel bakfra. En person i bilen som ble påkjørt, klager på smerter.",
+          publishedAt: "2026-07-07T18:20:02.000Z",
+          category: "Transport",
+          places: ["Trondheim", "Tyholt"],
+          location: { lat: 63.4176, lng: 10.4356, label: "Tyholt" },
+          situationId: "auto-traffic-tyholt-beddc20c",
+          coverageBundle: newsBundle,
+        }),
+        article({
+          id: "nrk-tyholt-collision",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Trafikkuhell på Tyholt",
+          excerpt:
+            "Politiet og ambulanse rykker ut til et trafikkuhell på Tyholt i Trondheim tirsdag kveld. Politiet opplyser at det har vært en påkjørsel bakfra med to biler involvert.",
+          publishedAt: "2026-07-07T18:19:28.000Z",
+          category: "Transport",
+          places: ["Trondheim", "Tyholt", "Trøndelag"],
+          location: { lat: 63.4176, lng: 10.4356, label: "Tyholt" },
+          situationId: "auto-traffic-tyholt-beddc20c",
+          coverageBundle: newsBundle,
+        }),
+        article({
+          id: "politiloggen-tyholt-collision",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Trafikk: Trondheim, Tyholt",
+          excerpt:
+            "Politiet og ambulanse rykker ut til et trafikkuhell, påkjørsel bakfra. To biler involvert. En person i bilen som ble påkjørt, klager på smerter. Tre personer i den andre bilen fremstår som uskadd.",
+          publishedAt: "2026-07-07T18:18:11.102Z",
+          category: "Transport",
+          places: ["Tyholt", "Trondheim"],
+          location: { lat: 63.4176, lng: 10.4356, label: "Tyholt" },
+          situationId: "politiloggen-26m5x8",
+          coverageBundle: newsBundle,
+        }),
+      ],
+      generatedAt,
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse med offisiell tråd",
+      memberArticleIds: expect.arrayContaining([
+        "adressa-tyholt-collision",
+        "nrk-tyholt-collision",
+        "politiloggen-tyholt-collision",
+      ]),
+      sourceIds: expect.arrayContaining(["adressa", "nrk", "politiloggen"]),
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "traffic_collision",
+        }),
+      ]),
+    });
+    expect(new Set(analysis.articles.map((item) => item.coverageBundle?.id))).toHaveLength(1);
+  });
+
+  it("keeps unrelated same-place traffic situations apart without collision wording", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "datex-tyholt-bilstans",
+          source: "vegvesen_traffic_info",
+          sourceLabel: "Statens vegvesen DATEX",
+          title: "Bilstans på Tyholt",
+          excerpt: "Et kjørefelt er stengt på Tyholt etter en bilstans.",
+          publishedAt: "2026-07-07T18:30:00.000Z",
+          category: "Transport",
+          places: ["Trondheim", "Tyholt"],
+          location: { lat: 63.4176, lng: 10.4356, label: "Tyholt" },
+          situationId: "datex-tyholt-bilstans",
+        }),
+        article({
+          id: "politiloggen-tyholt-order",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Trafikk: Trondheim, Tyholt",
+          excerpt: "Politiet kontrollerer trafikken ved Tyholt. Det er ikke meldt om ulykke.",
+          publishedAt: "2026-07-07T18:29:00.000Z",
+          category: "Transport",
+          places: ["Tyholt", "Trondheim"],
+          location: { lat: 63.4176, lng: 10.4356, label: "Tyholt" },
+          situationId: "politiloggen-tyholt-order",
+        }),
+      ],
+      "2026-07-07T18:45:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(0);
+    expect(analysis.nearMisses).toEqual([
+      expect.objectContaining({
+        articleIds: ["datex-tyholt-bilstans", "politiloggen-tyholt-order"],
+        reason: "different_situation",
+      }),
+    ]);
+  });
+
   it("bundles close downtown order and threat updates that otherwise split into several rows", () => {
     const analysis = analyzeArticleCoverage(
       [
