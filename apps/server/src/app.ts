@@ -13,6 +13,7 @@ import {
   accessRequestQuerySchema,
   applyNotificationDeliveryStates,
   articleQuerySchema,
+  buildDatabasePoolOptions,
   commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
   emailLoginRequestSchema,
@@ -981,7 +982,10 @@ export interface AppRuntime {
 export async function createApp(config: AppConfig): Promise<AppRuntime> {
   const app = express();
   const pool = config.databaseUrl
-    ? new pg.Pool({ connectionString: config.databaseUrl })
+    ? new pg.Pool({
+        connectionString: config.databaseUrl,
+        ...buildDatabasePoolOptions("server"),
+      })
     : undefined;
   const store: Store = pool ? new PgStore(pool) : new MemoryStore();
   if (pool && config.seedDemo) await (store as PgStore).seedDevelopmentData();
