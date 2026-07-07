@@ -1058,6 +1058,50 @@ describe("article coverage analysis", () => {
     expect(analysis.bundles).toHaveLength(0);
   });
 
+  it("bundles Trondheim VM-fest planning coverage across local sources", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "nidaros-vm-fest-politikere",
+          source: "nidaros",
+          sourceLabel: "Nidaros",
+          title: "Mulig snuoperasjon for gratis VM-fest: Henter inn politikerne fra ferie",
+          excerpt:
+            "Byrådet i Trondheim kaller inn til et ekstraordinært møte fredag morgen. På planen kan det stå planlegging av fotballfest.",
+          publishedAt: "2026-07-07T19:07:00.000Z",
+          category: "Sport",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+        article({
+          id: "adressa-gratis-vm-fest",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Gratis VM-fest i Trondheim: Røper kommunen seg her?",
+          excerpt: "Plutselig har det kommet en ny dato for byrådsmøte. Og banken er involvert.",
+          publishedAt: "2026-07-07T17:22:00.000Z",
+          category: "Sport",
+          places: ["Trondheim"],
+          location: undefined,
+        }),
+      ],
+      "2026-07-07T19:10:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "topic",
+      confidence: "high",
+      memberArticleIds: ["nidaros-vm-fest-politikere", "adressa-gratis-vm-fest"],
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "topical_thread",
+          detail: "trondheim_vm_fest",
+        }),
+      ]),
+    });
+  });
+
   it("does not bundle separate same-club match results with different explicit opponents", () => {
     const analysis = analyzeArticleCoverage(
       [

@@ -275,6 +275,15 @@ const topicSignals: Array<[string, (text: string) => boolean]> = [
       /\b(rosenborg\w*|rbk)\b/iu.test(text) &&
       /\b(hovedtrener\w*|trenerjobb\w*|trener\w*|ansatt\w*|presentert\w*)\b/iu.test(text),
   ],
+  [
+    "trondheim_vm_fest",
+    (text) =>
+      /\btrondheim\b/iu.test(text) &&
+      /\b(?:vm\s*-?\s*fest\w*|fotballfest\w*|folkefest\w*|storskjerm\w*)\b/iu.test(text) &&
+      /\b(?:bank\w*|byr[åa]d\w*|dato\w*|ekstraordin[æa]r\w*|kommune\w*|m[øo]te\w*|planlegging\w*|politiker\w*|snuoperasjon\w*)\b/iu.test(
+        text,
+      ),
+  ],
 ];
 const sportsResultTopicPrefix = "sport_result:";
 const localSportsClubSignals: Array<[string, RegExp]> = [
