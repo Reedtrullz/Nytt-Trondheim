@@ -703,11 +703,16 @@ describe("traffic travel planner API", () => {
 
     const { app, store } = await testApp();
     vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([
-      trafficEvent(),
+      trafficEvent({
+        validFrom: "2026-07-08T08:00:00.000Z",
+        validTo: "2099-01-01T00:00:00.000Z",
+      }),
       trafficEvent({
         id: "vegvesen-traffic-info:far-roadwork",
         sourceEventId: "far-roadwork",
         title: "Veiarbeid langt unna ruten",
+        validFrom: "2026-07-08T08:00:00.000Z",
+        validTo: "2099-01-01T00:00:00.000Z",
         geometry: { type: "Point", coordinates: [10.8, 63.6] },
       }),
     ]);
@@ -1420,5 +1425,181 @@ describe("traffic travel planner API", () => {
         severity: "high",
       }),
     ]);
+  });
+
+  it("keeps future planned roadwork out of a travel plan for now", () => {
+    const futureRoadwork = trafficEvent({
+      id: "vegvesen-traffic-info:future-roadwork",
+      sourceEventId: "future-roadwork",
+      state: "planned",
+      title: "Planlagt arbeid ved Lade",
+      validFrom: "2026-06-03T08:00:00.000Z",
+      validTo: "2026-06-03T12:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z",
+    });
+    const payload = buildTravelPlanPayload({
+      origin: { query: "A", label: "A", coordinate: [10.4, 63.43] },
+      destination: { query: "B", label: "B", coordinate: [10.41, 63.43] },
+      route: {
+        source: "direct",
+        distanceMeters: 500,
+        detail: "Test route",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.4, 63.43],
+            [10.41, 63.43],
+          ],
+        },
+      },
+      events: [futureRoadwork],
+      vehicles: [],
+      alerts: [],
+      sourceHealth,
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-01T09:00:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T09:00:00.000Z"),
+    });
+
+    expect(payload.trafficImpacts).toEqual([]);
+  });
+
+  it("includes planned roadwork and service alerts when the travel window overlaps", () => {
+    const plannedRoadwork = trafficEvent({
+      id: "vegvesen-traffic-info:planned-roadwork",
+      sourceEventId: "planned-roadwork",
+      state: "planned",
+      title: "Planlagt arbeid ved Lade",
+      validFrom: "2026-06-03T08:00:00.000Z",
+      validTo: "2026-06-03T12:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z",
+    });
+    const plannedAlert = {
+      id: "entur-service-alert:planned-line-3",
+      source: "entur_service_alerts",
+      codespaceId: "ATB",
+      situationNumber: "planned-line-3",
+      severity: "normal",
+      summary: "Linje 3 kjører via Lerkendal",
+      description: "Planlagt omlegging.",
+      validFrom: "2026-06-03T08:00:00.000Z",
+      validTo: "2026-06-03T12:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z",
+      state: "active",
+      geometry: { type: "Point", coordinates: [10.405, 63.43] },
+      affectedLineNames: ["3"],
+    } satisfies PublicTransportServiceAlert;
+    const payload = buildTravelPlanPayload({
+      origin: { query: "A", label: "A", coordinate: [10.4, 63.43] },
+      destination: { query: "B", label: "B", coordinate: [10.41, 63.43] },
+      route: {
+        source: "direct",
+        distanceMeters: 500,
+        detail: "Test route",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.4, 63.43],
+            [10.41, 63.43],
+          ],
+        },
+      },
+      events: [plannedRoadwork],
+      vehicles: [],
+      alerts: [plannedAlert],
+      sourceHealth,
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-03T07:30:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T09:00:00.000Z"),
+    });
+
+    expect(payload.trafficImpacts).toEqual([
+      expect.objectContaining({
+        event: expect.objectContaining({ title: "Planlagt arbeid ved Lade" }),
+      }),
+    ]);
+    expect(payload.publicTransportSuggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "entur-service-alert:planned-line-3",
+          kind: "alert",
+          title: "Linje 3 kjører via Lerkendal",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps duration-unknown planned context when it started before the travel window", () => {
+    const durationUnknownRoadwork = trafficEvent({
+      id: "vegvesen-traffic-info:duration-unknown-roadwork",
+      sourceEventId: "duration-unknown-roadwork",
+      state: "planned",
+      title: "Planlagt arbeid uten slutttid",
+      validFrom: "2026-06-03T06:00:00.000Z",
+      validTo: undefined,
+      updatedAt: "2026-06-01T09:00:00.000Z",
+    });
+    const durationUnknownAlert = {
+      id: "entur-service-alert:duration-unknown-line-3",
+      source: "entur_service_alerts",
+      codespaceId: "ATB",
+      situationNumber: "duration-unknown-line-3",
+      severity: "normal",
+      summary: "Linje 3 har planlagt omlegging uten kjent slutttid",
+      description: "Planlagt omlegging.",
+      validFrom: "2026-06-03T06:00:00.000Z",
+      validTo: undefined,
+      updatedAt: "2026-06-01T09:00:00.000Z",
+      state: "planned",
+      geometry: { type: "Point", coordinates: [10.405, 63.43] },
+      affectedLineNames: ["3"],
+    } satisfies PublicTransportServiceAlert;
+    const payload = buildTravelPlanPayload({
+      origin: { query: "A", label: "A", coordinate: [10.4, 63.43] },
+      destination: { query: "B", label: "B", coordinate: [10.41, 63.43] },
+      route: {
+        source: "direct",
+        distanceMeters: 500,
+        detail: "Test route",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.4, 63.43],
+            [10.41, 63.43],
+          ],
+        },
+      },
+      events: [durationUnknownRoadwork],
+      vehicles: [],
+      alerts: [durationUnknownAlert],
+      sourceHealth,
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-03T07:30:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T09:00:00.000Z"),
+    });
+
+    expect(payload.trafficImpacts).toEqual([
+      expect.objectContaining({
+        event: expect.objectContaining({ title: "Planlagt arbeid uten slutttid" }),
+      }),
+    ]);
+    expect(payload.publicTransportSuggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "entur-service-alert:duration-unknown-line-3",
+          kind: "alert",
+          title: "Linje 3 har planlagt omlegging uten kjent slutttid",
+        }),
+      ]),
+    );
   });
 });

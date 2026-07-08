@@ -50,6 +50,9 @@ const ENTUR_JOURNEY_MAX_POLYLINE_POINTS = 600;
 const ROUTE_PADDING_METERS = 2_500;
 const ROUTE_TRAFFIC_BUFFER_METERS = 1_500;
 const ROUTE_TRANSIT_BUFFER_METERS = 1_200;
+const ROUTE_CONTEXT_LOOK_BEHIND_MS = 15 * 60_000;
+const ROUTE_CONTEXT_MIN_LOOK_AHEAD_MS = 2 * 60 * 60_000;
+const ROUTE_CONTEXT_AFTER_ROUTE_PADDING_MS = 60 * 60_000;
 const ENTUR_JOURNEY_PLANNER_ENDPOINT = "https://api.entur.io/journey-planner/v3/graphql";
 const TRONDELAG_TRAVEL_BOUNDS = {
   north: 64.7,
@@ -75,6 +78,84 @@ const severityRank: Record<TrafficEventSeverity, number> = {
   high: 3,
   critical: 4,
 };
+
+type TravelPlanContextWindow = {
+  fromMs: number;
+  toMs: number;
+};
+
+function timestampMs(value?: string): number | undefined {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function travelPlanContextWindow(
+  route: TravelPlanRoute,
+  requestedDepartureTime: string,
+  generatedAt: Date,
+): TravelPlanContextWindow {
+  const requestedMs = timestampMs(requestedDepartureTime) ?? generatedAt.getTime();
+  const routeDurationMs =
+    route.durationSeconds !== undefined && route.durationSeconds > 0
+      ? route.durationSeconds * 1000
+      : 0;
+  const lookAheadMs = Math.max(
+    ROUTE_CONTEXT_MIN_LOOK_AHEAD_MS,
+    routeDurationMs + ROUTE_CONTEXT_AFTER_ROUTE_PADDING_MS,
+  );
+  return {
+    fromMs: requestedMs - ROUTE_CONTEXT_LOOK_BEHIND_MS,
+    toMs: requestedMs + lookAheadMs,
+  };
+}
+
+function intervalIntersectsTravelPlanWindow(input: {
+  validFrom?: string;
+  validTo?: string;
+  fallbackStart?: string;
+  openEnded?: boolean;
+  window: TravelPlanContextWindow;
+}): boolean {
+  const validFromMs = timestampMs(input.validFrom);
+  const fallbackStartMs = timestampMs(input.fallbackStart);
+  const startMs = validFromMs ?? fallbackStartMs;
+  const endMs = input.validTo
+    ? (timestampMs(input.validTo) ?? Number.POSITIVE_INFINITY)
+    : input.openEnded || validFromMs !== undefined
+      ? Number.POSITIVE_INFINITY
+      : (fallbackStartMs ?? Number.POSITIVE_INFINITY);
+
+  if (Number.isFinite(endMs) && endMs < input.window.fromMs) return false;
+  if (startMs !== undefined && startMs > input.window.toMs) return false;
+  return true;
+}
+
+function trafficEventIntersectsTravelPlanWindow(
+  event: TrafficMapEvent,
+  window: TravelPlanContextWindow,
+): boolean {
+  return intervalIntersectsTravelPlanWindow({
+    validFrom: event.validFrom,
+    validTo: event.validTo,
+    fallbackStart: event.updatedAt,
+    openEnded: event.state === "active" && !event.validTo,
+    window,
+  });
+}
+
+function serviceAlertIntersectsTravelPlanWindow(
+  alert: PublicTransportServiceAlert,
+  window: TravelPlanContextWindow,
+): boolean {
+  return intervalIntersectsTravelPlanWindow({
+    validFrom: alert.validFrom,
+    validTo: alert.validTo,
+    fallbackStart: alert.updatedAt,
+    openEnded: alert.state === "active" && !alert.validTo,
+    window,
+  });
+}
 
 export class TravelPlanRequestError extends Error {
   status = 400;
@@ -1336,13 +1417,22 @@ export function buildTravelPlanPayload(input: {
   generatedAt?: Date;
 }): TravelPlanPayload {
   const generatedAt = input.generatedAt ?? new Date();
-  const trafficImpactsForRoute = trafficImpacts(input.events, input.route);
+  const requestedDepartureTime =
+    input.journeyPlanner?.requestedDepartureTime ?? generatedAt.toISOString();
+  const contextWindow = travelPlanContextWindow(input.route, requestedDepartureTime, generatedAt);
+  const contextEvents = input.events.filter((event) =>
+    trafficEventIntersectsTravelPlanWindow(event, contextWindow),
+  );
+  const contextAlerts = input.alerts.filter((alert) =>
+    serviceAlertIntersectsTravelPlanWindow(alert, contextWindow),
+  );
+  const trafficImpactsForRoute = trafficImpacts(contextEvents, input.route);
   const itineraries = rankItineraries(
     enrichItineraries(
       input.itineraries ?? [],
       trafficImpactsForRoute,
       input.vehicles,
-      input.alerts,
+      contextAlerts,
     ),
   );
   return {
@@ -1350,7 +1440,7 @@ export function buildTravelPlanPayload(input: {
     destination: input.destination,
     route: input.route,
     trafficImpacts: trafficImpactsForRoute,
-    publicTransportSuggestions: transitSuggestions(input.vehicles, input.alerts, input.route),
+    publicTransportSuggestions: transitSuggestions(input.vehicles, contextAlerts, input.route),
     itineraries,
     journeyPlanner: {
       status:
@@ -1361,8 +1451,7 @@ export function buildTravelPlanPayload(input: {
         (itineraries.length
           ? "Entur Journey Planner returnerte konkrete reiseforslag."
           : "Ingen konkrete Entur-reiser funnet for valgt tidspunkt."),
-      requestedDepartureTime:
-        input.journeyPlanner?.requestedDepartureTime ?? generatedAt.toISOString(),
+      requestedDepartureTime,
       source: "Entur Journey Planner",
     },
     sources: sourceStatuses(input.sourceHealth),
