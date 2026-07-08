@@ -49,6 +49,7 @@ import {
   routeDepartureConfidenceItems,
   routeDepartureConfidenceSummary,
   routePositions,
+  buildRouteContextSummary,
   selectedDepartureMatch,
   selectedDepartureStatus,
   selectedRouteWatchSummary,
@@ -1715,6 +1716,119 @@ describe("TrafficMapPage route overlay helpers", () => {
       heading: "Sjekk ruten før du drar",
       itineraryCount: 1,
       severity: "warning",
+    });
+  });
+
+  const basePlan = (overrides: Partial<TravelPlanPayload> = {}): TravelPlanPayload =>
+    ({
+      origin: {
+        label: "Munkegata, Trondheim",
+        query: "Munkegata",
+        coordinate: [10.393742, 63.432883],
+      },
+      destination: {
+        label: "Lade gård, Trondheim",
+        query: "Lade",
+        coordinate: [10.463, 63.433],
+      },
+      route: {
+        source: "direct",
+        detail: "Rute beregnet med OSRM.",
+        distanceMeters: 3700,
+        durationSeconds: 420,
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+      trafficImpacts: [
+        {
+          event: {
+            id: "traffic:f6650",
+            title: "Fv. 6650 Ilevolen",
+            source: "vegvesen_traffic_info",
+            sourceEventId: "traffic:f6650",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            updatedAt: "2026-07-08T09:55:00.000Z",
+            locationName: "Ilevolen",
+            geometry: { type: "Point", coordinates: [10.3901, 63.4301] },
+          },
+          distanceMeters: 121,
+          summary: "121 m fra foreslått rute",
+          severity: "medium",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "alert:line-3",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur",
+          distanceMeters: 220,
+          href: "https://www.atb.no/reise/",
+        },
+      ],
+      itineraries: [],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur fant reiseforslag.",
+        requestedDepartureTime: "2026-07-08T10:00:00.000Z",
+        source: "Entur Journey Planner",
+      },
+      sources: [],
+      generatedAt: "2026-07-08T10:00:00.000Z",
+      ...overrides,
+    }) as TravelPlanPayload;
+
+  describe("route context summary", () => {
+    it("summarizes traffic and alert context without exposing full text grids", () => {
+      const summary = buildRouteContextSummary(basePlan());
+
+      expect(summary).toMatchObject({
+        count: 2,
+        mapPointCount: 1,
+        blockingCount: 0,
+        heading: "2 punkt langs valgt rute",
+      });
+      expect(summary.detail).toContain("Kartet viser plassering");
+      expect(summary.items).toEqual([
+        expect.objectContaining({
+          id: "traffic:traffic:f6650",
+          kind: "traffic",
+          title: "Fv. 6650 Ilevolen",
+          distanceLabel: "121 m fra ruten",
+          source: "Vegvesen",
+          eventId: "traffic:f6650",
+          focusable: true,
+        }),
+        expect.objectContaining({
+          id: "transit_alert:alert:line-3",
+          kind: "transit_alert",
+          title: "Endret rute",
+          distanceLabel: "220 m fra ruten",
+          source: "Entur",
+          focusable: false,
+        }),
+      ]);
+    });
+
+    it("returns an empty calm summary when no route context exists", () => {
+      const summary = buildRouteContextSummary(
+        basePlan({ trafficImpacts: [], publicTransportSuggestions: [] }),
+      );
+
+      expect(summary).toMatchObject({
+        count: 0,
+        mapPointCount: 0,
+        heading: "Ingen kartpunkter langs valgt rute",
+        items: [],
+      });
     });
   });
 });

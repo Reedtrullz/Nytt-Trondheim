@@ -1925,6 +1925,108 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   };
 }
 
+export type RouteContextItem = {
+  id: string;
+  kind: "traffic" | "transit_alert";
+  title: string;
+  detail: string;
+  source: string;
+  severity: "ok" | "watch" | "warning";
+  distanceLabel?: string;
+  eventId?: string;
+  suggestionId?: string;
+  focusable: boolean;
+};
+
+export type RouteContextSummary = {
+  count: number;
+  mapPointCount: number;
+  blockingCount: number;
+  heading: string;
+  detail: string;
+  items: RouteContextItem[];
+};
+
+function routeContextSeverityFromTraffic(severity?: string): RouteContextItem["severity"] {
+  if (severity === "high" || severity === "critical") return "warning";
+  if (severity === "medium") return "watch";
+  return "ok";
+}
+
+function routeContextSourceLabel(source: string): string {
+  const normalized = source.toLocaleLowerCase("nb");
+  if (normalized === "datex" || normalized.includes("vegvesen") || normalized.includes("datex")) {
+    return "Vegvesen";
+  }
+  if (normalized.includes("entur")) return "Entur";
+  return source;
+}
+
+function routeContextDistanceLabel(distanceMeters?: number): string | undefined {
+  if (distanceMeters === undefined) return undefined;
+  return `${formatDistance(distanceMeters)} fra ruten`;
+}
+
+export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContextSummary {
+  const trafficItems: RouteContextItem[] = (plan?.trafficImpacts ?? []).map((impact) => ({
+    id: `traffic:${impact.event.id}`,
+    kind: "traffic",
+    title: impact.event.title,
+    detail:
+      impact.summary ||
+      impact.event.description ||
+      impact.event.roadName ||
+      "Trafikkhendelse langs valgt rute.",
+    source: routeContextSourceLabel(impact.event.source),
+    severity: routeContextSeverityFromTraffic(impact.severity),
+    distanceLabel: routeContextDistanceLabel(impact.distanceMeters),
+    eventId: impact.event.id,
+    focusable: true,
+  }));
+
+  const alertItems: RouteContextItem[] = (plan?.publicTransportSuggestions ?? [])
+    .filter((suggestion) => suggestion.kind === "alert")
+    .map((suggestion) => ({
+      id: `transit_alert:${suggestion.id}`,
+      kind: "transit_alert",
+      title: suggestion.title,
+      detail: suggestion.detail,
+      source: routeContextSourceLabel(suggestion.source),
+      severity: "watch",
+      distanceLabel: routeContextDistanceLabel(suggestion.distanceMeters),
+      suggestionId: suggestion.id,
+      focusable: false,
+    }));
+
+  const items = [...trafficItems, ...alertItems];
+  const count = items.length;
+  const mapPointCount = items.filter((item) => item.focusable).length;
+  const blockingCount = items.filter((item) => item.severity === "warning").length;
+
+  if (!count) {
+    return {
+      count: 0,
+      mapPointCount: 0,
+      blockingCount: 0,
+      heading: "Ingen kartpunkter langs valgt rute",
+      detail: "Nytt fant ingen trafikkpunkter langs valgt rute akkurat nå.",
+      items: [],
+    };
+  }
+
+  return {
+    count,
+    mapPointCount,
+    blockingCount,
+    heading: `${count} punkt langs valgt rute`,
+    detail:
+      mapPointCount > 0
+        ? `Kartet viser plassering av ${mapPointCount} kartpunkt som bør vurderes underveis.`
+        : "Kartet viser punkter med trafikk- og kollektivkontekst langs valgt rute.",
+    items,
+  };
+}
+
 function trafficEventListCopy(
   selectedPreset: TrafficMapPreset,
   showAll: boolean,
