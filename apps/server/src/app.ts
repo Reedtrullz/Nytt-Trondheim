@@ -1309,6 +1309,8 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const query = trafficMapQuerySchema.parse(req.query);
       const login = currentLogin(req);
       const requestedStates = query.states ?? ["active", "planned"];
+      const includeTravelTime = query.includeTravelTime ?? true;
+      const includeRoadContext = query.includeRoadContext ?? true;
       const bounds =
         typeof query.north === "number" &&
         typeof query.south === "number" &&
@@ -1338,13 +1340,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
           },
           login,
         ),
-        store.listOfficialEvents({ source: "datex" }, login),
+        store.listOfficialEvents(
+          { source: "datex", states: ["active", "updated"], bounds, limit: 300 },
+          login,
+        ),
         store.listArticles({ limit: 500 }, login),
         store.listSourceHealth(),
-        store.listTrafficPulseCorridors(50),
-        store.listRoadWeatherObservations(bounds),
-        store.listRoadCameras(bounds),
-        store.listTrafficCounterSnapshots(bounds),
+        includeTravelTime ? store.listTrafficPulseCorridors(50) : Promise.resolve([]),
+        includeRoadContext ? store.listRoadWeatherObservations(bounds) : Promise.resolve([]),
+        includeRoadContext ? store.listRoadCameras(bounds) : Promise.resolve([]),
+        includeRoadContext ? store.listTrafficCounterSnapshots(bounds) : Promise.resolve([]),
       ]);
       const eventsBySourceKey = new Map<string, TrafficMapEvent>();
       const sourceKey = (event: TrafficMapEvent) => `${event.source}:${event.sourceEventId}`;
@@ -1371,11 +1376,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       res.json({
         events,
         brief: buildTrafficBrief(events),
-        corridorImpacts: buildCorridorImpacts(events, trafficPulse),
+        corridorImpacts: includeTravelTime ? buildCorridorImpacts(events, trafficPulse) : [],
         sources: trafficMapSourceStatuses(sourceHealth),
-        weather,
-        cameras,
-        counters,
+        weather: includeRoadContext ? weather : [],
+        cameras: includeRoadContext ? cameras : [],
+        counters: includeRoadContext ? counters : [],
       });
     } catch (error) {
       next(error);

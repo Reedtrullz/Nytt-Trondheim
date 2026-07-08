@@ -1304,6 +1304,14 @@ export const trafficMapQuerySchema = z
       .enum(["true", "false"])
       .transform((value) => value === "true")
       .optional(),
+    includeTravelTime: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+    includeRoadContext: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
     from: z.string().datetime().optional(),
     to: z.string().datetime().optional(),
     north: coordinateParamSchema,

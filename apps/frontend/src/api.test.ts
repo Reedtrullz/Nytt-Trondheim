@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api.js";
 import { fetchPublicTransportDepartureBoard } from "./api/publicTransportDepartures.js";
+import { fetchTrafficMap } from "./api/trafficMap.js";
 import { fetchPublicTransportMap } from "./api/publicTransportMap.js";
 import { fetchTravelPlaceSuggestions, fetchTravelPlan } from "./api/travelPlan.js";
 import { fetchWeatherPreparedness } from "./api/weatherPreparedness.js";
@@ -224,6 +225,25 @@ describe("frontend source item API helpers", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/operations/notification-triggers?kinds=public_safety%2Ctraffic_disruption&severities=critical%2Cwarning&traceStates=raw_evidence%2Csource_audit&q=r%C3%B8yk&limit=20",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests traffic maps with explicit visible context flags", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ events: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchTrafficMap({
+      categories: ["accident"],
+      severities: ["high"],
+      states: ["active"],
+      includeTravelTime: false,
+      includeRoadContext: false,
+      bounds: { north: 63.5, south: 63.3, east: 10.5, west: 10.2 },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/map/traffic-events?categories=accident&severities=high&states=active&includeTravelTime=false&includeRoadContext=false&north=63.5&south=63.3&east=10.5&west=10.2",
       expect.objectContaining({ credentials: "include" }),
     );
   });

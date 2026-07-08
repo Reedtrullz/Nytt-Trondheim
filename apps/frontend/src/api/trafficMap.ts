@@ -10,6 +10,8 @@ export interface TrafficMapRequest {
   severities?: TrafficEventSeverity[];
   states?: TrafficEventState[];
   estimatedNews?: boolean;
+  includeTravelTime?: boolean;
+  includeRoadContext?: boolean;
   from?: string;
   to?: string;
   bounds?: {
@@ -30,6 +32,10 @@ export async function fetchTrafficMap(
   if (request.states !== undefined) params.set("states", request.states.join(","));
   if (request.estimatedNews !== undefined)
     params.set("estimatedNews", String(request.estimatedNews));
+  if (request.includeTravelTime !== undefined)
+    params.set("includeTravelTime", String(request.includeTravelTime));
+  if (request.includeRoadContext !== undefined)
+    params.set("includeRoadContext", String(request.includeRoadContext));
   if (request.from) params.set("from", request.from);
   if (request.to) params.set("to", request.to);
   if (request.bounds) {

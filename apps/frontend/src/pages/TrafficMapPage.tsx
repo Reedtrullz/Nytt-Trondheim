@@ -4251,11 +4251,14 @@ export function TrafficMapPage() {
   const requestedTrafficStates: TrafficEventState[] = visibleContextLayers.showAll
     ? ["active", "planned", "expired", "cancelled"]
     : timeWindow.states;
+  const includeRoadContext = visibleContextLayers.weatherRisk || visibleContextLayers.showAll;
   const { data, loading, error, reload } = useTrafficMap({
     categories: selectedCategories,
     severities: selectedSeverities,
     states: requestedTrafficStates,
     estimatedNews: visibleContextLayers.estimatedNews,
+    includeTravelTime: visibleContextLayers.travelTime,
+    includeRoadContext,
     from: timeWindow.from,
     to: timeWindow.to,
     bounds: stableBounds,

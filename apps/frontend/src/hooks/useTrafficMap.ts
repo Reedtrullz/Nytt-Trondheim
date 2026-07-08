@@ -14,6 +14,8 @@ export interface UseTrafficMapOptions {
   severities: TrafficEventSeverity[];
   states?: TrafficEventState[];
   estimatedNews?: boolean;
+  includeTravelTime?: boolean;
+  includeRoadContext?: boolean;
   from?: string;
   to?: string;
   bounds?: MapBounds;
@@ -70,6 +72,8 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
   const severitiesKey = options.severities.join(",");
   const statesKey = options.states?.join(",") ?? "";
   const estimatedNewsKey = options.estimatedNews ? "true" : "false";
+  const includeTravelTimeKey = options.includeTravelTime ? "true" : "false";
+  const includeRoadContextKey = options.includeRoadContext ? "true" : "false";
   const fromKey = options.from ?? "";
   const toKey = options.to ?? "";
   const currentBoundsKey = boundsKey(options.bounds);
@@ -78,6 +82,8 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
     severitiesKey,
     statesKey,
     estimatedNewsKey,
+    includeTravelTimeKey,
+    includeRoadContextKey,
     fromKey,
     toKey,
     currentBoundsKey,
@@ -102,6 +108,8 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
           severities: severitiesFromKey(severitiesKey),
           states: statesFromKey(statesKey),
           estimatedNews: estimatedNewsKey === "true",
+          includeTravelTime: includeTravelTimeKey === "true",
+          includeRoadContext: includeRoadContextKey === "true",
           from: fromKey || undefined,
           to: toKey || undefined,
           bounds: boundsFromKey(currentBoundsKey),
@@ -129,6 +137,8 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
     currentBoundsKey,
     estimatedNewsKey,
     fromKey,
+    includeRoadContextKey,
+    includeTravelTimeKey,
     queryKey,
     severitiesKey,
     statesKey,

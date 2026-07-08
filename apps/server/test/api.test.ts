@@ -2830,6 +2830,46 @@ describe("private situation API", () => {
     ]);
   });
 
+  it("bounds DATEX and skips hidden traffic context layers", async () => {
+    const { app, store } = await testApp();
+    const listOfficialEvents = vi.spyOn(store, "listOfficialEvents").mockResolvedValue([]);
+    const listTrafficPulseCorridors = vi
+      .spyOn(store, "listTrafficPulseCorridors")
+      .mockResolvedValue([]);
+    const listRoadWeatherObservations = vi
+      .spyOn(store, "listRoadWeatherObservations")
+      .mockResolvedValue([]);
+    const listRoadCameras = vi.spyOn(store, "listRoadCameras").mockResolvedValue([]);
+    const listTrafficCounterSnapshots = vi
+      .spyOn(store, "listTrafficCounterSnapshots")
+      .mockResolvedValue([]);
+    vi.spyOn(store, "listTrafficMapEvents").mockResolvedValue([]);
+    vi.spyOn(store, "listArticles").mockResolvedValue({ items: [] });
+    vi.spyOn(store, "listSourceHealth").mockResolvedValue([]);
+
+    const agent = request.agent(app);
+    await agent.get("/api/session").expect(200);
+    await agent
+      .get(
+        "/api/map/traffic-events?north=63.5&south=63.3&east=10.5&west=10.2&includeTravelTime=false&includeRoadContext=false",
+      )
+      .expect(200);
+
+    expect(listOfficialEvents).toHaveBeenCalledWith(
+      {
+        source: "datex",
+        states: ["active", "updated"],
+        bounds: { north: 63.5, south: 63.3, east: 10.5, west: 10.2 },
+        limit: 300,
+      },
+      "Reedtrullz",
+    );
+    expect(listTrafficPulseCorridors).not.toHaveBeenCalled();
+    expect(listRoadWeatherObservations).not.toHaveBeenCalled();
+    expect(listRoadCameras).not.toHaveBeenCalled();
+    expect(listTrafficCounterSnapshots).not.toHaveBeenCalled();
+  });
+
   it("supports planned roadwork timeline queries", async () => {
     const { app, store } = await testApp();
     vi.spyOn(store, "listOfficialEvents").mockResolvedValue([
