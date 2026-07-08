@@ -203,6 +203,15 @@ describe("private situation API", () => {
     });
   });
 
+  it("returns a non-cacheable 404 for missing frontend assets", async () => {
+    const { app } = await testApp();
+
+    const response = await request(app).get("/assets/nonexistent-probe.js").expect(404);
+    expect(response.headers["cache-control"]).toContain("no-store");
+    expect(response.headers["content-type"]).toContain("text/plain");
+    expect(response.text).toBe("Asset not found");
+  });
+
   it("defaults rate limiting on unless RATE_LIMIT_ENABLED explicitly disables it", () => {
     expect(withEnvValue("RATE_LIMIT_ENABLED", undefined, () => loadConfig().rateLimitEnabled)).toBe(
       true,
