@@ -14,7 +14,6 @@ import type {
   TravelPlanComparisonPreset,
   TravelPlanComparisonSource,
   TravelPlanItinerary,
-  TravelPlanItineraryLabel,
   TravelPlanLeg,
   TravelPlanLegMode,
   TravelPlanPayload,
@@ -897,19 +896,6 @@ function comparisonSeverityLabel(severity: TravelTimeComparisonOption["severity"
       return "Følg med";
     case "warning":
       return "Sjekk";
-  }
-}
-
-function itineraryLabel(label: TravelPlanItineraryLabel): string {
-  switch (label) {
-    case "best_now":
-      return "Beste nå";
-    case "fewest_transfers":
-      return "Færrest bytter";
-    case "soonest_departure":
-      return "Snarest avgang";
-    case "most_robust":
-      return "Mest robust";
   }
 }
 
@@ -2135,101 +2121,6 @@ function TrafficMapFocus({
   return null;
 }
 
-function ItineraryCard({
-  itinerary,
-  selected,
-  onSelect,
-}: {
-  itinerary: TravelPlanItinerary;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const safeHandoff = safeExternalUrl(itinerary.handoffUrl);
-  const noticeCount = itinerary.legs.reduce((count, leg) => count + leg.notices.length, 0);
-  const itineraryTimeLabel = `${formatTravelDateTime(itinerary.departureTime)} til ${formatTravelDateTime(
-    itinerary.arrivalTime,
-  )}`;
-  return (
-    <article
-      className={`itinerary-card itinerary-card-${itinerary.decision}${selected ? " selected" : ""}`}
-      aria-current={selected ? "true" : undefined}
-    >
-      <header>
-        <div className="itinerary-card-labels">
-          {itinerary.labels.map((label) => (
-            <span key={label}>{itineraryLabel(label)}</span>
-          ))}
-          <strong>{itineraryDecisionLabel(itinerary.decision)}</strong>
-        </div>
-        <h3>
-          {formatTravelDateTime(itinerary.departureTime)} →{" "}
-          {formatTravelDateTime(itinerary.arrivalTime)}
-        </h3>
-        <p>
-          {formatDuration(itinerary.durationSeconds)} ·{" "}
-          {itinerary.transferCount === 0
-            ? "Direkte"
-            : `${itinerary.transferCount} bytte${itinerary.transferCount === 1 ? "" : "r"}`}{" "}
-          · {formatDuration(itinerary.walkTimeSeconds)} gange
-        </p>
-        <small>{itinerary.decisionReason}</small>
-      </header>
-      <ol className="itinerary-leg-list">
-        {itinerary.legs.map((leg) => (
-          <li key={leg.id}>
-            <div>
-              <strong>
-                {leg.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : modeLabel(leg.mode)}
-              </strong>
-              <span>
-                {formatTravelDateTime(leg.expectedStartTime)} {leg.from.stopName ?? leg.from.name} →{" "}
-                {formatTravelDateTime(leg.expectedEndTime)} {leg.to.stopName ?? leg.to.name}
-              </span>
-            </div>
-            {leg.lineName ? <small>{leg.lineName}</small> : null}
-            {leg.notices.length ? (
-              <div className="itinerary-leg-notices">
-                {leg.notices.slice(0, 3).map((notice) => (
-                  <span key={notice.id}>{notice.title}</span>
-                ))}
-              </div>
-            ) : null}
-          </li>
-        ))}
-      </ol>
-      <footer>
-        <span>
-          {itinerary.realtime ? "Sanntid inkludert" : "Rutetid"} · {noticeCount} varsel
-          {noticeCount === 1 ? "" : "er"}
-        </span>
-        <button
-          type="button"
-          className="itinerary-card-select"
-          aria-pressed={selected}
-          aria-label={
-            selected
-              ? `Reiseforslag ${itineraryTimeLabel} vises på kart`
-              : `Vis reiseforslag ${itineraryTimeLabel} på kart`
-          }
-          onClick={onSelect}
-        >
-          {selected ? "Vises på kart" : "Vis på kart"}
-        </button>
-        {safeHandoff ? (
-          <a
-            href={safeHandoff}
-            target="_blank"
-            rel="noreferrer noopener"
-            aria-label={`Åpne reiseforslag ${itineraryTimeLabel} hos AtB/Entur`}
-          >
-            Åpne hos AtB/Entur
-          </a>
-        ) : null}
-      </footer>
-    </article>
-  );
-}
-
 function SelectedRouteWatchPanel({ summary }: { summary?: SelectedRouteWatchSummary }) {
   if (!summary) return null;
   return (
@@ -2356,7 +2247,7 @@ function RouteChoicePanel({
         </div>
         <span>{displayOptions.length} valg</span>
       </header>
-      <div className="route-choice-grid">
+      <div className="route-choice-list">
         {displayOptions.map((option) => (
           <button
             key={option.itineraryId}
@@ -2365,12 +2256,16 @@ function RouteChoicePanel({
               option.recommended ? " recommended" : ""
             }${option.selected ? " selected" : ""}`}
             aria-pressed={option.selected}
-            onClick={() => onSelectItinerary(option.itineraryId)}
-            disabled={option.selected}
+            aria-current={option.selected ? "true" : undefined}
+            onClick={() => {
+              if (!option.selected) {
+                onSelectItinerary(option.itineraryId);
+              }
+            }}
           >
             <span>{option.label}</span>
             <strong>{option.summary}</strong>
-            <small>{option.lineSummary}</small>
+            <small className="route-choice-lines">{option.lineSummary}</small>
             <em>{option.meta}</em>
             <small>{option.detail}</small>
           </button>
@@ -2384,15 +2279,11 @@ function RouteChoicePanel({
   );
 }
 
-function SelectedItineraryPanel({
-  itinerary,
-  onSelect,
-}: {
-  itinerary?: TravelPlanItinerary;
-  onSelect: () => void;
-}) {
+function SelectedItineraryPanel({ itinerary }: { itinerary?: TravelPlanItinerary }) {
   if (!itinerary) return null;
   const boardingLeg = firstBoardingLeg(itinerary);
+  const safeHandoff = safeExternalUrl(itinerary.handoffUrl);
+  const noticeCount = itinerary.legs.reduce((count, leg) => count + leg.notices.length, 0);
   return (
     <section className="selected-itinerary-panel" aria-label="Valgt reiseforslag">
       <header>
@@ -2419,7 +2310,43 @@ function SelectedItineraryPanel({
           </span>
         </div>
       ) : null}
-      <ItineraryCard itinerary={itinerary} selected={true} onSelect={onSelect} />
+      <ol className="selected-itinerary-timeline">
+        {itinerary.legs.map((leg) => (
+          <li key={leg.id} className={`selected-itinerary-leg selected-itinerary-leg-${leg.mode}`}>
+            <div className="selected-itinerary-leg-time">
+              <strong>{formatTravelDateTime(leg.expectedStartTime)}</strong>
+              <span>{formatTravelDateTime(leg.expectedEndTime)}</span>
+            </div>
+            <div className="selected-itinerary-leg-body">
+              <strong>
+                {leg.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : modeLabel(leg.mode)}
+              </strong>
+              <span>
+                {leg.from.stopName ?? leg.from.name} → {leg.to.stopName ?? leg.to.name}
+              </span>
+              {leg.lineName ? <small>{leg.lineName}</small> : null}
+              {leg.notices.length ? (
+                <div className="itinerary-leg-notices">
+                  {leg.notices.slice(0, 3).map((notice) => (
+                    <span key={notice.id}>{notice.title}</span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <footer className="selected-itinerary-footer">
+        <span>
+          {itinerary.realtime ? "Sanntid inkludert" : "Rutetid"} · {noticeCount} varsel
+          {noticeCount === 1 ? "" : "er"}
+        </span>
+        {safeHandoff ? (
+          <a href={safeHandoff} target="_blank" rel="noreferrer noopener">
+            Åpne hos AtB/Entur
+          </a>
+        ) : null}
+      </footer>
     </section>
   );
 }
@@ -2477,7 +2404,7 @@ function TravelPlanCard({
       aria-live="polite"
     >
       <header>
-        <p className="label">Reiseråd</p>
+        <p className="label">Reiseråd nå</p>
         <h2>{decision.heading}</h2>
         <p>{decision.detail}</p>
         <div className="travel-plan-route-summary" aria-label="Ruteoppsummering">
@@ -2494,7 +2421,7 @@ function TravelPlanCard({
           </small>
         </div>
       </header>
-      <section>
+      <section className="travel-plan-journey-section">
         <h3>Kollektivvalg</h3>
         {plan.journeyPlanner.status === "unavailable" ? (
           <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
@@ -2503,16 +2430,15 @@ function TravelPlanCard({
           <p className="route-planner-status">Ingen konkrete Entur-reiser funnet for valgt tid.</p>
         ) : null}
         {plan.itineraries.length ? (
-          <>
+          <div className="travel-plan-result-workspace">
             <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
-            <SelectedItineraryPanel
-              itinerary={selectedItinerary}
-              onSelect={() => selectedItinerary && onSelectItinerary(selectedItinerary.id)}
-            />
-          </>
+            <div className="travel-plan-selected-workspace">
+              <SelectedItineraryPanel itinerary={selectedItinerary} />
+              <SelectedRouteWatchPanel summary={routeWatchSummary} />
+            </div>
+          </div>
         ) : null}
       </section>
-      <SelectedRouteWatchPanel summary={routeWatchSummary} />
       <details className="travel-secondary-disclosure">
         <summary>
           Se trafikk langs ruten
@@ -3467,37 +3393,74 @@ function TravelPlannerPanel({
   onToggleDisruptions: () => void;
   onToggleVehicles: () => void;
 }) {
+  const hasTravelResult = Boolean(travelPlan || travelPlanLoading || travelPlanError);
+  const panelClassName = `travel-planner-panel ${
+    hasTravelResult ? "travel-planner-panel-post-search" : "travel-planner-panel-pre-search"
+  }`;
+  const controlsClassName = `route-planner-controls${
+    hasTravelResult ? " route-planner-controls-compact" : ""
+  }`;
+  const formClassName = `route-planner-form route-planner-form-primary${
+    hasTravelResult ? " route-planner-form-compact" : ""
+  }`;
   return (
-    <section className="travel-planner-panel" aria-labelledby="travel-planner-heading">
-      <div className="travel-planner-copy">
-        <p className="label">Reise og trafikk</p>
-        <h1 id="travel-planner-heading">Planlegg reisen</h1>
-        <p>
-          Sjekk vegmeldinger, reisetid og kollektivavvik langs ruten. Nytt viser kontekst; bruk
-          AtB/Entur for avgangstid, billetter og endelig reisevalg.
-        </p>
-        <div className="travel-planner-actions" aria-label="Kollektivvalg">
-          <button
-            type="button"
-            className={publicTransportDisruptionsVisible ? "selected" : undefined}
-            aria-pressed={publicTransportDisruptionsVisible}
-            onClick={onToggleDisruptions}
-          >
-            Vis kollektivavvik
-          </button>
-          <button
-            type="button"
-            className={publicTransportVehiclesVisible ? "selected" : undefined}
-            aria-pressed={publicTransportVehiclesVisible}
-            onClick={onToggleVehicles}
-          >
-            Vis kjøretøy
-          </button>
+    <section className={panelClassName} aria-labelledby="travel-planner-heading">
+      {hasTravelResult ? (
+        <header className="travel-planner-post-heading">
+          <div>
+            <p className="label">Reise og trafikk</p>
+            <h1 id="travel-planner-heading">Planlegg reisen</h1>
+          </div>
+          <div className="travel-planner-actions" aria-label="Kollektivvalg">
+            <button
+              type="button"
+              className={publicTransportDisruptionsVisible ? "selected" : undefined}
+              aria-pressed={publicTransportDisruptionsVisible}
+              onClick={onToggleDisruptions}
+            >
+              Vis kollektivavvik
+            </button>
+            <button
+              type="button"
+              className={publicTransportVehiclesVisible ? "selected" : undefined}
+              aria-pressed={publicTransportVehiclesVisible}
+              onClick={onToggleVehicles}
+            >
+              Vis kjøretøy
+            </button>
+          </div>
+        </header>
+      ) : (
+        <div className="travel-planner-copy">
+          <p className="label">Reise og trafikk</p>
+          <h1 id="travel-planner-heading">Planlegg reisen</h1>
+          <p>
+            Sjekk vegmeldinger, reisetid og kollektivavvik langs ruten. Nytt viser kontekst; bruk
+            AtB/Entur for avgangstid, billetter og endelig reisevalg.
+          </p>
+          <div className="travel-planner-actions" aria-label="Kollektivvalg">
+            <button
+              type="button"
+              className={publicTransportDisruptionsVisible ? "selected" : undefined}
+              aria-pressed={publicTransportDisruptionsVisible}
+              onClick={onToggleDisruptions}
+            >
+              Vis kollektivavvik
+            </button>
+            <button
+              type="button"
+              className={publicTransportVehiclesVisible ? "selected" : undefined}
+              aria-pressed={publicTransportVehiclesVisible}
+              onClick={onToggleVehicles}
+            >
+              Vis kjøretøy
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       <div className="travel-planner-workbench">
-        <div className="route-planner-controls">
-          <form className="route-planner-form route-planner-form-primary" onSubmit={onSubmit}>
+        <div className={controlsClassName}>
+          <form className={formClassName} onSubmit={onSubmit}>
             <div>
               <RoutePlaceInput
                 id="travel-origin"
@@ -3540,21 +3503,27 @@ function TravelPlannerPanel({
                 onChange={onDestinationChange}
                 onSelectSuggestion={(suggestion) => onSuggestionSelect("destination", suggestion)}
               />
-              <div className="route-destination-presets" role="group" aria-label="Vanlige reisemål">
-                <span className="route-destination-presets-title">Vanlige mål</span>
-                {destinationPresets.map((preset) => (
-                  <button
-                    key={preset.query}
-                    type="button"
-                    className={destinationInput === preset.query ? "selected" : undefined}
-                    aria-pressed={destinationInput === preset.query}
-                    onClick={() => onDestinationPresetSelect(preset)}
-                    disabled={travelPlanLoading}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
+              {!hasTravelResult ? (
+                <div
+                  className="route-destination-presets"
+                  role="group"
+                  aria-label="Vanlige reisemål"
+                >
+                  <span className="route-destination-presets-title">Vanlige mål</span>
+                  {destinationPresets.map((preset) => (
+                    <button
+                      key={preset.query}
+                      type="button"
+                      className={destinationInput === preset.query ? "selected" : undefined}
+                      aria-pressed={destinationInput === preset.query}
+                      onClick={() => onDestinationPresetSelect(preset)}
+                      disabled={travelPlanLoading}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <button
               type="button"
@@ -3582,13 +3551,15 @@ function TravelPlannerPanel({
               {travelPlanLoading ? "Henter reiseråd ..." : "Finn reiseråd"}
             </button>
           </form>
-          <RememberedTravelRoutesPanel
-            routes={rememberedRoutes}
-            loading={travelPlanLoading}
-            onSelectRoute={onSelectRememberedRoute}
-            onToggleRoutePinned={onToggleRememberedRoutePinned}
-            onRemoveRoute={onRemoveRememberedRoute}
-          />
+          {!hasTravelResult ? (
+            <RememberedTravelRoutesPanel
+              routes={rememberedRoutes}
+              loading={travelPlanLoading}
+              onSelectRoute={onSelectRememberedRoute}
+              onToggleRoutePinned={onToggleRememberedRoutePinned}
+              onRemoveRoute={onRemoveRememberedRoute}
+            />
+          ) : null}
         </div>
         <div id="travel-plan-result" className="travel-planner-result">
           <TravelPlanCard
@@ -3612,6 +3583,18 @@ function TravelPlannerPanel({
           ) : null}
         </div>
       </div>
+      {hasTravelResult && rememberedRoutes.length ? (
+        <details className="remembered-routes-disclosure">
+          <summary>Lagrede ruter ({rememberedRoutes.length})</summary>
+          <RememberedTravelRoutesPanel
+            routes={rememberedRoutes}
+            loading={travelPlanLoading}
+            onSelectRoute={onSelectRememberedRoute}
+            onToggleRoutePinned={onToggleRememberedRoutePinned}
+            onRemoveRoute={onRemoveRememberedRoute}
+          />
+        </details>
+      ) : null}
     </section>
   );
 }

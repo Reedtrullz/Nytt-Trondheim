@@ -2290,12 +2290,15 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
   await expect.poll(() => travelPlanRequestUrls.length).toBe(1);
   expect(travelPlanRequestUrls[0]?.pathname).toBe("/api/map/travel-plan/compare");
 
-  const rememberedRoute = page.getByRole("button", {
-    name: /Munkegata, Trondheim → Leangen, Trondheim/,
-  });
-  await expect(page.getByRole("region", { name: "Ruter" })).toContainText(
+  const savedRoutesDisclosure = page.locator("details.remembered-routes-disclosure");
+  await expect(savedRoutesDisclosure).toContainText("Lagrede ruter (1)");
+  await savedRoutesDisclosure.locator("summary").click();
+  await expect(savedRoutesDisclosure.getByRole("region", { name: "Ruter" })).toContainText(
     "Lagres bare i denne nettleseren",
   );
+  const rememberedRoute = savedRoutesDisclosure.getByRole("button", {
+    name: /Munkegata, Trondheim → Leangen, Trondheim/,
+  });
   await expect(rememberedRoute).toContainText("brukt 1 gang");
   await page
     .getByRole("button", { name: "Fest Munkegata, Trondheim til Leangen, Trondheim" })
@@ -2718,21 +2721,30 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await page.getByLabel("Når?").selectOption("in30");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
+  await expect(page.locator(".travel-planner-panel-post-search")).toBeVisible();
+  await expect(page.locator(".travel-planner-copy")).toHaveCount(0);
+  await expect(page.locator(".route-planner-form-compact")).toBeVisible();
+  await expect(page.locator(".travel-plan-result-workspace")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sjekk ruten før du drar" })).toBeVisible();
+  await expect(page.getByText("Reiseråd nå", { exact: true })).toBeVisible();
   await expect(page.getByText("Munkegata, Midtbyen → Leangen, Trondheim")).toBeVisible();
   await expect(page.getByLabel("Ruteoppsummering")).toContainText(
     "1 reiseforslag · 2 relevante avvik langs korridoren",
   );
-  await openTrafficDisclosure(page, "Se trafikk langs ruten");
-  await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
-  await expect(page.getByText("Beste nå")).toBeVisible();
+  await expect(page.getByLabel("Velg reiseforslag")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText("Buss 3");
+  await expect(page.getByLabel("Velg reiseforslag")).toContainText("Anbefalt");
   await expect(page.getByText("Start med Buss 3 fra Munkegata")).toBeVisible();
-  await expect(page.getByRole("button", { name: /vises på kart/i })).toBeVisible();
   await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
     "Sjekk dette før avreise",
   );
   await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
     "Forsinkelse på linje 3",
+  );
+  await openTrafficDisclosure(page, "Se trafikk langs ruten");
+  await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText(
+    "Lade - Hallset",
   );
   await openTrafficDisclosure(page, "Dra nå eller vent?");
   const comparison = page.getByLabel("Dra nå eller vent");
@@ -2772,7 +2784,9 @@ test("traffic map travel planner shows route-specific traffic and public transpo
     page.getByText("Nytt vurderer reiserisiko, ikke billetter eller garanti."),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: /Åpne reiseforslag .* hos AtB\/Entur/ }),
+    page
+      .getByRole("region", { name: "Valgt reiseforslag" })
+      .getByRole("link", { name: "Åpne hos AtB/Entur" }),
   ).toHaveAttribute("href", "https://www.atb.no/reiseplanlegger/");
   await page.getByText("Se datagrunnlag").click();
   await expect(page.getByText("Entur Journey Planner", { exact: true })).toBeVisible();
@@ -3407,16 +3421,23 @@ test("traffic map recommends the robust itinerary when the fastest live departur
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
+  await expect(page.locator(".travel-planner-panel-post-search")).toBeVisible();
+  await expect(page.locator(".travel-plan-result-workspace")).toBeVisible();
+  const selectedItinerary = page.getByRole("region", { name: "Valgt reiseforslag" });
+  await expect(selectedItinerary).toBeVisible();
   const choices = page.getByLabel("Velg reiseforslag");
+  await expect(choices).toBeVisible();
   await expect(choices).toContainText("Et annet reiseforslag ser tryggere ut");
   await expect(choices.getByRole("button")).toHaveCount(2);
   await expect(choices.getByRole("button", { name: /Anbefalt/ })).toContainText("Buss 71");
   await expect(choices.getByRole("button", { name: /Raskest/ })).toContainText(
     "Avgangen mot Leangen er innstilt",
   );
+  await expect(selectedItinerary).toContainText("Buss 3");
   await choices.getByRole("button", { name: /Anbefalt/ }).click();
   await expect(choices).toContainText("Valgt reiseforslag ser best ut");
   await expect(choices).toContainText("Matcher sanntidsavgang mot Leangen");
+  await expect(selectedItinerary).toContainText("Buss 71");
   expect(
     departureRequestUrls.some(
       (url) =>
@@ -4971,6 +4992,123 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chromium", "mobile layout contract");
+  await page.route("**/api/map/public-transport/departures**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "empty",
+        detail: "Ingen avganger funnet nær valgt område.",
+        areaLabel: "Valgt område",
+        center: { lat: 63.4305, lon: 10.3951 },
+        stops: [],
+        departures: [],
+        sources: [],
+        generatedAt: "2026-06-01T09:06:00.000Z",
+        handoffUrl: "https://www.atb.no/reiseplanlegger/",
+      }),
+    });
+  });
+  await page.route("**/api/map/travel-plan/compare?**", async (route) => {
+    const departureTime = "2026-06-01T09:10:00.000Z";
+    const arrivalTime = "2026-06-01T09:28:00.000Z";
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        travelPlanComparisonFixture({
+          origin: {
+            query: "Munkegata",
+            label: "Munkegata, Midtbyen",
+            coordinate: [10.3951, 63.4305],
+          },
+          destination: {
+            query: "Lade",
+            label: "Lade, Trondheim",
+            coordinate: [10.445, 63.442],
+          },
+          route: {
+            source: "osrm",
+            distanceMeters: 3700,
+            durationSeconds: 420,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [10.3951, 63.4305],
+                [10.445, 63.442],
+              ],
+            },
+            detail: "Rute beregnet med OSRM.",
+          },
+          trafficImpacts: [],
+          publicTransportSuggestions: [],
+          itineraries: [
+            {
+              id: "mobile-itinerary",
+              decision: "good",
+              decisionReason: "Direkte reiseforslag uten kjente avvik.",
+              labels: ["best_now", "fewest_transfers", "most_robust"],
+              departureTime,
+              arrivalTime,
+              durationSeconds: 1080,
+              transferCount: 0,
+              walkTimeSeconds: 360,
+              realtime: true,
+              modes: ["bus"],
+              disruptionCount: 0,
+              handoffUrl: "https://www.atb.no/reiseplanlegger/",
+              legs: [
+                {
+                  id: "mobile-leg-bus-2",
+                  mode: "bus",
+                  from: {
+                    name: "Søndre gate",
+                    stopName: "Søndre gate",
+                    stopId: "NSR:StopPlace:41613",
+                    coordinate: [10.3951, 63.4305],
+                  },
+                  to: {
+                    name: "Lade gård",
+                    stopName: "Lade gård",
+                    coordinate: [10.445, 63.442],
+                  },
+                  aimedStartTime: departureTime,
+                  expectedStartTime: departureTime,
+                  aimedEndTime: arrivalTime,
+                  expectedEndTime: arrivalTime,
+                  durationSeconds: 1080,
+                  distanceMeters: 3700,
+                  realtime: true,
+                  cancelled: false,
+                  replacementTransport: false,
+                  lineId: "ATB:Line:2",
+                  publicCode: "2",
+                  lineName: "Strindheim - Lade",
+                  serviceJourneyId: "ATB:ServiceJourney:2",
+                  geometry: {
+                    type: "LineString",
+                    coordinates: [
+                      [10.3951, 63.4305],
+                      [10.445, 63.442],
+                    ],
+                  },
+                  notices: [],
+                },
+              ],
+            },
+          ],
+          journeyPlanner: {
+            status: "ok",
+            detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+            requestedDepartureTime: departureTime,
+            source: "Entur Journey Planner",
+          },
+          sources: [],
+          generatedAt: "2026-06-01T09:05:00.000Z",
+        }),
+      ),
+    });
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/trafikk");
 
@@ -4989,6 +5127,67 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
     expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
     expect((box?.width ?? Number.POSITIVE_INFINITY) + (box?.x ?? 0)).toBeLessThanOrEqual(391);
   }
+
+  await page.getByLabel("Hvor er du?").fill("Munkegata");
+  await page.getByLabel("Hvor skal du?").fill("Lade");
+  await page.getByRole("button", { name: "Finn reiseråd" }).click();
+
+  const postSearchPanel = page.locator(".travel-planner-panel-post-search");
+  const choices = page.getByLabel("Velg reiseforslag");
+  const selectedRoute = page.getByRole("region", { name: "Valgt reiseforslag" });
+  const travelAdvice = page.locator(".travel-plan-card");
+  const departureContext = page.locator("details.traffic-support-disclosure", {
+    hasText: "Avganger for valgt reise",
+  });
+  const trafficPicture = page.locator("details.traffic-support-disclosure", {
+    hasText: "Trafikkbildet nå",
+  });
+  const postSearchMap = page.locator(".traffic-map-disclosure");
+  const sourceData = page.locator(".traffic-data-disclosure");
+  await expect(postSearchPanel).toBeVisible();
+  await expect(page.getByText("Reiseråd nå", { exact: true })).toBeVisible();
+  await expect(choices).toBeVisible();
+  await expect(selectedRoute).toContainText("Buss 2");
+  await expect(departureContext).toBeVisible();
+  await expect(trafficPicture).toBeVisible();
+  await expect(postSearchMap).toContainText("Kart og trafikkgrunnlag");
+  await expect(sourceData).toContainText("Se datagrunnlag");
+  await expect(page.locator(".travel-planner-copy")).toHaveCount(0);
+  await expect(choices.getByRole("button", { name: /Anbefalt/ })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(choices.getByRole("button", { name: /Anbefalt/ })).toBeEnabled();
+
+  const adviceBox = await travelAdvice.boundingBox();
+  const postSearchBox = await postSearchPanel.boundingBox();
+  const choicesBox = await choices.boundingBox();
+  const selectedRouteBox = await selectedRoute.boundingBox();
+  const departureContextBox = await departureContext.boundingBox();
+  const trafficPictureBox = await trafficPicture.boundingBox();
+  const postSearchMapBox = await postSearchMap.boundingBox();
+  const sourceDataBox = await sourceData.boundingBox();
+  for (const box of [
+    postSearchBox,
+    adviceBox,
+    choicesBox,
+    selectedRouteBox,
+    departureContextBox,
+    trafficPictureBox,
+    postSearchMapBox,
+    sourceDataBox,
+  ]) {
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.width ?? Number.POSITIVE_INFINITY) + (box?.x ?? 0)).toBeLessThanOrEqual(391);
+  }
+  expect(adviceBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(choicesBox?.y ?? 0);
+  expect(choicesBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(selectedRouteBox?.y ?? 0);
+  expect(selectedRouteBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(departureContextBox?.y ?? 0);
+  expect(departureContextBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
+    trafficPictureBox?.y ?? 0,
+  );
+  expect(trafficPictureBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(postSearchMapBox?.y ?? 0);
+  expect(postSearchMapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(sourceDataBox?.y ?? 0);
   await expectNoHorizontalPageOverflow(page);
 });
 

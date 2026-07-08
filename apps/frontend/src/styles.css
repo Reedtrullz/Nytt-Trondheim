@@ -9410,15 +9410,32 @@ button {
   border-left: 5px solid var(--blue);
 }
 
+.travel-planner-panel-post-search {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
 .travel-planner-copy {
   display: grid;
   align-content: start;
   gap: 12px;
 }
 
+.travel-planner-post-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
 .travel-planner-panel h1 {
   margin-top: 0;
   font-size: 42px;
+}
+
+.travel-planner-post-heading h1 {
+  font-size: 32px;
 }
 
 .travel-planner-copy p {
@@ -9455,6 +9472,11 @@ button {
   grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.1fr);
   gap: 14px;
   align-items: start;
+}
+
+.travel-planner-panel-post-search .travel-planner-workbench {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
 }
 
 .travel-planner-result {
@@ -9510,6 +9532,28 @@ button {
   display: grid;
   gap: 10px;
   min-width: 0;
+}
+
+.route-planner-controls-compact {
+  gap: 8px;
+}
+
+.remembered-routes-disclosure {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.remembered-routes-disclosure > summary {
+  padding: 9px 12px;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.remembered-routes-disclosure .remembered-routes {
+  border-width: 1px 0 0;
 }
 
 .remembered-routes {
@@ -10141,6 +10185,32 @@ button {
   min-height: 100%;
 }
 
+.route-planner-form-compact {
+  grid-template-columns:
+    minmax(180px, 1.15fr) minmax(180px, 1.15fr) minmax(130px, 0.5fr) minmax(120px, 0.42fr)
+    minmax(132px, 0.5fr);
+  align-items: end;
+  min-height: 0;
+  padding: 12px;
+}
+
+.route-planner-form-compact .route-swap-button {
+  min-height: 43px;
+}
+
+.route-planner-form-compact > button[type="submit"] {
+  min-height: 43px;
+}
+
+.route-planner-form-compact .route-input-tools {
+  margin-top: 6px;
+}
+
+.route-planner-form-compact label {
+  display: block;
+  margin-bottom: 5px;
+}
+
 .route-planner-form input,
 .route-planner-form select {
   width: 100%;
@@ -10369,6 +10439,30 @@ button {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.travel-plan-journey-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.travel-plan-journey-section > h3 {
+  margin-bottom: 0;
+}
+
+.travel-plan-result-workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.travel-plan-selected-workspace {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
 }
 
 .travel-plan-decision-grid {
@@ -10613,9 +10707,8 @@ button {
   font-weight: 850;
 }
 
-.route-choice-grid {
+.route-choice-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -10637,8 +10730,8 @@ button {
 }
 
 .route-choice-option.selected {
-  outline: 2px solid color-mix(in srgb, var(--blue) 34%, transparent);
-  outline-offset: -2px;
+  border-color: color-mix(in srgb, var(--blue) 44%, var(--line));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 28%, transparent);
 }
 
 .route-choice-option.recommended {
@@ -10680,10 +10773,20 @@ button {
   font-weight: 750;
 }
 
+.route-choice-lines {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, var(--line));
+  color: var(--blue);
+  background: color-mix(in srgb, #fff 90%, var(--blue) 10%);
+  font-weight: 850;
+}
+
 .selected-itinerary-panel {
   display: grid;
   gap: 10px;
-  margin-top: 10px;
   padding: 12px;
   border: 1px solid var(--line);
   background: #fff;
@@ -10746,10 +10849,80 @@ button {
   font-size: 13px;
 }
 
-.selected-itinerary-panel .itinerary-card {
+.selected-itinerary-timeline {
+  display: grid;
   padding: 0;
-  border: 0;
-  outline: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.selected-itinerary-leg {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.selected-itinerary-leg:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.selected-itinerary-leg-time,
+.selected-itinerary-leg-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.selected-itinerary-leg-time {
+  align-content: start;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.selected-itinerary-leg-time strong {
+  color: var(--ink);
+}
+
+.selected-itinerary-leg-body strong,
+.selected-itinerary-leg-body span,
+.selected-itinerary-leg-body small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.selected-itinerary-leg-body strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.selected-itinerary-leg-body span,
+.selected-itinerary-leg-body small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.selected-itinerary-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.selected-itinerary-footer a {
+  color: var(--blue);
+  font-weight: 850;
 }
 
 .selected-route-watch {
@@ -12645,8 +12818,13 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .route-planner-form-compact,
+  .travel-plan-result-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .itinerary-grid,
-  .route-choice-grid,
+  .route-choice-list,
   .traffic-data-disclosure div {
     grid-template-columns: 1fr;
   }
@@ -13554,8 +13732,16 @@ button {
     gap: 14px;
   }
 
-  .traffic-support-disclosure,
-  .traffic-data-disclosure {
+  .travel-planner-post-heading {
+    display: grid;
+    gap: 10px;
+  }
+
+  .travel-planner-post-heading .travel-planner-actions {
+    justify-content: flex-start;
+  }
+
+  .traffic-support-disclosure {
     order: 4;
   }
 
@@ -13563,8 +13749,12 @@ button {
     order: 5;
   }
 
-  .traffic-bottom-panel {
+  .traffic-data-disclosure {
     order: 6;
+  }
+
+  .traffic-bottom-panel {
+    order: 7;
   }
 
   .route-departure-confidence {
@@ -13641,6 +13831,10 @@ button {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .route-planner-form-compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .travel-plan-decision-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -13658,6 +13852,15 @@ button {
   .selected-itinerary-panel > header > span {
     max-width: 100%;
     text-align: left;
+  }
+
+  .selected-itinerary-leg {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .selected-route-watch ul {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .travel-time-comparison header {
