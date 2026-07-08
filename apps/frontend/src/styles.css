@@ -13817,9 +13817,7 @@ button {
   }
 
   .traffic-bottom-list {
-    position: relative;
-    z-index: 450;
-    margin-top: -38px;
+    margin-top: 0;
     padding: 14px;
     border: 1px solid var(--line);
     border-radius: 18px 18px 0 0;

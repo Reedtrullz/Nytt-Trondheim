@@ -11,6 +11,12 @@ import {
 } from "@nytt/shared";
 
 async function openTrafficLayersIfHidden(page: Page): Promise<void> {
+  const mapDisclosure = page.locator("details.traffic-map-disclosure").first();
+  if ((await mapDisclosure.count()) > 0) {
+    await mapDisclosure.evaluate((node) => {
+      (node as HTMLDetailsElement).open = true;
+    });
+  }
   const layersButton = page.getByRole("button", { name: "Kartlag og filtre" });
   const buttonAttached = await layersButton
     .waitFor({ state: "attached", timeout: 1_000 })
@@ -19,7 +25,20 @@ async function openTrafficLayersIfHidden(page: Page): Promise<void> {
   if (!buttonAttached) return;
   const expanded = await layersButton.getAttribute("aria-expanded").catch(() => null);
   if ((await layersButton.isVisible().catch(() => false)) && expanded !== "true") {
+    await layersButton.scrollIntoViewIfNeeded();
     await layersButton.click();
+  }
+}
+
+async function openTrafficDisclosure(page: Page, summary: string): Promise<void> {
+  const disclosure = page
+    .locator("details")
+    .filter({ has: page.locator("summary", { hasText: summary }) })
+    .first();
+  await expect(disclosure).toHaveCount(1);
+  const isOpen = await disclosure.evaluate((node) => (node as HTMLDetailsElement).open);
+  if (!isOpen) {
+    await disclosure.locator("summary").click();
   }
 }
 
@@ -1971,6 +1990,7 @@ test("traffic page shows summary cards semantic layers ranked list and detail dr
 
   await page.goto("/trafikk");
 
+  await openTrafficDisclosure(page, "Trafikkbildet nå");
   await expect(page.getByRole("heading", { name: "Trafikkbildet nå" })).toBeVisible();
   const summary = page.getByRole("region", { name: "Trafikkbildet nå" });
   await expect(summary.getByText("OFFISIELL").first()).toBeVisible();
@@ -2700,21 +2720,25 @@ test("traffic map travel planner shows route-specific traffic and public transpo
 
   await expect(page.getByRole("heading", { name: "Sjekk ruten før du drar" })).toBeVisible();
   await expect(page.getByText("Munkegata, Midtbyen → Leangen, Trondheim")).toBeVisible();
-  const routeAssessment = page.getByLabel("Rutevurdering");
-  await expect(routeAssessment.getByText("Vegmeldinger", { exact: true })).toBeVisible();
-  await expect(routeAssessment.getByText("Kollektivavvik", { exact: true })).toBeVisible();
-  await expect(routeAssessment.getByText("Kjøretøy nær ruten", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Ruteoppsummering")).toContainText(
+    "1 reiseforslag · 2 relevante avvik langs korridoren",
+  );
+  await openTrafficDisclosure(page, "Se trafikk langs ruten");
   await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
   await expect(page.getByText("Beste nå")).toBeVisible();
-  await expect(page.locator(".itinerary-grid").getByText("Buss 3", { exact: true })).toBeVisible();
+  await expect(page.getByText("Start med Buss 3 fra Munkegata")).toBeVisible();
   await expect(page.getByRole("button", { name: /vises på kart/i })).toBeVisible();
-  await expect(page.getByText("Forsinkelse på linje 3", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
     "Sjekk dette før avreise",
   );
+  await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
+    "Forsinkelse på linje 3",
+  );
+  await openTrafficDisclosure(page, "Dra nå eller vent?");
   const comparison = page.getByLabel("Dra nå eller vent");
   await expect(comparison).toContainText("Dra nå eller vent?");
   await expect(comparison).toContainText("Om 2 timer");
+  await openTrafficDisclosure(page, "Avganger for valgt reise");
   const board = page.getByRole("region", { name: /Avganger rundt/ });
   await expect(board).toContainText("Munkegata: neste avganger fra holdeplasser ved startpunktet.");
   await expect(board.getByRole("button", { name: "Startpunkt" })).toHaveAttribute(
@@ -2886,6 +2910,7 @@ test("traffic map explains selected route departures that are missing from the l
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
+  await openTrafficDisclosure(page, "Avganger for valgt reise");
   const board = page.getByRole("region", { name: /Avganger rundt/ });
   const selectedDeparture = board.getByLabel("Valgt reiseforslag");
   await expect(selectedDeparture).toContainText("Buss 3 fra Munkegata");
@@ -3116,11 +3141,13 @@ test("traffic map checks transfer legs against live departure boards", async ({ 
   await page.getByLabel("Hvor skal du?").fill("Lade");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
+  await openTrafficDisclosure(page, "Live-sjekk av bytter");
   const confidence = page.getByRole("region", { name: "Sjekk byttene før du drar" });
   await expect(confidence).toContainText("Start: Munkegata");
   await expect(confidence).toContainText("Bytte 1: Strindheim");
   await expect(confidence).toContainText("Innstilt");
   await expect(confidence).toContainText("Buss 4");
+  await openTrafficDisclosure(page, "Dra nå eller vent?");
   const comparison = page.getByLabel("Dra nå eller vent");
   await expect(comparison).toContainText("Vent til om 30 min kan være bedre");
   await expect(comparison).toContainText("Live-sjekken for valgt reise gir usikkerhet");
@@ -3546,6 +3573,7 @@ test("traffic map keeps planner useful when Entur journey search is unavailable"
   await expect(
     page.getByText("Entur reisesøk er ikke tilgjengelig akkurat nå.", { exact: true }),
   ).toBeVisible();
+  await openTrafficDisclosure(page, "Kollektivkontekst");
   await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
     "href",
     "https://www.atb.no/reiseplanlegger/",
@@ -3679,7 +3707,7 @@ test("traffic map can show Entur public transport context", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Kollektivtrafikk" })).toBeVisible();
   await openTrafficLayersIfHidden(page);
   await expect(page.getByText("45 → Hagen")).toBeVisible();
-  await expect(page.getByText("Rota flyttet").first()).toBeVisible();
+  await expect(page.locator(".public-transport-card").getByText("Rota flyttet")).toBeVisible();
 });
 
 test("bootstrap 429 shows retryable error without stale loading", async ({ page }) => {
@@ -4638,7 +4666,7 @@ test("viewer shell keeps command center tools out of the public traffic map", as
 
   for (const route of [
     { path: "/", heading: "Siste nytt i Trondheim" },
-    { path: "/trafikk", heading: "Trafikkbildet nå" },
+    { path: "/trafikk", heading: "Planlegg reisen" },
     { path: "/vaer", heading: "Vær" },
     { path: "/sport", heading: "Fotballoversikt" },
     { path: "/situasjoner", heading: "Trondheim situasjonskart" },
