@@ -209,7 +209,7 @@ describe("private situation API", () => {
     const response = await request(app).get("/assets/nonexistent-probe.js").expect(404);
     expect(response.headers["cache-control"]).toContain("no-store");
     expect(response.headers["content-type"]).toContain("text/plain");
-    expect(response.text).toBe("Asset not found");
+    expect(response.text).toBe("Fant ikke ressursen");
   });
 
   it("defaults rate limiting on unless RATE_LIMIT_ENABLED explicitly disables it", () => {

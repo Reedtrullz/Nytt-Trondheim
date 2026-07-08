@@ -1074,7 +1074,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }
     if (req.path.startsWith("/assets/")) {
       res.setHeader("Cache-Control", "no-store");
-      res.status(404).type("text/plain").send("Asset not found");
+      res.status(404).type("text/plain").send("Fant ikke ressursen");
       return;
     }
     res.sendFile(frontendIndex);
