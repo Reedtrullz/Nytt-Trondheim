@@ -1966,9 +1966,7 @@ function routeContextDistanceLabel(distanceMeters?: number): string | undefined 
   return `${formatDistance(distanceMeters)} fra ruten`;
 }
 
-export function eventIdForRouteContextItem(
-  item: RouteContextItem,
-): string | undefined {
+export function eventIdForRouteContextItem(item: RouteContextItem): string | undefined {
   return item.kind === "traffic" && item.focusable ? item.eventId : undefined;
 }
 
