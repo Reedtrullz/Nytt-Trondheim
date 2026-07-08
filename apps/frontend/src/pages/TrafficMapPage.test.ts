@@ -45,6 +45,7 @@ import {
   parseTravelPlannerSearch,
   readRememberedDepartureBoards,
   readRememberedTravelRoutes,
+  eventIdForRouteContextItem,
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
   RouteContextFallback,
@@ -1865,6 +1866,36 @@ describe("TrafficMapPage route overlay helpers", () => {
         heading: "Ingen kartpunkter langs valgt rute",
         items: [],
       });
+    });
+  });
+
+  describe("route context map focus", () => {
+    it("returns traffic event ids for focusable route context items only", () => {
+      expect(
+        eventIdForRouteContextItem({
+          id: "traffic:one",
+          kind: "traffic",
+          title: "Fv. 6650",
+          detail: "121 m fra ruten",
+          source: "Vegvesen",
+          severity: "watch",
+          eventId: "one",
+          focusable: true,
+        }),
+      ).toBe("one");
+
+      expect(
+        eventIdForRouteContextItem({
+          id: "transit_alert:two",
+          kind: "transit_alert",
+          title: "Endret rute",
+          detail: "Linje 3",
+          source: "Entur",
+          severity: "watch",
+          suggestionId: "two",
+          focusable: false,
+        }),
+      ).toBeUndefined();
     });
   });
 

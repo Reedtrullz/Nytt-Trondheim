@@ -1966,6 +1966,12 @@ function routeContextDistanceLabel(distanceMeters?: number): string | undefined 
   return `${formatDistance(distanceMeters)} fra ruten`;
 }
 
+export function eventIdForRouteContextItem(
+  item: RouteContextItem,
+): string | undefined {
+  return item.kind === "traffic" && item.focusable ? item.eventId : undefined;
+}
+
 export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContextSummary {
   const trafficItems: RouteContextItem[] = (plan?.trafficImpacts ?? []).map((impact) => ({
     id: `traffic:${impact.event.id}`,
@@ -4372,8 +4378,9 @@ export function TrafficMapPage() {
   }, []);
 
   const handleRouteContextFocus = useCallback((item: RouteContextItem) => {
-    if (!item.focusable || !item.eventId) return;
-    setSelectedEventId(item.eventId);
+    const eventId = eventIdForRouteContextItem(item);
+    if (!eventId) return;
+    setSelectedEventId(eventId);
   }, []);
 
   const applyTrafficFilters = useCallback(
