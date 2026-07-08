@@ -442,6 +442,35 @@ export interface RouteChoiceModel {
   options: RouteChoiceOption[];
 }
 
+export function compactRouteChoiceOptions(
+  model?: RouteChoiceModel,
+  limit = 3,
+): RouteChoiceOption[] {
+  if (!model) return [];
+  const merged = model.options.reduce<RouteChoiceOption[]>((items, option) => {
+    const existing = items.find((item) => item.itineraryId === option.itineraryId);
+    if (!existing) {
+      items.push({ ...option });
+      return items;
+    }
+    const labels = new Set([...existing.label.split(" · "), option.label]);
+    existing.label = [...labels].join(" · ");
+    existing.recommended = existing.recommended || option.recommended;
+    existing.selected = existing.selected || option.selected;
+    existing.severity = strongestDepartureSeverity(existing.severity, option.severity);
+    existing.score = Math.min(existing.score, option.score);
+    return items;
+  }, []);
+  if (merged.length <= limit) return merged;
+
+  const selected = merged.find((option) => option.selected);
+  const visible = merged.slice(0, limit);
+  if (selected && !visible.some((option) => option.itineraryId === selected.itineraryId)) {
+    visible[visible.length - 1] = selected;
+  }
+  return visible;
+}
+
 const destinationPresets: DestinationPreset[] = [
   { label: "Trondheim S", query: "Trondheim S" },
   { label: "St. Olavs", query: "St. Olavs hospital" },
@@ -2316,20 +2345,7 @@ function RouteChoicePanel({
   onSelectItinerary: (itineraryId: string) => void;
 }) {
   if (!model) return null;
-  const displayOptions = model.options.reduce<RouteChoiceOption[]>((items, option) => {
-    const existing = items.find((item) => item.itineraryId === option.itineraryId);
-    if (!existing) {
-      items.push({ ...option });
-      return items;
-    }
-    const labels = new Set([...existing.label.split(" · "), option.label]);
-    existing.label = [...labels].join(" · ");
-    existing.recommended = existing.recommended || option.recommended;
-    existing.selected = existing.selected || option.selected;
-    existing.severity = strongestDepartureSeverity(existing.severity, option.severity);
-    existing.score = Math.min(existing.score, option.score);
-    return items;
-  }, []);
+  const displayOptions = compactRouteChoiceOptions(model);
   return (
     <section className="route-choice-panel" aria-label="Velg reiseforslag">
       <header>
@@ -2364,6 +2380,46 @@ function RouteChoicePanel({
         Live-tavla vektes for valgt reiseforslag. Velg et annet forslag for å sjekke start og
         eventuelle bytter.
       </footer>
+    </section>
+  );
+}
+
+function SelectedItineraryPanel({
+  itinerary,
+  onSelect,
+}: {
+  itinerary?: TravelPlanItinerary;
+  onSelect: () => void;
+}) {
+  if (!itinerary) return null;
+  const boardingLeg = firstBoardingLeg(itinerary);
+  return (
+    <section className="selected-itinerary-panel" aria-label="Valgt reiseforslag">
+      <header>
+        <div>
+          <p className="label">Valgt reiseforslag</p>
+          <h3>
+            {formatTravelDateTime(itinerary.departureTime)} →{" "}
+            {formatTravelDateTime(itinerary.arrivalTime)}
+          </h3>
+          <p>
+            {formatDuration(itinerary.durationSeconds)} · {itineraryTransferLabel(itinerary)} ·{" "}
+            {formatDuration(itinerary.walkTimeSeconds)} gange
+          </p>
+        </div>
+        <span>{comparisonLineSummary(itinerary)}</span>
+      </header>
+      {boardingLeg ? (
+        <div className="selected-itinerary-boarding">
+          <strong>
+            Start med {legLineLabel(boardingLeg)} fra {legStopLabel(boardingLeg)}
+          </strong>
+          <span>
+            {formatTravelDateTime(legDepartureTime(boardingLeg) ?? itinerary.departureTime)}
+          </span>
+        </div>
+      ) : null}
+      <ItineraryCard itinerary={itinerary} selected={true} onSelect={onSelect} />
     </section>
   );
 }
@@ -2408,8 +2464,13 @@ function TravelPlanCard({
   }
   const duration = formatDuration(plan.route.durationSeconds);
   const decision = travelPlanDecision(plan);
+  const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   const showFallbackSuggestions =
     plan.itineraries.length === 0 && plan.publicTransportSuggestions.length > 0;
+  const transitAlertCount = plan.publicTransportSuggestions.filter(
+    (suggestion) => suggestion.kind === "alert",
+  ).length;
+  const routeContextCount = plan.trafficImpacts.length + transitAlertCount;
   return (
     <article
       className={`travel-plan-card travel-plan-card-${decision.severity}`}
@@ -2419,36 +2480,19 @@ function TravelPlanCard({
         <p className="label">Reiseråd</p>
         <h2>{decision.heading}</h2>
         <p>{decision.detail}</p>
-        <div className="travel-plan-decision-grid" aria-label="Rutevurdering">
-          <article>
-            <span>{decision.roadImpactCount}</span>
-            <strong>Vegmeldinger</strong>
-            <small>langs korridoren</small>
-          </article>
-          <article>
-            <span>{decision.alertCount}</span>
-            <strong>Kollektivavvik</strong>
-            <small>fra Entur/AtB</small>
-          </article>
-          <article>
-            <span>{decision.vehicleCount}</span>
-            <strong>Kjøretøy nær ruten</strong>
-            <small>buss, trikk, tog eller båt</small>
-          </article>
-          <article>
-            <span>{decision.itineraryCount}</span>
-            <strong>Reiseforslag</strong>
-            <small>fra Entur</small>
-          </article>
+        <div className="travel-plan-route-summary" aria-label="Ruteoppsummering">
+          <strong>
+            {plan.origin.label} → {plan.destination.label}
+          </strong>
+          <span>
+            {formatDistance(plan.route.distanceMeters)}
+            {duration ? ` · ${duration}` : ""} · {plan.route.detail}
+          </span>
+          <small>
+            {decision.itineraryCount} reiseforslag · {routeContextCount} relevante avvik langs
+            korridoren
+          </small>
         </div>
-        <h3>Rute</h3>
-        <p>
-          {plan.origin.label} → {plan.destination.label}
-        </p>
-        <small>
-          {formatDistance(plan.route.distanceMeters)}
-          {duration ? ` · ${duration}` : ""} · {plan.route.detail}
-        </small>
       </header>
       <section>
         <h3>Kollektivvalg</h3>
@@ -2461,22 +2505,19 @@ function TravelPlanCard({
         {plan.itineraries.length ? (
           <>
             <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
-            <div className="itinerary-grid">
-              {plan.itineraries.map((itinerary) => (
-                <ItineraryCard
-                  key={itinerary.id}
-                  itinerary={itinerary}
-                  selected={itinerary.id === selectedItineraryId}
-                  onSelect={() => onSelectItinerary(itinerary.id)}
-                />
-              ))}
-            </div>
+            <SelectedItineraryPanel
+              itinerary={selectedItinerary}
+              onSelect={() => selectedItinerary && onSelectItinerary(selectedItinerary.id)}
+            />
           </>
         ) : null}
       </section>
       <SelectedRouteWatchPanel summary={routeWatchSummary} />
-      <section>
-        <h3>Trafikk langs ruten</h3>
+      <details className="travel-secondary-disclosure">
+        <summary>
+          Se trafikk langs ruten
+          {routeContextCount ? ` (${routeContextCount})` : ""}
+        </summary>
         {plan.trafficImpacts.length ? (
           <ul>
             {plan.trafficImpacts.map((impact) => (
@@ -2489,10 +2530,23 @@ function TravelPlanCard({
         ) : (
           <p>Ingen aktive trafikkhendelser funnet langs ruten akkurat nå.</p>
         )}
-      </section>
+        {transitAlertCount ? (
+          <ul>
+            {plan.publicTransportSuggestions
+              .filter((suggestion) => suggestion.kind === "alert")
+              .slice(0, 4)
+              .map((suggestion) => (
+                <li key={suggestion.id}>
+                  <strong>{suggestion.title}</strong>
+                  <span>{suggestion.detail}</span>
+                </li>
+              ))}
+          </ul>
+        ) : null}
+      </details>
       {showFallbackSuggestions ? (
-        <section>
-          <h3>Kollektivkontekst</h3>
+        <details className="travel-secondary-disclosure">
+          <summary>Kollektivkontekst</summary>
           <p>
             Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for billetter og endelig
             reisevalg.
@@ -2518,7 +2572,7 @@ function TravelPlanCard({
               </li>
             ))}
           </ul>
-        </section>
+        </details>
       ) : null}
       <footer className="travel-plan-disclaimer">
         Nytt vurderer reiserisiko, ikke billetter eller garanti. Sjekk alltid AtB/Entur før du drar.
@@ -3157,6 +3211,7 @@ function RoutePlaceInput({
   describedBy,
   hasError,
   selectedSuggestion,
+  resetToken,
   onChange,
   onSelectSuggestion,
 }: {
@@ -3167,6 +3222,7 @@ function RoutePlaceInput({
   describedBy: string;
   hasError: boolean;
   selectedSuggestion?: TravelPlaceSuggestion;
+  resetToken: number;
   onChange: (value: string) => void;
   onSelectSuggestion: (suggestion: TravelPlaceSuggestion) => void;
 }) {
@@ -3176,6 +3232,12 @@ function RoutePlaceInput({
   const listId = `${id}-suggestions`;
   const trimmedValue = value.trim();
   const selectedIsCurrent = selectedSuggestion?.label === value;
+
+  useEffect(() => {
+    requestRef.current += 1;
+    setSuggestions([]);
+    setStatus("idle");
+  }, [resetToken]);
 
   useEffect(() => {
     const requestId = requestRef.current + 1;
@@ -3349,6 +3411,7 @@ function TravelPlannerPanel({
   travelTimeComparison,
   selectedOriginSuggestion,
   selectedDestinationSuggestion,
+  suggestionResetToken,
   publicTransportDisruptionsVisible,
   publicTransportVehiclesVisible,
   locationStatus,
@@ -3382,6 +3445,7 @@ function TravelPlannerPanel({
   travelTimeComparison: TravelTimeComparisonState;
   selectedOriginSuggestion?: TravelPlaceSuggestion;
   selectedDestinationSuggestion?: TravelPlaceSuggestion;
+  suggestionResetToken: number;
   publicTransportDisruptionsVisible: boolean;
   publicTransportVehiclesVisible: boolean;
   locationStatus: LocationRequestStatus;
@@ -3443,6 +3507,7 @@ function TravelPlannerPanel({
                 describedBy="travel-plan-result"
                 hasError={Boolean(travelPlanError)}
                 selectedSuggestion={selectedOriginSuggestion}
+                resetToken={suggestionResetToken}
                 onChange={onOriginChange}
                 onSelectSuggestion={(suggestion) => onSuggestionSelect("origin", suggestion)}
               />
@@ -3471,6 +3536,7 @@ function TravelPlannerPanel({
                 describedBy="travel-plan-result"
                 hasError={Boolean(travelPlanError)}
                 selectedSuggestion={selectedDestinationSuggestion}
+                resetToken={suggestionResetToken}
                 onChange={onDestinationChange}
                 onSelectSuggestion={(suggestion) => onSuggestionSelect("destination", suggestion)}
               />
@@ -3534,11 +3600,16 @@ function TravelPlannerPanel({
             routeWatchSummary={routeWatchSummary}
             onSelectItinerary={onSelectItinerary}
           />
-          <TravelTimeComparisonPanel
-            state={travelTimeComparison}
-            activePreset={timePreset}
-            onSelectPreset={onSelectComparisonPreset}
-          />
+          {travelTimeComparison.status !== "idle" ? (
+            <details className="travel-secondary-disclosure travel-time-disclosure">
+              <summary>Dra nå eller vent?</summary>
+              <TravelTimeComparisonPanel
+                state={travelTimeComparison}
+                activePreset={timePreset}
+                onSelectPreset={onSelectComparisonPreset}
+              />
+            </details>
+          ) : null}
         </div>
       </div>
     </section>
@@ -3578,6 +3649,7 @@ export function TrafficMapPage() {
   const [selectedOriginSuggestion, setSelectedOriginSuggestion] = useState<TravelPlaceSuggestion>();
   const [selectedDestinationSuggestion, setSelectedDestinationSuggestion] =
     useState<TravelPlaceSuggestion>();
+  const [suggestionResetToken, setSuggestionResetToken] = useState(0);
   const [activeTravelRouteQueryOverride, setActiveTravelRouteQueryOverride] =
     useState<RememberedTravelRouteQueryOverride>();
   const [timePreset, setTimePreset] = useState<TravelTimePreset>(
@@ -3828,6 +3900,7 @@ export function TrafficMapPage() {
       setSelectedOriginSuggestion(suggestion);
       setActiveTravelRouteQueryOverride(undefined);
       setOriginInput(suggestion.label);
+      setSuggestionResetToken((token) => token + 1);
       if (travelPlanLoading || travelPlan) {
         invalidateTravelPlan();
         updateTravelSearchParams();
@@ -3840,6 +3913,7 @@ export function TrafficMapPage() {
       setSelectedDestinationSuggestion(suggestion);
       setActiveTravelRouteQueryOverride(undefined);
       setDestinationInput(suggestion.label);
+      setSuggestionResetToken((token) => token + 1);
       if (travelPlanLoading || travelPlan) {
         invalidateTravelPlan({ resetDepartureBoard: true });
         updateTravelSearchParams();
@@ -4361,6 +4435,7 @@ export function TrafficMapPage() {
     routeQueryOverride?: RememberedTravelRouteQueryOverride;
     onAbort?: () => void;
   }) {
+    setSuggestionResetToken((token) => token + 1);
     const requestId = invalidateTravelPlan({
       resetDepartureBoard: Boolean(
         travelPlanLoading || travelPlan || departureBoardContext.scope === "origin",
@@ -4521,6 +4596,7 @@ export function TrafficMapPage() {
         travelTimeComparison={travelTimeComparison}
         selectedOriginSuggestion={selectedOriginSuggestion}
         selectedDestinationSuggestion={selectedDestinationSuggestion}
+        suggestionResetToken={suggestionResetToken}
         publicTransportDisruptionsVisible={visibleContextLayers.publicTransportDisruptions}
         publicTransportVehiclesVisible={visibleContextLayers.publicTransportVehicles}
         locationStatus={locationStatus}
@@ -4542,28 +4618,39 @@ export function TrafficMapPage() {
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}
       />
-      <RouteDepartureConfidencePanel
-        checkpoints={routeDepartureCheckpointsForSelection}
-        results={routeDepartureBoards}
-        fetchStatus={routeDepartureBoardStatus}
-      />
-      <DepartureBoardPanel
-        board={departureBoard}
-        loading={departureBoardLoading}
-        error={departureBoardError}
-        context={departureBoardContext}
-        routeOriginContext={routeOriginDepartureBoardContext}
-        rememberedBoards={rememberedDepartureBoards}
-        requestedLineFilterKey={requestedDepartureLineFilterKey}
-        selectedDeparture={selectedDeparture}
-        onReload={reloadDepartureBoard}
-        onContextChange={handleDepartureBoardContextChange}
-        onClearRequestedLineFilter={() => setRequestedDepartureLineFilterKey(undefined)}
-        onRememberCurrentBoard={handleRememberCurrentDepartureBoard}
-        onSelectRememberedBoard={handleSelectRememberedDepartureBoard}
-        onRemoveRememberedBoard={handleRemoveRememberedDepartureBoard}
-      />
-      <TrafficNowSummary cards={summaryCardsForDisplay} />
+      {routeDepartureCheckpointsForSelection.length > 1 ? (
+        <details className="traffic-support-disclosure">
+          <summary>Live-sjekk av bytter</summary>
+          <RouteDepartureConfidencePanel
+            checkpoints={routeDepartureCheckpointsForSelection}
+            results={routeDepartureBoards}
+            fetchStatus={routeDepartureBoardStatus}
+          />
+        </details>
+      ) : null}
+      <details className="traffic-support-disclosure" open={!travelPlan}>
+        <summary>{travelPlan ? "Avganger for valgt reise" : "Avganger nå"}</summary>
+        <DepartureBoardPanel
+          board={departureBoard}
+          loading={departureBoardLoading}
+          error={departureBoardError}
+          context={departureBoardContext}
+          routeOriginContext={routeOriginDepartureBoardContext}
+          rememberedBoards={rememberedDepartureBoards}
+          requestedLineFilterKey={requestedDepartureLineFilterKey}
+          selectedDeparture={selectedDeparture}
+          onReload={reloadDepartureBoard}
+          onContextChange={handleDepartureBoardContextChange}
+          onClearRequestedLineFilter={() => setRequestedDepartureLineFilterKey(undefined)}
+          onRememberCurrentBoard={handleRememberCurrentDepartureBoard}
+          onSelectRememberedBoard={handleSelectRememberedDepartureBoard}
+          onRemoveRememberedBoard={handleRemoveRememberedDepartureBoard}
+        />
+      </details>
+      <details className="traffic-support-disclosure">
+        <summary>Trafikkbildet nå</summary>
+        <TrafficNowSummary cards={summaryCardsForDisplay} />
+      </details>
       <TrafficDataDisclosure
         sources={[
           ...(data?.sources ?? []),
@@ -4572,79 +4659,82 @@ export function TrafficMapPage() {
         ]}
       />
 
-      <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
-        <button
-          type="button"
-          className="traffic-mobile-layers-button"
-          aria-expanded={mobileLayersOpen}
-          aria-controls="traffic-workspace-sidebar"
-          onClick={() => setMobileLayersOpen((open) => !open)}
-        >
-          Kartlag og filtre
-        </button>
-        <div
-          id="traffic-workspace-sidebar"
-          className={`traffic-workspace-sidebar${mobileLayersOpen ? " open" : ""}`}
-        >
-          <TrafficFilterPanel
-            selectedCategories={selectedCategories}
-            selectedSeverities={selectedSeverities}
-            selectedPreset={selectedPreset}
-            visibleContextLayers={visibleContextLayers}
-            onCategoriesChange={handleCategoriesChange}
-            onSeveritiesChange={handleSeveritiesChange}
-            onPresetChange={applyPreset}
-            onContextLayersChange={handleContextLayersChange}
-          />
-          <TrafficLegend />
-          {loading || error ? (
-            <section className="traffic-status-card">
-              <h2>Datastatus</h2>
-              <button type="button" onClick={reload} disabled={loading}>
-                {loading ? "Oppdaterer ..." : "Oppdater"}
-              </button>
-              {error ? <p role="alert">{error}</p> : <p>Henter trafikkdata ...</p>}
-            </section>
-          ) : null}
-        </div>
-        <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
-          <TileLayer attribution="© Kartverket" url={tiles} />
-          <MapAccessibility label="Trafikkart for Trondheim" />
-          <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
-          <TrafficMapFocus
-            selectedEvent={selectedEvent}
-            travelPlan={travelPlan}
-            selectedItineraryId={selectedItineraryId}
-          />
-          {visibleContextLayers.travelTime ? (
-            <CorridorImpactLayer
-              impacts={data?.corridorImpacts}
-              selectedImpactId={selectedCorridorId}
-              onSelectImpact={setSelectedCorridorId}
+      <details className="traffic-support-disclosure traffic-map-disclosure" open={!travelPlan}>
+        <summary>Kart og trafikkgrunnlag</summary>
+        <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
+          <button
+            type="button"
+            className="traffic-mobile-layers-button"
+            aria-expanded={mobileLayersOpen}
+            aria-controls="traffic-workspace-sidebar"
+            onClick={() => setMobileLayersOpen((open) => !open)}
+          >
+            Kartlag og filtre
+          </button>
+          <div
+            id="traffic-workspace-sidebar"
+            className={`traffic-workspace-sidebar${mobileLayersOpen ? " open" : ""}`}
+          >
+            <TrafficFilterPanel
+              selectedCategories={selectedCategories}
+              selectedSeverities={selectedSeverities}
+              selectedPreset={selectedPreset}
+              visibleContextLayers={visibleContextLayers}
+              onCategoriesChange={handleCategoriesChange}
+              onSeveritiesChange={handleSeveritiesChange}
+              onPresetChange={applyPreset}
+              onContextLayersChange={handleContextLayersChange}
             />
-          ) : null}
-          {data?.events ? (
-            <TrafficLayer
-              events={visibleTrafficEvents}
-              highlightedEventIds={highlightedEventIds}
-              showEstimatedNews={visibleContextLayers.estimatedNews}
-              onSelectEvent={setSelectedEventId}
+            <TrafficLegend />
+            {loading || error ? (
+              <section className="traffic-status-card">
+                <h2>Datastatus</h2>
+                <button type="button" onClick={reload} disabled={loading}>
+                  {loading ? "Oppdaterer ..." : "Oppdater"}
+                </button>
+                {error ? <p role="alert">{error}</p> : <p>Henter trafikkdata ...</p>}
+              </section>
+            ) : null}
+          </div>
+          <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
+            <TileLayer attribution="© Kartverket" url={tiles} />
+            <MapAccessibility label="Trafikkart for Trondheim" />
+            <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
+            <TrafficMapFocus
+              selectedEvent={selectedEvent}
+              travelPlan={travelPlan}
+              selectedItineraryId={selectedItineraryId}
             />
-          ) : null}
-          {data ? (
-            <RoadContextLayer
-              weather={visibleContextLayers.weatherRisk ? data.weather : []}
-              cameras={visibleContextLayers.weatherRisk ? data.cameras : []}
-              counters={visibleContextLayers.weatherRisk ? data.counters : []}
+            {visibleContextLayers.travelTime ? (
+              <CorridorImpactLayer
+                impacts={data?.corridorImpacts}
+                selectedImpactId={selectedCorridorId}
+                onSelectImpact={setSelectedCorridorId}
+              />
+            ) : null}
+            {data?.events ? (
+              <TrafficLayer
+                events={visibleTrafficEvents}
+                highlightedEventIds={highlightedEventIds}
+                showEstimatedNews={visibleContextLayers.estimatedNews}
+                onSelectEvent={setSelectedEventId}
+              />
+            ) : null}
+            {data ? (
+              <RoadContextLayer
+                weather={visibleContextLayers.weatherRisk ? data.weather : []}
+                cameras={visibleContextLayers.weatherRisk ? data.cameras : []}
+                counters={visibleContextLayers.weatherRisk ? data.counters : []}
+              />
+            ) : null}
+            <PublicTransportLayer
+              payload={publicTransportDisplayData}
+              visible={publicTransportVisible}
             />
-          ) : null}
-          <PublicTransportLayer
-            payload={publicTransportDisplayData}
-            visible={publicTransportVisible}
-          />
-          <TravelPlanLayer plan={travelPlan} selectedItineraryId={selectedItineraryId} />
-        </MapContainer>
-      </section>
+            <TravelPlanLayer plan={travelPlan} selectedItineraryId={selectedItineraryId} />
+          </MapContainer>
+        </section>
+      </details>
 
       <section className="traffic-bottom-panel" aria-label="Trafikkdetaljer">
         <div className="traffic-bottom-list">

@@ -30,6 +30,7 @@ import {
   buildRouteChoiceModel,
   buildTravelTimeComparisonModel,
   canonicalTravelPlannerQuery,
+  compactRouteChoiceOptions,
   departureBoardContextFromPlan,
   departureBoardContextFromSuggestion,
   departureLineFilterKey,
@@ -61,6 +62,7 @@ import {
   type RememberedDepartureBoard,
   upsertRememberedTravelRoute,
   type RememberedTravelRoute,
+  type RouteChoiceModel,
 } from "./TrafficMapPage.js";
 
 function storageReturning(raw: string | null): Storage {
@@ -681,6 +683,121 @@ describe("TrafficMapPage route overlay helpers", () => {
     expect(routePositions(plan)).toEqual([
       [63.39, 10.39],
       [63.4, 10.41],
+    ]);
+  });
+
+  it("caps route choices after deduping labels for the same itinerary", () => {
+    const model = {
+      heading: "Velg reise",
+      detail: "Nytt sammenligner forslag.",
+      recommendedItineraryId: "itinerary-a",
+      options: [
+        {
+          kind: "recommended",
+          label: "Anbefalt",
+          itineraryId: "itinerary-a",
+          selected: true,
+          recommended: true,
+          severity: "ok",
+          score: 1,
+          summary: "09:10-09:27",
+          lineSummary: "Buss 3",
+          detail: "Normal reise.",
+          meta: "17 min · Direkte",
+        },
+        {
+          kind: "fastest",
+          label: "Raskest",
+          itineraryId: "itinerary-b",
+          selected: false,
+          recommended: false,
+          severity: "ok",
+          score: 2,
+          summary: "09:12-09:29",
+          lineSummary: "Buss 4",
+          detail: "Normal reise.",
+          meta: "17 min · Direkte",
+        },
+        {
+          kind: "robust",
+          label: "Mest robust",
+          itineraryId: "itinerary-b",
+          selected: false,
+          recommended: false,
+          severity: "watch",
+          score: 3,
+          summary: "09:12-09:29",
+          lineSummary: "Buss 4",
+          detail: "Live-tavle bør sjekkes.",
+          meta: "17 min · Direkte",
+        },
+        {
+          kind: "fewest_transfers",
+          label: "Færrest bytter",
+          itineraryId: "itinerary-c",
+          selected: false,
+          recommended: false,
+          severity: "ok",
+          score: 4,
+          summary: "09:15-09:35",
+          lineSummary: "Trikk 9",
+          detail: "Normal reise.",
+          meta: "20 min · Direkte",
+        },
+        {
+          kind: "fastest",
+          label: "Snarvei",
+          itineraryId: "itinerary-d",
+          selected: false,
+          recommended: false,
+          severity: "ok",
+          score: 5,
+          summary: "09:20-09:37",
+          lineSummary: "Buss 22",
+          detail: "Normal reise.",
+          meta: "17 min · Direkte",
+        },
+      ],
+    } satisfies RouteChoiceModel;
+
+    const options = compactRouteChoiceOptions(model);
+
+    expect(options.map((option) => option.itineraryId)).toEqual([
+      "itinerary-a",
+      "itinerary-b",
+      "itinerary-c",
+    ]);
+    expect(options[1]).toMatchObject({
+      label: "Raskest · Mest robust",
+      severity: "watch",
+      score: 2,
+    });
+  });
+
+  it("keeps a selected route choice visible when it would otherwise be hidden", () => {
+    const model = {
+      heading: "Velg reise",
+      detail: "Nytt sammenligner forslag.",
+      recommendedItineraryId: "itinerary-a",
+      options: ["a", "b", "c", "d"].map((suffix, index) => ({
+        kind: index === 0 ? "recommended" : "fastest",
+        label: `Valg ${suffix}`,
+        itineraryId: `itinerary-${suffix}`,
+        selected: suffix === "d",
+        recommended: suffix === "a",
+        severity: "ok",
+        score: index,
+        summary: "09:10-09:27",
+        lineSummary: "Buss 3",
+        detail: "Normal reise.",
+        meta: "17 min · Direkte",
+      })),
+    } satisfies RouteChoiceModel;
+
+    expect(compactRouteChoiceOptions(model).map((option) => option.itineraryId)).toEqual([
+      "itinerary-a",
+      "itinerary-b",
+      "itinerary-d",
     ]);
   });
 

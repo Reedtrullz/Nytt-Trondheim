@@ -9461,6 +9461,51 @@ button {
   min-width: 0;
 }
 
+.traffic-support-disclosure,
+.travel-secondary-disclosure {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--page);
+}
+
+.traffic-support-disclosure > summary,
+.travel-secondary-disclosure > summary {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.traffic-support-disclosure > summary::after,
+.travel-secondary-disclosure > summary::after {
+  content: "Vis";
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.traffic-support-disclosure[open] > summary::after,
+.travel-secondary-disclosure[open] > summary::after {
+  content: "Skjul";
+}
+
+.traffic-support-disclosure > :not(summary),
+.travel-secondary-disclosure > :not(summary) {
+  margin: 0;
+  border-width: 1px 0 0;
+}
+
+.travel-time-disclosure {
+  margin-top: 10px;
+}
+
 .route-planner-controls {
   display: grid;
   gap: 10px;
@@ -10297,6 +10342,35 @@ button {
   border-left-color: var(--terracotta);
 }
 
+.travel-plan-route-summary {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid color-mix(in srgb, var(--green) 42%, var(--line));
+  background: #fff;
+}
+
+.travel-plan-route-summary strong,
+.travel-plan-route-summary span,
+.travel-plan-route-summary small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.travel-plan-route-summary strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.travel-plan-route-summary span,
+.travel-plan-route-summary small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .travel-plan-decision-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -10541,7 +10615,7 @@ button {
 
 .route-choice-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -10604,6 +10678,78 @@ button {
 .route-choice-option em {
   font-style: normal;
   font-weight: 750;
+}
+
+.selected-itinerary-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.selected-itinerary-panel > header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.selected-itinerary-panel > header div {
+  min-width: 0;
+}
+
+.selected-itinerary-panel > header h3 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font: 22px/1.05 var(--serif);
+  letter-spacing: 0;
+}
+
+.selected-itinerary-panel > header p:not(.label),
+.selected-itinerary-boarding span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.selected-itinerary-panel > header p:not(.label) {
+  margin: 4px 0 0;
+}
+
+.selected-itinerary-panel > header > span {
+  flex: 0 1 auto;
+  max-width: 260px;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--green) 34%, var(--line));
+  color: var(--green);
+  background: color-mix(in srgb, var(--paper) 88%, var(--green) 12%);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.selected-itinerary-boarding {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--blue) 22%, var(--line));
+  background: color-mix(in srgb, #fff 92%, var(--blue) 8%);
+}
+
+.selected-itinerary-boarding strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.selected-itinerary-panel .itinerary-card {
+  padding: 0;
+  border: 0;
+  outline: 0;
 }
 
 .selected-route-watch {
@@ -13408,6 +13554,19 @@ button {
     gap: 14px;
   }
 
+  .traffic-support-disclosure,
+  .traffic-data-disclosure {
+    order: 4;
+  }
+
+  .traffic-map-disclosure {
+    order: 5;
+  }
+
+  .traffic-bottom-panel {
+    order: 6;
+  }
+
   .route-departure-confidence {
     order: 2;
     padding: 14px;
@@ -13486,6 +13645,21 @@ button {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .selected-itinerary-panel > header,
+  .selected-itinerary-boarding {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .selected-itinerary-panel > header {
+    display: grid;
+  }
+
+  .selected-itinerary-panel > header > span {
+    max-width: 100%;
+    text-align: left;
+  }
+
   .travel-time-comparison header {
     display: grid;
   }
@@ -13498,12 +13672,6 @@ button {
   .travel-time-comparison header > span {
     max-width: 100%;
     text-align: left;
-  }
-
-  .travel-plan-card {
-    max-height: min(72vh, 620px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
   }
 
   .situation-workspace-page {
@@ -13645,7 +13813,7 @@ button {
 
   .traffic-bottom-panel {
     display: block;
-    order: 4;
+    order: 6;
   }
 
   .traffic-bottom-list {
