@@ -1,9 +1,12 @@
 import type {
   PublicTransportDeparture,
   PublicTransportDepartureBoardPayload,
+  TrafficMapEvent,
   TravelPlanPayload,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("react-leaflet", () => ({
   CircleMarker: () => null,
@@ -43,12 +46,16 @@ import {
   parseTravelPlannerSearch,
   readRememberedDepartureBoards,
   readRememberedTravelRoutes,
+  eventIdForRouteContextItem,
+  mergeRouteContextTrafficEvents,
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
+  RouteContextFallback,
   routeDepartureCheckpoints,
   routeDepartureConfidenceItems,
   routeDepartureConfidenceSummary,
   routePositions,
+  buildRouteContextSummary,
   selectedDepartureMatch,
   selectedDepartureStatus,
   selectedRouteWatchSummary,
@@ -1715,6 +1722,351 @@ describe("TrafficMapPage route overlay helpers", () => {
       heading: "Sjekk ruten før du drar",
       itineraryCount: 1,
       severity: "warning",
+    });
+  });
+
+  const basePlan = (overrides: Partial<TravelPlanPayload> = {}): TravelPlanPayload =>
+    ({
+      origin: {
+        label: "Munkegata, Trondheim",
+        query: "Munkegata",
+        coordinate: [10.393742, 63.432883],
+      },
+      destination: {
+        label: "Lade gård, Trondheim",
+        query: "Lade",
+        coordinate: [10.463, 63.433],
+      },
+      route: {
+        source: "direct",
+        detail: "Rute beregnet med OSRM.",
+        distanceMeters: 3700,
+        durationSeconds: 420,
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+      trafficImpacts: [
+        {
+          event: {
+            id: "traffic:f6650",
+            title: "Fv. 6650 Ilevolen",
+            source: "vegvesen_traffic_info",
+            sourceEventId: "traffic:f6650",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            updatedAt: "2026-07-08T09:55:00.000Z",
+            locationName: "Ilevolen",
+            geometry: { type: "Point", coordinates: [10.3901, 63.4301] },
+          },
+          distanceMeters: 121,
+          summary: "121 m fra foreslått rute",
+          severity: "medium",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "alert:line-3",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur",
+          distanceMeters: 220,
+          href: "https://www.atb.no/reise/",
+        },
+      ],
+      itineraries: [],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur fant reiseforslag.",
+        requestedDepartureTime: "2026-07-08T10:00:00.000Z",
+        source: "Entur Journey Planner",
+      },
+      sources: [],
+      generatedAt: "2026-07-08T10:00:00.000Z",
+      ...overrides,
+    }) as TravelPlanPayload;
+
+  describe("route context summary", () => {
+    it("summarizes traffic and alert context without exposing full text grids", () => {
+      const summary = buildRouteContextSummary(basePlan());
+
+      expect(summary).toMatchObject({
+        count: 2,
+        mapPointCount: 1,
+        blockingCount: 0,
+        heading: "1 kartpunkt · 1 kollektivvarsel nær ruten",
+      });
+      expect(summary.detail).toContain("Kartet viser 1 kartpunkt");
+      expect(summary.items).toEqual([
+        expect.objectContaining({
+          id: "traffic:traffic:f6650",
+          kind: "traffic",
+          title: "Fv. 6650 Ilevolen",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 121 m",
+          distanceLabel: "121 m fra ruten",
+          source: "Statens vegvesen",
+          eventId: "traffic:f6650",
+          focusable: true,
+        }),
+        expect.objectContaining({
+          id: "transit_alert:alert:line-3",
+          kind: "transit_alert",
+          title: "Endret rute",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 220 m",
+          distanceLabel: "220 m fra ruten",
+          source: "Entur",
+          focusable: false,
+        }),
+      ]);
+    });
+
+    it("uses compact fallback wording for alert-only route context without map points", () => {
+      const summary = buildRouteContextSummary(
+        basePlan({
+          trafficImpacts: [],
+          publicTransportSuggestions: [
+            {
+              id: "alert:line-3",
+              kind: "alert",
+              title: "Endret rute",
+              detail: "Linje 3 kjører via Lerkendal.",
+              source: "Entur avvik",
+              distanceMeters: 220,
+              href: "https://www.atb.no/reise/",
+            },
+          ],
+        }),
+      );
+
+      expect(summary).toMatchObject({
+        count: 1,
+        mapPointCount: 0,
+        heading: "1 kollektivvarsel nær ruten",
+        detail: "Rutevarslene har ikke egne kartpunkter og vises som kompakt tekst.",
+      });
+      expect(summary.items).toEqual([
+        expect.objectContaining({
+          id: "transit_alert:alert:line-3",
+          kind: "transit_alert",
+          title: "Endret rute",
+          source: "Entur",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 220 m",
+          href: "https://www.atb.no/reise/",
+          focusable: false,
+        }),
+      ]);
+    });
+
+    it("labels line-only transit alerts as text context without map points", () => {
+      const summary = buildRouteContextSummary(
+        basePlan({
+          trafficImpacts: [],
+          publicTransportSuggestions: [
+            {
+              id: "alert:line-only",
+              kind: "alert",
+              title: "Endret rute",
+              detail: "Linje 3 kjører via Lerkendal.",
+              source: "Entur avvik",
+              href: "https://www.atb.no/reise/",
+            },
+          ],
+        }),
+      );
+
+      expect(summary).toMatchObject({
+        count: 1,
+        mapPointCount: 0,
+        heading: "1 linjevarsel uten kartpunkt",
+        detail: "Rutevarslene har ikke egne kartpunkter og vises som kompakt tekst.",
+      });
+      expect(summary.items[0]).toEqual(
+        expect.objectContaining({
+          placement: "transit_line_alert",
+          placementLabel: "Linjevarsel uten kartpunkt",
+        }),
+      );
+    });
+
+    it("keeps DATEX and Vegvesen traffic source labels distinct", () => {
+      const trafficImpact = basePlan().trafficImpacts[0]!;
+      const summary = buildRouteContextSummary(
+        basePlan({
+          trafficImpacts: [
+            {
+              ...trafficImpact,
+              event: {
+                ...trafficImpact.event,
+                id: "datex:e6",
+                source: "datex",
+                sourceEventId: "datex:e6",
+                title: "E6 Sluppen",
+              },
+            },
+            {
+              ...trafficImpact,
+              event: {
+                ...trafficImpact.event,
+                id: "trafficinfo:e6",
+                source: "vegvesen_traffic_info",
+                sourceEventId: "trafficinfo:e6",
+                title: "TrafficInfo E6 Sluppen",
+              },
+            },
+          ],
+          publicTransportSuggestions: [],
+        }),
+      );
+
+      expect(summary.items.map((item) => item.source)).toEqual(["DATEX", "Statens vegvesen"]);
+    });
+
+    it("returns an empty calm summary when no route context exists", () => {
+      const summary = buildRouteContextSummary(
+        basePlan({ trafficImpacts: [], publicTransportSuggestions: [] }),
+      );
+
+      expect(summary).toMatchObject({
+        count: 0,
+        mapPointCount: 0,
+        heading: "Ingen kartpunkter langs valgt rute",
+        items: [],
+      });
+    });
+  });
+
+  describe("route context map focus", () => {
+    const trafficEvent = (overrides: Partial<TrafficMapEvent>): TrafficMapEvent => ({
+      id: "event:one",
+      source: "vegvesen_traffic_info",
+      sourceEventId: "one",
+      category: "accident",
+      severity: "medium",
+      state: "active",
+      title: "Fv. 6650 Ilevolen",
+      updatedAt: "2026-07-08T10:00:00.000Z",
+      geometry: { type: "Point", coordinates: [10.4, 63.42] },
+      ...overrides,
+    });
+
+    it("returns traffic event ids for focusable route context items only", () => {
+      expect(
+        eventIdForRouteContextItem({
+          id: "traffic:one",
+          kind: "traffic",
+          title: "Fv. 6650",
+          detail: "121 m fra ruten",
+          source: "Vegvesen",
+          severity: "watch",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 121 m",
+          eventId: "one",
+          focusable: true,
+        }),
+      ).toBe("one");
+
+      expect(
+        eventIdForRouteContextItem({
+          id: "transit_alert:two",
+          kind: "transit_alert",
+          title: "Endret rute",
+          detail: "Linje 3",
+          source: "Entur",
+          severity: "watch",
+          placement: "transit_line_alert",
+          placementLabel: "Linjevarsel uten kartpunkt",
+          suggestionId: "two",
+          focusable: false,
+        }),
+      ).toBeUndefined();
+    });
+
+    it("keeps route-context traffic events available for map focus even when filters hide them", () => {
+      const visibleEvent = trafficEvent({ id: "visible", sourceEventId: "visible" });
+      const routeOnlyEvent = trafficEvent({
+        id: "route-only",
+        sourceEventId: "route-only",
+        title: "Rutehendelse utenfor filter",
+      });
+
+      expect(mergeRouteContextTrafficEvents([visibleEvent], [routeOnlyEvent])).toEqual([
+        visibleEvent,
+        routeOnlyEvent,
+      ]);
+    });
+
+    it("deduplicates route-context traffic events already visible on the map", () => {
+      const visibleEvent = trafficEvent({ id: "shared", sourceEventId: "shared" });
+      const routeContextEvent = trafficEvent({
+        id: "shared",
+        sourceEventId: "shared",
+        title: "Oppdatert rutetittel",
+      });
+
+      expect(mergeRouteContextTrafficEvents([visibleEvent], [routeContextEvent])).toEqual([
+        routeContextEvent,
+      ]);
+    });
+  });
+
+  describe("route context fallback markup", () => {
+    it("renders compact collapsed fallback language without full route-impact card grids", () => {
+      const summary = {
+        count: 2,
+        mapPointCount: 1,
+        blockingCount: 0,
+        heading: "1 kartpunkt · 1 kollektivvarsel nær ruten",
+        detail: "Kartet viser 1 kartpunkt. 1 varsel uten kartpunkt vises som kompakt tekst.",
+        items: [
+          {
+            id: "traffic:one",
+            kind: "traffic" as const,
+            title: "Fv. 6650 Ilevolen",
+            detail: "121 m fra foreslått rute",
+            source: "Vegvesen",
+            severity: "watch" as const,
+            placement: "near_route" as const,
+            placementLabel: "Nær ruten · 121 m",
+            distanceLabel: "121 m fra ruten",
+            eventId: "one",
+            focusable: true,
+          },
+          {
+            id: "transit_alert:two",
+            kind: "transit_alert" as const,
+            title: "Endret rute",
+            detail: "Linje 3 kjører via Lerkendal.",
+            source: "Entur",
+            severity: "watch" as const,
+            placement: "near_route" as const,
+            placementLabel: "Nær ruten · 220 m",
+            distanceLabel: "220 m fra ruten",
+            href: "https://www.atb.no/reise/",
+            suggestionId: "two",
+            focusable: false,
+          },
+        ],
+      };
+
+      const html = renderToStaticMarkup(createElement(RouteContextFallback, { summary }));
+
+      expect(html).toContain("Kartpunkter langs valgt rute");
+      expect(html).toContain("1 kartpunkt · 1 kollektivvarsel nær ruten");
+      expect(html).toContain("Fv. 6650 Ilevolen");
+      expect(html).toContain("Endret rute");
+      expect(html).toContain("Linje 3 kjører via Lerkendal.");
+      expect(html).toContain('href="https://www.atb.no/reise/"');
+      expect(html).not.toContain("disabled");
+      expect(html).not.toContain("Se trafikk langs ruten");
     });
   });
 });

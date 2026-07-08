@@ -1925,6 +1925,251 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   };
 }
 
+export type RouteContextItem = {
+  id: string;
+  kind: "traffic" | "transit_alert";
+  title: string;
+  detail: string;
+  source: string;
+  severity: "ok" | "watch" | "warning";
+  placement: "on_route" | "near_route" | "transit_line_alert";
+  placementLabel: string;
+  distanceLabel?: string;
+  eventId?: string;
+  suggestionId?: string;
+  href?: string;
+  focusable: boolean;
+};
+
+export type RouteContextSummary = {
+  count: number;
+  mapPointCount: number;
+  blockingCount: number;
+  heading: string;
+  detail: string;
+  items: RouteContextItem[];
+};
+
+function routeContextSeverityFromTraffic(severity?: string): RouteContextItem["severity"] {
+  if (severity === "high" || severity === "critical") return "warning";
+  if (severity === "medium") return "watch";
+  return "ok";
+}
+
+function routeContextSourceLabel(source: string): string {
+  const normalized = source.toLocaleLowerCase("nb");
+  if (normalized === "datex" || normalized.includes("datex")) return "DATEX";
+  if (normalized.includes("vegvesen")) return "Statens vegvesen";
+  if (normalized.includes("entur")) return "Entur";
+  return source;
+}
+
+function routeContextDistanceLabel(distanceMeters?: number): string | undefined {
+  if (distanceMeters === undefined) return undefined;
+  return `${formatDistance(distanceMeters)} fra ruten`;
+}
+
+function routeContextCountLabel(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "er"}`;
+}
+
+function routeContextPlacement(
+  kind: RouteContextItem["kind"],
+  distanceMeters?: number,
+): Pick<RouteContextItem, "placement" | "placementLabel"> {
+  if (kind === "transit_alert" && distanceMeters === undefined) {
+    return {
+      placement: "transit_line_alert",
+      placementLabel: "Linjevarsel uten kartpunkt",
+    };
+  }
+  if (distanceMeters === 0) {
+    return {
+      placement: "on_route",
+      placementLabel: "På ruten",
+    };
+  }
+  return {
+    placement: "near_route",
+    placementLabel:
+      distanceMeters === undefined ? "Nær ruten" : `Nær ruten · ${formatDistance(distanceMeters)}`,
+  };
+}
+
+export function eventIdForRouteContextItem(item: RouteContextItem): string | undefined {
+  return item.kind === "traffic" && item.focusable ? item.eventId : undefined;
+}
+
+export function mergeRouteContextTrafficEvents(
+  visibleEvents: TrafficMapEvent[],
+  routeContextEvents: TrafficMapEvent[],
+): TrafficMapEvent[] {
+  if (!routeContextEvents.length) return visibleEvents;
+  const mergedEvents = new Map(visibleEvents.map((event) => [event.id, event]));
+  routeContextEvents.forEach((event) => mergedEvents.set(event.id, event));
+  return Array.from(mergedEvents.values());
+}
+
+export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContextSummary {
+  const trafficItems: RouteContextItem[] = (plan?.trafficImpacts ?? []).map((impact) => ({
+    id: `traffic:${impact.event.id}`,
+    kind: "traffic",
+    title: impact.event.title,
+    detail:
+      impact.summary ||
+      impact.event.description ||
+      impact.event.roadName ||
+      "Trafikkhendelse langs valgt rute.",
+    source: routeContextSourceLabel(impact.event.source),
+    severity: routeContextSeverityFromTraffic(impact.severity),
+    ...routeContextPlacement("traffic", impact.distanceMeters),
+    distanceLabel: routeContextDistanceLabel(impact.distanceMeters),
+    eventId: impact.event.id,
+    focusable: true,
+  }));
+
+  const alertItems: RouteContextItem[] = (plan?.publicTransportSuggestions ?? [])
+    .filter((suggestion) => suggestion.kind === "alert")
+    .map((suggestion) => ({
+      id: `transit_alert:${suggestion.id}`,
+      kind: "transit_alert",
+      title: suggestion.title,
+      detail: suggestion.detail,
+      source: routeContextSourceLabel(suggestion.source),
+      severity: "watch",
+      ...routeContextPlacement("transit_alert", suggestion.distanceMeters),
+      distanceLabel: routeContextDistanceLabel(suggestion.distanceMeters),
+      suggestionId: suggestion.id,
+      href: suggestion.href,
+      focusable: false,
+    }));
+
+  const items = [...trafficItems, ...alertItems];
+  const count = items.length;
+  const mapPointCount = items.filter((item) => item.focusable).length;
+  const blockingCount = items.filter((item) => item.severity === "warning").length;
+  const nearbyAlertCount = items.filter(
+    (item) => item.kind === "transit_alert" && item.placement === "near_route",
+  ).length;
+  const lineAlertCount = items.filter((item) => item.placement === "transit_line_alert").length;
+  const headingParts = [
+    mapPointCount > 0 ? routeContextCountLabel(mapPointCount, "kartpunkt") : undefined,
+    nearbyAlertCount > 0 ? `${nearbyAlertCount} kollektivvarsel nær ruten` : undefined,
+    lineAlertCount > 0 ? `${lineAlertCount} linjevarsel uten kartpunkt` : undefined,
+  ].filter(Boolean);
+
+  if (!count) {
+    return {
+      count: 0,
+      mapPointCount: 0,
+      blockingCount: 0,
+      heading: "Ingen kartpunkter langs valgt rute",
+      detail: "Nytt fant ingen trafikkpunkter langs valgt rute akkurat nå.",
+      items: [],
+    };
+  }
+
+  const textFallbackCount = count - mapPointCount;
+  return {
+    count,
+    mapPointCount,
+    blockingCount,
+    heading: headingParts.join(" · "),
+    detail:
+      mapPointCount > 0
+        ? textFallbackCount > 0
+          ? `Kartet viser ${routeContextCountLabel(mapPointCount, "kartpunkt")}. ${routeContextCountLabel(textFallbackCount, "varsel")} uten kartpunkt vises som kompakt tekst.`
+          : `Kartet viser plassering av ${routeContextCountLabel(mapPointCount, "kartpunkt")} som bør vurderes underveis.`
+        : "Rutevarslene har ikke egne kartpunkter og vises som kompakt tekst.",
+    items,
+  };
+}
+
+export function RouteContextFallback({
+  summary,
+  onFocusItem,
+  selectedEventId,
+}: {
+  summary: RouteContextSummary;
+  onFocusItem?: (item: RouteContextItem) => void;
+  selectedEventId?: string;
+}) {
+  if (summary.count === 0) {
+    return (
+      <p className="route-context-empty">
+        Ingen aktive trafikkpunkter funnet langs valgt rute akkurat nå.
+      </p>
+    );
+  }
+
+  return (
+    <details className="route-context-fallback">
+      <summary>
+        <span>
+          {summary.mapPointCount > 0
+            ? "Kartpunkter langs valgt rute"
+            : "Tekstfallback for valgt rute"}
+        </span>
+        <strong>{summary.heading}</strong>
+      </summary>
+      <p>{summary.detail}</p>
+      <ol>
+        {summary.items.map((item, index) => (
+          <li
+            key={item.id}
+            className={`route-context-fallback-item route-context-${item.severity}`}
+          >
+            {(() => {
+              const meta = [item.placementLabel, item.source].filter(Boolean).join(" · ");
+              if (item.focusable) {
+                return (
+                  <button
+                    type="button"
+                    aria-pressed={
+                      item.eventId && selectedEventId === item.eventId ? "true" : undefined
+                    }
+                    onClick={() => onFocusItem?.(item)}
+                  >
+                    <span>{index + 1}</span>
+                    <strong>{item.title}</strong>
+                    <small>{meta}</small>
+                    {item.detail ? (
+                      <small className="route-context-fallback-detail">{item.detail}</small>
+                    ) : null}
+                  </button>
+                );
+              }
+              const safeHref = item.href ? safeExternalUrl(item.href) : undefined;
+              if (safeHref) {
+                return (
+                  <a href={safeHref} target="_blank" rel="noreferrer noopener">
+                    <span>{index + 1}</span>
+                    <strong>{item.title}</strong>
+                    <small>{meta}</small>
+                    {item.detail ? (
+                      <small className="route-context-fallback-detail">{item.detail}</small>
+                    ) : null}
+                  </a>
+                );
+              }
+              return (
+                <div className="route-context-fallback-static">
+                  <span>{index + 1}</span>
+                  <strong>{item.title}</strong>
+                  <small>{meta}</small>
+                  {item.detail ? (
+                    <small className="route-context-fallback-detail">{item.detail}</small>
+                  ) : null}
+                </div>
+              );
+            })()}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 function trafficEventListCopy(
   selectedPreset: TrafficMapPreset,
   showAll: boolean,
@@ -2356,17 +2601,23 @@ function TravelPlanCard({
   loading,
   error,
   selectedItineraryId,
+  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
+  routeContextSummary,
   onSelectItinerary,
+  onFocusRouteContextItem,
 }: {
   plan?: TravelPlanPayload;
   loading: boolean;
   error?: string;
   selectedItineraryId?: string;
+  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
+  routeContextSummary: RouteContextSummary;
   onSelectItinerary: (itineraryId: string) => void;
+  onFocusRouteContextItem?: (item: RouteContextItem) => void;
 }) {
   if (error) {
     return (
@@ -2394,10 +2645,6 @@ function TravelPlanCard({
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   const showFallbackSuggestions =
     plan.itineraries.length === 0 && plan.publicTransportSuggestions.length > 0;
-  const transitAlertCount = plan.publicTransportSuggestions.filter(
-    (suggestion) => suggestion.kind === "alert",
-  ).length;
-  const routeContextCount = plan.trafficImpacts.length + transitAlertCount;
   return (
     <article
       className={`travel-plan-card travel-plan-card-${decision.severity}`}
@@ -2416,8 +2663,7 @@ function TravelPlanCard({
             {duration ? ` · ${duration}` : ""} · {plan.route.detail}
           </span>
           <small>
-            {decision.itineraryCount} reiseforslag · {routeContextCount} relevante avvik langs
-            korridoren
+            {decision.itineraryCount} reiseforslag · {routeContextSummary.heading}
           </small>
         </div>
       </header>
@@ -2439,37 +2685,11 @@ function TravelPlanCard({
           </div>
         ) : null}
       </section>
-      <details className="travel-secondary-disclosure">
-        <summary>
-          Se trafikk langs ruten
-          {routeContextCount ? ` (${routeContextCount})` : ""}
-        </summary>
-        {plan.trafficImpacts.length ? (
-          <ul>
-            {plan.trafficImpacts.map((impact) => (
-              <li key={impact.event.id}>
-                <strong>{impact.event.title}</strong>
-                <span>{impact.summary}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>Ingen aktive trafikkhendelser funnet langs ruten akkurat nå.</p>
-        )}
-        {transitAlertCount ? (
-          <ul>
-            {plan.publicTransportSuggestions
-              .filter((suggestion) => suggestion.kind === "alert")
-              .slice(0, 4)
-              .map((suggestion) => (
-                <li key={suggestion.id}>
-                  <strong>{suggestion.title}</strong>
-                  <span>{suggestion.detail}</span>
-                </li>
-              ))}
-          </ul>
-        ) : null}
-      </details>
+      <RouteContextFallback
+        summary={routeContextSummary}
+        onFocusItem={onFocusRouteContextItem}
+        selectedEventId={selectedEventId}
+      />
       {showFallbackSuggestions ? (
         <details className="travel-secondary-disclosure">
           <summary>Kollektivkontekst</summary>
@@ -3332,8 +3552,11 @@ function TravelPlannerPanel({
   travelPlanLoading,
   travelPlanError,
   selectedItineraryId,
+  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
+  routeContextSummary,
+  onFocusRouteContextItem,
   travelTimeComparison,
   selectedOriginSuggestion,
   selectedDestinationSuggestion,
@@ -3366,8 +3589,11 @@ function TravelPlannerPanel({
   travelPlanLoading: boolean;
   travelPlanError?: string;
   selectedItineraryId?: string;
+  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
+  routeContextSummary: RouteContextSummary;
+  onFocusRouteContextItem?: (item: RouteContextItem) => void;
   travelTimeComparison: TravelTimeComparisonState;
   selectedOriginSuggestion?: TravelPlaceSuggestion;
   selectedDestinationSuggestion?: TravelPlaceSuggestion;
@@ -3567,9 +3793,12 @@ function TravelPlannerPanel({
             loading={travelPlanLoading}
             error={travelPlanError}
             selectedItineraryId={selectedItineraryId}
+            selectedEventId={selectedEventId}
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
+            routeContextSummary={routeContextSummary}
             onSelectItinerary={onSelectItinerary}
+            onFocusRouteContextItem={onFocusRouteContextItem}
           />
           {travelTimeComparison.status !== "idle" ? (
             <details className="travel-secondary-disclosure travel-time-disclosure">
@@ -4122,10 +4351,20 @@ export function TrafficMapPage() {
     () => new Set(visibleTrafficEvents.map((event) => event.id)),
     [visibleTrafficEvents],
   );
+  const routeContextTrafficEvents = useMemo(
+    () => travelPlan?.trafficImpacts.map((impact) => impact.event) ?? [],
+    [travelPlan],
+  );
+  const visibleTrafficEventsWithRouteContext = useMemo(
+    () => mergeRouteContextTrafficEvents(visibleTrafficEvents, routeContextTrafficEvents),
+    [routeContextTrafficEvents, visibleTrafficEvents],
+  );
 
   const selectedEvent = useMemo(
-    () => visibleTrafficEvents.find((event) => event.id === selectedEventId),
-    [visibleTrafficEvents, selectedEventId],
+    () =>
+      visibleTrafficEventsWithRouteContext.find((event) => event.id === selectedEventId) ??
+      data?.events.find((event) => event.id === selectedEventId),
+    [data?.events, selectedEventId, visibleTrafficEventsWithRouteContext],
   );
 
   const rankedEventsForList = useMemo(
@@ -4194,6 +4433,7 @@ export function TrafficMapPage() {
       travelPlan,
     ],
   );
+  const routeContextSummary = useMemo(() => buildRouteContextSummary(travelPlan), [travelPlan]);
   const routeChoiceModel = useMemo(
     () =>
       buildRouteChoiceModel({
@@ -4255,6 +4495,12 @@ export function TrafficMapPage() {
 
   const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
     setBounds(nextBounds);
+  }, []);
+
+  const handleRouteContextFocus = useCallback((item: RouteContextItem) => {
+    const eventId = eventIdForRouteContextItem(item);
+    if (!eventId) return;
+    setSelectedEventId(eventId);
   }, []);
 
   const applyTrafficFilters = useCallback(
@@ -4574,8 +4820,11 @@ export function TrafficMapPage() {
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
         selectedItineraryId={selectedItineraryId}
+        selectedEventId={selectedEventId}
         routeChoiceModel={routeChoiceModel}
         routeWatchSummary={routeWatchSummary}
+        routeContextSummary={routeContextSummary}
+        onFocusRouteContextItem={handleRouteContextFocus}
         travelTimeComparison={travelTimeComparison}
         selectedOriginSuggestion={selectedOriginSuggestion}
         selectedDestinationSuggestion={selectedDestinationSuggestion}
@@ -4642,7 +4891,10 @@ export function TrafficMapPage() {
         ]}
       />
 
-      <details className="traffic-support-disclosure traffic-map-disclosure" open={!travelPlan}>
+      <details
+        className="traffic-support-disclosure traffic-map-disclosure"
+        open={!travelPlan || routeContextSummary.mapPointCount > 0}
+      >
         <summary>Kart og trafikkgrunnlag</summary>
         <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
           <button
@@ -4695,9 +4947,9 @@ export function TrafficMapPage() {
                 onSelectImpact={setSelectedCorridorId}
               />
             ) : null}
-            {data?.events ? (
+            {visibleTrafficEventsWithRouteContext.length > 0 ? (
               <TrafficLayer
-                events={visibleTrafficEvents}
+                events={visibleTrafficEventsWithRouteContext}
                 highlightedEventIds={highlightedEventIds}
                 showEstimatedNews={visibleContextLayers.estimatedNews}
                 onSelectEvent={setSelectedEventId}
