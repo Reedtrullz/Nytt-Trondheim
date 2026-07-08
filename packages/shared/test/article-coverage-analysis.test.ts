@@ -751,6 +751,97 @@ describe("article coverage analysis", () => {
     expect(analysis.articles.map((item) => item.coverageBundle)).toEqual([undefined, undefined]);
   });
 
+  it("keeps the full downtown order graph split into the pinne and trussel bundles", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-pinne-update",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Mann skal ha med pinne - ble bortvist",
+          excerpt:
+            "Operasjonsleder meldte kl 19.47 om at politiet har kontroll på en mann. Mannen gikk gjennom Elgeseter gate og viftet med en pinne mot forbipasserende. Han fremstår ruset, og vi har kjørt mannen til legevakten.",
+          publishedAt: "2026-07-04T17:51:00.000Z",
+          category: "Krim",
+          places: ["Elgeseter", "Trondheim"],
+          location: { lat: 63.424, lng: 10.395, label: "Elgeseter" },
+        }),
+        article({
+          id: "nrk-pinne",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Mann viftet med pinne mot folk i gata",
+          excerpt:
+            "Kl. 19.47 melder politiet at de har kontroll på en mann som har gått å viftet med en pinne mot forbipasserende i Elgesetergate i Trondheim. Mannen skal ha fremstått som ruset. Han blir kjørt til legevakta.",
+          publishedAt: "2026-07-04T17:50:00.000Z",
+          category: "Nyheter",
+          places: ["Trondheim", "Prinsengate"],
+          location: { lat: 63.424, lng: 10.395, label: "Prinsengate" },
+        }),
+        article({
+          id: "politiloggen-pinne",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Ro og orden: Trondheim, Prinsengate",
+          excerpt:
+            "Patruljen har kontroll på en mann som viftet med en pinne mot forbipasserende i Elgesetergate. Mannen fremstår ruset og kjøres til legevakt.",
+          publishedAt: "2026-07-04T17:47:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim", "Prinsengate"],
+          location: { lat: 63.424, lng: 10.395, label: "Prinsengate" },
+          situationId: "politiloggen-prinsensgate-pinne",
+        }),
+        article({
+          id: "nrk-trussel",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Mulig trusselsituasjon i Midtbyen",
+          excerpt:
+            "Kl. 19.18 melder politiet at de har kontroll på flere ungdommer etter en mulig trusselsituasjon i Midtbyen i Trondheim. Alle de involverte er mindreårige og politiet har kontroll på dem.",
+          publishedAt: "2026-07-04T17:22:00.000Z",
+          category: "Krim",
+          places: ["Midtbyen", "Trondheim"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Midtbyen" },
+        }),
+        article({
+          id: "adressa-trussel",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Melding om mulig trusselsituasjon - flere mindreårige jenter",
+          excerpt:
+            "Politiet har kontroll på flere ungdommer i Midtbyen etter melding om en mulig trusselsituasjon. Alle involverte er mindreårige.",
+          publishedAt: "2026-07-04T17:18:00.000Z",
+          category: "Krim",
+          places: ["Midtbyen", "Trondheim"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Midtbyen" },
+        }),
+        article({
+          id: "politiloggen-trussel",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Andre hendelser: Trondheim, Sentrum",
+          excerpt:
+            "Politiet har kontroll på flere ungdommer etter en mulig trusselsituasjon i Midtbyen. Alle involverte er mindreårige. Politiet har snakket med de involverte og tre mindreårige blir bortvist fra stedet.",
+          publishedAt: "2026-07-04T17:18:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Sentrum"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Trondheim sentrum" },
+          situationId: "politiloggen-midtbyen-trussel",
+        }),
+      ],
+      "2026-07-04T18:00:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(2);
+    expect(analysis.bundles.map((bundle) => new Set(bundle.memberArticleIds))).toEqual(
+      expect.arrayContaining([
+        new Set(["adressa-pinne-update", "nrk-pinne", "politiloggen-pinne"]),
+        new Set(["nrk-trussel", "adressa-trussel", "politiloggen-trussel"]),
+      ]),
+    );
+    expect(new Set(analysis.articles.map((item) => item.coverageBundle?.id))).toHaveLength(2);
+  });
+
   it("bundles serious violence reports with different source counts but the same victim context", () => {
     const analysis = analyzeArticleCoverage(
       [

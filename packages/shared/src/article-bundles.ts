@@ -314,6 +314,7 @@ const articleTitleTokensCache = new WeakMap<Article, Set<string>>();
 const articleDistinctiveTokensCache = new WeakMap<Article, Set<string>>();
 const articlePlaceTokensCache = new WeakMap<Article, Set<string>>();
 const articleIncidentSignalsCache = new WeakMap<Article, Set<string>>();
+const articleStreetOrderSubSignalsCache = new WeakMap<Article, Set<string>>();
 const articleTopicSignalsCache = new WeakMap<Article, Set<string>>();
 
 function normalizeText(value: string): string {
@@ -510,10 +511,19 @@ function articleIncidentSignals(article: Article): Set<string> {
 }
 
 function articleStreetOrderSubSignals(article: Article): Set<string> {
+  const cached = articleStreetOrderSubSignalsCache.get(article);
+  if (cached) return cached;
   const text = articleText(article);
-  return new Set(
+  const signals = new Set(
     streetOrderSubSignals.filter(([, pattern]) => pattern.test(text)).map(([signal]) => signal),
   );
+  if (signals.has("pinne")) {
+    const pinneSignals = new Set(["pinne"]);
+    articleStreetOrderSubSignalsCache.set(article, pinneSignals);
+    return pinneSignals;
+  }
+  articleStreetOrderSubSignalsCache.set(article, signals);
+  return signals;
 }
 
 function streetOrderSubSignalsCompatible(left: Article, right: Article): boolean {
