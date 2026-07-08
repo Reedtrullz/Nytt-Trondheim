@@ -4,6 +4,8 @@ import type {
   TravelPlanPayload,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("react-leaflet", () => ({
   CircleMarker: () => null,
@@ -45,6 +47,7 @@ import {
   readRememberedTravelRoutes,
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
+  RouteContextFallback,
   routeDepartureCheckpoints,
   routeDepartureConfidenceItems,
   routeDepartureConfidenceSummary,
@@ -1862,6 +1865,50 @@ describe("TrafficMapPage route overlay helpers", () => {
         heading: "Ingen kartpunkter langs valgt rute",
         items: [],
       });
+    });
+  });
+
+  describe("route context fallback markup", () => {
+    it("renders compact collapsed fallback language without full route-impact card grids", () => {
+      const summary = {
+        count: 2,
+        mapPointCount: 1,
+        blockingCount: 0,
+        heading: "2 punkter langs valgt rute",
+        detail: "Kartet viser plassering langs valgt rute. Tekstlisten er kun en kompakt fallback.",
+        items: [
+          {
+            id: "traffic:one",
+            kind: "traffic" as const,
+            title: "Fv. 6650 Ilevolen",
+            detail: "121 m fra foreslått rute",
+            source: "Vegvesen",
+            severity: "watch" as const,
+            distanceLabel: "121 m fra ruten",
+            eventId: "one",
+            focusable: true,
+          },
+          {
+            id: "transit_alert:two",
+            kind: "transit_alert" as const,
+            title: "Endret rute",
+            detail: "Linje 3 kjører via Lerkendal.",
+            source: "Entur",
+            severity: "watch" as const,
+            distanceLabel: "220 m fra ruten",
+            suggestionId: "two",
+            focusable: false,
+          },
+        ],
+      };
+
+      const html = renderToStaticMarkup(createElement(RouteContextFallback, { summary }));
+
+      expect(html).toContain("Kartpunkter langs valgt rute");
+      expect(html).toContain("2 punkter langs valgt rute");
+      expect(html).toContain("Fv. 6650 Ilevolen");
+      expect(html).toContain("Endret rute");
+      expect(html).not.toContain("Se trafikk langs ruten");
     });
   });
 });

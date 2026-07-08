@@ -11238,6 +11238,100 @@ button {
   text-decoration: none;
 }
 
+.route-context-empty {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.route-context-fallback {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.route-context-fallback summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--blue);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.route-context-fallback summary span {
+  font-size: 13px;
+}
+
+.route-context-fallback summary strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.route-context-fallback p {
+  margin: 0;
+  padding: 0 12px 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.route-context-fallback ol {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.route-context-fallback-item button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.route-context-fallback-item button:not(:disabled) {
+  cursor: pointer;
+}
+
+.route-context-fallback-item button:not(:disabled):hover,
+.route-context-fallback-item button:not(:disabled):focus-visible {
+  background: #eef4f8;
+}
+
+.route-context-fallback-item span {
+  grid-row: span 2;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.route-context-fallback-item strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.route-context-fallback-item small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .public-transport-card header {
   display: flex;
   align-items: center;

@@ -2026,6 +2026,50 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
   };
 }
 
+export function RouteContextFallback({
+  summary,
+  onFocusItem,
+}: {
+  summary: RouteContextSummary;
+  onFocusItem?: (item: RouteContextItem) => void;
+}) {
+  if (summary.count === 0) {
+    return (
+      <p className="route-context-empty">
+        Ingen aktive trafikkpunkter funnet langs valgt rute akkurat nå.
+      </p>
+    );
+  }
+
+  return (
+    <details className="route-context-fallback">
+      <summary>
+        <span>Kartpunkter langs valgt rute</span>
+        <strong>{summary.heading}</strong>
+      </summary>
+      <p>{summary.detail}</p>
+      <ol>
+        {summary.items.map((item, index) => (
+          <li
+            key={item.id}
+            className={`route-context-fallback-item route-context-${item.severity}`}
+          >
+            <button
+              type="button"
+              disabled={!item.focusable || !onFocusItem}
+              onClick={() => onFocusItem?.(item)}
+            >
+              <span>{index + 1}</span>
+              <strong>{item.title}</strong>
+              <small>{[item.distanceLabel, item.source].filter(Boolean).join(" · ")}</small>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 function trafficEventListCopy(
   selectedPreset: TrafficMapPreset,
   showAll: boolean,
@@ -2460,6 +2504,7 @@ function TravelPlanCard({
   routeChoiceModel,
   routeWatchSummary,
   onSelectItinerary,
+  onFocusRouteContextItem,
 }: {
   plan?: TravelPlanPayload;
   loading: boolean;
@@ -2468,6 +2513,7 @@ function TravelPlanCard({
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
   onSelectItinerary: (itineraryId: string) => void;
+  onFocusRouteContextItem?: (item: RouteContextItem) => void;
 }) {
   if (error) {
     return (
@@ -2495,10 +2541,7 @@ function TravelPlanCard({
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   const showFallbackSuggestions =
     plan.itineraries.length === 0 && plan.publicTransportSuggestions.length > 0;
-  const transitAlertCount = plan.publicTransportSuggestions.filter(
-    (suggestion) => suggestion.kind === "alert",
-  ).length;
-  const routeContextCount = plan.trafficImpacts.length + transitAlertCount;
+  const routeContextSummary = buildRouteContextSummary(plan);
   return (
     <article
       className={`travel-plan-card travel-plan-card-${decision.severity}`}
@@ -2517,8 +2560,7 @@ function TravelPlanCard({
             {duration ? ` · ${duration}` : ""} · {plan.route.detail}
           </span>
           <small>
-            {decision.itineraryCount} reiseforslag · {routeContextCount} relevante avvik langs
-            korridoren
+            {decision.itineraryCount} reiseforslag · {routeContextSummary.heading}
           </small>
         </div>
       </header>
@@ -2540,37 +2582,7 @@ function TravelPlanCard({
           </div>
         ) : null}
       </section>
-      <details className="travel-secondary-disclosure">
-        <summary>
-          Se trafikk langs ruten
-          {routeContextCount ? ` (${routeContextCount})` : ""}
-        </summary>
-        {plan.trafficImpacts.length ? (
-          <ul>
-            {plan.trafficImpacts.map((impact) => (
-              <li key={impact.event.id}>
-                <strong>{impact.event.title}</strong>
-                <span>{impact.summary}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>Ingen aktive trafikkhendelser funnet langs ruten akkurat nå.</p>
-        )}
-        {transitAlertCount ? (
-          <ul>
-            {plan.publicTransportSuggestions
-              .filter((suggestion) => suggestion.kind === "alert")
-              .slice(0, 4)
-              .map((suggestion) => (
-                <li key={suggestion.id}>
-                  <strong>{suggestion.title}</strong>
-                  <span>{suggestion.detail}</span>
-                </li>
-              ))}
-          </ul>
-        ) : null}
-      </details>
+      <RouteContextFallback summary={routeContextSummary} onFocusItem={onFocusRouteContextItem} />
       {showFallbackSuggestions ? (
         <details className="travel-secondary-disclosure">
           <summary>Kollektivkontekst</summary>
@@ -3671,6 +3683,7 @@ function TravelPlannerPanel({
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
             onSelectItinerary={onSelectItinerary}
+            onFocusRouteContextItem={handleRouteContextFocus}
           />
           {travelTimeComparison.status !== "idle" ? (
             <details className="travel-secondary-disclosure travel-time-disclosure">
@@ -4356,6 +4369,11 @@ export function TrafficMapPage() {
 
   const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
     setBounds(nextBounds);
+  }, []);
+
+  const handleRouteContextFocus = useCallback((item: RouteContextItem) => {
+    if (!item.focusable || !item.eventId) return;
+    setSelectedEventId(item.eventId);
   }, []);
 
   const applyTrafficFilters = useCallback(
