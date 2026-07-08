@@ -1027,10 +1027,40 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }),
   );
 
+  const readinessPayload = async () => {
+    if (pool) await pool.query("SELECT 1");
+    return {
+      status: "ok" as const,
+      storage: pool ? "postgres" : "development-memory",
+      ...(pool
+        ? {
+            pool: {
+              total: pool.totalCount,
+              idle: pool.idleCount,
+              waiting: pool.waitingCount,
+            },
+          }
+        : {}),
+    };
+  };
+
+  app.get("/health/live", (_req, res) => {
+    res.json({ status: "ok", storage: pool ? "postgres" : "development-memory" });
+  });
+
+  app.get("/health/ready", async (_req, res) => {
+    try {
+      res.json(await readinessPayload());
+    } catch {
+      res
+        .status(503)
+        .json({ status: "degraded", storage: pool ? "postgres" : "development-memory" });
+    }
+  });
+
   app.get("/health", async (_req, res) => {
     try {
-      if (pool) await pool.query("SELECT 1");
-      res.json({ status: "ok", storage: pool ? "postgres" : "development-memory" });
+      res.json(await readinessPayload());
     } catch {
       res.status(503).json({ status: "degraded" });
     }

@@ -185,6 +185,24 @@ function addMemorySituation(store: Store, situation: Situation): void {
 }
 
 describe("private situation API", () => {
+  it("serves live and ready health endpoints before the SPA fallback", async () => {
+    const { app } = await testApp();
+
+    const live = await request(app).get("/health/live").expect(200);
+    expect(live.type).toContain("json");
+    expect(live.body).toMatchObject({
+      status: "ok",
+      storage: "development-memory",
+    });
+
+    const ready = await request(app).get("/health/ready").expect(200);
+    expect(ready.type).toContain("json");
+    expect(ready.body).toMatchObject({
+      status: "ok",
+      storage: "development-memory",
+    });
+  });
+
   it("defaults rate limiting on unless RATE_LIMIT_ENABLED explicitly disables it", () => {
     expect(withEnvValue("RATE_LIMIT_ENABLED", undefined, () => loadConfig().rateLimitEnabled)).toBe(
       true,
