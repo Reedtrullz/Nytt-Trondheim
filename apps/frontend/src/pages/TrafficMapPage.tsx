@@ -2509,6 +2509,7 @@ function TravelPlanCard({
   selectedItineraryId,
   routeChoiceModel,
   routeWatchSummary,
+  routeContextSummary,
   onSelectItinerary,
   onFocusRouteContextItem,
 }: {
@@ -2518,6 +2519,7 @@ function TravelPlanCard({
   selectedItineraryId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
+  routeContextSummary: RouteContextSummary;
   onSelectItinerary: (itineraryId: string) => void;
   onFocusRouteContextItem?: (item: RouteContextItem) => void;
 }) {
@@ -2547,7 +2549,6 @@ function TravelPlanCard({
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   const showFallbackSuggestions =
     plan.itineraries.length === 0 && plan.publicTransportSuggestions.length > 0;
-  const routeContextSummary = buildRouteContextSummary(plan);
   return (
     <article
       className={`travel-plan-card travel-plan-card-${decision.severity}`}
@@ -3453,6 +3454,8 @@ function TravelPlannerPanel({
   selectedItineraryId,
   routeChoiceModel,
   routeWatchSummary,
+  routeContextSummary,
+  onFocusRouteContextItem,
   travelTimeComparison,
   selectedOriginSuggestion,
   selectedDestinationSuggestion,
@@ -3487,6 +3490,8 @@ function TravelPlannerPanel({
   selectedItineraryId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
+  routeContextSummary: RouteContextSummary;
+  onFocusRouteContextItem?: (item: RouteContextItem) => void;
   travelTimeComparison: TravelTimeComparisonState;
   selectedOriginSuggestion?: TravelPlaceSuggestion;
   selectedDestinationSuggestion?: TravelPlaceSuggestion;
@@ -3688,8 +3693,9 @@ function TravelPlannerPanel({
             selectedItineraryId={selectedItineraryId}
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
+            routeContextSummary={routeContextSummary}
             onSelectItinerary={onSelectItinerary}
-            onFocusRouteContextItem={handleRouteContextFocus}
+            onFocusRouteContextItem={onFocusRouteContextItem}
           />
           {travelTimeComparison.status !== "idle" ? (
             <details className="travel-secondary-disclosure travel-time-disclosure">
@@ -4314,6 +4320,7 @@ export function TrafficMapPage() {
       travelPlan,
     ],
   );
+  const routeContextSummary = useMemo(() => buildRouteContextSummary(travelPlan), [travelPlan]);
   const routeChoiceModel = useMemo(
     () =>
       buildRouteChoiceModel({
@@ -4702,6 +4709,8 @@ export function TrafficMapPage() {
         selectedItineraryId={selectedItineraryId}
         routeChoiceModel={routeChoiceModel}
         routeWatchSummary={routeWatchSummary}
+        routeContextSummary={routeContextSummary}
+        onFocusRouteContextItem={handleRouteContextFocus}
         travelTimeComparison={travelTimeComparison}
         selectedOriginSuggestion={selectedOriginSuggestion}
         selectedDestinationSuggestion={selectedDestinationSuggestion}
@@ -4768,7 +4777,10 @@ export function TrafficMapPage() {
         ]}
       />
 
-      <details className="traffic-support-disclosure traffic-map-disclosure" open={!travelPlan}>
+      <details
+        className="traffic-support-disclosure traffic-map-disclosure"
+        open={!travelPlan || routeContextSummary.count > 0}
+      >
         <summary>Kart og trafikkgrunnlag</summary>
         <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
           <button

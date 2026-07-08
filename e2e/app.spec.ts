@@ -2729,7 +2729,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(page.getByText("Reiseråd nå", { exact: true })).toBeVisible();
   await expect(page.getByText("Munkegata, Midtbyen → Leangen, Trondheim")).toBeVisible();
   await expect(page.getByLabel("Ruteoppsummering")).toContainText(
-    "1 reiseforslag · 2 relevante avvik langs korridoren",
+    "1 reiseforslag · 2 punkt langs valgt rute",
   );
   await expect(page.getByLabel("Velg reiseforslag")).toBeVisible();
   await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText("Buss 3");
@@ -2741,8 +2741,22 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
     "Forsinkelse på linje 3",
   );
-  await openTrafficDisclosure(page, "Se trafikk langs ruten");
-  await expect(page.getByText("Veiarbeid på E6 ved Leangen")).toBeVisible();
+  await expect(page.getByText("Kartpunkter langs valgt rute")).toBeVisible();
+  await expect(page.getByText("Se trafikk langs ruten")).toHaveCount(0);
+  const mapDisclosure = page.locator("details.traffic-map-disclosure").first();
+  await expect(mapDisclosure).toHaveCount(1);
+  await mapDisclosure.evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  await expect(page.locator(".traffic-map")).toBeVisible();
+  const fallback = page.locator("details.route-context-fallback").first();
+  await fallback.evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  await expect(fallback.getByRole("button", { name: /Veiarbeid på E6 ved Leangen/ })).toHaveCount(
+    1,
+  );
+  await expect(fallback.getByRole("button", { name: /Forsinkelse på linje 3/ })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText(
     "Lade - Hallset",
   );
