@@ -336,6 +336,54 @@ describe("WorkerRepository", () => {
     expect(params[1]).toBeGreaterThanOrEqual(3);
   });
 
+  it("ranks public-safety situations before newer routine traffic in worker briefs", async () => {
+    const now = new Date();
+    const freshCreatedAt = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
+    const olderCreatedAt = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const newerUpdatedAt = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+    const olderUpdatedAt = new Date(now.getTime() - 45 * 60 * 1000).toISOString();
+    const freshRoad: Situation = {
+      ...sampleSituation,
+      id: "fresh-road",
+      type: "traffic",
+      title: "Trær/Busker, ett stengt kjørefelt",
+      summary: "Ett kjørefelt er stengt etter trær i vegbanen.",
+      status: "active",
+      publicVisibility: "public",
+      createdAt: freshCreatedAt,
+      updatedAt: newerUpdatedAt,
+      locationLabel: "Romundstadbygdvegen",
+      verificationStatus: "Offentlig bekreftet",
+    };
+    const armedPolice: Situation = {
+      ...sampleSituation,
+      id: "armed-police",
+      type: "rescue",
+      title: "Bevæpnet politi rykket ut i Trondheim",
+      summary: "Politiet rykket ut til en trusselsituasjon på Byåsen.",
+      status: "active",
+      publicVisibility: "public",
+      createdAt: olderCreatedAt,
+      updatedAt: olderUpdatedAt,
+      locationLabel: "Byåsen",
+      verificationStatus: "Offentlig bekreftet",
+    };
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ payload: freshRoad }, { payload: armedPolice }],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    const situations = await repository.homeSituationSummaries(1);
+
+    expect(situations).toEqual([
+      expect.objectContaining({
+        id: "armed-police",
+      }),
+    ]);
+    const params = query.mock.calls[0]?.[1] as unknown[];
+    expect(params[1]).toBe(100);
+  });
+
   it("claims Web Push deliveries outside the source item ledger", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [{ id: "claim-one" }] });
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);

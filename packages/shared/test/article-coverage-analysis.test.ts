@@ -442,6 +442,138 @@ describe("article coverage analysis", () => {
     expect(new Set(analysis.articles.map((item) => item.coverageBundle?.id))).toHaveLength(1);
   });
 
+  it("merges Transport collision articles with event-like official updates when collision wording matches", () => {
+    const generatedAt = "2026-07-08T10:00:00.000Z";
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-kroppanbrua-collision",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "To biler kolliderte ved Kroppanbrua",
+          excerpt:
+            "Politi og ambulanse har rykket ut til en trafikkulykke ved Kroppanbrua i Trondheim. To biler er involvert i en påkjørsel bakfra.",
+          publishedAt: "2026-07-08T09:20:00.000Z",
+          category: "Transport",
+          places: ["Trondheim", "Kroppanbrua"],
+          location: { lat: 63.3864, lng: 10.3925, label: "Kroppanbrua" },
+          situationId: "auto-traffic-kroppanbrua",
+        }),
+        article({
+          id: "politiloggen-kroppanbrua-collision",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Trafikk: Trondheim",
+          excerpt:
+            "Politiet og ambulanse rykker ut til trafikkuhell ved Kroppanbrua. Det skal være en påkjørsel bakfra med to biler involvert.",
+          publishedAt: "2026-07-08T09:18:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim"],
+          location: undefined,
+          situationId: "politiloggen-kroppanbrua",
+        }),
+      ],
+      generatedAt,
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]).toMatchObject({
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse med offisiell tråd",
+      memberArticleIds: expect.arrayContaining([
+        "adressa-kroppanbrua-collision",
+        "politiloggen-kroppanbrua-collision",
+      ]),
+      signals: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "generic_place_incident",
+          detail: "traffic_collision",
+        }),
+      ]),
+    });
+    expect(new Set(analysis.articles.map((item) => item.coverageBundle?.id))).toHaveLength(1);
+  });
+
+  it("does not merge Transport and event-like Trondheim stories without traffic-collision wording", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-trondheim-road-check",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Kontroll på trafikken i Trondheim",
+          excerpt:
+            "Politiet følger trafikkbildet i Trondheim sentrum. Det er ikke meldt om ulykke.",
+          publishedAt: "2026-07-08T09:30:00.000Z",
+          category: "Transport",
+          places: ["Trondheim"],
+          situationId: "transport-road-check",
+        }),
+        article({
+          id: "politiloggen-trondheim-order",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Andre hendelser: Trondheim",
+          excerpt: "Politiet har kontroll på en ordensforstyrrelse i sentrum.",
+          publishedAt: "2026-07-08T09:28:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim"],
+          situationId: "politiloggen-order",
+        }),
+      ],
+      "2026-07-08T10:00:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(0);
+    expect(analysis.articles.map((item) => item.coverageBundle)).toEqual([undefined, undefined]);
+  });
+
+  it("does not merge cross-category collision stories without a shared specific place", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "adressa-generic-trondheim-collision",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "To biler kolliderte i Trondheim",
+          excerpt:
+            "Politi og ambulanse har rykket ut til en trafikkulykke i Trondheim. To biler er involvert i en påkjørsel bakfra.",
+          publishedAt: "2026-07-08T09:40:00.000Z",
+          category: "Transport",
+          places: ["Trondheim"],
+          location: undefined,
+          situationId: "auto-traffic-generic",
+        }),
+        article({
+          id: "politiloggen-generic-trondheim-collision",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Trafikk: Trondheim",
+          excerpt:
+            "Politiet og ambulanse rykker ut til et trafikkuhell i Trondheim. To biler er involvert i en påkjørsel bakfra.",
+          publishedAt: "2026-07-08T09:38:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim"],
+          location: undefined,
+          situationId: "politiloggen-traffic-generic",
+        }),
+      ],
+      "2026-07-08T10:00:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(0);
+    expect(analysis.nearMisses).toContainEqual(
+      expect.objectContaining({
+        articleIds: [
+          "adressa-generic-trondheim-collision",
+          "politiloggen-generic-trondheim-collision",
+        ],
+        reason: "different_situation",
+      }),
+    );
+  });
+
   it("keeps unrelated same-place traffic situations apart without collision wording", () => {
     const analysis = analyzeArticleCoverage(
       [

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import {
+  comparePublicHomeSituations,
   publicLeadLongRunningSituationAgeMs,
   shouldFeaturePublicHomeSituation,
 } from "@nytt/shared";
@@ -529,7 +530,7 @@ export class WorkerRepository {
   async homeSituationSummaries(limit = 3): Promise<HomeSituationSummary[]> {
     const now = new Date();
     const staleCutoff = new Date(now.getTime() - publicLeadLongRunningSituationAgeMs).toISOString();
-    const candidateLimit = Math.max(limit * 4, limit + 6);
+    const candidateLimit = Math.max(limit * 30, 100);
     const result = await this.pool.query<{ payload: Situation }>(
       `SELECT payload
        FROM situations
@@ -551,6 +552,7 @@ export class WorkerRepository {
     return result.rows
       .map((row) => row.payload)
       .filter((situation) => shouldFeaturePublicHomeSituation(situation, now))
+      .sort(comparePublicHomeSituations)
       .slice(0, limit)
       .map((situation) => ({
         id: situation.id,

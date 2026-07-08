@@ -1932,6 +1932,8 @@ export type RouteContextItem = {
   detail: string;
   source: string;
   severity: "ok" | "watch" | "warning";
+  placement: "on_route" | "near_route" | "transit_line_alert";
+  placementLabel: string;
   distanceLabel?: string;
   eventId?: string;
   suggestionId?: string;
@@ -1971,6 +1973,29 @@ function routeContextCountLabel(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "er"}`;
 }
 
+function routeContextPlacement(
+  kind: RouteContextItem["kind"],
+  distanceMeters?: number,
+): Pick<RouteContextItem, "placement" | "placementLabel"> {
+  if (kind === "transit_alert" && distanceMeters === undefined) {
+    return {
+      placement: "transit_line_alert",
+      placementLabel: "Linjevarsel uten kartpunkt",
+    };
+  }
+  if (distanceMeters === 0) {
+    return {
+      placement: "on_route",
+      placementLabel: "På ruten",
+    };
+  }
+  return {
+    placement: "near_route",
+    placementLabel:
+      distanceMeters === undefined ? "Nær ruten" : `Nær ruten · ${formatDistance(distanceMeters)}`,
+  };
+}
+
 export function eventIdForRouteContextItem(item: RouteContextItem): string | undefined {
   return item.kind === "traffic" && item.focusable ? item.eventId : undefined;
 }
@@ -1997,6 +2022,7 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
       "Trafikkhendelse langs valgt rute.",
     source: routeContextSourceLabel(impact.event.source),
     severity: routeContextSeverityFromTraffic(impact.severity),
+    ...routeContextPlacement("traffic", impact.distanceMeters),
     distanceLabel: routeContextDistanceLabel(impact.distanceMeters),
     eventId: impact.event.id,
     focusable: true,
@@ -2011,6 +2037,7 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
       detail: suggestion.detail,
       source: routeContextSourceLabel(suggestion.source),
       severity: "watch",
+      ...routeContextPlacement("transit_alert", suggestion.distanceMeters),
       distanceLabel: routeContextDistanceLabel(suggestion.distanceMeters),
       suggestionId: suggestion.id,
       href: suggestion.href,
@@ -2021,6 +2048,15 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
   const count = items.length;
   const mapPointCount = items.filter((item) => item.focusable).length;
   const blockingCount = items.filter((item) => item.severity === "warning").length;
+  const nearbyAlertCount = items.filter(
+    (item) => item.kind === "transit_alert" && item.placement === "near_route",
+  ).length;
+  const lineAlertCount = items.filter((item) => item.placement === "transit_line_alert").length;
+  const headingParts = [
+    mapPointCount > 0 ? routeContextCountLabel(mapPointCount, "kartpunkt") : undefined,
+    nearbyAlertCount > 0 ? `${nearbyAlertCount} kollektivvarsel nær ruten` : undefined,
+    lineAlertCount > 0 ? `${lineAlertCount} linjevarsel uten kartpunkt` : undefined,
+  ].filter(Boolean);
 
   if (!count) {
     return {
@@ -2038,16 +2074,13 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
     count,
     mapPointCount,
     blockingCount,
-    heading:
-      mapPointCount > 0
-        ? `${routeContextCountLabel(count, "punkt")} langs valgt rute`
-        : `${routeContextCountLabel(count, "tekstpunkt")} i kompakt fallback`,
+    heading: headingParts.join(" · "),
     detail:
       mapPointCount > 0
         ? textFallbackCount > 0
-          ? `Kartet viser plassering av ${routeContextCountLabel(mapPointCount, "kartpunkt")}. ${routeContextCountLabel(textFallbackCount, "punkt")} vises som kompakt tekstfallback uten kartpunkter.`
+          ? `Kartet viser ${routeContextCountLabel(mapPointCount, "kartpunkt")}. ${routeContextCountLabel(textFallbackCount, "varsel")} uten kartpunkt vises som kompakt tekst.`
           : `Kartet viser plassering av ${routeContextCountLabel(mapPointCount, "kartpunkt")} som bør vurderes underveis.`
-        : "Dette er en kompakt tekstfallback uten kartpunkter.",
+        : "Rutevarslene har ikke egne kartpunkter og vises som kompakt tekst.",
     items,
   };
 }
@@ -2087,7 +2120,7 @@ export function RouteContextFallback({
             className={`route-context-fallback-item route-context-${item.severity}`}
           >
             {(() => {
-              const meta = [item.distanceLabel, item.source].filter(Boolean).join(" · ");
+              const meta = [item.placementLabel, item.source].filter(Boolean).join(" · ");
               if (item.focusable) {
                 return (
                   <button

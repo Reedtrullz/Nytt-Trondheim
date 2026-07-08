@@ -1800,14 +1800,16 @@ describe("TrafficMapPage route overlay helpers", () => {
         count: 2,
         mapPointCount: 1,
         blockingCount: 0,
-        heading: "2 punkter langs valgt rute",
+        heading: "1 kartpunkt · 1 kollektivvarsel nær ruten",
       });
-      expect(summary.detail).toContain("Kartet viser plassering");
+      expect(summary.detail).toContain("Kartet viser 1 kartpunkt");
       expect(summary.items).toEqual([
         expect.objectContaining({
           id: "traffic:traffic:f6650",
           kind: "traffic",
           title: "Fv. 6650 Ilevolen",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 121 m",
           distanceLabel: "121 m fra ruten",
           source: "Statens vegvesen",
           eventId: "traffic:f6650",
@@ -1817,6 +1819,8 @@ describe("TrafficMapPage route overlay helpers", () => {
           id: "transit_alert:alert:line-3",
           kind: "transit_alert",
           title: "Endret rute",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 220 m",
           distanceLabel: "220 m fra ruten",
           source: "Entur",
           focusable: false,
@@ -1845,8 +1849,8 @@ describe("TrafficMapPage route overlay helpers", () => {
       expect(summary).toMatchObject({
         count: 1,
         mapPointCount: 0,
-        heading: "1 tekstpunkt i kompakt fallback",
-        detail: "Dette er en kompakt tekstfallback uten kartpunkter.",
+        heading: "1 kollektivvarsel nær ruten",
+        detail: "Rutevarslene har ikke egne kartpunkter og vises som kompakt tekst.",
       });
       expect(summary.items).toEqual([
         expect.objectContaining({
@@ -1854,10 +1858,43 @@ describe("TrafficMapPage route overlay helpers", () => {
           kind: "transit_alert",
           title: "Endret rute",
           source: "Entur",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 220 m",
           href: "https://www.atb.no/reise/",
           focusable: false,
         }),
       ]);
+    });
+
+    it("labels line-only transit alerts as text context without map points", () => {
+      const summary = buildRouteContextSummary(
+        basePlan({
+          trafficImpacts: [],
+          publicTransportSuggestions: [
+            {
+              id: "alert:line-only",
+              kind: "alert",
+              title: "Endret rute",
+              detail: "Linje 3 kjører via Lerkendal.",
+              source: "Entur avvik",
+              href: "https://www.atb.no/reise/",
+            },
+          ],
+        }),
+      );
+
+      expect(summary).toMatchObject({
+        count: 1,
+        mapPointCount: 0,
+        heading: "1 linjevarsel uten kartpunkt",
+        detail: "Rutevarslene har ikke egne kartpunkter og vises som kompakt tekst.",
+      });
+      expect(summary.items[0]).toEqual(
+        expect.objectContaining({
+          placement: "transit_line_alert",
+          placementLabel: "Linjevarsel uten kartpunkt",
+        }),
+      );
     });
 
     it("keeps DATEX and Vegvesen traffic source labels distinct", () => {
@@ -1930,6 +1967,8 @@ describe("TrafficMapPage route overlay helpers", () => {
           detail: "121 m fra ruten",
           source: "Vegvesen",
           severity: "watch",
+          placement: "near_route",
+          placementLabel: "Nær ruten · 121 m",
           eventId: "one",
           focusable: true,
         }),
@@ -1943,6 +1982,8 @@ describe("TrafficMapPage route overlay helpers", () => {
           detail: "Linje 3",
           source: "Entur",
           severity: "watch",
+          placement: "transit_line_alert",
+          placementLabel: "Linjevarsel uten kartpunkt",
           suggestionId: "two",
           focusable: false,
         }),
@@ -1983,8 +2024,8 @@ describe("TrafficMapPage route overlay helpers", () => {
         count: 2,
         mapPointCount: 1,
         blockingCount: 0,
-        heading: "2 punkter langs valgt rute",
-        detail: "Kartet viser plassering langs valgt rute. Tekstlisten er kun en kompakt fallback.",
+        heading: "1 kartpunkt · 1 kollektivvarsel nær ruten",
+        detail: "Kartet viser 1 kartpunkt. 1 varsel uten kartpunkt vises som kompakt tekst.",
         items: [
           {
             id: "traffic:one",
@@ -1993,6 +2034,8 @@ describe("TrafficMapPage route overlay helpers", () => {
             detail: "121 m fra foreslått rute",
             source: "Vegvesen",
             severity: "watch" as const,
+            placement: "near_route" as const,
+            placementLabel: "Nær ruten · 121 m",
             distanceLabel: "121 m fra ruten",
             eventId: "one",
             focusable: true,
@@ -2004,6 +2047,8 @@ describe("TrafficMapPage route overlay helpers", () => {
             detail: "Linje 3 kjører via Lerkendal.",
             source: "Entur",
             severity: "watch" as const,
+            placement: "near_route" as const,
+            placementLabel: "Nær ruten · 220 m",
             distanceLabel: "220 m fra ruten",
             href: "https://www.atb.no/reise/",
             suggestionId: "two",
@@ -2015,7 +2060,7 @@ describe("TrafficMapPage route overlay helpers", () => {
       const html = renderToStaticMarkup(createElement(RouteContextFallback, { summary }));
 
       expect(html).toContain("Kartpunkter langs valgt rute");
-      expect(html).toContain("2 punkter langs valgt rute");
+      expect(html).toContain("1 kartpunkt · 1 kollektivvarsel nær ruten");
       expect(html).toContain("Fv. 6650 Ilevolen");
       expect(html).toContain("Endret rute");
       expect(html).toContain("Linje 3 kjører via Lerkendal.");

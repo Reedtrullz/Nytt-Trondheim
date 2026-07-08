@@ -414,6 +414,17 @@ function hasSharedPlace(left: Article, right: Article): boolean {
   return tokenSimilarity(leftPlaces, rightPlaces).overlap > 0;
 }
 
+function hasSpecificPlaceMention(left: Article, right: Article): boolean {
+  const leftPlaces = articlePlaceTokens(left);
+  const rightPlaces = articlePlaceTokens(right);
+  const leftText = articleTextTokens(left);
+  const rightText = articleTextTokens(right);
+  return (
+    [...leftPlaces].some((place) => rightText.has(place)) ||
+    [...rightPlaces].some((place) => leftText.has(place))
+  );
+}
+
 function hasConflictingSpecificPlaces(left: Article, right: Article): boolean {
   const leftPlaces = articlePlaceTokens(left);
   const rightPlaces = articlePlaceTokens(right);
@@ -425,6 +436,20 @@ function sameBroadCategory(left: Article, right: Article): boolean {
   if (left.category === right.category) return true;
   const eventLike = new Set(["Hendelser", "Krim", "Nyheter"]);
   return eventLike.has(left.category) && eventLike.has(right.category);
+}
+
+function categoriesCompatibleForIncidentSignal(
+  left: Article,
+  right: Article,
+  signal: string,
+): boolean {
+  if (sameBroadCategory(left, right)) return true;
+  if (signal !== "traffic_collision") return false;
+  const eventLike = new Set(["Hendelser", "Krim", "Nyheter"]);
+  return (
+    (left.category === "Transport" && eventLike.has(right.category)) ||
+    (right.category === "Transport" && eventLike.has(left.category))
+  );
 }
 
 function sameCanonicalUrl(left: Article, right: Article): boolean {
@@ -549,7 +574,8 @@ function compatibleDifferentSituationSignal(
   if (!left.situationId || !right.situationId || left.situationId === right.situationId) {
     return undefined;
   }
-  if (!sameBroadCategory(left, right) || !hasSharedPlace(left, right)) return undefined;
+  const sharedPlace = hasSharedPlace(left, right);
+  if (!sharedPlace && hasConflictingSpecificPlaces(left, right)) return undefined;
   const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
   const distinctive = tokenSimilarity(
     articleDistinctiveIncidentTokens(left),
@@ -558,6 +584,9 @@ function compatibleDifferentSituationSignal(
 
   for (const signal of sharedIncidentSignals(left, right)) {
     if (!compatibleDifferentSituationSignals.has(signal)) continue;
+    if (!sharedPlace && signal !== "traffic_collision") continue;
+    if (!sharedPlace && !hasSpecificPlaceMention(left, right)) continue;
+    if (!categoriesCompatibleForIncidentSignal(left, right, signal)) continue;
     const rule = genericPlaceIncidentSignalRules.get(signal);
     if (
       !rule ||
@@ -593,13 +622,21 @@ function genericPlaceIncidentSignals(
   body: { overlap: number; score: number },
 ): ArticleCoverageDecisionSignal[] {
   if (hasConflictingSpecificPlaces(left, right)) return [];
-  if (!sameBroadCategory(left, right)) return [];
   const distance = publishedDistanceMs(left, right);
   const distinctive = tokenSimilarity(
     articleDistinctiveIncidentTokens(left),
     articleDistinctiveIncidentTokens(right),
   );
   return [...sharedIncidentSignals(left, right)].flatMap((signal) => {
+    if (!categoriesCompatibleForIncidentSignal(left, right, signal)) return [];
+    if (
+      !sameBroadCategory(left, right) &&
+      signal === "traffic_collision" &&
+      !hasSharedPlace(left, right) &&
+      !hasSpecificPlaceMention(left, right)
+    ) {
+      return [];
+    }
     const rule = genericPlaceIncidentSignalRules.get(signal);
     if (
       !rule ||
