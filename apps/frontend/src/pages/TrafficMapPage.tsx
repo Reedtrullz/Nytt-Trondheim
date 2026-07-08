@@ -1955,9 +1955,8 @@ function routeContextSeverityFromTraffic(severity?: string): RouteContextItem["s
 
 function routeContextSourceLabel(source: string): string {
   const normalized = source.toLocaleLowerCase("nb");
-  if (normalized === "datex" || normalized.includes("vegvesen") || normalized.includes("datex")) {
-    return "Vegvesen";
-  }
+  if (normalized === "datex" || normalized.includes("datex")) return "DATEX";
+  if (normalized.includes("vegvesen")) return "Statens vegvesen";
   if (normalized.includes("entur")) return "Entur";
   return source;
 }

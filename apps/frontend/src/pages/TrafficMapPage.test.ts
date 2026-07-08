@@ -1803,7 +1803,7 @@ describe("TrafficMapPage route overlay helpers", () => {
           kind: "traffic",
           title: "Fv. 6650 Ilevolen",
           distanceLabel: "121 m fra ruten",
-          source: "Vegvesen",
+          source: "Statens vegvesen",
           eventId: "traffic:f6650",
           focusable: true,
         }),
@@ -1816,6 +1816,39 @@ describe("TrafficMapPage route overlay helpers", () => {
           focusable: false,
         }),
       ]);
+    });
+
+    it("keeps DATEX and Vegvesen traffic source labels distinct", () => {
+      const trafficImpact = basePlan().trafficImpacts[0]!;
+      const summary = buildRouteContextSummary(
+        basePlan({
+          trafficImpacts: [
+            {
+              ...trafficImpact,
+              event: {
+                ...trafficImpact.event,
+                id: "datex:e6",
+                source: "datex",
+                sourceEventId: "datex:e6",
+                title: "E6 Sluppen",
+              },
+            },
+            {
+              ...trafficImpact,
+              event: {
+                ...trafficImpact.event,
+                id: "trafficinfo:e6",
+                source: "vegvesen_traffic_info",
+                sourceEventId: "trafficinfo:e6",
+                title: "TrafficInfo E6 Sluppen",
+              },
+            },
+          ],
+          publicTransportSuggestions: [],
+        }),
+      );
+
+      expect(summary.items.map((item) => item.source)).toEqual(["DATEX", "Statens vegvesen"]);
     });
 
     it("returns an empty calm summary when no route context exists", () => {
