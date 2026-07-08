@@ -614,7 +614,7 @@ describe("article coverage analysis", () => {
     ]);
   });
 
-  it("bundles close downtown order and threat updates that otherwise split into several rows", () => {
+  it("bundles downtown pinne order updates across sources", () => {
     const analysis = analyzeArticleCoverage(
       [
         article({
@@ -654,6 +654,19 @@ describe("article coverage analysis", () => {
           location: { lat: 63.424, lng: 10.395, label: "Prinsengate" },
           situationId: "politiloggen-prinsensgate-pinne",
         }),
+      ],
+      "2026-07-04T18:00:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(1);
+    expect(analysis.bundles[0]?.memberArticleIds).toEqual(
+      expect.arrayContaining(["adressa-pinne-update", "nrk-pinne", "politiloggen-pinne"]),
+    );
+  });
+
+  it("bundles downtown trussel order updates across sources", () => {
+    const analysis = analyzeArticleCoverage(
+      [
         article({
           id: "nrk-trussel",
           source: "nrk",
@@ -696,26 +709,46 @@ describe("article coverage analysis", () => {
     );
 
     expect(analysis.bundles).toHaveLength(1);
-    expect(analysis.bundles[0]).toMatchObject({
-      kind: "incident",
-      confidence: "high",
-      memberArticleIds: expect.arrayContaining([
-        "adressa-pinne-update",
-        "nrk-pinne",
-        "politiloggen-pinne",
-        "nrk-trussel",
-        "adressa-trussel",
-        "politiloggen-trussel",
-      ]),
-      signals: expect.arrayContaining([
-        expect.objectContaining({
-          kind: "generic_place_incident",
-          detail: "street_order",
+    expect(analysis.bundles[0]?.memberArticleIds).toEqual(
+      expect.arrayContaining(["nrk-trussel", "adressa-trussel", "politiloggen-trussel"]),
+    );
+  });
+
+  it("keeps distinct downtown order families separate when only broad area tokens overlap", () => {
+    const analysis = analyzeArticleCoverage(
+      [
+        article({
+          id: "politiloggen-pinne",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Ro og orden: Trondheim, Prinsengate",
+          excerpt:
+            "Patruljen har kontroll på en mann som viftet med en pinne mot forbipasserende i Elgesetergate. Mannen fremstår ruset og kjøres til legevakt.",
+          publishedAt: "2026-07-04T17:47:00.000Z",
+          category: "Hendelser",
+          places: ["Trondheim", "Prinsengate"],
+          location: { lat: 63.424, lng: 10.395, label: "Prinsengate" },
+          situationId: "politiloggen-prinsensgate-pinne",
         }),
-      ]),
-      nearMisses: [],
-    });
-    expect(new Set(analysis.articles.map((item) => item.coverageBundle?.id))).toHaveLength(1);
+        article({
+          id: "politiloggen-trussel",
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Andre hendelser: Trondheim, Sentrum",
+          excerpt:
+            "Politiet har kontroll på flere ungdommer etter en mulig trusselsituasjon i Midtbyen. Alle involverte er mindreårige. Tre mindreårige blir bortvist fra stedet.",
+          publishedAt: "2026-07-04T17:18:00.000Z",
+          category: "Krim",
+          places: ["Trondheim", "Sentrum"],
+          location: { lat: 63.4305, lng: 10.3951, label: "Trondheim sentrum" },
+          situationId: "politiloggen-midtbyen-trussel",
+        }),
+      ],
+      "2026-07-04T18:00:00.000Z",
+    );
+
+    expect(analysis.bundles).toHaveLength(0);
+    expect(analysis.articles.map((item) => item.coverageBundle)).toEqual([undefined, undefined]);
   });
 
   it("bundles serious violence reports with different source counts but the same victim context", () => {

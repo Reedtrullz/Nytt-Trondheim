@@ -268,6 +268,13 @@ const incidentSignals: Array<[string, RegExp]> = [
     /^(?!.*\b(?:dyr|hund|hest|katt)\b)(?=.*\b(?:savnet\w*|leteaksjon\w*|s[øo]k(?:er|te|t|es)?\w*)\b)(?=.*\b(?:dame|eldre|kvinne|mann|pasient|person|[0-9]{2}\s*-?\s*[åa]r(?:ene|ing)?|[0-9]{2}-[åa]ra)\b)/iu,
   ],
 ];
+const streetOrderSubSignals: Array<[string, RegExp]> = [
+  ["pinne", /\b(pinne\w*|viftet\w*|forbipasserende|ruset|legevakt\w*)\b/iu],
+  [
+    "trussel",
+    /\b(trusselsituasjon\w*|trussel\w*|mindre[åa]rig\w*|ungdom(?:men|mer|mene)?|bortvis\w*)\b/iu,
+  ],
+];
 const topicSignals: Array<[string, (text: string) => boolean]> = [
   [
     "rosenborg_trener",
@@ -502,6 +509,20 @@ function articleIncidentSignals(article: Article): Set<string> {
   return signals;
 }
 
+function articleStreetOrderSubSignals(article: Article): Set<string> {
+  const text = articleText(article);
+  return new Set(
+    streetOrderSubSignals.filter(([, pattern]) => pattern.test(text)).map(([signal]) => signal),
+  );
+}
+
+function streetOrderSubSignalsCompatible(left: Article, right: Article): boolean {
+  const leftSignals = articleStreetOrderSubSignals(left);
+  const rightSignals = articleStreetOrderSubSignals(right);
+  if (leftSignals.size === 0 || rightSignals.size === 0) return true;
+  return [...leftSignals].some((signal) => rightSignals.has(signal));
+}
+
 function sportsResultTopicSignals(text: string): string[] {
   if (!sportsResultPattern.test(text) || !sportsMatchContextPattern.test(text)) return [];
   return localSportsClubSignals.flatMap(([club, pattern]) =>
@@ -584,6 +605,9 @@ function compatibleDifferentSituationSignal(
 
   for (const signal of sharedIncidentSignals(left, right)) {
     if (!compatibleDifferentSituationSignals.has(signal)) continue;
+    if (signal === "street_order" && !streetOrderSubSignalsCompatible(left, right)) {
+      continue;
+    }
     if (!sharedPlace && signal !== "traffic_collision") continue;
     if (!sharedPlace && !hasSpecificPlaceMention(left, right)) continue;
     if (!categoriesCompatibleForIncidentSignal(left, right, signal)) continue;
@@ -628,6 +652,9 @@ function genericPlaceIncidentSignals(
     articleDistinctiveIncidentTokens(right),
   );
   return [...sharedIncidentSignals(left, right)].flatMap((signal) => {
+    if (signal === "street_order" && !streetOrderSubSignalsCompatible(left, right)) {
+      return [];
+    }
     if (!categoriesCompatibleForIncidentSignal(left, right, signal)) return [];
     if (
       !sameBroadCategory(left, right) &&
