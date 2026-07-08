@@ -2062,7 +2062,11 @@ export function RouteContextFallback({
   return (
     <details className="route-context-fallback">
       <summary>
-        <span>{summary.mapPointCount > 0 ? "Kartpunkter langs valgt rute" : "Tekstfallback for valgt rute"}</span>
+        <span>
+          {summary.mapPointCount > 0
+            ? "Kartpunkter langs valgt rute"
+            : "Tekstfallback for valgt rute"}
+        </span>
         <strong>{summary.heading}</strong>
       </summary>
       <p>{summary.detail}</p>
@@ -2078,7 +2082,9 @@ export function RouteContextFallback({
                 return (
                   <button
                     type="button"
-                    aria-pressed={item.eventId && selectedEventId === item.eventId ? "true" : undefined}
+                    aria-pressed={
+                      item.eventId && selectedEventId === item.eventId ? "true" : undefined
+                    }
                     onClick={() => onFocusItem?.(item)}
                   >
                     <span>{index + 1}</span>
