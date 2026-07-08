@@ -1975,6 +1975,16 @@ export function eventIdForRouteContextItem(item: RouteContextItem): string | und
   return item.kind === "traffic" && item.focusable ? item.eventId : undefined;
 }
 
+export function mergeRouteContextTrafficEvents(
+  visibleEvents: TrafficMapEvent[],
+  routeContextEvents: TrafficMapEvent[],
+): TrafficMapEvent[] {
+  if (!routeContextEvents.length) return visibleEvents;
+  const mergedEvents = new Map(visibleEvents.map((event) => [event.id, event]));
+  routeContextEvents.forEach((event) => mergedEvents.set(event.id, event));
+  return Array.from(mergedEvents.values());
+}
+
 export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContextSummary {
   const trafficItems: RouteContextItem[] = (plan?.trafficImpacts ?? []).map((impact) => ({
     id: `traffic:${impact.event.id}`,
@@ -2090,6 +2100,9 @@ export function RouteContextFallback({
                     <span>{index + 1}</span>
                     <strong>{item.title}</strong>
                     <small>{meta}</small>
+                    {item.detail ? (
+                      <small className="route-context-fallback-detail">{item.detail}</small>
+                    ) : null}
                   </button>
                 );
               }
@@ -2100,6 +2113,9 @@ export function RouteContextFallback({
                     <span>{index + 1}</span>
                     <strong>{item.title}</strong>
                     <small>{meta}</small>
+                    {item.detail ? (
+                      <small className="route-context-fallback-detail">{item.detail}</small>
+                    ) : null}
                   </a>
                 );
               }
@@ -2108,6 +2124,9 @@ export function RouteContextFallback({
                   <span>{index + 1}</span>
                   <strong>{item.title}</strong>
                   <small>{meta}</small>
+                  {item.detail ? (
+                    <small className="route-context-fallback-detail">{item.detail}</small>
+                  ) : null}
                 </div>
               );
             })()}
@@ -4299,10 +4318,20 @@ export function TrafficMapPage() {
     () => new Set(visibleTrafficEvents.map((event) => event.id)),
     [visibleTrafficEvents],
   );
+  const routeContextTrafficEvents = useMemo(
+    () => travelPlan?.trafficImpacts.map((impact) => impact.event) ?? [],
+    [travelPlan],
+  );
+  const visibleTrafficEventsWithRouteContext = useMemo(
+    () => mergeRouteContextTrafficEvents(visibleTrafficEvents, routeContextTrafficEvents),
+    [routeContextTrafficEvents, visibleTrafficEvents],
+  );
 
   const selectedEvent = useMemo(
-    () => visibleTrafficEvents.find((event) => event.id === selectedEventId),
-    [visibleTrafficEvents, selectedEventId],
+    () =>
+      visibleTrafficEventsWithRouteContext.find((event) => event.id === selectedEventId) ??
+      data?.events.find((event) => event.id === selectedEventId),
+    [data?.events, selectedEventId, visibleTrafficEventsWithRouteContext],
   );
 
   const rankedEventsForList = useMemo(
@@ -4831,7 +4860,7 @@ export function TrafficMapPage() {
 
       <details
         className="traffic-support-disclosure traffic-map-disclosure"
-        open={!travelPlan || routeContextSummary.count > 0}
+        open={!travelPlan || routeContextSummary.mapPointCount > 0}
       >
         <summary>Kart og trafikkgrunnlag</summary>
         <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
@@ -4885,9 +4914,9 @@ export function TrafficMapPage() {
                 onSelectImpact={setSelectedCorridorId}
               />
             ) : null}
-            {data?.events ? (
+            {visibleTrafficEventsWithRouteContext.length > 0 ? (
               <TrafficLayer
-                events={visibleTrafficEvents}
+                events={visibleTrafficEventsWithRouteContext}
                 highlightedEventIds={highlightedEventIds}
                 showEstimatedNews={visibleContextLayers.estimatedNews}
                 onSelectEvent={setSelectedEventId}

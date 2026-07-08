@@ -1,6 +1,7 @@
 import type {
   PublicTransportDeparture,
   PublicTransportDepartureBoardPayload,
+  TrafficMapEvent,
   TravelPlanPayload,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
@@ -46,6 +47,7 @@ import {
   readRememberedDepartureBoards,
   readRememberedTravelRoutes,
   eventIdForRouteContextItem,
+  mergeRouteContextTrafficEvents,
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
   RouteContextFallback,
@@ -1906,6 +1908,19 @@ describe("TrafficMapPage route overlay helpers", () => {
   });
 
   describe("route context map focus", () => {
+    const trafficEvent = (overrides: Partial<TrafficMapEvent>): TrafficMapEvent => ({
+      id: "event:one",
+      source: "vegvesen_traffic_info",
+      sourceEventId: "one",
+      category: "accident",
+      severity: "medium",
+      state: "active",
+      title: "Fv. 6650 Ilevolen",
+      updatedAt: "2026-07-08T10:00:00.000Z",
+      geometry: { type: "Point", coordinates: [10.4, 63.42] },
+      ...overrides,
+    });
+
     it("returns traffic event ids for focusable route context items only", () => {
       expect(
         eventIdForRouteContextItem({
@@ -1932,6 +1947,33 @@ describe("TrafficMapPage route overlay helpers", () => {
           focusable: false,
         }),
       ).toBeUndefined();
+    });
+
+    it("keeps route-context traffic events available for map focus even when filters hide them", () => {
+      const visibleEvent = trafficEvent({ id: "visible", sourceEventId: "visible" });
+      const routeOnlyEvent = trafficEvent({
+        id: "route-only",
+        sourceEventId: "route-only",
+        title: "Rutehendelse utenfor filter",
+      });
+
+      expect(mergeRouteContextTrafficEvents([visibleEvent], [routeOnlyEvent])).toEqual([
+        visibleEvent,
+        routeOnlyEvent,
+      ]);
+    });
+
+    it("deduplicates route-context traffic events already visible on the map", () => {
+      const visibleEvent = trafficEvent({ id: "shared", sourceEventId: "shared" });
+      const routeContextEvent = trafficEvent({
+        id: "shared",
+        sourceEventId: "shared",
+        title: "Oppdatert rutetittel",
+      });
+
+      expect(mergeRouteContextTrafficEvents([visibleEvent], [routeContextEvent])).toEqual([
+        routeContextEvent,
+      ]);
     });
   });
 
@@ -1976,6 +2018,7 @@ describe("TrafficMapPage route overlay helpers", () => {
       expect(html).toContain("2 punkter langs valgt rute");
       expect(html).toContain("Fv. 6650 Ilevolen");
       expect(html).toContain("Endret rute");
+      expect(html).toContain("Linje 3 kjører via Lerkendal.");
       expect(html).toContain('href="https://www.atb.no/reise/"');
       expect(html).not.toContain("disabled");
       expect(html).not.toContain("Se trafikk langs ruten");

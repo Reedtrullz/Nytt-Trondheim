@@ -11322,7 +11322,7 @@ button {
 }
 
 .route-context-fallback-item span {
-  grid-row: span 2;
+  grid-row: span 3;
   display: inline-grid;
   place-items: center;
   width: 24px;
@@ -11342,6 +11342,10 @@ button {
 .route-context-fallback-item small {
   color: var(--muted);
   font-size: 12px;
+}
+
+.route-context-fallback-detail {
+  line-height: 1.35;
 }
 
 .public-transport-card header {
