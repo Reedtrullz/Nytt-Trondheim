@@ -2187,6 +2187,10 @@ function trafficEventListCopy(
   };
 }
 
+export function includeRoadContextForLayers(visibleContextLayers: TrafficLayerVisibility): boolean {
+  return visibleContextLayers.weatherRisk;
+}
+
 function TravelPlanLayer({
   plan,
   selectedItineraryId,
@@ -4251,7 +4255,7 @@ export function TrafficMapPage() {
   const requestedTrafficStates: TrafficEventState[] = visibleContextLayers.showAll
     ? ["active", "planned", "expired", "cancelled"]
     : timeWindow.states;
-  const includeRoadContext = visibleContextLayers.weatherRisk || visibleContextLayers.showAll;
+  const includeRoadContext = includeRoadContextForLayers(visibleContextLayers);
   const { data, loading, error, reload } = useTrafficMap({
     categories: selectedCategories,
     severities: selectedSeverities,

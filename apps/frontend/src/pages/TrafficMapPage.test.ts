@@ -7,6 +7,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { TrafficLayerVisibility } from "../components/map/TrafficFilterPanel.js";
 
 vi.mock("react-leaflet", () => ({
   CircleMarker: () => null,
@@ -41,6 +42,7 @@ import {
   departureTimeForPreset,
   displayDepartureRows,
   formatTravelDateTime,
+  includeRoadContextForLayers,
   mergeTrafficFilterSearch,
   mergeTravelPlannerSearch,
   parseTravelPlannerSearch,
@@ -82,6 +84,36 @@ function storageReturning(raw: string | null): Storage {
     length: raw ? 1 : 0,
   } as Storage;
 }
+
+const baseTrafficLayerVisibility: TrafficLayerVisibility = {
+  incidents: true,
+  roadworks: true,
+  travelTime: false,
+  publicTransportDisruptions: false,
+  publicTransportVehicles: false,
+  weatherRisk: false,
+  estimatedNews: false,
+  privateNotes: false,
+  showAll: false,
+};
+
+describe("TrafficMapPage layer helpers", () => {
+  it("requests road context only when the road-context layer is visible", () => {
+    expect(includeRoadContextForLayers(baseTrafficLayerVisibility)).toBe(false);
+    expect(
+      includeRoadContextForLayers({
+        ...baseTrafficLayerVisibility,
+        showAll: true,
+      }),
+    ).toBe(false);
+    expect(
+      includeRoadContextForLayers({
+        ...baseTrafficLayerVisibility,
+        weatherRisk: true,
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("remembered travel routes", () => {
   it("deduplicates routes by actual query and preserves pinning", () => {
