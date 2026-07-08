@@ -6,6 +6,7 @@ import type {
   TrafficMapPayload,
 } from "@nytt/shared";
 import { fetchTrafficMap } from "../api/trafficMap.js";
+import type { MapBounds } from "../mapBounds.js";
 import { useVisiblePolling } from "./useVisiblePolling.js";
 
 export interface UseTrafficMapOptions {
@@ -15,12 +16,7 @@ export interface UseTrafficMapOptions {
   estimatedNews?: boolean;
   from?: string;
   to?: string;
-  bounds?: {
-    north: number;
-    south: number;
-    east: number;
-    west: number;
-  };
+  bounds?: MapBounds;
 }
 
 function boundsKey(bounds: UseTrafficMapOptions["bounds"]): string {

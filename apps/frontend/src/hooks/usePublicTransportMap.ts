@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicTransportMapPayload, PublicTransportVehicleMode } from "@nytt/shared";
 import { fetchPublicTransportMap } from "../api/publicTransportMap.js";
+import type { MapBounds } from "../mapBounds.js";
 import { useVisiblePolling } from "./useVisiblePolling.js";
 
 export interface UsePublicTransportMapOptions {
   modes?: PublicTransportVehicleMode[];
   includeAlerts?: boolean;
-  bounds?: {
-    north: number;
-    south: number;
-    east: number;
-    west: number;
-  };
+  bounds?: MapBounds;
   enabled?: boolean;
 }
 
