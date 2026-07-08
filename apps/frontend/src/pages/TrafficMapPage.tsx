@@ -50,6 +50,7 @@ import {
   latLngFromGeoJsonPosition,
   latLngsFromLineString,
 } from "../mapCoordinates.js";
+import { mapBoundsEqual, type MapBounds } from "../mapBounds.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { compactTrafficEventRow } from "../trafficEventRows.js";
 import {
@@ -64,13 +65,6 @@ import {
   visibleByDefault,
   visibleInTrafficLayers,
 } from "../trafficViewModel.js";
-
-interface MapBounds {
-  north: number;
-  south: number;
-  east: number;
-  west: number;
-}
 
 interface TrafficTimeWindow {
   states: TrafficEventState[];
@@ -4494,7 +4488,9 @@ export function TrafficMapPage() {
   }, [data?.corridorImpacts, selectedCorridorId, selectedEventId, travelPlan]);
 
   const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
-    setBounds(nextBounds);
+    setBounds((currentBounds) =>
+      mapBoundsEqual(currentBounds, nextBounds) ? currentBounds : nextBounds,
+    );
   }, []);
 
   const handleRouteContextFocus = useCallback((item: RouteContextItem) => {

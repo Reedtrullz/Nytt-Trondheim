@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicTransportMapPayload, PublicTransportVehicleMode } from "@nytt/shared";
 import { fetchPublicTransportMap } from "../api/publicTransportMap.js";
+import { useVisiblePolling } from "./useVisiblePolling.js";
 
 export interface UsePublicTransportMapOptions {
   modes?: PublicTransportVehicleMode[];
@@ -102,13 +103,11 @@ export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}
     void reload();
   }, [reload]);
 
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const interval = window.setInterval(() => {
-      void reload();
-    }, 60_000);
-    return () => window.clearInterval(interval);
-  }, [enabled, reload]);
+  useVisiblePolling({
+    enabled,
+    intervalMs: 60_000,
+    reload,
+  });
 
   useEffect(() => {
     return () => {

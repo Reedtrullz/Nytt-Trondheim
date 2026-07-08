@@ -24,6 +24,7 @@ import {
   latLngFromGeoJsonPosition,
   latLngsFromGeometry,
 } from "../mapCoordinates.js";
+import { mapBoundsEqual, type MapBounds } from "../mapBounds.js";
 import {
   bearingDegrees,
   circlePolygon,
@@ -79,13 +80,6 @@ type PrivateFeatureProperties = Pick<
   | "styleKey"
   | "sourceItemIds"
 >;
-
-interface MapBounds {
-  north: number;
-  south: number;
-  east: number;
-  west: number;
-}
 
 const minToolRadiusMeters = 25;
 const maxToolRadiusMeters = 50_000;
@@ -295,7 +289,9 @@ export function SituationMap({
   const mapCenter: LatLngTuple = featurePositions[0] ?? [63.421, 10.395];
 
   const handleBoundsChange = useCallback((nextBounds: MapBounds) => {
-    setBounds(nextBounds);
+    setBounds((currentBounds) =>
+      mapBoundsEqual(currentBounds, nextBounds) ? currentBounds : nextBounds,
+    );
   }, []);
 
   function featureProperties(

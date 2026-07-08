@@ -6,6 +6,7 @@ import type {
   TrafficMapPayload,
 } from "@nytt/shared";
 import { fetchTrafficMap } from "../api/trafficMap.js";
+import { useVisiblePolling } from "./useVisiblePolling.js";
 
 export interface UseTrafficMapOptions {
   categories: TrafficEventCategory[];
@@ -142,12 +143,10 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
     void reload();
   }, [reload]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      void reload();
-    }, 60_000);
-    return () => window.clearInterval(interval);
-  }, [reload]);
+  useVisiblePolling({
+    intervalMs: 60_000,
+    reload,
+  });
 
   useEffect(() => {
     return () => {
