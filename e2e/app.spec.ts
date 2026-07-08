@@ -2729,7 +2729,7 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(page.getByText("Reiseråd nå", { exact: true })).toBeVisible();
   await expect(page.getByText("Munkegata, Midtbyen → Leangen, Trondheim")).toBeVisible();
   await expect(page.getByLabel("Ruteoppsummering")).toContainText(
-    "1 reiseforslag · 2 punkt langs valgt rute",
+    "1 reiseforslag · 2 punkter langs valgt rute",
   );
   await expect(page.getByLabel("Velg reiseforslag")).toBeVisible();
   await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText("Buss 3");
@@ -2756,7 +2756,10 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(fallback.getByRole("button", { name: /Veiarbeid på E6 ved Leangen/ })).toHaveCount(
     1,
   );
-  await expect(fallback.getByRole("button", { name: /Forsinkelse på linje 3/ })).toHaveCount(1);
+  await expect(fallback.getByText("Forsinkelse på linje 3")).toBeVisible();
+  const fallbackRow = fallback.getByRole("button", { name: /Veiarbeid på E6 ved Leangen/ });
+  await fallbackRow.click();
+  await expect(fallbackRow).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText(
     "Lade - Hallset",
   );

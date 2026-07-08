@@ -1935,6 +1935,7 @@ export type RouteContextItem = {
   distanceLabel?: string;
   eventId?: string;
   suggestionId?: string;
+  href?: string;
   focusable: boolean;
 };
 
@@ -1964,6 +1965,10 @@ function routeContextSourceLabel(source: string): string {
 function routeContextDistanceLabel(distanceMeters?: number): string | undefined {
   if (distanceMeters === undefined) return undefined;
   return `${formatDistance(distanceMeters)} fra ruten`;
+}
+
+function routeContextCountLabel(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "er"}`;
 }
 
 export function eventIdForRouteContextItem(item: RouteContextItem): string | undefined {
@@ -1998,6 +2003,7 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
       severity: "watch",
       distanceLabel: routeContextDistanceLabel(suggestion.distanceMeters),
       suggestionId: suggestion.id,
+      href: suggestion.href,
       focusable: false,
     }));
 
@@ -2017,15 +2023,21 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
     };
   }
 
+  const textFallbackCount = count - mapPointCount;
   return {
     count,
     mapPointCount,
     blockingCount,
-    heading: `${count} punkt langs valgt rute`,
+    heading:
+      mapPointCount > 0
+        ? `${routeContextCountLabel(count, "punkt")} langs valgt rute`
+        : `${routeContextCountLabel(count, "tekstpunkt")} i kompakt fallback`,
     detail:
       mapPointCount > 0
-        ? `Kartet viser plassering av ${mapPointCount} kartpunkt som bør vurderes underveis.`
-        : "Kartet viser punkter med trafikk- og kollektivkontekst langs valgt rute.",
+        ? textFallbackCount > 0
+          ? `Kartet viser plassering av ${routeContextCountLabel(mapPointCount, "kartpunkt")}. ${routeContextCountLabel(textFallbackCount, "punkt")} vises som kompakt tekstfallback uten kartpunkter.`
+          : `Kartet viser plassering av ${routeContextCountLabel(mapPointCount, "kartpunkt")} som bør vurderes underveis.`
+        : "Dette er en kompakt tekstfallback uten kartpunkter.",
     items,
   };
 }
@@ -2033,9 +2045,11 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
 export function RouteContextFallback({
   summary,
   onFocusItem,
+  selectedEventId,
 }: {
   summary: RouteContextSummary;
   onFocusItem?: (item: RouteContextItem) => void;
+  selectedEventId?: string;
 }) {
   if (summary.count === 0) {
     return (
@@ -2048,7 +2062,7 @@ export function RouteContextFallback({
   return (
     <details className="route-context-fallback">
       <summary>
-        <span>Kartpunkter langs valgt rute</span>
+        <span>{summary.mapPointCount > 0 ? "Kartpunkter langs valgt rute" : "Tekstfallback for valgt rute"}</span>
         <strong>{summary.heading}</strong>
       </summary>
       <p>{summary.detail}</p>
@@ -2058,15 +2072,39 @@ export function RouteContextFallback({
             key={item.id}
             className={`route-context-fallback-item route-context-${item.severity}`}
           >
-            <button
-              type="button"
-              disabled={!item.focusable || !onFocusItem}
-              onClick={() => onFocusItem?.(item)}
-            >
-              <span>{index + 1}</span>
-              <strong>{item.title}</strong>
-              <small>{[item.distanceLabel, item.source].filter(Boolean).join(" · ")}</small>
-            </button>
+            {(() => {
+              const meta = [item.distanceLabel, item.source].filter(Boolean).join(" · ");
+              if (item.focusable) {
+                return (
+                  <button
+                    type="button"
+                    aria-pressed={item.eventId && selectedEventId === item.eventId ? "true" : undefined}
+                    onClick={() => onFocusItem?.(item)}
+                  >
+                    <span>{index + 1}</span>
+                    <strong>{item.title}</strong>
+                    <small>{meta}</small>
+                  </button>
+                );
+              }
+              const safeHref = item.href ? safeExternalUrl(item.href) : undefined;
+              if (safeHref) {
+                return (
+                  <a href={safeHref} target="_blank" rel="noreferrer noopener">
+                    <span>{index + 1}</span>
+                    <strong>{item.title}</strong>
+                    <small>{meta}</small>
+                  </a>
+                );
+              }
+              return (
+                <div className="route-context-fallback-static">
+                  <span>{index + 1}</span>
+                  <strong>{item.title}</strong>
+                  <small>{meta}</small>
+                </div>
+              );
+            })()}
           </li>
         ))}
       </ol>
@@ -2505,6 +2543,7 @@ function TravelPlanCard({
   loading,
   error,
   selectedItineraryId,
+  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
   routeContextSummary,
@@ -2515,6 +2554,7 @@ function TravelPlanCard({
   loading: boolean;
   error?: string;
   selectedItineraryId?: string;
+  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
   routeContextSummary: RouteContextSummary;
@@ -2587,7 +2627,11 @@ function TravelPlanCard({
           </div>
         ) : null}
       </section>
-      <RouteContextFallback summary={routeContextSummary} onFocusItem={onFocusRouteContextItem} />
+      <RouteContextFallback
+        summary={routeContextSummary}
+        onFocusItem={onFocusRouteContextItem}
+        selectedEventId={selectedEventId}
+      />
       {showFallbackSuggestions ? (
         <details className="travel-secondary-disclosure">
           <summary>Kollektivkontekst</summary>
@@ -3450,6 +3494,7 @@ function TravelPlannerPanel({
   travelPlanLoading,
   travelPlanError,
   selectedItineraryId,
+  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
   routeContextSummary,
@@ -3486,6 +3531,7 @@ function TravelPlannerPanel({
   travelPlanLoading: boolean;
   travelPlanError?: string;
   selectedItineraryId?: string;
+  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
   routeContextSummary: RouteContextSummary;
@@ -3689,6 +3735,7 @@ function TravelPlannerPanel({
             loading={travelPlanLoading}
             error={travelPlanError}
             selectedItineraryId={selectedItineraryId}
+            selectedEventId={selectedEventId}
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
             routeContextSummary={routeContextSummary}
@@ -4705,6 +4752,7 @@ export function TrafficMapPage() {
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
         selectedItineraryId={selectedItineraryId}
+        selectedEventId={selectedEventId}
         routeChoiceModel={routeChoiceModel}
         routeWatchSummary={routeWatchSummary}
         routeContextSummary={routeContextSummary}

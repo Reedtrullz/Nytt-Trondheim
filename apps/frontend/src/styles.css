@@ -11287,7 +11287,9 @@ button {
   border-top: 1px solid var(--line);
 }
 
-.route-context-fallback-item button {
+.route-context-fallback-item button,
+.route-context-fallback-item a,
+.route-context-fallback-static {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 8px 10px;
@@ -11304,9 +11306,19 @@ button {
   cursor: pointer;
 }
 
-.route-context-fallback-item button:not(:disabled):hover,
-.route-context-fallback-item button:not(:disabled):focus-visible {
+.route-context-fallback-item button:hover,
+.route-context-fallback-item button:focus-visible,
+.route-context-fallback-item a:hover,
+.route-context-fallback-item a:focus-visible {
   background: #eef4f8;
+}
+
+.route-context-fallback-item a {
+  text-decoration: none;
+}
+
+.route-context-fallback-static {
+  cursor: default;
 }
 
 .route-context-fallback-item span {

@@ -1798,7 +1798,7 @@ describe("TrafficMapPage route overlay helpers", () => {
         count: 2,
         mapPointCount: 1,
         blockingCount: 0,
-        heading: "2 punkt langs valgt rute",
+        heading: "2 punkter langs valgt rute",
       });
       expect(summary.detail).toContain("Kartet viser plassering");
       expect(summary.items).toEqual([
@@ -1817,6 +1817,42 @@ describe("TrafficMapPage route overlay helpers", () => {
           title: "Endret rute",
           distanceLabel: "220 m fra ruten",
           source: "Entur",
+          focusable: false,
+        }),
+      ]);
+    });
+
+    it("uses compact fallback wording for alert-only route context without map points", () => {
+      const summary = buildRouteContextSummary(
+        basePlan({
+          trafficImpacts: [],
+          publicTransportSuggestions: [
+            {
+              id: "alert:line-3",
+              kind: "alert",
+              title: "Endret rute",
+              detail: "Linje 3 kjører via Lerkendal.",
+              source: "Entur avvik",
+              distanceMeters: 220,
+              href: "https://www.atb.no/reise/",
+            },
+          ],
+        }),
+      );
+
+      expect(summary).toMatchObject({
+        count: 1,
+        mapPointCount: 0,
+        heading: "1 tekstpunkt i kompakt fallback",
+        detail: "Dette er en kompakt tekstfallback uten kartpunkter.",
+      });
+      expect(summary.items).toEqual([
+        expect.objectContaining({
+          id: "transit_alert:alert:line-3",
+          kind: "transit_alert",
+          title: "Endret rute",
+          source: "Entur",
+          href: "https://www.atb.no/reise/",
           focusable: false,
         }),
       ]);
@@ -1927,6 +1963,7 @@ describe("TrafficMapPage route overlay helpers", () => {
             source: "Entur",
             severity: "watch" as const,
             distanceLabel: "220 m fra ruten",
+            href: "https://www.atb.no/reise/",
             suggestionId: "two",
             focusable: false,
           },
@@ -1939,6 +1976,8 @@ describe("TrafficMapPage route overlay helpers", () => {
       expect(html).toContain("2 punkter langs valgt rute");
       expect(html).toContain("Fv. 6650 Ilevolen");
       expect(html).toContain("Endret rute");
+      expect(html).toContain('href="https://www.atb.no/reise/"');
+      expect(html).not.toContain("disabled");
       expect(html).not.toContain("Se trafikk langs ruten");
     });
   });
