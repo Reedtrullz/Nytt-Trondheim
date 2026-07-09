@@ -1234,6 +1234,32 @@ describe("TrafficJourneyAnswer", () => {
     expect(html).toContain("11:10-11:28");
   });
 
+  it("separates compact alert titles from their details", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeWatchSummary: {
+          heading: "Følg med på valgt reise",
+          detail: "1 punkt kan påvirke reiseforslaget.",
+          severity: "watch",
+          items: [
+            {
+              id: "delay-2",
+              label: "Buss 2: Mindre forsinkelse",
+              detail: "Omtrent 2 minutter.",
+              severity: "watch",
+              source: "Entur avvik",
+            },
+          ],
+        },
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Buss 2: Mindre forsinkelse</strong> <span>Omtrent 2 minutter.");
+  });
+
   it("does not reselect an already-selected live option", () => {
     const onSelectItinerary = vi.fn();
     const tree = TrafficJourneyAnswer({

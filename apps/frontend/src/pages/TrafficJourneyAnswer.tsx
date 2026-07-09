@@ -95,7 +95,7 @@ export function TrafficJourneyAnswer({
             <ul>
               {routeWatch.items.map((item) => (
                 <li key={item.id} className={`traffic-journey-watch-item-${item.severity}`}>
-                  <strong>{item.label}</strong>
+                  <strong>{item.label}</strong>{" "}
                   <span>
                     {item.detail} · {item.source}
                   </span>
