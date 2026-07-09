@@ -2284,9 +2284,11 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
 
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
-  await expect(
-    page.locator("#travel-plan-result").getByText("Munkegata, Trondheim → Leangen, Trondheim"),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sjekk AtB/Entur" })).toBeVisible();
+  await expect(page.locator("#travel-plan-result")).toContainText(
+    "Ingen konkrete Entur-reiser funnet for valgt tid.",
+  );
+  await expect(page.locator("#travel-plan-result")).not.toContainText("Ruteoppsummering");
   await expect.poll(() => travelPlanRequestUrls.length).toBe(1);
   expect(travelPlanRequestUrls[0]?.pathname).toBe("/api/map/travel-plan/compare");
 
@@ -3606,7 +3608,9 @@ test("traffic map keeps planner useful when Entur journey search is unavailable"
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
   await expect(page.getByRole("heading", { name: "Sjekk AtB/Entur" })).toBeVisible();
-  await expect(page.getByText(/Entur reisesøk er ikke tilgjengelig akkurat nå/)).toBeVisible();
+  await expect(page.locator("#travel-plan-result .route-planner-status.warning")).toHaveText(
+    "Entur reisesøk er ikke tilgjengelig akkurat nå.",
+  );
   await openTrafficDisclosure(page, "Kollektivkontekst");
   await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
     "href",
