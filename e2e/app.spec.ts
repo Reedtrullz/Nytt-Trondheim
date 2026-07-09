@@ -2337,7 +2337,7 @@ test("traffic map can use Entur route input suggestions without re-geocoding lab
 
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
-  await expect(page.getByRole("heading", { name: "Gå til Leangen" })).toBeVisible();
+  await expect(page.locator("h1#travel-planner-heading")).toHaveText("Gå til Leangen");
   await expect(page.locator("#travel-plan-result")).toContainText(
     "Ingen kollektivreise akkurat nå.",
   );
@@ -3566,10 +3566,9 @@ test("traffic map recommends the robust itinerary when the fastest live departur
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
   await expect(page.locator(".travel-planner-panel-post-search")).toBeVisible();
-  await expect(page.locator(".travel-plan-result-workspace")).toBeVisible();
-  const selectedItinerary = page.getByRole("region", { name: "Valgt reiseforslag" });
-  await expect(selectedItinerary).toBeVisible();
-  const choices = page.getByLabel("Velg reiseforslag");
+  await expect(page.locator(".travel-plan-result")).toBeVisible();
+  await expect(page.locator("h1#travel-planner-heading")).toHaveText("Ta Buss 3 fra Munkegata");
+  const choices = page.getByLabel("Andre reiseforslag");
   await expect(choices).toBeVisible();
   await expect(choices).toContainText("Et annet reiseforslag ser tryggere ut");
   await expect(choices.getByRole("button")).toHaveCount(2);
@@ -3577,11 +3576,10 @@ test("traffic map recommends the robust itinerary when the fastest live departur
   await expect(choices.getByRole("button", { name: /Raskest/ })).toContainText(
     "Avgangen mot Leangen er innstilt",
   );
-  await expect(selectedItinerary).toContainText("Buss 3");
   await choices.getByRole("button", { name: /Anbefalt/ }).click();
   await expect(choices).toContainText("Valgt reiseforslag ser best ut");
   await expect(choices).toContainText("Matcher sanntidsavgang mot Leangen");
-  await expect(selectedItinerary).toContainText("Buss 71");
+  await expect(page.locator("h1#travel-planner-heading")).toHaveText("Ta Buss 71 fra Munkegata");
   expect(
     departureRequestUrls.some(
       (url) =>
@@ -3656,7 +3654,7 @@ test("traffic map clears a stale route when planner validation fails", async ({ 
   await page.getByLabel("Hvor er du?").fill("Munkegata");
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
-  await expect(page.getByRole("heading", { name: "Gå til Leangen" })).toBeVisible();
+  await expect(page.locator("h1#travel-planner-heading")).toHaveText("Gå til Leangen");
   await expect(page.locator('path[stroke="#2563eb"]')).toHaveCount(1);
 
   await page.getByLabel("Hvor er du?").fill("");
@@ -3732,13 +3730,12 @@ test("traffic map keeps planner useful when Entur journey search is unavailable"
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
-  await expect(page.getByRole("heading", { name: "Gå til Leangen" })).toBeVisible();
-  await expect(page.getByLabel("Anbefalt gangrute")).toContainText("1 t");
-  await expect(
-    page.getByText("Entur reisesøk er ikke tilgjengelig akkurat nå.", { exact: true }),
-  ).toBeVisible();
-  await openTrafficDisclosure(page, "Kollektivkontekst");
-  await expect(page.getByRole("link", { name: "Åpne reiseplanlegger" })).toHaveAttribute(
+  await expect(page.locator("h1#travel-planner-heading")).toHaveText("Gå til Leangen");
+  await expect(page.locator(".traffic-journey-answer")).toContainText("1 t");
+  await expect(page.locator(".traffic-journey-answer")).toContainText(
+    "Kollektivsøket feilet akkurat nå.",
+  );
+  await expect(page.getByRole("link", { name: "Sjekk AtB/Entur" })).toHaveAttribute(
     "href",
     "https://www.atb.no/reiseplanlegger/",
   );
