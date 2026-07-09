@@ -11,8 +11,6 @@
   --green: #176446;
   --green-soft: #edf5f0;
   --amber: #d79132;
-  --rust: var(--terracotta);
-  --red: var(--terracotta);
   --serif: "Iowan Old Style", "Baskerville", Georgia, serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ink);
@@ -9496,11 +9494,11 @@ button {
 }
 
 .traffic-journey-answer-watch {
-  border-left-color: var(--rust);
+  border-left-color: var(--terracotta);
 }
 
 .traffic-journey-answer-warning {
-  border-left-color: var(--red);
+  border-left-color: var(--terracotta);
 }
 
 .traffic-journey-answer-header {
