@@ -998,11 +998,39 @@ function selectedItineraryPositions(
   return positions.length >= 2 ? positions : routePositions(plan);
 }
 
-function selectedBoardingLegForMap(
+export function selectedBoardingLegForMap(
   plan?: TravelPlanPayload,
   selectedItineraryId?: string,
 ): TravelPlanLeg | undefined {
-  return firstTransitLeg(selectedItineraryForPlan(plan, selectedItineraryId));
+  const itinerary = selectedItineraryForPlan(plan, selectedItineraryId);
+  return firstBoardingLeg(itinerary) ?? firstTransitLeg(itinerary);
+}
+
+export interface TravelMapBoardingMarker {
+  leg: TravelPlanLeg;
+  position: [number, number];
+  stopLabel: string;
+}
+
+export function selectedBoardingMarkerForMap(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): TravelMapBoardingMarker | undefined {
+  const leg = selectedBoardingLegForMap(plan, selectedItineraryId);
+  const position = leg?.from.coordinate
+    ? latLngFromGeoJsonPosition(leg.from.coordinate)
+    : undefined;
+  if (!leg || !position) return undefined;
+  return {
+    leg,
+    position,
+    stopLabel:
+      leg.from.stopName?.trim() ||
+      leg.from.name?.trim() ||
+      plan?.origin.label?.trim() ||
+      plan?.origin.query?.trim() ||
+      "Startpunkt for kollektivreisen",
+  };
 }
 
 function severityColor(severity: TrafficEventSeverity): string {
@@ -2381,10 +2409,7 @@ function TravelPlanLayer({
   const destination = latLngFromGeoJsonPosition(plan.destination.coordinate);
   const routeSeverity = strongestRouteImpact(plan);
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
-  const boardingLeg = selectedBoardingLegForMap(plan, selectedItineraryId);
-  const boardingPosition = boardingLeg?.from.coordinate
-    ? latLngFromGeoJsonPosition(boardingLeg.from.coordinate)
-    : undefined;
+  const boardingMarker = selectedBoardingMarkerForMap(plan, selectedItineraryId);
   return (
     <>
       {positions.length >= 2 ? (
@@ -2433,20 +2458,20 @@ function TravelPlanLayer({
           <Popup>{plan.origin.label}</Popup>
         </CircleMarker>
       ) : null}
-      {boardingPosition ? (
+      {boardingMarker ? (
         <CircleMarker
-          center={boardingPosition}
+          center={boardingMarker.position}
           radius={8}
           pathOptions={{ color: "#19549a", fillOpacity: 0.9 }}
         >
           <Popup>
             <article className="traffic-popup">
               <strong>
-                {boardingLeg?.publicCode
-                  ? `Ta ${modeLabel(boardingLeg.mode)} ${boardingLeg.publicCode}`
+                {boardingMarker.leg.publicCode
+                  ? `Ta ${modeLabel(boardingMarker.leg.mode)} ${boardingMarker.leg.publicCode}`
                   : "Start kollektivreisen"}
               </strong>
-              <p>{boardingLeg?.from.stopName ?? boardingLeg?.from.name}</p>
+              <p>{boardingMarker.stopLabel}</p>
             </article>
           </Popup>
         </CircleMarker>

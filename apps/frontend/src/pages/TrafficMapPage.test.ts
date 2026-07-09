@@ -2,6 +2,7 @@ import type {
   PublicTransportDeparture,
   PublicTransportDepartureBoardPayload,
   TrafficMapEvent,
+  TravelPlanLeg,
   TravelPlanPayload,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
@@ -55,6 +56,7 @@ import {
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
   RouteContextFallback,
+  selectedBoardingMarkerForMap,
   TravelPlanCard,
   travelMapDisplayMode,
   routeDepartureCheckpoints,
@@ -135,6 +137,77 @@ describe("traffic map route proof", () => {
 
     expect(html).not.toContain("Ruteoppsummering");
     expect(html).not.toContain("Tekstfallback");
+  });
+
+  it("prefers the first metadata-backed boarding leg for the map marker", () => {
+    const itinerary = planWithItinerary.itineraries[0]!;
+    const baseLeg = itinerary.legs[0]!;
+    const transitLikeLeg: TravelPlanLeg = {
+      ...baseLeg,
+      id: "leg-transit-like",
+      lineId: undefined,
+      publicCode: undefined,
+      from: {
+        name: "Mellomstopp",
+        coordinate: [10.396, 63.431],
+      },
+    };
+    const boardingLeg: TravelPlanLeg = {
+      ...baseLeg,
+      id: "leg-boarding",
+      from: {
+        name: "Torget",
+        stopName: "Torget",
+        stopId: "NSR:StopPlace:999",
+        coordinate: [10.397, 63.432],
+      },
+    };
+    const markerPlan: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [{ ...itinerary, legs: [transitLikeLeg, boardingLeg] }],
+    };
+    expect(selectedBoardingMarkerForMap(markerPlan, itinerary.id)).toMatchObject({
+      leg: { id: "leg-boarding" },
+      position: [63.432, 10.397],
+      stopLabel: "Torget",
+    });
+  });
+
+  it("omits coordinate-less markers and supplies nonblank fallback copy", () => {
+    const itinerary = planWithItinerary.itineraries[0]!;
+    const baseLeg = itinerary.legs[0]!;
+    const fallbackLeg: TravelPlanLeg = {
+      ...baseLeg,
+      id: "leg-fallback",
+      lineId: undefined,
+      publicCode: undefined,
+      from: { name: "", coordinate: [10.396, 63.431] },
+    };
+    const fallbackPlan: TravelPlanPayload = {
+      ...planWithItinerary,
+      origin: { ...planWithItinerary.origin, label: "", query: "" },
+      itineraries: [{ ...itinerary, legs: [fallbackLeg] }],
+    };
+    expect(selectedBoardingMarkerForMap(fallbackPlan, itinerary.id)).toMatchObject({
+      leg: { id: "leg-fallback" },
+      stopLabel: "Startpunkt for kollektivreisen",
+    });
+
+    const coordinateLessPlan: TravelPlanPayload = {
+      ...fallbackPlan,
+      itineraries: [
+        {
+          ...itinerary,
+          legs: [
+            {
+              ...fallbackLeg,
+              from: { name: "" } as unknown as TravelPlanLeg["from"],
+            },
+          ],
+        },
+      ],
+    };
+    expect(selectedBoardingMarkerForMap(coordinateLessPlan, itinerary.id)).toBeUndefined();
   });
 });
 
