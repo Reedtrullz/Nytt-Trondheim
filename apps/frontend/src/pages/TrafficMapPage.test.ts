@@ -49,6 +49,7 @@ import {
   readRememberedDepartureBoards,
   readRememberedTravelRoutes,
   eventIdForRouteContextItem,
+  JourneyContextChips,
   mergeRouteContextTrafficEvents,
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
@@ -645,7 +646,6 @@ function departureFixture(
 
 describe("TravelPlanCard journey answer", () => {
   it("renders the concrete journey instruction before route diagnostics", () => {
-    const routeContextSummary = buildRouteContextSummary(planWithItinerary);
     const html = renderToStaticMarkup(
       createElement(TravelPlanCard, {
         plan: planWithItinerary,
@@ -654,7 +654,6 @@ describe("TravelPlanCard journey answer", () => {
           plan: planWithItinerary,
           selectedItineraryId: "itinerary-1",
         }),
-        routeContextSummary,
         selectedItineraryId: "itinerary-1",
         onSelectItinerary: () => undefined,
       }),
@@ -666,7 +665,7 @@ describe("TravelPlanCard journey answer", () => {
     expect(html).not.toContain("Ruteoppsummering");
   });
 
-  it("keeps route context as compact journey chips instead of bulky fallback text", () => {
+  it("does not render route context inside the main answer card", () => {
     const planWithContext: TravelPlanPayload = {
       ...planWithItinerary,
       trafficImpacts: [
@@ -705,9 +704,53 @@ describe("TravelPlanCard journey answer", () => {
           plan: planWithContext,
           selectedItineraryId: "itinerary-1",
         }),
-        routeContextSummary: buildRouteContextSummary(planWithContext),
         selectedItineraryId: "itinerary-1",
         onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("Trafikk langs reisen");
+    expect(html).not.toContain("Vegarbeid ved Bakklandet");
+    expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+});
+
+describe("JourneyContextChips", () => {
+  it("keeps route context as compact journey chips instead of bulky fallback text", () => {
+    const planWithContext: TravelPlanPayload = {
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "route-roadwork",
+            source: "datex",
+            sourceEventId: "route-roadwork",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(JourneyContextChips, {
+        plan: planWithContext,
+        routeContextSummary: buildRouteContextSummary(planWithContext),
       }),
     );
 
@@ -721,6 +764,22 @@ describe("TravelPlanCard journey answer", () => {
 describe("traffic journey map placement", () => {
   it("uses a primary map for actionable journeys and support disclosure for context-only corridors", () => {
     expect(travelMapDisplayMode(planWithItinerary)).toBe("primary");
+    expect(
+      travelMapDisplayMode({
+        ...planWithItinerary,
+        itineraries: [
+          {
+            ...planWithItinerary.itineraries[0]!,
+            legs: [
+              {
+                ...planWithItinerary.itineraries[0]!.legs[0]!,
+                geometry: { type: "LineString", coordinates: [] },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBe("support-open");
     expect(travelMapDisplayMode(plan)).toBe("support-open");
     expect(
       travelMapDisplayMode({

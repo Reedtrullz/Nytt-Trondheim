@@ -356,6 +356,27 @@ describe("traffic journey answer view", () => {
     expect(
       getJourneyMapPlacement(
         plan({
+          itineraries: [
+            itinerary({
+              legs: [
+                leg({
+                  geometry: { type: "LineString", coordinates: [] },
+                }),
+              ],
+            }),
+          ],
+          journeyPlanner: {
+            status: "ok",
+            detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+            requestedDepartureTime: generatedAt,
+            source: "Entur Journey Planner",
+          },
+        }),
+      ),
+    ).toBe("context");
+    expect(
+      getJourneyMapPlacement(
+        plan({
           route: {
             source: "direct",
             detail: "Rute kunne ikke beregnes.",

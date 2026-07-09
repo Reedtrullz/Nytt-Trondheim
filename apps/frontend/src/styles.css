@@ -14002,6 +14002,10 @@ button.journey-context-chip {
     padding: 14px;
   }
 
+  .journey-context-chips {
+    order: 3;
+  }
+
   .route-departure-confidence {
     order: 3;
     padding: 14px;

@@ -2087,8 +2087,11 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
 
 export type TravelMapDisplayMode = "primary" | "support-open" | "support-closed";
 
-export function travelMapDisplayMode(plan?: TravelPlanPayload): TravelMapDisplayMode {
-  const placement = getJourneyMapPlacement(plan);
+export function travelMapDisplayMode(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): TravelMapDisplayMode {
+  const placement = getJourneyMapPlacement(plan, selectedItineraryId);
   if (placement === "primary") return "primary";
   if (!plan || placement === "context") return "support-open";
   return "support-closed";
@@ -2654,7 +2657,7 @@ function JourneyContextChip({
   return <span className={className}>{content}</span>;
 }
 
-function JourneyContextChips({
+export function JourneyContextChips({
   plan,
   routeContextSummary,
   selectedEventId,
@@ -2703,25 +2706,19 @@ export function TravelPlanCard({
   loading,
   error,
   selectedItineraryId,
-  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
-  routeContextSummary,
   showAnswerHeading = true,
   onSelectItinerary,
-  onFocusRouteContextItem,
 }: {
   plan?: TravelPlanPayload;
   loading: boolean;
   error?: string;
   selectedItineraryId?: string;
-  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
-  routeContextSummary: RouteContextSummary;
   showAnswerHeading?: boolean;
   onSelectItinerary: (itineraryId: string) => void;
-  onFocusRouteContextItem?: (item: RouteContextItem) => void;
 }) {
   if (error) {
     return (
@@ -2788,12 +2785,6 @@ export function TravelPlanCard({
           </div>
         ) : null}
       </section>
-      <JourneyContextChips
-        plan={plan}
-        routeContextSummary={routeContextSummary}
-        selectedEventId={selectedEventId}
-        onFocusItem={onFocusRouteContextItem}
-      />
       {showFallbackSuggestions ? (
         <details className="travel-secondary-disclosure">
           <summary>Kollektivkontekst</summary>
@@ -3904,13 +3895,10 @@ function TravelPlannerPanel({
             loading={travelPlanLoading}
             error={travelPlanError}
             selectedItineraryId={selectedItineraryId}
-            selectedEventId={selectedEventId}
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
-            routeContextSummary={routeContextSummary}
             showAnswerHeading={!travelPlan}
             onSelectItinerary={onSelectItinerary}
-            onFocusRouteContextItem={onFocusRouteContextItem}
           />
           {travelTimeComparison.status !== "idle" ? (
             <details className="travel-secondary-disclosure travel-time-disclosure">
@@ -4927,7 +4915,7 @@ export function TrafficMapPage() {
     });
   }, [autoTravelSearchPending]);
 
-  const mapDisplayMode = travelMapDisplayMode(travelPlan);
+  const mapDisplayMode = travelMapDisplayMode(travelPlan, selectedItineraryId);
   const trafficMapWorkspace = (
     <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
       <button
@@ -5059,6 +5047,14 @@ export function TrafficMapPage() {
           </header>
           {trafficMapWorkspace}
         </section>
+      ) : null}
+      {travelPlan ? (
+        <JourneyContextChips
+          plan={travelPlan}
+          routeContextSummary={routeContextSummary}
+          selectedEventId={selectedEventId}
+          onFocusItem={handleRouteContextFocus}
+        />
       ) : null}
       {routeDepartureCheckpointsForSelection.length > 1 ? (
         <details className="traffic-support-disclosure">

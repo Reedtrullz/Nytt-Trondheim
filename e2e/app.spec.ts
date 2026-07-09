@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   buildCityPulseStories,
   fallbackWorldCupDashboard,
@@ -5051,8 +5051,33 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
             },
             detail: "Rute beregnet med OSRM.",
           },
-          trafficImpacts: [],
-          publicTransportSuggestions: [],
+          trafficImpacts: [
+            {
+              event: {
+                id: "mobile-roadwork",
+                source: "datex",
+                sourceEventId: "mobile-roadwork",
+                category: "roadworks",
+                severity: "medium",
+                state: "active",
+                title: "Vegarbeid ved Bakklandet",
+                updatedAt: "2026-06-01T09:00:00.000Z",
+                geometry: { type: "Point", coordinates: [10.412, 63.429] },
+              },
+              distanceMeters: 220,
+              severity: "medium",
+              summary: "220 m fra foreslått rute.",
+            },
+          ],
+          publicTransportSuggestions: [
+            {
+              id: "mobile-line-alert",
+              kind: "alert",
+              title: "Forsinkelse på linje 2",
+              detail: "Beregn ekstra tid på Buss 2.",
+              source: "Entur avvik",
+            },
+          ],
           itineraries: [
             {
               id: "mobile-itinerary",
@@ -5153,6 +5178,7 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   const trafficPicture = page.locator("details.traffic-support-disclosure", {
     hasText: "Trafikkbildet nå",
   });
+  const journeyContext = page.locator(".journey-context-chips");
   const postSearchMap = page.locator(".traffic-primary-map-section");
   const sourceData = page.locator(".traffic-data-disclosure");
   await expect(postSearchPanel).toBeVisible();
@@ -5162,6 +5188,7 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   await expect(departureContext).toBeVisible();
   await expect(trafficPicture).toBeVisible();
   await expect(postSearchMap).toContainText("Rute og trafikk langs valgt reise");
+  await expect(journeyContext).toContainText("Forsinkelse på linje 2");
   await expect(sourceData).toContainText("Se datagrunnlag");
   await expect(page.locator(".travel-planner-copy")).toHaveCount(0);
   await expect(choices.getByRole("button", { name: /Anbefalt/ })).toHaveAttribute(
@@ -5174,15 +5201,19 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   const postSearchBox = await postSearchPanel.boundingBox();
   const choicesBox = await choices.boundingBox();
   const selectedRouteBox = await selectedRoute.boundingBox();
+  const journeyContextBox = await journeyContext.boundingBox();
   const departureContextBox = await departureContext.boundingBox();
   const trafficPictureBox = await trafficPicture.boundingBox();
   const postSearchMapBox = await postSearchMap.boundingBox();
   const sourceDataBox = await sourceData.boundingBox();
+  const documentY = async (locator: Locator) =>
+    locator.evaluate((element) => element.getBoundingClientRect().top + window.scrollY);
   for (const box of [
     postSearchBox,
     adviceBox,
     choicesBox,
     selectedRouteBox,
+    journeyContextBox,
     departureContextBox,
     trafficPictureBox,
     postSearchMapBox,
@@ -5191,14 +5222,13 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
     expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
     expect((box?.width ?? Number.POSITIVE_INFINITY) + (box?.x ?? 0)).toBeLessThanOrEqual(391);
   }
-  expect(adviceBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(choicesBox?.y ?? 0);
-  expect(choicesBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(selectedRouteBox?.y ?? 0);
-  expect(selectedRouteBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(postSearchMapBox?.y ?? 0);
-  expect(postSearchMapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(departureContextBox?.y ?? 0);
-  expect(departureContextBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
-    trafficPictureBox?.y ?? 0,
-  );
-  expect(postSearchMapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(sourceDataBox?.y ?? 0);
+  await expect.poll(() => documentY(travelAdvice)).toBeLessThan(await documentY(choices));
+  await expect.poll(() => documentY(choices)).toBeLessThan(await documentY(selectedRoute));
+  await expect.poll(() => documentY(selectedRoute)).toBeLessThan(await documentY(postSearchMap));
+  await expect.poll(() => documentY(postSearchMap)).toBeLessThan(await documentY(journeyContext));
+  await expect.poll(() => documentY(journeyContext)).toBeLessThan(await documentY(departureContext));
+  await expect.poll(() => documentY(departureContext)).toBeLessThan(await documentY(trafficPicture));
+  await expect.poll(() => documentY(postSearchMap)).toBeLessThan(await documentY(sourceData));
   await expectNoHorizontalPageOverflow(page);
 });
 

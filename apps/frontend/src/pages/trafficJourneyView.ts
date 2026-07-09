@@ -374,18 +374,21 @@ export function buildJourneyContextView(plan?: TravelPlanPayload): JourneyContex
   };
 }
 
-export function shouldShowJourneyMap(plan?: TravelPlanPayload): boolean {
-  return getJourneyMapPlacement(plan) !== "hidden";
+export function shouldShowJourneyMap(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): boolean {
+  return getJourneyMapPlacement(plan, selectedItineraryId) !== "hidden";
 }
 
-export function getJourneyMapPlacement(plan?: TravelPlanPayload): JourneyMapPlacement {
+export function getJourneyMapPlacement(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): JourneyMapPlacement {
   if (!plan) return "hidden";
 
-  const itinerary = selectedItinerary(plan);
-  if (
-    hasActionableJourney(itinerary) &&
-    (hasUsefulLegGeometry(itinerary) || hasUsefulRouteGeometry(plan))
-  ) {
+  const itinerary = selectedItinerary(plan, selectedItineraryId);
+  if (hasActionableJourney(itinerary) && hasUsefulLegGeometry(itinerary)) {
     return "primary";
   }
 
