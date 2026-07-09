@@ -114,6 +114,14 @@ function stopLabel(leg: TravelPlanLeg): string {
   return leg.from.stopName ?? leg.from.name;
 }
 
+function shortPlaceLabel(label: string): string {
+  const parts = label
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts[0] ?? label;
+}
+
 function isBoardingLeg(leg: TravelPlanLeg): boolean {
   if (leg.cancelled) return false;
   if (leg.mode === "walk") return false;
@@ -213,6 +221,14 @@ function hasUsefulLegGeometry(itinerary?: TravelPlanItinerary): boolean {
   return Boolean(itinerary?.legs.some((leg) => (leg.geometry?.coordinates.length ?? 0) >= 2));
 }
 
+function hasUsefulWalkingRouteGeometry(plan?: TravelPlanPayload): boolean {
+  return (
+    plan?.primaryMode === "walk" &&
+    (plan.walkingRoute?.geometry.coordinates.length ?? 0) >= 2 &&
+    (plan.walkingRoute?.distanceMeters ?? 0) > 0
+  );
+}
+
 function hasTrafficMapContext(plan?: TravelPlanPayload): boolean {
   return Boolean(plan?.trafficImpacts.some((impact) => impact.event.geometry));
 }
@@ -241,7 +257,7 @@ function walkingAnswer(plan: TravelPlanPayload, itinerary: TravelPlanItinerary):
   const duration = formatDuration(itinerary.durationSeconds);
   return {
     kind: "walk",
-    heading: `Gå til ${plan.destination.label}`,
+    heading: `Gå til ${shortPlaceLabel(plan.destination.label)}`,
     detail:
       itinerary.decisionReason ||
       "Entur foreslår gange hele veien. Nytt viser relevant trafikk langs ruten.",
@@ -251,6 +267,26 @@ function walkingAnswer(plan: TravelPlanPayload, itinerary: TravelPlanItinerary):
     handoffUrl: operatorHandoffUrl,
     handoffLabel: "Sjekk AtB/Entur",
     routeOptions: routeOptions(plan, itinerary.id),
+  };
+}
+
+function walkingRouteAnswer(plan: TravelPlanPayload): JourneyAnswerView {
+  const distance = formatDistance(plan.walkingRoute?.distanceMeters);
+  const duration = formatDuration(plan.walkingRoute?.durationSeconds);
+  const degradedPrefix =
+    plan.journeyPlanner.status === "unavailable"
+      ? "Kollektivsøket feilet akkurat nå. "
+      : "Ingen kollektivreise akkurat nå. ";
+  return {
+    kind: "walk",
+    heading: `Gå til ${shortPlaceLabel(plan.destination.label)}`,
+    detail: `${degradedPrefix}${plan.walkingRoute?.detail ?? "Nytt viser gangrute og trafikk langs veien."}`,
+    meta: [distance, duration ? `ca. ${duration}` : undefined].filter(Boolean).join(" · "),
+    severity:
+      plan.journeyPlanner.status === "unavailable" || plan.trafficImpacts.length ? "watch" : "ok",
+    handoffUrl: operatorHandoffUrl,
+    handoffLabel: "Sjekk AtB/Entur",
+    routeOptions: routeOptions(plan),
   };
 }
 
@@ -282,6 +318,10 @@ export function buildJourneyAnswerView(
 
   if (isWalkOnlyItinerary(itinerary)) {
     return walkingAnswer(plan, itinerary);
+  }
+
+  if (plan.primaryMode === "walk" && plan.walkingRoute) {
+    return walkingRouteAnswer(plan);
   }
 
   return handoffAnswer(plan);
@@ -389,6 +429,10 @@ export function getJourneyMapPlacement(
 
   const itinerary = selectedItinerary(plan, selectedItineraryId);
   if (hasActionableJourney(itinerary) && hasUsefulLegGeometry(itinerary)) {
+    return "primary";
+  }
+
+  if (hasUsefulWalkingRouteGeometry(plan)) {
     return "primary";
   }
 

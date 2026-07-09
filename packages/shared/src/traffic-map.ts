@@ -317,10 +317,34 @@ export interface TravelPlanJourneyStatusPayload {
   source: "Entur Journey Planner";
 }
 
+export type TravelPlanPrimaryMode = "transit" | "walk" | "fallback";
+
+export interface TravelPlanWalkingRoute {
+  source: TravelPlanRoute["source"];
+  geometry: LineString;
+  distanceMeters: number;
+  durationSeconds: number;
+  detail: string;
+  confidence: "route" | "corridor";
+}
+
+export interface TravelPlanNextTransitOption {
+  departureTime: string;
+  arrivalTime: string;
+  lineLabel: string;
+  boardingStopName: string;
+  durationSeconds: number;
+  transferCount: number;
+  handoffUrl: string;
+}
+
 export interface TravelPlanPayload {
   origin: TravelPlanPlace;
   destination: TravelPlanPlace;
   route: TravelPlanRoute;
+  primaryMode: TravelPlanPrimaryMode;
+  walkingRoute?: TravelPlanWalkingRoute;
+  nextTransitOption?: TravelPlanNextTransitOption;
   trafficImpacts: TravelPlanTrafficImpact[];
   publicTransportSuggestions: TravelPlanTransitSuggestion[];
   itineraries: TravelPlanItinerary[];

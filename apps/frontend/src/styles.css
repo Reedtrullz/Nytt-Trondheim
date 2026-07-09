@@ -9528,6 +9528,43 @@ button {
   margin-top: 10px;
 }
 
+.traffic-map-disclosure[open] .traffic-workspace {
+  min-height: 520px;
+}
+
+.walking-answer-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--green) 35%, var(--line));
+  border-left: 4px solid var(--green);
+  background: var(--green-soft);
+}
+
+.walking-answer-card strong {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.walking-answer-card span {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.walking-answer-card small,
+.travel-plan-context-note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.travel-plan-context-note {
+  margin: 12px 0 0;
+}
+
 .route-planner-controls {
   display: grid;
   gap: 10px;
@@ -13987,6 +14024,10 @@ button.journey-context-chip {
 
   .traffic-map-disclosure {
     order: 6;
+  }
+
+  .traffic-map-disclosure[open] .traffic-workspace {
+    min-height: 460px;
   }
 
   .traffic-data-disclosure {

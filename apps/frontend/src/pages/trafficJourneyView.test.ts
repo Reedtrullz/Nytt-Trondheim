@@ -124,6 +124,7 @@ function plan(overrides: Partial<TravelPlanPayload> = {}): TravelPlanPayload {
     trafficImpacts: [],
     publicTransportSuggestions: [],
     itineraries: [],
+    primaryMode: "fallback",
     journeyPlanner: {
       status: "empty",
       detail: "Ingen konkrete Entur-reiser funnet.",
@@ -212,7 +213,7 @@ describe("traffic journey answer view", () => {
     );
 
     expect(answer.kind).toBe("walk");
-    expect(answer.heading).toBe("Gå til Lade gård, Trondheim");
+    expect(answer.heading).toBe("Gå til Lade gård");
     expect(answer.meta).toBe("3,5 km · ca. 42 min");
     expect(answer.primaryItineraryId).toBe("walk-itinerary");
     expect(answer.detail).toContain("Entur foreslår gange");

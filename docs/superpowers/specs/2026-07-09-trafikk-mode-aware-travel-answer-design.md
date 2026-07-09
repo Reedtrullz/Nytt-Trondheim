@@ -8,10 +8,9 @@ boarding stop, departure, arrival, and map. If there is no usable public-transpo
 selected time, the page should not lead with roadwork counts. It should switch modes and show a
 walking route: how long it takes, where to walk, and what to watch along the way.
 
-Implementation correction, 2026-07-09: the current server-side OSRM route is a road/travel-context
-corridor, not guaranteed pedestrian routing. V1 must only promote walking when the payload contains
-an explicit walk-only itinerary, or when a future server field provides explicit pedestrian route
-data. Generic OSRM corridor geometry stays context-only.
+Implementation correction, 2026-07-09: walking can be the primary answer only when the payload
+contains an explicit `walkingRoute` or walk-only itinerary. Generic corridor geometry without a
+walking-mode decision stays context-only.
 
 This is a follow-up to `2026-07-08-trafikk-map-first-route-context-design.md`. That spec moved route
 context toward the map. This spec defines which travel mode owns the top answer.
@@ -55,9 +54,9 @@ Use the mode-aware answer-first approach:
 
 - Public transport is primary only when Entur returns at least one usable itinerary for the selected
   time.
-- Walking becomes the primary result when no usable public-transport itinerary exists and Entur
-  returns an actual walk-only itinerary, or a future explicit pedestrian route source is available.
-  Generic OSRM road-corridor geometry must not be presented as walking directions.
+- Walking becomes the primary result when no usable public-transport itinerary exists and the server
+  returns an explicit `walkingRoute` or a walk-only itinerary. Generic route context alone must not
+  be presented as walking directions.
 - A later public-transport option may appear as secondary context, not as the main answer, when the
   selected time is a dead transit window.
 - Roadworks and traffic points appear as route context on the map and in one compact fallback
@@ -115,13 +114,13 @@ Use the mode-aware answer-first approach:
 - Keep the existing `/api/map/travel-plan` contract as the main response.
 - Additive shared fields are acceptable if needed:
   - `primaryMode`: `transit | walk | fallback`
-  - `walkingRoute`: distance, duration, polyline/geometry reference, and route detail from an
-    explicit pedestrian route source only.
+  - `walkingRoute`: distance, duration, polyline/geometry reference, and route detail.
   - `nextTransitOption`: optional lightweight summary for a later usable Entur journey.
 - Do not create source items, situations, or editorial evidence from walking fallback data.
-- Keep Entur as public-transport authority and OSRM as road/travel-context shape, not pedestrian
-  authority.
-- If only generic OSRM geometry exists, show it as context below the journey answer instead of a
+- Keep Entur as public-transport authority and OSRM as route-shape/duration context.
+- If the server already created an explicit `walkingRoute`, reuse its geometry for the walking map
+  instead of adding another external dependency.
+- If only generic route geometry exists, show it as context below the journey answer instead of a
   primary walking map.
 
 ## UI Boundaries
@@ -131,8 +130,8 @@ Use the mode-aware answer-first approach:
 - On mobile, the order should be:
   1. planner form
   2. answer card
-  3. selected transit/walking details
-  4. map
+  3. map
+  4. selected transit/walking details
   5. collapsed context
 - On desktop, the result can use a two-column layout only if both columns are filled with meaningful
   content. Avoid a busy right column with an empty left column or vice versa.
@@ -140,9 +139,9 @@ Use the mode-aware answer-first approach:
 ## Error Handling
 
 - Entur empty response is not an error. It is a no-transit state and should fall through to walking
-  only when explicit walk-only route data exists.
+  only when explicit walking-route data exists.
 - Entur timeout/upstream failure is a degraded state. It can still show walking if explicit
-  pedestrian route data exists, but it must say transit could not be checked.
+  walking-route data exists, but it must say transit could not be checked.
 - OSRM failure with Entur empty response becomes a clear handoff state.
 - Late-night no-transit results should be fast. The UI should not wait on broad route-context fan-out
   before showing the walking answer.
@@ -151,10 +150,11 @@ Use the mode-aware answer-first approach:
 
 - Shared/server:
   - Walk-only Entur itinerary returns a walking primary answer.
-  - No Entur itineraries plus only generic OSRM road-corridor geometry returns an AtB/Entur handoff
-    with context map, not a walking primary answer.
+  - No Entur itineraries plus explicit `walkingRoute` returns a walking primary answer.
+  - No Entur itineraries plus only generic route geometry returns an AtB/Entur handoff with context
+    map, not a walking primary answer.
   - Entur itineraries return transit as the primary answer.
-  - Entur failure plus generic OSRM route returns handoff/context with a clear warning.
+  - Entur failure plus explicit `walkingRoute` returns degraded walking with a clear warning.
   - Entur empty plus OSRM failure returns an AtB/Entur handoff state.
   - Road/context points stay context-only and do not override the primary mode.
 - Frontend:
@@ -165,7 +165,7 @@ Use the mode-aware answer-first approach:
   - Map remains visible and usable in the walking fallback state.
 - E2E:
   - Munkegata to Lade gård at a dead transit time shows a walking recommendation and map when an
-    explicit walk-only/pedestrian route is available.
+    explicit walking route is available.
   - Munkegata to Lade gård at a morning preset shows a bus recommendation.
 
 ## Non-Goals

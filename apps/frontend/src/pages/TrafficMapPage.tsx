@@ -935,14 +935,18 @@ export function routePositions(plan: TravelPlanPayload): [number, number][] {
   return latLngsFromLineString(plan.route.geometry);
 }
 
+function isUsableTransitItinerary(itinerary: TravelPlanItinerary): boolean {
+  return itinerary.decision !== "avoid" && itinerary.modes.some((mode) => mode !== "walk");
+}
+
 function selectedItineraryForPlan(
   plan?: TravelPlanPayload,
   selectedItineraryId?: string,
 ): TravelPlanItinerary | undefined {
-  return (
-    plan?.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
-    plan?.itineraries[0]
-  );
+  if (!plan || plan.primaryMode !== "transit") return undefined;
+  const selected = plan.itineraries.find((itinerary) => itinerary.id === selectedItineraryId);
+  if (selected && isUsableTransitItinerary(selected)) return selected;
+  return plan.itineraries.find(isUsableTransitItinerary);
 }
 
 export function departureBoardContextFromPlan(
@@ -1854,6 +1858,67 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   const hasHighRoadImpact = strongestRoadImpact === "critical" || strongestRoadImpact === "high";
   const avoidCount = plan.itineraries.filter((itinerary) => itinerary.decision === "avoid").length;
   const watchCount = plan.itineraries.filter((itinerary) => itinerary.decision === "watch").length;
+  const selectedItinerary = selectedItineraryForPlan(plan);
+
+  if (plan.primaryMode === "transit" && selectedItinerary) {
+    const heading = transitHeadingForItinerary(selectedItinerary) ?? "Ta valgt kollektivreise";
+    const duration = formatDuration(selectedItinerary.durationSeconds);
+    const departure = formatTravelTime(selectedItinerary.departureTime);
+    const arrival = formatTravelTime(selectedItinerary.arrivalTime);
+    return {
+      heading,
+      detail: [
+        departure && arrival ? `${departure}-${arrival}` : undefined,
+        duration,
+        selectedItinerary.transferCount === 0
+          ? "direkte"
+          : `${selectedItinerary.transferCount} bytte${selectedItinerary.transferCount === 1 ? "" : "r"}`,
+        `${formatDuration(selectedItinerary.walkTimeSeconds)} gange`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
+      severity:
+        selectedItinerary.decision === "avoid"
+          ? "warning"
+          : selectedItinerary.decision === "watch" || alertCount > 0 || hasHighRoadImpact
+            ? "watch"
+            : "ok",
+    };
+  }
+
+  if (plan.primaryMode === "walk" && plan.walkingRoute) {
+    const duration = formatDuration(plan.walkingRoute.durationSeconds) ?? "ukjent tid";
+    const distance = formatDistance(plan.walkingRoute.distanceMeters);
+    return {
+      heading: `Gå til ${shortPlaceLabel(plan.destination.label)}`,
+      detail:
+        plan.journeyPlanner.status === "unavailable"
+          ? `Kollektivsøket feilet akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`
+          : `Ingen kollektivreise akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
+      severity:
+        plan.journeyPlanner.status === "unavailable" || hasHighRoadImpact ? "warning" : "watch",
+    };
+  }
+
+  if (plan.primaryMode === "fallback") {
+    return {
+      heading: "Sjekk AtB/Entur",
+      detail: `${plan.journeyPlanner.detail} Nytt klarte ikke å lage en trygg gangrute for valgt søk.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
+      severity: "warning",
+    };
+  }
 
   if (plan.journeyPlanner.status === "unavailable") {
     return {
@@ -1926,6 +1991,83 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   };
 }
 
+function shortPlaceLabel(label: string): string {
+  return label.split(",")[0]?.trim() || label;
+}
+
+function firstTransitLeg(itinerary?: TravelPlanItinerary): TravelPlanLeg | undefined {
+  return itinerary?.legs.find((leg) => leg.mode !== "walk" && !leg.cancelled);
+}
+
+function transitHeadingForItinerary(itinerary?: TravelPlanItinerary): string | undefined {
+  const leg = firstTransitLeg(itinerary);
+  if (!leg) return undefined;
+  const mode = modeLabel(leg.mode);
+  const line = leg.publicCode ?? leg.lineName;
+  const stop = leg.from.stopName ?? leg.from.name;
+  if (line && stop) return `Ta ${mode} ${line} fra ${shortPlaceLabel(stop)}`;
+  if (line) return `Ta ${mode} ${line}`;
+  if (stop) return `Ta ${mode} fra ${shortPlaceLabel(stop)}`;
+  return `Ta ${mode}`;
+}
+
+function formatTravelTime(value: string): string {
+  return new Intl.DateTimeFormat("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Oslo",
+  }).format(new Date(value));
+}
+
+export function travelPlanModeSummary(plan: TravelPlanPayload): {
+  label: string;
+  detail: string;
+  contextLabel: string;
+} {
+  const selectedItinerary = selectedItineraryForPlan(plan);
+  if (plan.primaryMode === "transit" && selectedItinerary) {
+    const leg = firstTransitLeg(selectedItinerary);
+    return {
+      label: "Kollektiv",
+      detail: [
+        leg?.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : undefined,
+        formatDuration(selectedItinerary.durationSeconds),
+        selectedItinerary.transferCount === 0
+          ? "Direkte"
+          : `${selectedItinerary.transferCount} bytte`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      contextLabel: "Trafikk langs ruten",
+    };
+  }
+  if (plan.primaryMode === "walk" && plan.walkingRoute) {
+    return {
+      label: "Gange",
+      detail: [
+        formatDuration(plan.walkingRoute.durationSeconds),
+        formatDistance(plan.walkingRoute.distanceMeters),
+        shortPlaceLabel(plan.destination.label),
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      contextLabel: "Trafikk langs gangruta",
+    };
+  }
+  return {
+    label: "Sjekk operatør",
+    detail: "Bruk AtB/Entur for endelig reisevalg.",
+    contextLabel: "Lokal trafikkontekst",
+  };
+}
+
+export function shouldOpenPostSearchMap(plan?: TravelPlanPayload): boolean {
+  if (!plan) return false;
+  if (plan.primaryMode === "walk" && plan.walkingRoute) return true;
+  if (plan.primaryMode === "transit" && plan.itineraries.length > 0) return true;
+  return plan.trafficImpacts.length > 0;
+}
+
 export type RouteContextItem = {
   id: string;
   kind: "traffic" | "transit_alert";
@@ -1950,6 +2092,10 @@ export type RouteContextSummary = {
   detail: string;
   items: RouteContextItem[];
 };
+
+function routeContextEmptyTarget(plan?: TravelPlanPayload): string {
+  return plan?.primaryMode === "walk" ? "gangruta" : "ruten";
+}
 
 function routeContextSeverityFromTraffic(severity?: string): RouteContextItem["severity"] {
   if (severity === "high" || severity === "critical") return "warning";
@@ -2100,17 +2246,24 @@ export function travelMapDisplayMode(
 
 export function RouteContextFallback({
   summary,
+  plan,
+  title,
   onFocusItem,
   selectedEventId,
 }: {
   summary: RouteContextSummary;
+  plan?: TravelPlanPayload;
+  title?: string;
   onFocusItem?: (item: RouteContextItem) => void;
   selectedEventId?: string;
 }) {
+  const summaryTitle =
+    title ??
+    (summary.mapPointCount > 0 ? "Kartpunkter langs valgt rute" : "Tekstfallback for valgt rute");
   if (summary.count === 0) {
     return (
       <p className="route-context-empty">
-        Ingen aktive trafikkpunkter funnet langs valgt rute akkurat nå.
+        Ingen aktive trafikkpunkter funnet langs {routeContextEmptyTarget(plan)} akkurat nå.
       </p>
     );
   }
@@ -2118,11 +2271,7 @@ export function RouteContextFallback({
   return (
     <details className="route-context-fallback">
       <summary>
-        <span>
-          {summary.mapPointCount > 0
-            ? "Kartpunkter langs valgt rute"
-            : "Tekstfallback for valgt rute"}
-        </span>
+        <span>{summaryTitle}</span>
         <strong>{summary.heading}</strong>
       </summary>
       <p>{summary.detail}</p>
@@ -2222,9 +2371,7 @@ function TravelPlanLayer({
   const origin = latLngFromGeoJsonPosition(plan.origin.coordinate);
   const destination = latLngFromGeoJsonPosition(plan.destination.coordinate);
   const routeSeverity = strongestRouteImpact(plan);
-  const selectedItinerary =
-    plan.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
-    plan.itineraries[0];
+  const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   return (
     <>
       {positions.length >= 2 ? (
@@ -2746,7 +2893,7 @@ export function TravelPlanCard({
   const answerHandoffUrl = safeExternalUrl(answer.handoffUrl);
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   const showFallbackSuggestions =
-    plan.itineraries.length === 0 && plan.publicTransportSuggestions.length > 0;
+    plan.primaryMode !== "transit" && plan.publicTransportSuggestions.length > 0;
   return (
     <article
       className={`travel-plan-card travel-plan-card-${answer.severity} journey-answer-card`}
@@ -2773,10 +2920,22 @@ export function TravelPlanCard({
         {plan.journeyPlanner.status === "unavailable" ? (
           <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
         ) : null}
-        {plan.journeyPlanner.status === "empty" ? (
-          <p className="route-planner-status">Ingen konkrete Entur-reiser funnet for valgt tid.</p>
+        {plan.primaryMode === "walk" && plan.walkingRoute ? (
+          <section className="walking-answer-card" aria-label="Anbefalt gangrute">
+            <strong>Gangrute</strong>
+            <span>
+              {formatDuration(plan.walkingRoute.durationSeconds)} ·{" "}
+              {formatDistance(plan.walkingRoute.distanceMeters)}
+            </span>
+            <small>{plan.walkingRoute.detail}</small>
+          </section>
         ) : null}
-        {plan.itineraries.length ? (
+        {plan.primaryMode === "fallback" && plan.journeyPlanner.status === "empty" ? (
+          <p className="route-planner-status warning">
+            Ingen konkrete Entur-reiser funnet, og Nytt klarte ikke å lage en trygg gangrute.
+          </p>
+        ) : null}
+        {plan.primaryMode === "transit" && plan.itineraries.length ? (
           <div className="travel-plan-result-workspace">
             <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
             <div className="travel-plan-selected-workspace">
@@ -4840,13 +4999,16 @@ export function TrafficMapPage() {
         (await fetchTravelPlan(request, { signal: controller.signal }));
       if (travelPlanRequestIdRef.current !== requestId) return;
       setTravelPlan(payload);
-      setSelectedItineraryId(payload.itineraries[0]?.id);
+      setSelectedItineraryId(selectedItineraryForPlan(payload)?.id);
       if (comparisonPayload && comparisonPreset) {
         setTravelTimeComparisonFromSources(comparisonPayload.sources, comparisonPreset);
       } else {
         setTravelTimeComparison({ status: "idle" });
       }
-      const originContext = departureBoardContextFromPlan(payload, payload.itineraries[0]?.id);
+      const originContext = departureBoardContextFromPlan(
+        payload,
+        selectedItineraryForPlan(payload)?.id,
+      );
       if (originContext) {
         loadDepartureBoard(originContext);
       }
