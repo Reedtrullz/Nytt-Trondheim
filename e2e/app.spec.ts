@@ -2730,13 +2730,10 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(page.locator(".travel-planner-copy")).toHaveCount(0);
   await expect(page.locator(".route-planner-form-compact")).toBeVisible();
   await expect(page.locator(".travel-plan-result-workspace")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Ta Buss 3 fra Munkegata" })).toBeVisible();
+  await expect(page.locator("h1#travel-planner-heading")).toHaveText("Ta Buss 3 fra Munkegata");
   await expect(page.getByText("11:10 → 11:27 · 17 min · Direkte · 4 min gange")).toBeVisible();
   await expect(page.getByText("Reiseråd nå", { exact: true })).toBeVisible();
-  await expect(page.getByText("Munkegata, Midtbyen → Leangen, Trondheim")).toBeVisible();
-  await expect(page.getByLabel("Ruteoppsummering")).toContainText(
-    "1 kartpunkt · 1 kollektivvarsel nær ruten · 1 linjevarsel uten kartpunkt",
-  );
+  await expect(page.getByLabel("Ruteoppsummering")).toHaveCount(0);
   await expect(page.getByLabel("Velg reiseforslag")).toBeVisible();
   await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText("Buss 3");
   await expect(page.getByLabel("Velg reiseforslag")).toContainText("Anbefalt");

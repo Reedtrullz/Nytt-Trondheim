@@ -2707,6 +2707,7 @@ export function TravelPlanCard({
   routeChoiceModel,
   routeWatchSummary,
   routeContextSummary,
+  showAnswerHeading = true,
   onSelectItinerary,
   onFocusRouteContextItem,
 }: {
@@ -2718,6 +2719,7 @@ export function TravelPlanCard({
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
   routeContextSummary: RouteContextSummary;
+  showAnswerHeading?: boolean;
   onSelectItinerary: (itineraryId: string) => void;
   onFocusRouteContextItem?: (item: RouteContextItem) => void;
 }) {
@@ -2742,7 +2744,6 @@ export function TravelPlanCard({
       </p>
     );
   }
-  const routeDuration = formatDuration(plan.route.durationSeconds);
   const answer = buildJourneyAnswerView(plan, selectedItineraryId);
   const answerHandoffUrl = safeExternalUrl(answer.handoffUrl);
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
@@ -2755,7 +2756,7 @@ export function TravelPlanCard({
     >
       <header className="journey-answer-header">
         <p className="label">Reiseråd nå</p>
-        <h2>{answer.heading}</h2>
+        {showAnswerHeading ? <h2>{answer.heading}</h2> : null}
         {answer.meta ? <p className="journey-answer-meta">{answer.meta}</p> : null}
         <p>{answer.detail}</p>
         {answerHandoffUrl ? (
@@ -2768,16 +2769,6 @@ export function TravelPlanCard({
             {answer.handoffLabel ?? "Sjekk AtB/Entur"}
           </a>
         ) : null}
-        <div className="travel-plan-route-summary" aria-label="Ruteoppsummering">
-          <strong>
-            {plan.origin.label} → {plan.destination.label}
-          </strong>
-          <span>
-            {formatDistance(plan.route.distanceMeters)}
-            {routeDuration ? ` · ${routeDuration}` : ""} · {plan.route.detail}
-          </span>
-          <small>{routeContextSummary.heading}</small>
-        </div>
       </header>
       <section className="travel-plan-journey-section">
         <h3>Kollektivvalg</h3>
@@ -3742,13 +3733,20 @@ function TravelPlannerPanel({
   const formClassName = `route-planner-form route-planner-form-primary${
     hasTravelResult ? " route-planner-form-compact" : ""
   }`;
+  const postSearchHeading = travelPlan
+    ? buildJourneyAnswerView(travelPlan, selectedItineraryId).heading
+    : travelPlanLoading
+      ? "Henter reiseråd ..."
+      : travelPlanError
+        ? "Kunne ikke hente reiseråd"
+        : "Planlegg reisen";
   return (
     <section className={panelClassName} aria-labelledby="travel-planner-heading">
       {hasTravelResult ? (
         <header className="travel-planner-post-heading">
           <div>
             <p className="label">Reise og trafikk</p>
-            <h1 id="travel-planner-heading">Planlegg reisen</h1>
+            <h1 id="travel-planner-heading">{postSearchHeading}</h1>
           </div>
           <div className="travel-planner-actions" aria-label="Kollektivvalg">
             <button
@@ -3910,6 +3908,7 @@ function TravelPlannerPanel({
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
             routeContextSummary={routeContextSummary}
+            showAnswerHeading={!travelPlan}
             onSelectItinerary={onSelectItinerary}
             onFocusRouteContextItem={onFocusRouteContextItem}
           />

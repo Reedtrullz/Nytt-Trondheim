@@ -663,6 +663,7 @@ describe("TravelPlanCard journey answer", () => {
     expect(html).toContain("Ta Buss 3 fra Munkegata");
     expect(html).toContain("11:10 → 11:27 · 17 min · Direkte · 3 min gange");
     expect(html).not.toContain("Sjekk ruten før du drar");
+    expect(html).not.toContain("Ruteoppsummering");
   });
 
   it("keeps route context as compact journey chips instead of bulky fallback text", () => {
