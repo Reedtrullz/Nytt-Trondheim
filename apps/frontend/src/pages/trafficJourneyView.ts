@@ -8,6 +8,7 @@ import type {
 
 export type JourneyAnswerKind = "transit" | "walk" | "handoff" | "idle";
 export type JourneyAnswerSeverity = "ok" | "watch" | "warning";
+export type JourneyMapPlacement = "primary" | "context" | "hidden";
 
 export interface JourneyRouteOptionView {
   itineraryId: string;
@@ -114,6 +115,7 @@ function stopLabel(leg: TravelPlanLeg): string {
 }
 
 function isBoardingLeg(leg: TravelPlanLeg): boolean {
+  if (leg.cancelled) return false;
   if (leg.mode === "walk") return false;
   return Boolean(leg.publicCode || leg.lineId || leg.from.stopId || leg.from.stopName);
 }
@@ -198,6 +200,18 @@ function hasUsefulRouteGeometry(plan?: TravelPlanPayload): boolean {
   return (
     (plan?.route.geometry.coordinates.length ?? 0) >= 2 && (plan?.route.distanceMeters ?? 0) > 0
   );
+}
+
+function hasUsefulLegGeometry(itinerary?: TravelPlanItinerary): boolean {
+  return Boolean(itinerary?.legs.some((leg) => (leg.geometry?.coordinates.length ?? 0) >= 2));
+}
+
+function hasTrafficMapContext(plan?: TravelPlanPayload): boolean {
+  return Boolean(plan?.trafficImpacts.some((impact) => impact.event.geometry));
+}
+
+function hasActionableJourney(itinerary?: TravelPlanItinerary): boolean {
+  return Boolean(firstBoardingLeg(itinerary) || isWalkOnlyItinerary(itinerary));
 }
 
 function transitAnswer(
@@ -358,5 +372,21 @@ export function buildJourneyContextView(plan?: TravelPlanPayload): JourneyContex
 }
 
 export function shouldShowJourneyMap(plan?: TravelPlanPayload): boolean {
-  return hasUsefulRouteGeometry(plan);
+  return getJourneyMapPlacement(plan) !== "hidden";
+}
+
+export function getJourneyMapPlacement(plan?: TravelPlanPayload): JourneyMapPlacement {
+  if (!plan) return "hidden";
+
+  const itinerary = selectedItinerary(plan);
+  if (
+    hasActionableJourney(itinerary) &&
+    (hasUsefulLegGeometry(itinerary) || hasUsefulRouteGeometry(plan))
+  ) {
+    return "primary";
+  }
+
+  if (hasUsefulRouteGeometry(plan) || hasTrafficMapContext(plan)) return "context";
+
+  return "hidden";
 }

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildJourneyAnswerView,
   buildJourneyContextView,
+  getJourneyMapPlacement,
   shouldShowJourneyMap,
 } from "./trafficJourneyView.js";
 
@@ -225,6 +226,43 @@ describe("traffic journey answer view", () => {
     expect(answer.detail).toContain("Ingen konkrete Entur-reiser funnet");
   });
 
+  it("does not instruct travellers to board a cancelled transit leg", () => {
+    const answer = buildJourneyAnswerView(
+      plan({
+        itineraries: [
+          itinerary({
+            decision: "avoid",
+            decisionReason: "Avgangen er innstilt.",
+            labels: [],
+            legs: [
+              leg({
+                cancelled: true,
+                notices: [
+                  {
+                    id: "notice:cancelled",
+                    title: "Innstilt avgang",
+                    source: "Entur avvik",
+                    severity: "warning",
+                  },
+                ],
+              }),
+            ],
+          }),
+        ],
+        journeyPlanner: {
+          status: "ok",
+          detail: "Entur returnerte bare en innstilt avgang.",
+          requestedDepartureTime: generatedAt,
+          source: "Entur Journey Planner",
+        },
+      }),
+    );
+
+    expect(answer.kind).toBe("handoff");
+    expect(answer.heading).toBe("Sjekk AtB/Entur");
+    expect(answer.detail).toContain("Entur returnerte bare en innstilt avgang");
+  });
+
   it("falls back to operator handoff when neither transit nor walking route is useful", () => {
     const answer = buildJourneyAnswerView(
       plan({
@@ -297,5 +335,34 @@ describe("traffic journey answer view", () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it("marks generic OSRM corridors as context maps rather than primary journey maps", () => {
+    expect(getJourneyMapPlacement(plan())).toBe("context");
+    expect(
+      getJourneyMapPlacement(
+        plan({
+          itineraries: [itinerary()],
+          journeyPlanner: {
+            status: "ok",
+            detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+            requestedDepartureTime: generatedAt,
+            source: "Entur Journey Planner",
+          },
+        }),
+      ),
+    ).toBe("primary");
+    expect(
+      getJourneyMapPlacement(
+        plan({
+          route: {
+            source: "direct",
+            detail: "Rute kunne ikke beregnes.",
+            distanceMeters: 0,
+            geometry: { type: "LineString", coordinates: [] },
+          },
+        }),
+      ),
+    ).toBe("hidden");
   });
 });

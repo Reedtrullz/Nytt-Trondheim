@@ -22,6 +22,55 @@
 
 ---
 
+## Current Findings And Execution Corrections
+
+This section supersedes any older code snippets in this plan if they conflict.
+
+### Product Findings
+
+- The current `/trafikk` post-search page still reads like a diagnostics report: distance, roadwork counts, source details, and collapsible text panels appear before the concrete travel instruction.
+- The map is too late in the hierarchy even though the user expects traffic points, roadwork, stops, and the route itself to be spatial.
+- “No concrete Entur journey found” is not a complete answer. If an actual walk-only journey exists, the page should say how to walk and how long it takes. If only a generic OSRM road corridor exists, the page must not present it as a walking route.
+- Text lists of route context duplicate the map and make the page feel busy. The primary representation should be map pins plus a compact chip row; a text fallback is still needed for accessibility and map failures.
+- Cancelled or replacement transit legs must never produce an imperative instruction such as `Ta Buss 2 ...` unless the view clearly marks the option as unavailable or degraded.
+
+### Engineering Corrections
+
+- `apps/frontend/src/pages/trafficJourneyView.ts` is the pure journey-answer model. Keep it frontend-only and payload-only.
+- Do not import `PublicTransportDepartureBoardPayload` into the pure model. Departure-board rendering belongs to the selected-route detail task, not the base answer task.
+- `firstBoardingLeg` / equivalent logic must ignore cancelled transit legs when choosing the headline instruction.
+- `shouldShowJourneyMap(plan)` must distinguish between:
+  - **Primary journey map:** actual selected transit itinerary with leg geometry/stop sequence, or actual walk-only itinerary.
+  - **Context-only map:** generic `plan.route` corridor, route-impact map points, or traffic context without an actionable Entur itinerary.
+- The generic OSRM route is useful for “traffic context along the corridor,” but it is not proof of a walkable journey and must not drive walking ETA copy.
+- Any new client-side async traffic/Entur hook must use request-id invalidation plus abort cleanup, matching the existing `useTrafficMap` pattern.
+
+### Immediate Repair Before Continuing
+
+Before Task 2 starts, repair Task 1 with focused tests:
+
+1. Add a unit test where the only transit leg is `cancelled: true`; expected answer is not `transit` with `Ta Buss ...`.
+2. Add or update a unit test where there are zero itineraries but `plan.route.geometry` exists; expected answer is `handoff`, and map placement is `context`, not primary journey map.
+3. If the model needs a richer return shape, prefer an additive helper such as:
+
+```ts
+export type JourneyMapPlacement = "primary" | "context" | "hidden";
+
+export function getJourneyMapPlacement(plan?: TravelPlanPayload): JourneyMapPlacement;
+```
+
+4. Keep `shouldShowJourneyMap(plan)` as a backwards-compatible boolean wrapper if existing code/tests already call it:
+
+```ts
+export function shouldShowJourneyMap(plan?: TravelPlanPayload): boolean {
+  return getJourneyMapPlacement(plan) !== "hidden";
+}
+```
+
+5. Do not move on to UI wiring until these focused tests pass.
+
+---
+
 ## File Structure
 
 - Create `apps/frontend/src/pages/trafficJourneyView.ts`
@@ -2081,15 +2130,15 @@ Expected:
 
 ## Acceptance Criteria
 
-- A user who searches Munkegata -> Lade immediately sees either the concrete bus/tram/train/walk instruction or a clear AtB/Entur handoff.
-- The selected route map is visible as part of the primary result when a route exists.
+- A user who searches Munkegata -> Lade immediately sees either the concrete usable bus/tram/train instruction, an actual walk-only itinerary, or a clear AtB/Entur handoff.
+- The selected route map is visible as part of the primary result when an actionable journey exists; generic road corridors are shown as context, not as walking directions.
 - Text boxes listing roadwork are replaced by map pins plus a compact chip/drawer fallback.
 - Post-search H1 does not remain generic `Planlegg reisen`.
 - The full departure board no longer competes with the primary journey answer.
 - Broad `Trafikkbildet nå`, sources, layer internals, and data diagnostics are below the main answer.
 - Mobile order is: planner/answer, map, selected-departure context, compact warnings, broad diagnostics.
 - No new upstream calls, source items, situations, source contracts, database migrations, or worker changes.
-- `/trafikk` e2e tests verify visible map, concrete journey answer, walking fallback, compact context, and no horizontal overflow.
+- `/trafikk` e2e tests verify visible map, concrete journey answer, real walking fallback, compact context, and no horizontal overflow.
 
 ---
 
@@ -2102,8 +2151,8 @@ Use this as the autonomous work goal:
 
 Intent:
 - Make `/trafikk` answer “what should I do now?” before it shows diagnostics.
-- After a route search, show the concrete travel instruction first: transit line + boarding stop when available, otherwise walking route + walking ETA, otherwise a clear AtB/Entur handoff.
-- Make the selected route map a primary visible workspace, not a generic support disclosure.
+- After a route search, show the concrete travel instruction first: usable transit line + boarding stop when available, otherwise an actual walk-only itinerary + walking ETA, otherwise a clear AtB/Entur handoff.
+- Make the selected route map a primary visible workspace when an actionable journey exists. Generic OSRM road corridors are context maps, not walking directions.
 - Move roadwork/context from duplicated text boxes onto the map with compact chips/fallback drawer.
 - Collapse route choice, selected itinerary, route warnings, departure board, time comparison, traffic picture, and data/source details into a cleaner hierarchy.
 
@@ -2113,6 +2162,8 @@ Hard constraints:
 - Keep `/trafikk` public/viewer-safe and Bokmål-only.
 - Use Node 22.
 - Preserve request-id invalidation plus abort cleanup patterns for any new polling/request hooks.
+- Do not generate “Ta Buss ...” from cancelled transit legs.
+- Do not generate walking ETA/instructions from the generic OSRM traffic corridor.
 - Do not stage unrelated local artifacts.
 
 Execution method:
@@ -2125,7 +2176,7 @@ Execution method:
 
 Definition of done:
 - `/trafikk` route search shows a concrete journey answer and visible map without user digging through disclosures.
-- Walking fallback is first-class when no transit is available.
+- Walking fallback is first-class only when backed by an actual walk-only itinerary.
 - Road/context text no longer dominates the result.
 - Mobile has no horizontal overflow and shows answer/map before broad diagnostics.
 - Full local verification passes.
