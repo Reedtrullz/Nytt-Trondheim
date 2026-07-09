@@ -172,6 +172,10 @@ function isWalkOnlyItinerary(itinerary?: TravelPlanItinerary): itinerary is Trav
   return Boolean(itinerary?.legs.length) && itinerary!.legs.every((leg) => leg.mode === "walk");
 }
 
+function hasActionableJourney(itinerary?: TravelPlanItinerary): boolean {
+  return Boolean(firstBoardingLeg(itinerary) || isWalkOnlyItinerary(itinerary));
+}
+
 function itineraryDistance(itinerary: TravelPlanItinerary): number | undefined {
   if (itinerary.distanceMeters !== undefined) return itinerary.distanceMeters;
   const distances = itinerary.legs
@@ -186,14 +190,17 @@ function routeOptions(
   selectedItineraryId?: string,
 ): JourneyRouteOptionView[] {
   const selected = selectedItinerary(plan, selectedItineraryId);
-  return plan.itineraries.slice(0, 5).map((itinerary) => ({
-    itineraryId: itinerary.id,
-    label: itineraryPrimaryLabel(itinerary),
-    summary: itinerarySummary(itinerary),
-    meta: itineraryMeta(itinerary),
-    selected: itinerary.id === selected?.id,
-    severity: itinerarySeverity(itinerary),
-  }));
+  return plan.itineraries
+    .filter(hasActionableJourney)
+    .slice(0, 5)
+    .map((itinerary) => ({
+      itineraryId: itinerary.id,
+      label: itineraryPrimaryLabel(itinerary),
+      summary: itinerarySummary(itinerary),
+      meta: itineraryMeta(itinerary),
+      selected: itinerary.id === selected?.id,
+      severity: itinerarySeverity(itinerary),
+    }));
 }
 
 function hasUsefulRouteGeometry(plan?: TravelPlanPayload): boolean {
@@ -208,10 +215,6 @@ function hasUsefulLegGeometry(itinerary?: TravelPlanItinerary): boolean {
 
 function hasTrafficMapContext(plan?: TravelPlanPayload): boolean {
   return Boolean(plan?.trafficImpacts.some((impact) => impact.event.geometry));
-}
-
-function hasActionableJourney(itinerary?: TravelPlanItinerary): boolean {
-  return Boolean(firstBoardingLeg(itinerary) || isWalkOnlyItinerary(itinerary));
 }
 
 function transitAnswer(

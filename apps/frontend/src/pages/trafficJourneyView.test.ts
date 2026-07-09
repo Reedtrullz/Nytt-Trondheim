@@ -261,6 +261,7 @@ describe("traffic journey answer view", () => {
     expect(answer.kind).toBe("handoff");
     expect(answer.heading).toBe("Sjekk AtB/Entur");
     expect(answer.detail).toContain("Entur returnerte bare en innstilt avgang");
+    expect(answer.routeOptions).toEqual([]);
   });
 
   it("falls back to operator handoff when neither transit nor walking route is useful", () => {
