@@ -2800,21 +2800,19 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(page.getByText("Ta Buss 3 mot Leangen")).toBeVisible();
   await expect(page.getByLabel("Sjekk før avreise")).toContainText("Sjekk dette før avreise");
   await expect(page.getByLabel("Sjekk før avreise")).toContainText("Forsinkelse på linje 3");
-  await expect(page.getByLabel("Trafikk langs reisen")).toContainText(
-    "Veiarbeid på E6 ved Leangen",
-  );
-  await expect(page.getByLabel("Trafikk langs reisen")).toContainText("Forsinkelse på linje 3");
+  await expect(page.getByLabel("Trafikk langs reisen")).toHaveCount(0);
   await expect(page.getByText("Kartpunkter langs valgt rute")).toHaveCount(0);
   await expect(page.getByText("Se trafikk langs ruten")).toHaveCount(0);
   await expect(page.locator(".traffic-primary-map-section")).toContainText("Kartet viser ruten");
   await expect(page.locator(".traffic-primary-map-section")).toContainText("Stopp, gangetapper");
   await expect(page.locator("details.traffic-map-disclosure")).toHaveCount(0);
   await expect(page.locator(".traffic-map")).toBeVisible();
-  const routeContextChip = page
-    .getByLabel("Trafikk langs reisen")
-    .getByRole("button", { name: /Veiarbeid på E6 ved Leangen/ });
-  await routeContextChip.click();
-  await expect(routeContextChip).toHaveAttribute("aria-pressed", "true");
+  await openTrafficDisclosure(page, "Varsler uten kartpunkt");
+  await expect(
+    page
+      .locator("details.traffic-line-alert-disclosure")
+      .getByText("Forsinkelse på linje 3", { exact: true }),
+  ).toBeVisible();
   await openTrafficDisclosure(page, "Dra nå eller vent?");
   const comparison = page.getByLabel("Dra nå eller vent");
   await expect(comparison).toContainText("Dra nå eller vent?");

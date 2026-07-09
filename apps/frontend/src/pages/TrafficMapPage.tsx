@@ -2285,12 +2285,14 @@ export function RouteContextFallback({
   summary,
   plan,
   title,
+  className,
   onFocusItem,
   selectedEventId,
 }: {
   summary: RouteContextSummary;
   plan?: TravelPlanPayload;
   title?: string;
+  className?: string;
   onFocusItem?: (item: RouteContextItem) => void;
   selectedEventId?: string;
 }) {
@@ -2306,7 +2308,7 @@ export function RouteContextFallback({
   }
 
   return (
-    <details className="route-context-fallback">
+    <details className={["route-context-fallback", className].filter(Boolean).join(" ")}>
       <summary>
         <span>{summaryTitle}</span>
         <strong>{summary.heading}</strong>
@@ -4523,6 +4525,7 @@ export function TrafficMapPage() {
     ],
   );
   const routeContextSummary = useMemo(() => buildRouteContextSummary(travelPlan), [travelPlan]);
+  const nonMapRouteContextItems = routeContextSummary.items.filter((item) => !item.focusable);
   const routeChoiceModel = useMemo(
     () =>
       buildRouteChoiceModel({
@@ -4586,12 +4589,6 @@ export function TrafficMapPage() {
     setBounds((currentBounds) =>
       mapBoundsEqual(currentBounds, nextBounds) ? currentBounds : nextBounds,
     );
-  }, []);
-
-  const handleRouteContextFocus = useCallback((item: RouteContextItem) => {
-    const eventId = eventIdForRouteContextItem(item);
-    if (!eventId) return;
-    setSelectedEventId(eventId);
   }, []);
 
   const applyTrafficFilters = useCallback(
@@ -5037,12 +5034,20 @@ export function TrafficMapPage() {
           {trafficMapWorkspace}
         </section>
       ) : null}
-      {travelPlan ? (
-        <JourneyContextChips
+      {travelPlan && nonMapRouteContextItems.length ? (
+        <RouteContextFallback
+          summary={{
+            ...routeContextSummary,
+            items: nonMapRouteContextItems,
+            count: nonMapRouteContextItems.length,
+            mapPointCount: 0,
+            heading: routeContextCountLabel(nonMapRouteContextItems.length, "linjevarsel"),
+            detail:
+              "Varsler uten kartpunkt vises her. Trafikkpunkt med plassering vises på kartet.",
+          }}
           plan={travelPlan}
-          routeContextSummary={routeContextSummary}
-          selectedEventId={selectedEventId}
-          onFocusItem={handleRouteContextFocus}
+          title="Varsler uten kartpunkt"
+          className="traffic-support-disclosure traffic-line-alert-disclosure"
         />
       ) : null}
       {routeDepartureCheckpointsForSelection.length > 1 ? (

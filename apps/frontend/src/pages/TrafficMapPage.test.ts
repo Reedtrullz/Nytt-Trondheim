@@ -887,6 +887,48 @@ describe("TravelPlanCard journey answer", () => {
   });
 });
 
+describe("route context demotion", () => {
+  it("does not repeat map-point traffic as bulky text before the map", () => {
+    const planWithMapPoint: TravelPlanPayload = {
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "roadwork-1",
+            source: "vegvesen_traffic_info",
+            sourceEventId: "roadwork-1",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithMapPoint,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithMapPoint,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("Vegarbeid ved Bakklandet");
+    expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+});
+
 describe("TrafficJourneyAnswer", () => {
   const travellerStepPlan: TravelPlanPayload = {
     ...planWithItinerary,
