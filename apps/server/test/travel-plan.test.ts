@@ -23,6 +23,8 @@ import type {
   PublicTransportVehicle,
   SourceHealth,
   TrafficMapEvent,
+  TravelPlanItinerary,
+  TravelPlanRoute,
 } from "@nytt/shared";
 
 async function testApp() {
@@ -91,6 +93,99 @@ const line71Alert = {
   affectedLineRefs: ["ATB:Line:71"],
   affectedLineNames: ["71"],
 } satisfies PublicTransportServiceAlert;
+
+const testRoute = {
+  source: "direct",
+  distanceMeters: 2520,
+  detail: "Direkte korridor mellom punktene.",
+  geometry: {
+    type: "LineString",
+    coordinates: [
+      [10.393742, 63.432883],
+      [10.463, 63.433],
+    ],
+  },
+} satisfies TravelPlanRoute;
+
+const minimalItinerary = {
+  id: "itinerary-bus-2",
+  decision: "best",
+  decisionReason: "Raskeste konkrete kollektivvalg.",
+  labels: ["best_now"],
+  departureTime: "2026-06-01T10:00:00.000Z",
+  arrivalTime: "2026-06-01T10:18:00.000Z",
+  durationSeconds: 1080,
+  transferCount: 0,
+  walkTimeSeconds: 420,
+  realtime: true,
+  modes: ["bus"],
+  legs: [],
+  disruptionCount: 0,
+  handoffUrl: "https://entur.no/reiseresultater",
+} satisfies TravelPlanItinerary;
+
+const walkOnlyItinerary = {
+  ...minimalItinerary,
+  id: "itinerary-walk-1",
+  modes: ["walk"],
+  legs: [],
+} satisfies TravelPlanItinerary;
+
+const avoidItinerary = {
+  ...minimalItinerary,
+  id: "itinerary-bus-avoid",
+  decision: "avoid",
+  decisionReason: "Minst én del av reisen er innstilt eller har kritisk trafikkpåvirkning.",
+  legs: [
+    {
+      id: "leg-bus-cancelled",
+      mode: "bus",
+      from: {
+        name: "Munkegata",
+        coordinate: [10.393742, 63.432883],
+        stopId: "NSR:StopPlace:63277",
+        stopName: "Munkegata",
+        stopCode: "M1",
+      },
+      to: {
+        name: "Lade",
+        coordinate: [10.463, 63.433],
+        stopId: "NSR:StopPlace:65000",
+        stopName: "Lade",
+        stopCode: "L1",
+      },
+      aimedStartTime: "2026-06-01T10:00:00.000Z",
+      expectedStartTime: "2026-06-01T10:00:00.000Z",
+      aimedEndTime: "2026-06-01T10:18:00.000Z",
+      expectedEndTime: "2026-06-01T10:18:00.000Z",
+      durationSeconds: 1080,
+      distanceMeters: 2520,
+      realtime: true,
+      cancelled: true,
+      replacementTransport: false,
+      lineId: "ATB:Line:3",
+      publicCode: "3",
+      lineName: "Lade - Hallset",
+      serviceJourneyId: "ATB:ServiceJourney:3",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [10.393742, 63.432883],
+          [10.463, 63.433],
+        ],
+      },
+      notices: [
+        {
+          id: "entur-cancelled",
+          title: "Avgangen er innstilt",
+          detail: "Finn alternativ avgang.",
+          source: "Entur",
+          severity: "critical",
+        },
+      ],
+    },
+  ],
+} satisfies TravelPlanItinerary;
 
 afterEach(() => {
   clearEnturJourneyCache();
@@ -1601,5 +1696,169 @@ describe("traffic travel planner API", () => {
         }),
       ]),
     );
+  });
+
+  it("uses walking as primary mode when Entur has no usable itinerary and route geometry exists", () => {
+    const payload = buildTravelPlanPayload({
+      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
+      route: testRoute,
+      events: [],
+      vehicles: [],
+      alerts: [],
+      sourceHealth,
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-01T23:30:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T23:30:00.000Z"),
+    });
+
+    expect(payload.primaryMode).toBe("walk");
+    expect(payload.walkingRoute).toMatchObject({
+      source: "direct",
+      distanceMeters: 2520,
+      durationSeconds: 1860,
+      detail: expect.stringContaining("Gangtid estimert"),
+    });
+    expect(payload.nextTransitOption).toBeUndefined();
+    expect(payload.journeyPlanner.status).toBe("empty");
+  });
+
+  it("uses transit as primary mode when Entur returns a usable itinerary", () => {
+    const payload = buildTravelPlanPayload({
+      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
+      route: testRoute,
+      events: [],
+      vehicles: [],
+      alerts: [],
+      sourceHealth,
+      itineraries: [minimalItinerary],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: "2026-06-01T10:00:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T09:55:00.000Z"),
+    });
+
+    expect(payload.primaryMode).toBe("transit");
+    expect(payload.walkingRoute).toBeUndefined();
+    expect(payload.itineraries).toHaveLength(1);
+  });
+
+  it("keeps walking as primary mode when the only itinerary is walk-only", () => {
+    const payload = buildTravelPlanPayload({
+      origin: {
+        query: "Munkegata",
+        label: "Munkegata, Trondheim",
+        coordinate: [10.393742, 63.432883],
+      },
+      destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
+      route: testRoute,
+      events: [],
+      vehicles: [],
+      alerts: [],
+      sourceHealth,
+      itineraries: [walkOnlyItinerary],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: "2026-06-01T10:00:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T09:55:00.000Z"),
+    });
+
+    expect(payload.primaryMode).toBe("walk");
+    expect(payload.walkingRoute).toMatchObject({
+      source: "direct",
+      distanceMeters: 2520,
+      durationSeconds: 1860,
+    });
+    expect(payload.itineraries).toHaveLength(1);
+  });
+
+  it("keeps walking as primary mode when the only itinerary is marked avoid", () => {
+    const payload = buildTravelPlanPayload({
+      origin: {
+        query: "Munkegata",
+        label: "Munkegata, Trondheim",
+        coordinate: [10.393742, 63.432883],
+      },
+      destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
+      route: testRoute,
+      events: [],
+      vehicles: [],
+      alerts: [],
+      sourceHealth,
+      itineraries: [avoidItinerary],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: "2026-06-01T10:00:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T09:55:00.000Z"),
+    });
+
+    expect(payload.primaryMode).toBe("walk");
+    expect(payload.walkingRoute).toMatchObject({
+      source: "direct",
+      distanceMeters: 2520,
+      durationSeconds: 1860,
+    });
+    expect(payload.itineraries).toHaveLength(1);
+  });
+
+  it("keeps walking as degraded primary mode when Entur fails but route geometry exists", () => {
+    const payload = buildTravelPlanPayload({
+      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
+      route: testRoute,
+      events: [],
+      vehicles: [],
+      alerts: [],
+      sourceHealth,
+      itineraries: undefined,
+      journeyPlanner: {
+        status: "unavailable",
+        detail: "Entur reisesøk er ikke tilgjengelig akkurat nå.",
+        requestedDepartureTime: "2026-06-01T23:30:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T23:30:00.000Z"),
+    });
+
+    expect(payload.primaryMode).toBe("walk");
+    expect(payload.walkingRoute?.durationSeconds).toBe(1860);
+    expect(payload.journeyPlanner.status).toBe("unavailable");
+  });
+
+  it("uses fallback as primary mode when neither Entur nor route geometry can answer the trip", () => {
+    const payload = buildTravelPlanPayload({
+      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
+      route: {
+        source: "direct",
+        distanceMeters: 0,
+        detail: "Kunne ikke beregne rute.",
+        geometry: { type: "LineString", coordinates: [] },
+      },
+      events: [],
+      vehicles: [],
+      alerts: [],
+      sourceHealth,
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-01T23:30:00.000Z",
+      },
+      generatedAt: new Date("2026-06-01T23:30:00.000Z"),
+    });
+
+    expect(payload.primaryMode).toBe("fallback");
+    expect(payload.walkingRoute).toBeUndefined();
   });
 });

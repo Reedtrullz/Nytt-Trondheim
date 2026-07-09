@@ -1847,6 +1847,67 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   const hasHighRoadImpact = strongestRoadImpact === "critical" || strongestRoadImpact === "high";
   const avoidCount = plan.itineraries.filter((itinerary) => itinerary.decision === "avoid").length;
   const watchCount = plan.itineraries.filter((itinerary) => itinerary.decision === "watch").length;
+  const selectedItinerary = selectedItineraryForPlan(plan);
+
+  if (plan.primaryMode === "transit" && selectedItinerary) {
+    const heading = transitHeadingForItinerary(selectedItinerary) ?? "Ta valgt kollektivreise";
+    const duration = formatDuration(selectedItinerary.durationSeconds);
+    const departure = formatTravelTime(selectedItinerary.departureTime);
+    const arrival = formatTravelTime(selectedItinerary.arrivalTime);
+    return {
+      heading,
+      detail: [
+        departure && arrival ? `${departure}-${arrival}` : undefined,
+        duration,
+        selectedItinerary.transferCount === 0
+          ? "direkte"
+          : `${selectedItinerary.transferCount} bytte${selectedItinerary.transferCount === 1 ? "" : "r"}`,
+        `${formatDuration(selectedItinerary.walkTimeSeconds)} gange`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
+      severity:
+        selectedItinerary.decision === "avoid"
+          ? "warning"
+          : selectedItinerary.decision === "watch" || alertCount > 0 || hasHighRoadImpact
+            ? "watch"
+            : "ok",
+    };
+  }
+
+  if (plan.primaryMode === "walk" && plan.walkingRoute) {
+    const duration = formatDuration(plan.walkingRoute.durationSeconds) ?? "ukjent tid";
+    const distance = formatDistance(plan.walkingRoute.distanceMeters);
+    return {
+      heading: `Gå til ${shortPlaceLabel(plan.destination.label)}`,
+      detail:
+        plan.journeyPlanner.status === "unavailable"
+          ? `Kollektivsøket feilet akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`
+          : `Ingen kollektivreise akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
+      severity:
+        plan.journeyPlanner.status === "unavailable" || hasHighRoadImpact ? "warning" : "watch",
+    };
+  }
+
+  if (plan.primaryMode === "fallback") {
+    return {
+      heading: "Sjekk AtB/Entur",
+      detail: `${plan.journeyPlanner.detail} Nytt klarte ikke å lage en trygg gangrute for valgt søk.`,
+      roadImpactCount,
+      vehicleCount,
+      alertCount,
+      itineraryCount,
+      severity: "warning",
+    };
+  }
 
   if (plan.journeyPlanner.status === "unavailable") {
     return {
@@ -1919,6 +1980,81 @@ export function travelPlanDecision(plan?: TravelPlanPayload): {
   };
 }
 
+function shortPlaceLabel(label: string): string {
+  return label.split(",")[0]?.trim() || label;
+}
+
+function firstTransitLeg(itinerary?: TravelPlanItinerary): TravelPlanLeg | undefined {
+  return itinerary?.legs.find((leg) => leg.mode !== "walk" && !leg.cancelled);
+}
+
+function transitHeadingForItinerary(itinerary?: TravelPlanItinerary): string | undefined {
+  const leg = firstTransitLeg(itinerary);
+  if (!leg) return undefined;
+  const mode = modeLabel(leg.mode);
+  const line = leg.publicCode ?? leg.lineName;
+  const stop = leg.from.stopName ?? leg.from.name;
+  if (line && stop) return `Ta ${mode} ${line} fra ${shortPlaceLabel(stop)}`;
+  if (line) return `Ta ${mode} ${line}`;
+  if (stop) return `Ta ${mode} fra ${shortPlaceLabel(stop)}`;
+  return `Ta ${mode}`;
+}
+
+function formatTravelTime(value: string): string {
+  return new Intl.DateTimeFormat("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Oslo",
+  }).format(new Date(value));
+}
+
+export function travelPlanModeSummary(plan: TravelPlanPayload): {
+  label: string;
+  detail: string;
+  contextLabel: string;
+} {
+  const selectedItinerary = selectedItineraryForPlan(plan);
+  if (plan.primaryMode === "transit" && selectedItinerary) {
+    const leg = firstTransitLeg(selectedItinerary);
+    return {
+      label: "Kollektiv",
+      detail: [
+        leg?.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : undefined,
+        formatDuration(selectedItinerary.durationSeconds),
+        selectedItinerary.transferCount === 0 ? "Direkte" : `${selectedItinerary.transferCount} bytte`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      contextLabel: "Trafikk langs ruten",
+    };
+  }
+  if (plan.primaryMode === "walk" && plan.walkingRoute) {
+    return {
+      label: "Gange",
+      detail: [
+        formatDuration(plan.walkingRoute.durationSeconds),
+        formatDistance(plan.walkingRoute.distanceMeters),
+        shortPlaceLabel(plan.destination.label),
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      contextLabel: "Trafikk langs gangruta",
+    };
+  }
+  return {
+    label: "Sjekk operatør",
+    detail: "Bruk AtB/Entur for endelig reisevalg.",
+    contextLabel: "Lokal trafikkontekst",
+  };
+}
+
+export function shouldOpenPostSearchMap(plan?: TravelPlanPayload): boolean {
+  if (!plan) return false;
+  if (plan.primaryMode === "walk" && plan.walkingRoute) return true;
+  if (plan.primaryMode === "transit" && plan.itineraries.length > 0) return true;
+  return plan.trafficImpacts.length > 0;
+}
+
 export type RouteContextItem = {
   id: string;
   kind: "traffic" | "transit_alert";
@@ -1943,6 +2079,17 @@ export type RouteContextSummary = {
   detail: string;
   items: RouteContextItem[];
 };
+
+function routeContextTitle(plan?: TravelPlanPayload, summary?: RouteContextSummary): string {
+  if (plan?.primaryMode === "walk") {
+    return summary?.mapPointCount ? "Kartpunkter langs gangruta" : "Trafikk langs gangruta";
+  }
+  return summary?.mapPointCount ? "Kartpunkter langs ruten" : "Trafikk langs ruten";
+}
+
+function routeContextEmptyTarget(plan?: TravelPlanPayload): string {
+  return plan?.primaryMode === "walk" ? "gangruta" : "ruten";
+}
 
 function routeContextSeverityFromTraffic(severity?: string): RouteContextItem["severity"] {
   if (severity === "high" || severity === "critical") return "warning";
@@ -2081,17 +2228,24 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
 
 export function RouteContextFallback({
   summary,
+  plan,
+  title,
   onFocusItem,
   selectedEventId,
 }: {
   summary: RouteContextSummary;
+  plan?: TravelPlanPayload;
+  title?: string;
   onFocusItem?: (item: RouteContextItem) => void;
   selectedEventId?: string;
 }) {
+  const summaryTitle =
+    title ??
+    (summary.mapPointCount > 0 ? "Kartpunkter langs valgt rute" : "Tekstfallback for valgt rute");
   if (summary.count === 0) {
     return (
       <p className="route-context-empty">
-        Ingen aktive trafikkpunkter funnet langs valgt rute akkurat nå.
+        Ingen aktive trafikkpunkter funnet langs {routeContextEmptyTarget(plan)} akkurat nå.
       </p>
     );
   }
@@ -2100,9 +2254,7 @@ export function RouteContextFallback({
     <details className="route-context-fallback">
       <summary>
         <span>
-          {summary.mapPointCount > 0
-            ? "Kartpunkter langs valgt rute"
-            : "Tekstfallback for valgt rute"}
+          {summaryTitle}
         </span>
         <strong>{summary.heading}</strong>
       </summary>
@@ -2594,7 +2746,7 @@ function SelectedItineraryPanel({ itinerary }: { itinerary?: TravelPlanItinerary
   );
 }
 
-function TravelPlanCard({
+export function TravelPlanCard({
   plan,
   loading,
   error,
@@ -2640,9 +2792,15 @@ function TravelPlanCard({
   }
   const duration = formatDuration(plan.route.durationSeconds);
   const decision = travelPlanDecision(plan);
+  const modeSummary = travelPlanModeSummary(plan);
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   const showFallbackSuggestions =
-    plan.itineraries.length === 0 && plan.publicTransportSuggestions.length > 0;
+    plan.primaryMode !== "transit" && plan.publicTransportSuggestions.length > 0;
+  const routeContextSummaryTitle = routeContextTitle(plan, routeContextSummary);
+  const contextIntro =
+    routeContextSummary.count > 0
+      ? `${routeContextSummary.heading} · ${modeSummary.contextLabel}`
+      : undefined;
   return (
     <article
       className={`travel-plan-card travel-plan-card-${decision.severity}`}
@@ -2660,9 +2818,7 @@ function TravelPlanCard({
             {formatDistance(plan.route.distanceMeters)}
             {duration ? ` · ${duration}` : ""} · {plan.route.detail}
           </span>
-          <small>
-            {decision.itineraryCount} reiseforslag · {routeContextSummary.heading}
-          </small>
+          <small>{modeSummary.label} · {modeSummary.detail}</small>
         </div>
       </header>
       <section className="travel-plan-journey-section">
@@ -2670,10 +2826,22 @@ function TravelPlanCard({
         {plan.journeyPlanner.status === "unavailable" ? (
           <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
         ) : null}
-        {plan.journeyPlanner.status === "empty" ? (
-          <p className="route-planner-status">Ingen konkrete Entur-reiser funnet for valgt tid.</p>
+        {plan.primaryMode === "walk" && plan.walkingRoute ? (
+          <section className="walking-answer-card" aria-label="Anbefalt gangrute">
+            <strong>Gangrute</strong>
+            <span>
+              {formatDuration(plan.walkingRoute.durationSeconds)} ·{" "}
+              {formatDistance(plan.walkingRoute.distanceMeters)}
+            </span>
+            <small>{plan.walkingRoute.detail}</small>
+          </section>
         ) : null}
-        {plan.itineraries.length ? (
+        {plan.primaryMode === "fallback" && plan.journeyPlanner.status === "empty" ? (
+          <p className="route-planner-status warning">
+            Ingen konkrete Entur-reiser funnet, og Nytt klarte ikke å lage en trygg gangrute.
+          </p>
+        ) : null}
+        {plan.primaryMode === "transit" && plan.itineraries.length ? (
           <div className="travel-plan-result-workspace">
             <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
             <div className="travel-plan-selected-workspace">
@@ -2683,8 +2851,11 @@ function TravelPlanCard({
           </div>
         ) : null}
       </section>
+      {contextIntro ? <p className="travel-plan-context-note">{contextIntro}</p> : null}
       <RouteContextFallback
         summary={routeContextSummary}
+        plan={plan}
+        title={routeContextSummaryTitle}
         onFocusItem={onFocusRouteContextItem}
         selectedEventId={selectedEventId}
       />
@@ -4853,52 +5024,11 @@ export function TrafficMapPage() {
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}
       />
-      {routeDepartureCheckpointsForSelection.length > 1 ? (
-        <details className="traffic-support-disclosure">
-          <summary>Live-sjekk av bytter</summary>
-          <RouteDepartureConfidencePanel
-            checkpoints={routeDepartureCheckpointsForSelection}
-            results={routeDepartureBoards}
-            fetchStatus={routeDepartureBoardStatus}
-          />
-        </details>
-      ) : null}
-      <details className="traffic-support-disclosure" open={!travelPlan}>
-        <summary>{travelPlan ? "Avganger for valgt reise" : "Avganger nå"}</summary>
-        <DepartureBoardPanel
-          board={departureBoard}
-          loading={departureBoardLoading}
-          error={departureBoardError}
-          context={departureBoardContext}
-          routeOriginContext={routeOriginDepartureBoardContext}
-          rememberedBoards={rememberedDepartureBoards}
-          requestedLineFilterKey={requestedDepartureLineFilterKey}
-          selectedDeparture={selectedDeparture}
-          onReload={reloadDepartureBoard}
-          onContextChange={handleDepartureBoardContextChange}
-          onClearRequestedLineFilter={() => setRequestedDepartureLineFilterKey(undefined)}
-          onRememberCurrentBoard={handleRememberCurrentDepartureBoard}
-          onSelectRememberedBoard={handleSelectRememberedDepartureBoard}
-          onRemoveRememberedBoard={handleRemoveRememberedDepartureBoard}
-        />
-      </details>
-      <details className="traffic-support-disclosure">
-        <summary>Trafikkbildet nå</summary>
-        <TrafficNowSummary cards={summaryCardsForDisplay} />
-      </details>
-      <TrafficDataDisclosure
-        sources={[
-          ...(data?.sources ?? []),
-          ...(publicTransportDisplayData?.sources ?? []),
-          ...travelPlanSources,
-        ]}
-      />
-
       <details
         className="traffic-support-disclosure traffic-map-disclosure"
-        open={!travelPlan || routeContextSummary.mapPointCount > 0}
+        open={!travelPlan || shouldOpenPostSearchMap(travelPlan)}
       >
-        <summary>Kart og trafikkgrunnlag</summary>
+        <summary>{travelPlan ? "Kart for valgt reise" : "Kart og trafikkgrunnlag"}</summary>
         <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
           <button
             type="button"
@@ -4973,6 +5103,46 @@ export function TrafficMapPage() {
           </MapContainer>
         </section>
       </details>
+      {routeDepartureCheckpointsForSelection.length > 1 ? (
+        <details className="traffic-support-disclosure">
+          <summary>Live-sjekk av bytter</summary>
+          <RouteDepartureConfidencePanel
+            checkpoints={routeDepartureCheckpointsForSelection}
+            results={routeDepartureBoards}
+            fetchStatus={routeDepartureBoardStatus}
+          />
+        </details>
+      ) : null}
+      <details className="traffic-support-disclosure" open={!travelPlan}>
+        <summary>{travelPlan ? "Avganger for valgt reise" : "Avganger nå"}</summary>
+        <DepartureBoardPanel
+          board={departureBoard}
+          loading={departureBoardLoading}
+          error={departureBoardError}
+          context={departureBoardContext}
+          routeOriginContext={routeOriginDepartureBoardContext}
+          rememberedBoards={rememberedDepartureBoards}
+          requestedLineFilterKey={requestedDepartureLineFilterKey}
+          selectedDeparture={selectedDeparture}
+          onReload={reloadDepartureBoard}
+          onContextChange={handleDepartureBoardContextChange}
+          onClearRequestedLineFilter={() => setRequestedDepartureLineFilterKey(undefined)}
+          onRememberCurrentBoard={handleRememberCurrentDepartureBoard}
+          onSelectRememberedBoard={handleSelectRememberedDepartureBoard}
+          onRemoveRememberedBoard={handleRemoveRememberedDepartureBoard}
+        />
+      </details>
+      <details className="traffic-support-disclosure">
+        <summary>Trafikkbildet nå</summary>
+        <TrafficNowSummary cards={summaryCardsForDisplay} />
+      </details>
+      <TrafficDataDisclosure
+        sources={[
+          ...(data?.sources ?? []),
+          ...(publicTransportDisplayData?.sources ?? []),
+          ...travelPlanSources,
+        ]}
+      />
 
       <section className="traffic-bottom-panel" aria-label="Trafikkdetaljer">
         <div className="traffic-bottom-list">

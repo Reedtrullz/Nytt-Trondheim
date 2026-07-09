@@ -53,6 +53,7 @@ const ROUTE_TRANSIT_BUFFER_METERS = 1_200;
 const ROUTE_CONTEXT_LOOK_BEHIND_MS = 15 * 60_000;
 const ROUTE_CONTEXT_MIN_LOOK_AHEAD_MS = 2 * 60 * 60_000;
 const ROUTE_CONTEXT_AFTER_ROUTE_PADDING_MS = 60 * 60_000;
+const WALKING_SPEED_METERS_PER_SECOND = 1.35;
 const ENTUR_JOURNEY_PLANNER_ENDPOINT = "https://api.entur.io/journey-planner/v3/graphql";
 const TRONDELAG_TRAVEL_BOUNDS = {
   north: 64.7,
@@ -1400,6 +1401,47 @@ function sourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourceStatus[] 
     }));
 }
 
+export function estimateWalkingDurationSeconds(distanceMeters: number): number {
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return 0;
+  return Math.max(60, Math.round(distanceMeters / WALKING_SPEED_METERS_PER_SECOND / 60) * 60);
+}
+
+function walkingRouteFromTravelRoute(
+  route: TravelPlanRoute,
+  hasUsableTransitItinerary: boolean,
+): TravelPlanPayload["walkingRoute"] {
+  if (hasUsableTransitItinerary) return undefined;
+  if (!Number.isFinite(route.distanceMeters) || route.distanceMeters <= 0) return undefined;
+  if (route.geometry.type !== "LineString" || route.geometry.coordinates.length < 2) {
+    return undefined;
+  }
+  const confidence = route.source === "osrm" ? "route" : "corridor";
+  return {
+    source: route.source,
+    geometry: route.geometry,
+    distanceMeters: route.distanceMeters,
+    durationSeconds: estimateWalkingDurationSeconds(route.distanceMeters),
+    detail:
+      confidence === "route"
+        ? "Gangtid estimert fra rutelengde. Ruten vises som OSRM-korridor."
+        : "Gangtid estimert fra luftlinjekorridor fordi rutetjenesten ikke ga detaljert gangrute.",
+    confidence,
+  };
+}
+
+function isUsableTransitItinerary(itinerary: TravelPlanItinerary): boolean {
+  return itinerary.decision !== "avoid" && itinerary.modes.some((mode) => mode !== "walk");
+}
+
+function primaryModeForTravelPlan(
+  itineraries: TravelPlanItinerary[],
+  walkingRoute: TravelPlanPayload["walkingRoute"],
+): TravelPlanPayload["primaryMode"] {
+  if (itineraries.some(isUsableTransitItinerary)) return "transit";
+  if (walkingRoute) return "walk";
+  return "fallback";
+}
+
 export function buildTravelPlanPayload(input: {
   origin: TravelPlanPlace;
   destination: TravelPlanPlace;
@@ -1435,10 +1477,15 @@ export function buildTravelPlanPayload(input: {
       contextAlerts,
     ),
   );
+  const hasUsableTransitItinerary = itineraries.some(isUsableTransitItinerary);
+  const walkingRoute = walkingRouteFromTravelRoute(input.route, hasUsableTransitItinerary);
+  const primaryMode = primaryModeForTravelPlan(itineraries, walkingRoute);
   return {
     origin: input.origin,
     destination: input.destination,
     route: input.route,
+    primaryMode,
+    ...(walkingRoute ? { walkingRoute } : {}),
     trafficImpacts: trafficImpactsForRoute,
     publicTransportSuggestions: transitSuggestions(input.vehicles, contextAlerts, input.route),
     itineraries,
