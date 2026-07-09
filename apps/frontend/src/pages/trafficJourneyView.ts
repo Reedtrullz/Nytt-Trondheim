@@ -631,10 +631,10 @@ export function buildJourneyTravellerAnswer(
     baseAnswer.kind === "transit" && itinerary
       ? stepsForItinerary(itinerary)
       : concreteWalkItinerary
-          ? stepsForItinerary(itinerary)
-          : baseAnswer.kind === "walk" && plan.walkingRoute
-            ? stepsForWalkingRoute(plan)
-            : [];
+        ? stepsForItinerary(itinerary)
+        : baseAnswer.kind === "walk" && plan.walkingRoute
+          ? stepsForWalkingRoute(plan)
+          : [];
 
   return {
     mode: baseAnswer.kind,
