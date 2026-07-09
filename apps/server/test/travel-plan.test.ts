@@ -1700,7 +1700,11 @@ describe("traffic travel planner API", () => {
 
   it("uses walking as primary mode when Entur has no usable itinerary and route geometry exists", () => {
     const payload = buildTravelPlanPayload({
-      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      origin: {
+        query: "Munkegata",
+        label: "Munkegata, Trondheim",
+        coordinate: [10.393742, 63.432883],
+      },
       destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
       route: testRoute,
       events: [],
@@ -1729,7 +1733,11 @@ describe("traffic travel planner API", () => {
 
   it("uses transit as primary mode when Entur returns a usable itinerary", () => {
     const payload = buildTravelPlanPayload({
-      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      origin: {
+        query: "Munkegata",
+        label: "Munkegata, Trondheim",
+        coordinate: [10.393742, 63.432883],
+      },
       destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
       route: testRoute,
       events: [],
@@ -1814,7 +1822,11 @@ describe("traffic travel planner API", () => {
 
   it("keeps walking as degraded primary mode when Entur fails but route geometry exists", () => {
     const payload = buildTravelPlanPayload({
-      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      origin: {
+        query: "Munkegata",
+        label: "Munkegata, Trondheim",
+        coordinate: [10.393742, 63.432883],
+      },
       destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
       route: testRoute,
       events: [],
@@ -1837,7 +1849,11 @@ describe("traffic travel planner API", () => {
 
   it("uses fallback as primary mode when neither Entur nor route geometry can answer the trip", () => {
     const payload = buildTravelPlanPayload({
-      origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+      origin: {
+        query: "Munkegata",
+        label: "Munkegata, Trondheim",
+        coordinate: [10.393742, 63.432883],
+      },
       destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
       route: {
         source: "direct",
@@ -1877,11 +1893,7 @@ describe("travel-plan comparison next transit option", () => {
         "fetch",
         vi.fn(async (input, init) => {
           const url =
-            typeof input === "string"
-              ? input
-              : input instanceof URL
-                ? input.toString()
-                : input.url;
+            typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
           if (url.startsWith("https://nominatim.openstreetmap.org/search")) {
             const requestUrl = new URL(url);
             const query = requestUrl.searchParams.get("q") ?? "";

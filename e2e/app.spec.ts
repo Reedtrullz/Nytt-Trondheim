@@ -3746,7 +3746,8 @@ test("traffic map keeps planner useful when Entur journey search is unavailable"
   await page.getByLabel("Hvor skal du?").fill("Leangen");
   await page.getByRole("button", { name: "Finn reiseråd" }).click();
 
-  await expect(page.getByRole("heading", { name: "Sjekk AtB/Entur før du drar" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Gå til Leangen" })).toBeVisible();
+  await expect(page.getByLabel("Anbefalt gangrute")).toContainText("1 t");
   await expect(
     page.getByText("Entur reisesøk er ikke tilgjengelig akkurat nå.", { exact: true }),
   ).toBeVisible();
@@ -5306,7 +5307,7 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   await expect(selectedRoute).toContainText("Buss 2");
   await expect(departureContext).toBeVisible();
   await expect(trafficPicture).toBeVisible();
-  await expect(postSearchMap).toContainText("Kart og trafikkgrunnlag");
+  await expect(postSearchMap).toContainText("Kart for valgt reise");
   await expect(sourceData).toContainText("Se datagrunnlag");
   await expect(page.locator(".travel-planner-copy")).toHaveCount(0);
   await expect(choices.getByRole("button", { name: /Anbefalt/ })).toHaveAttribute(
@@ -5338,12 +5339,12 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   }
   expect(adviceBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(choicesBox?.y ?? 0);
   expect(choicesBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(selectedRouteBox?.y ?? 0);
-  expect(selectedRouteBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(departureContextBox?.y ?? 0);
+  expect(selectedRouteBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(postSearchMapBox?.y ?? 0);
+  expect(postSearchMapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(departureContextBox?.y ?? 0);
   expect(departureContextBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
     trafficPictureBox?.y ?? 0,
   );
-  expect(trafficPictureBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(postSearchMapBox?.y ?? 0);
-  expect(postSearchMapBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(sourceDataBox?.y ?? 0);
+  expect(trafficPictureBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(sourceDataBox?.y ?? 0);
   await expectNoHorizontalPageOverflow(page);
 });
 

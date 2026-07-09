@@ -129,7 +129,11 @@ const minimalItinerary = {
 
 it("uses walking as primary mode when Entur has no usable itinerary and route geometry exists", () => {
   const payload = buildTravelPlanPayload({
-    origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+    origin: {
+      query: "Munkegata",
+      label: "Munkegata, Trondheim",
+      coordinate: [10.393742, 63.432883],
+    },
     destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
     route: testRoute,
     events: [],
@@ -158,7 +162,11 @@ it("uses walking as primary mode when Entur has no usable itinerary and route ge
 
 it("uses transit as primary mode when Entur returns a usable itinerary", () => {
   const payload = buildTravelPlanPayload({
-    origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+    origin: {
+      query: "Munkegata",
+      label: "Munkegata, Trondheim",
+      coordinate: [10.393742, 63.432883],
+    },
     destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
     route: testRoute,
     events: [],
@@ -181,7 +189,11 @@ it("uses transit as primary mode when Entur returns a usable itinerary", () => {
 
 it("keeps walking as degraded primary mode when Entur fails but route geometry exists", () => {
   const payload = buildTravelPlanPayload({
-    origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+    origin: {
+      query: "Munkegata",
+      label: "Munkegata, Trondheim",
+      coordinate: [10.393742, 63.432883],
+    },
     destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
     route: testRoute,
     events: [],
@@ -204,7 +216,11 @@ it("keeps walking as degraded primary mode when Entur fails but route geometry e
 
 it("uses handoff fallback when neither Entur nor route geometry can answer the trip", () => {
   const payload = buildTravelPlanPayload({
-    origin: { query: "Munkegata", label: "Munkegata, Trondheim", coordinate: [10.393742, 63.432883] },
+    origin: {
+      query: "Munkegata",
+      label: "Munkegata, Trondheim",
+      coordinate: [10.393742, 63.432883],
+    },
     destination: { query: "Lade", label: "Lade gård, Trondheim", coordinate: [10.463, 63.433] },
     route: {
       source: "direct",
@@ -562,7 +578,9 @@ export function travelPlanModeSummary(plan: TravelPlanPayload): {
       detail: [
         leg?.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : undefined,
         formatDuration(selectedItinerary.durationSeconds),
-        selectedItinerary.transferCount === 0 ? "Direkte" : `${selectedItinerary.transferCount} bytte`,
+        selectedItinerary.transferCount === 0
+          ? "Direkte"
+          : `${selectedItinerary.transferCount} bytte`,
       ]
         .filter(Boolean)
         .join(" · "),
@@ -595,65 +613,66 @@ export function travelPlanModeSummary(plan: TravelPlanPayload): {
 In `travelPlanDecision`, after the count variables and before the existing unavailable/empty branches, add:
 
 ```ts
-  const selectedItinerary = selectedItineraryForPlan(plan);
-  if (plan.primaryMode === "transit" && selectedItinerary) {
-    const heading = transitHeadingForItinerary(selectedItinerary) ?? "Ta valgt kollektivreise";
-    const duration = formatDuration(selectedItinerary.durationSeconds);
-    const departure = formatTravelTime(selectedItinerary.departureTime);
-    const arrival = formatTravelTime(selectedItinerary.arrivalTime);
-    return {
-      heading,
-      detail: [
-        departure && arrival ? `${departure}–${arrival}` : undefined,
-        duration,
-        selectedItinerary.transferCount === 0
-          ? "direkte"
-          : `${selectedItinerary.transferCount} bytte${selectedItinerary.transferCount === 1 ? "" : "r"}`,
-        `${formatDuration(selectedItinerary.walkTimeSeconds)} gange`,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      roadImpactCount,
-      vehicleCount,
-      alertCount,
-      itineraryCount,
-      severity:
-        selectedItinerary.decision === "avoid"
-          ? "warning"
-          : selectedItinerary.decision === "watch" || alertCount > 0 || hasHighRoadImpact
-            ? "watch"
-            : "ok",
-    };
-  }
+const selectedItinerary = selectedItineraryForPlan(plan);
+if (plan.primaryMode === "transit" && selectedItinerary) {
+  const heading = transitHeadingForItinerary(selectedItinerary) ?? "Ta valgt kollektivreise";
+  const duration = formatDuration(selectedItinerary.durationSeconds);
+  const departure = formatTravelTime(selectedItinerary.departureTime);
+  const arrival = formatTravelTime(selectedItinerary.arrivalTime);
+  return {
+    heading,
+    detail: [
+      departure && arrival ? `${departure}–${arrival}` : undefined,
+      duration,
+      selectedItinerary.transferCount === 0
+        ? "direkte"
+        : `${selectedItinerary.transferCount} bytte${selectedItinerary.transferCount === 1 ? "" : "r"}`,
+      `${formatDuration(selectedItinerary.walkTimeSeconds)} gange`,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    roadImpactCount,
+    vehicleCount,
+    alertCount,
+    itineraryCount,
+    severity:
+      selectedItinerary.decision === "avoid"
+        ? "warning"
+        : selectedItinerary.decision === "watch" || alertCount > 0 || hasHighRoadImpact
+          ? "watch"
+          : "ok",
+  };
+}
 
-  if (plan.primaryMode === "walk" && plan.walkingRoute) {
-    const duration = formatDuration(plan.walkingRoute.durationSeconds) ?? "ukjent tid";
-    const distance = formatDistance(plan.walkingRoute.distanceMeters);
-    return {
-      heading: `Gå til ${shortPlaceLabel(plan.destination.label)}`,
-      detail:
-        plan.journeyPlanner.status === "unavailable"
-          ? `Kollektivsøket feilet akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`
-          : `Ingen kollektivreise akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`,
-      roadImpactCount,
-      vehicleCount,
-      alertCount,
-      itineraryCount,
-      severity: plan.journeyPlanner.status === "unavailable" || hasHighRoadImpact ? "warning" : "watch",
-    };
-  }
+if (plan.primaryMode === "walk" && plan.walkingRoute) {
+  const duration = formatDuration(plan.walkingRoute.durationSeconds) ?? "ukjent tid";
+  const distance = formatDistance(plan.walkingRoute.distanceMeters);
+  return {
+    heading: `Gå til ${shortPlaceLabel(plan.destination.label)}`,
+    detail:
+      plan.journeyPlanner.status === "unavailable"
+        ? `Kollektivsøket feilet akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`
+        : `Ingen kollektivreise akkurat nå. Gangruta tar ca. ${duration} og er ${distance}.`,
+    roadImpactCount,
+    vehicleCount,
+    alertCount,
+    itineraryCount,
+    severity:
+      plan.journeyPlanner.status === "unavailable" || hasHighRoadImpact ? "warning" : "watch",
+  };
+}
 
-  if (plan.primaryMode === "fallback") {
-    return {
-      heading: "Sjekk AtB/Entur",
-      detail: `${plan.journeyPlanner.detail} Nytt klarte ikke å lage en trygg gangrute for valgt søk.`,
-      roadImpactCount,
-      vehicleCount,
-      alertCount,
-      itineraryCount,
-      severity: "warning",
-    };
-  }
+if (plan.primaryMode === "fallback") {
+  return {
+    heading: "Sjekk AtB/Entur",
+    detail: `${plan.journeyPlanner.detail} Nytt klarte ikke å lage en trygg gangrute for valgt søk.`,
+    roadImpactCount,
+    vehicleCount,
+    alertCount,
+    itineraryCount,
+    severity: "warning",
+  };
+}
 ```
 
 If `formatTravelTime` does not exist, add this helper next to `formatTravelDateTime` or the other local time helpers:
@@ -673,58 +692,66 @@ function formatTravelTime(value: string): string {
 Inside `TravelPlanCard`, replace the route-summary block and journey-section conditional with mode-aware copy:
 
 ```tsx
-  const duration = formatDuration(plan.route.durationSeconds);
-  const decision = travelPlanDecision(plan);
-  const modeSummary = travelPlanModeSummary(plan);
-  const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
-  const showFallbackSuggestions =
-    plan.primaryMode !== "transit" && plan.publicTransportSuggestions.length > 0;
+const duration = formatDuration(plan.route.durationSeconds);
+const decision = travelPlanDecision(plan);
+const modeSummary = travelPlanModeSummary(plan);
+const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
+const showFallbackSuggestions =
+  plan.primaryMode !== "transit" && plan.publicTransportSuggestions.length > 0;
 ```
 
 Replace the `<small>` inside `.travel-plan-route-summary` with:
 
 ```tsx
-          <small>
-            {modeSummary.label} · {modeSummary.detail}
-            {routeContextSummary.count > 0 ? ` · ${routeContextSummary.heading}` : ""}
-          </small>
+<small>
+  {modeSummary.label} · {modeSummary.detail}
+  {routeContextSummary.count > 0 ? ` · ${routeContextSummary.heading}` : ""}
+</small>
 ```
 
 Replace the empty journey status paragraph with:
 
 ```tsx
-        {plan.journeyPlanner.status === "unavailable" ? (
-          <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
-        ) : null}
-        {plan.primaryMode === "walk" && plan.walkingRoute ? (
-          <section className="walking-answer-card" aria-label="Anbefalt gangrute">
-            <strong>Gangrute</strong>
-            <span>
-              {formatDuration(plan.walkingRoute.durationSeconds)} ·{" "}
-              {formatDistance(plan.walkingRoute.distanceMeters)}
-            </span>
-            <small>{plan.walkingRoute.detail}</small>
-          </section>
-        ) : null}
-        {plan.primaryMode === "fallback" && plan.journeyPlanner.status === "empty" ? (
-          <p className="route-planner-status warning">
-            Ingen konkrete Entur-reiser funnet, og Nytt klarte ikke å lage en trygg gangrute.
-          </p>
-        ) : null}
+{
+  plan.journeyPlanner.status === "unavailable" ? (
+    <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
+  ) : null;
+}
+{
+  plan.primaryMode === "walk" && plan.walkingRoute ? (
+    <section className="walking-answer-card" aria-label="Anbefalt gangrute">
+      <strong>Gangrute</strong>
+      <span>
+        {formatDuration(plan.walkingRoute.durationSeconds)} ·{" "}
+        {formatDistance(plan.walkingRoute.distanceMeters)}
+      </span>
+      <small>{plan.walkingRoute.detail}</small>
+    </section>
+  ) : null;
+}
+{
+  plan.primaryMode === "fallback" && plan.journeyPlanner.status === "empty" ? (
+    <p className="route-planner-status warning">
+      Ingen konkrete Entur-reiser funnet, og Nytt klarte ikke å lage en trygg gangrute.
+    </p>
+  ) : null;
+}
 ```
 
 Keep the existing itinerary workspace, but guard it with transit:
 
 ```tsx
-        {plan.primaryMode === "transit" && plan.itineraries.length ? (
-          <div className="travel-plan-result-workspace">
-            <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
-            <div className="travel-plan-selected-workspace">
-              <SelectedItineraryPanel itinerary={selectedItinerary} />
-              <SelectedRouteWatchPanel summary={routeWatchSummary} />
-            </div>
-          </div>
-        ) : null}
+{
+  plan.primaryMode === "transit" && plan.itineraries.length ? (
+    <div className="travel-plan-result-workspace">
+      <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
+      <div className="travel-plan-selected-workspace">
+        <SelectedItineraryPanel itinerary={selectedItinerary} />
+        <SelectedRouteWatchPanel summary={routeWatchSummary} />
+      </div>
+    </div>
+  ) : null;
+}
 ```
 
 - [ ] **Step 6: Run focused frontend tests**
@@ -864,7 +891,7 @@ Change the `open` prop:
 Change the summary text:
 
 ```tsx
-        <summary>{travelPlan ? "Kart for valgt reise" : "Kart og trafikkgrunnlag"}</summary>
+<summary>{travelPlan ? "Kart for valgt reise" : "Kart og trafikkgrunnlag"}</summary>
 ```
 
 The map body stays the existing `traffic-workspace` with `MapContainer`, `TrafficMapFocus`, `TrafficLayer`, `PublicTransportLayer`, and `TravelPlanLayer`.
@@ -874,19 +901,19 @@ The map body stays the existing `traffic-workspace` with `MapContainer`, `Traffi
 In `TravelPlanCard`, before rendering `RouteContextFallback`, compute:
 
 ```ts
-  const modeSummary = travelPlanModeSummary(plan);
-  const contextIntro =
-    routeContextSummary.count > 0
-      ? `${routeContextSummary.heading} · ${modeSummary.contextLabel}`
-      : modeSummary.contextLabel;
+const modeSummary = travelPlanModeSummary(plan);
+const contextIntro =
+  routeContextSummary.count > 0
+    ? `${routeContextSummary.heading} · ${modeSummary.contextLabel}`
+    : modeSummary.contextLabel;
 ```
 
 Render a compact paragraph above `RouteContextFallback` only when there is context:
 
 ```tsx
-      {routeContextSummary.count > 0 ? (
-        <p className="travel-plan-context-note">{contextIntro}</p>
-      ) : null}
+{
+  routeContextSummary.count > 0 ? <p className="travel-plan-context-note">{contextIntro}</p> : null;
+}
 ```
 
 - [ ] **Step 6: Add CSS for post-search map and walking answer**
@@ -938,21 +965,21 @@ In `apps/frontend/src/styles.css`, add this near the existing travel-plan styles
 In the existing mobile block that orders `.traffic-support-disclosure`, update map ordering:
 
 ```css
-  .traffic-map-disclosure {
-    order: 2;
-  }
+.traffic-map-disclosure {
+  order: 2;
+}
 
-  .traffic-map-disclosure[open] .traffic-workspace {
-    min-height: 460px;
-  }
+.traffic-map-disclosure[open] .traffic-workspace {
+  min-height: 460px;
+}
 
-  .route-departure-confidence {
-    order: 3;
-  }
+.route-departure-confidence {
+  order: 3;
+}
 
-  .departure-board-panel {
-    order: 4;
-  }
+.departure-board-panel {
+  order: 4;
+}
 ```
 
 Keep `.traffic-data-disclosure` and `.traffic-bottom-panel` after the map and departure sections.

@@ -2025,7 +2025,9 @@ export function travelPlanModeSummary(plan: TravelPlanPayload): {
       detail: [
         leg?.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : undefined,
         formatDuration(selectedItinerary.durationSeconds),
-        selectedItinerary.transferCount === 0 ? "Direkte" : `${selectedItinerary.transferCount} bytte`,
+        selectedItinerary.transferCount === 0
+          ? "Direkte"
+          : `${selectedItinerary.transferCount} bytte`,
       ]
         .filter(Boolean)
         .join(" · "),
@@ -2257,9 +2259,7 @@ export function RouteContextFallback({
   return (
     <details className="route-context-fallback">
       <summary>
-        <span>
-          {summaryTitle}
-        </span>
+        <span>{summaryTitle}</span>
         <strong>{summary.heading}</strong>
       </summary>
       <p>{summary.detail}</p>
@@ -2820,7 +2820,9 @@ export function TravelPlanCard({
             {formatDistance(plan.route.distanceMeters)}
             {duration ? ` · ${duration}` : ""} · {plan.route.detail}
           </span>
-          <small>{modeSummary.label} · {modeSummary.detail}</small>
+          <small>
+            {modeSummary.label} · {modeSummary.detail}
+          </small>
         </div>
       </header>
       <section className="travel-plan-journey-section">

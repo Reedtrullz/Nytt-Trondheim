@@ -1466,7 +1466,9 @@ function nextTransitOptionFromItinerary(
   return {
     departureTime: itinerary.departureTime,
     arrivalTime: itinerary.arrivalTime,
-    lineLabel: leg.publicCode ? `${transitModeLabel(leg.mode)} ${leg.publicCode}` : transitModeLabel(leg.mode),
+    lineLabel: leg.publicCode
+      ? `${transitModeLabel(leg.mode)} ${leg.publicCode}`
+      : transitModeLabel(leg.mode),
     boardingStopName: leg.from.stopName ?? leg.from.name,
     durationSeconds: itinerary.durationSeconds,
     transferCount: itinerary.transferCount,
