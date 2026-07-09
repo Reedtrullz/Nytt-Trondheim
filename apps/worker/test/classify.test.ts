@@ -224,7 +224,7 @@ describe("Trondheim relevance classification", () => {
     expect(situations[0]).toMatchObject({
       type: "rescue",
       importance: "high",
-      incidentSignature: "rescue:byåsen",
+      incidentSignature: "rescue:byåsen:trussel",
       locationLabel: "Byåsen",
     });
   });
@@ -506,6 +506,52 @@ describe("Trondheim relevance classification", () => {
     expect(situations[0]?.type).toBe("fire");
     expect(situations[0]?.incidentSignature).toBe("fire:tiller:bilbrann");
     expect(situations[0]?.relatedArticleIds).toEqual(["car-fire-two", "car-fire-one"]);
+  });
+
+  it("keeps distinct downtown order situation descriptors apart", () => {
+    const situations = detectPreliminarySituations(
+      [
+        incidentArticle("pinne-nrk", "nrk", "2026-07-04T17:50:00.000Z", {
+          title: "Mann viftet med pinne mot folk i gata",
+          excerpt:
+            "Politiet har kontroll på en mann som viftet med en pinne mot forbipasserende i Midtbyen.",
+          category: "Krim",
+          places: ["Trondheim", "Sentrum"],
+        }),
+        incidentArticle("pinne-politiloggen", "politiloggen", "2026-07-04T17:47:00.000Z", {
+          title: "Ro og orden: Trondheim, Prinsengate",
+          excerpt:
+            "Patruljen har kontroll på en mann som viftet med en pinne mot forbipasserende i Midtbyen.",
+          category: "Hendelser",
+          places: ["Trondheim", "Sentrum"],
+        }),
+        incidentArticle("trussel-adressa", "adressa", "2026-07-04T17:22:00.000Z", {
+          title: "Melding om mulig trusselsituasjon - flere mindreårige jenter",
+          excerpt:
+            "Politiet har kontroll på flere ungdommer i Midtbyen etter melding om en mulig trusselsituasjon.",
+          category: "Krim",
+          places: ["Trondheim", "Sentrum"],
+        }),
+        incidentArticle("trussel-politiloggen", "politiloggen", "2026-07-04T17:18:00.000Z", {
+          title: "Andre hendelser: Trondheim, Sentrum",
+          excerpt:
+            "Politiet har kontroll på flere ungdommer etter en mulig trusselsituasjon i Midtbyen.",
+          category: "Krim",
+          places: ["Trondheim", "Sentrum"],
+        }),
+      ],
+      [],
+    );
+
+    expect(situations).toHaveLength(2);
+    expect(situations.map((item) => item.incidentSignature).sort()).toEqual([
+      "other:sentrum:pinne",
+      "rescue:sentrum:trussel",
+    ]);
+    expect(situations.map((item) => item.relatedArticleIds.sort()).sort()).toEqual([
+      ["pinne-nrk", "pinne-politiloggen"],
+      ["trussel-adressa", "trussel-politiloggen"],
+    ]);
   });
 
   it("canonicalizes only explicitly listed local place aliases", () => {

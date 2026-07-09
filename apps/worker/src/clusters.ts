@@ -68,10 +68,18 @@ const genericOfficialTrafficTokens = new Set([
 ]);
 const officialTrafficIncidentPattern =
   /\b(?:jordskred|løsmass\w*|omkjør\w*|ras(?:et)?|skred|stein(?:skred|sprang)|steng\w*)\b/iu;
-const eventDescriptorRules: Array<{ descriptor: string; pattern: RegExp }> = [
+const fireDescriptorRules: Array<{ descriptor: string; pattern: RegExp }> = [
   { descriptor: "garasjebrann", pattern: /\b(?:garasjebrann|brann\s+i\s+garasje)\b/i },
   { descriptor: "bodbrann", pattern: /\b(?:bodbrann|brann\s+i\s+bod)\b/i },
   { descriptor: "bilbrann", pattern: /\b(?:bilbrann|brann\s+i\s+bil)\b/i },
+];
+const orderDescriptorRules: Array<{ descriptor: string; pattern: RegExp }> = [
+  { descriptor: "pinne", pattern: /\b(pinne\w*|viftet\w*|forbipasserende)\b/i },
+  {
+    descriptor: "trussel",
+    pattern:
+      /\b(trusselsituasjon\w*|trussel\w*|mindre[åa]rig\w*|ungdom(?:men|mer|mene)?|bortvis\w*)\b/i,
+  },
 ];
 
 function slug(value: string): string {
@@ -238,9 +246,18 @@ function officialTrafficRelatedArticles(events: OfficialEvent[], articles: Artic
     .slice(0, 8);
 }
 
-function incidentEventDescriptor(article: Article): string | undefined {
+function fireEventDescriptor(article: Article): string | undefined {
   const text = `${article.title} ${article.excerpt}`;
-  return eventDescriptorRules.find((rule) => rule.pattern.test(text))?.descriptor;
+  return fireDescriptorRules.find((rule) => rule.pattern.test(text))?.descriptor;
+}
+
+function orderEventDescriptor(article: Article): string | undefined {
+  const text = articleText(article);
+  return orderDescriptorRules.find((rule) => rule.pattern.test(text))?.descriptor;
+}
+
+function incidentEventDescriptor(article: Article): string | undefined {
+  return fireEventDescriptor(article) ?? orderEventDescriptor(article);
 }
 
 function incidentSignatureKey(type: Situation["type"], place: string, article: Article): string {
@@ -818,7 +835,8 @@ function articleIncidentText(article: Article): string {
 function detectType(article: Article): Situation["type"] | undefined {
   const text = articleIncidentText(article).toLocaleLowerCase("nb");
   if (hasPublicSafetyThreatSignal(text)) return "rescue";
-  if (incidentEventDescriptor(article)) return "fire";
+  if (fireEventDescriptor(article)) return "fire";
+  if (orderEventDescriptor(article)) return "other";
   if (/\b(brann|skogbrann|røykutvikling)\b/.test(text) && !isFootballClubBrannContext(article)) {
     return "fire";
   }
