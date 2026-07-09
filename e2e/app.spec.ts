@@ -5226,8 +5226,12 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   await expect.poll(() => documentY(choices)).toBeLessThan(await documentY(selectedRoute));
   await expect.poll(() => documentY(selectedRoute)).toBeLessThan(await documentY(postSearchMap));
   await expect.poll(() => documentY(postSearchMap)).toBeLessThan(await documentY(journeyContext));
-  await expect.poll(() => documentY(journeyContext)).toBeLessThan(await documentY(departureContext));
-  await expect.poll(() => documentY(departureContext)).toBeLessThan(await documentY(trafficPicture));
+  await expect
+    .poll(() => documentY(journeyContext))
+    .toBeLessThan(await documentY(departureContext));
+  await expect
+    .poll(() => documentY(departureContext))
+    .toBeLessThan(await documentY(trafficPicture));
   await expect.poll(() => documentY(postSearchMap)).toBeLessThan(await documentY(sourceData));
   await expectNoHorizontalPageOverflow(page);
 });

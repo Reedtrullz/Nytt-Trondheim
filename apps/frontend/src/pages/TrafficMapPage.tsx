@@ -3647,11 +3647,8 @@ function TravelPlannerPanel({
   travelPlanLoading,
   travelPlanError,
   selectedItineraryId,
-  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
-  routeContextSummary,
-  onFocusRouteContextItem,
   travelTimeComparison,
   selectedOriginSuggestion,
   selectedDestinationSuggestion,
@@ -3684,11 +3681,8 @@ function TravelPlannerPanel({
   travelPlanLoading: boolean;
   travelPlanError?: string;
   selectedItineraryId?: string;
-  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
-  routeContextSummary: RouteContextSummary;
-  onFocusRouteContextItem?: (item: RouteContextItem) => void;
   travelTimeComparison: TravelTimeComparisonState;
   selectedOriginSuggestion?: TravelPlaceSuggestion;
   selectedDestinationSuggestion?: TravelPlaceSuggestion;
@@ -5002,11 +4996,8 @@ export function TrafficMapPage() {
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
         selectedItineraryId={selectedItineraryId}
-        selectedEventId={selectedEventId}
         routeChoiceModel={routeChoiceModel}
         routeWatchSummary={routeWatchSummary}
-        routeContextSummary={routeContextSummary}
-        onFocusRouteContextItem={handleRouteContextFocus}
         travelTimeComparison={travelTimeComparison}
         selectedOriginSuggestion={selectedOriginSuggestion}
         selectedDestinationSuggestion={selectedDestinationSuggestion}
