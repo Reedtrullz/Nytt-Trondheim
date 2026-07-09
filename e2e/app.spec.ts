@@ -5307,7 +5307,7 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   const trafficPicture = page.locator("details.traffic-support-disclosure", {
     hasText: "Trafikkbildet nå",
   });
-  const journeyContext = page.locator(".journey-context-chips");
+  const lineAlertDisclosure = page.locator("details.traffic-line-alert-disclosure");
   const postSearchMap = page.locator(".traffic-primary-map-section");
   const sourceData = page.locator(".traffic-data-disclosure");
   await expect(postSearchPanel).toBeVisible();
@@ -5317,7 +5317,11 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   await expect(departureContext).toBeVisible();
   await expect(trafficPicture).toBeVisible();
   await expect(postSearchMap).toContainText("Kartet viser ruten");
-  await expect(journeyContext).toContainText("Forsinkelse på linje 2");
+  await expect(lineAlertDisclosure).toContainText("Varsler uten kartpunkt");
+  await openTrafficDisclosure(page, "Varsler uten kartpunkt");
+  await expect(
+    lineAlertDisclosure.getByText("Forsinkelse på linje 2", { exact: true }),
+  ).toBeVisible();
   await expect(sourceData).toContainText("Se datagrunnlag");
   await expect(page.locator(".travel-planner-copy")).toHaveCount(0);
   await expect(choices.getByRole("button", { name: /Anbefalt/ })).toHaveAttribute(
@@ -5329,7 +5333,7 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   const adviceBox = await travelAdvice.boundingBox();
   const postSearchBox = await postSearchPanel.boundingBox();
   const choicesBox = await choices.boundingBox();
-  const journeyContextBox = await journeyContext.boundingBox();
+  const lineAlertDisclosureBox = await lineAlertDisclosure.boundingBox();
   const departureContextBox = await departureContext.boundingBox();
   const trafficPictureBox = await trafficPicture.boundingBox();
   const postSearchMapBox = await postSearchMap.boundingBox();
@@ -5340,7 +5344,7 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
     postSearchBox,
     adviceBox,
     choicesBox,
-    journeyContextBox,
+    lineAlertDisclosureBox,
     departureContextBox,
     trafficPictureBox,
     postSearchMapBox,
@@ -5351,9 +5355,11 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   }
   await expect.poll(() => documentY(travelAdvice)).toBeLessThan(await documentY(choices));
   await expect.poll(() => documentY(choices)).toBeLessThan(await documentY(postSearchMap));
-  await expect.poll(() => documentY(postSearchMap)).toBeLessThan(await documentY(journeyContext));
   await expect
-    .poll(() => documentY(journeyContext))
+    .poll(() => documentY(postSearchMap))
+    .toBeLessThan(await documentY(lineAlertDisclosure));
+  await expect
+    .poll(() => documentY(lineAlertDisclosure))
     .toBeLessThan(await documentY(departureContext));
   await expect
     .poll(() => documentY(departureContext))
