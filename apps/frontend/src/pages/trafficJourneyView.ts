@@ -31,6 +31,58 @@ export interface JourneyAnswerView {
   routeOptions: JourneyRouteOptionView[];
 }
 
+export type JourneyTravellerMode = "transit" | "walk" | "handoff" | "idle";
+
+export interface JourneyStepView {
+  id: string;
+  kind: "walk" | "ride" | "handoff";
+  label: string;
+  detail: string;
+  meta?: string;
+  lineLabel?: string;
+  fromLabel?: string;
+  toLabel?: string;
+  severity: JourneyAnswerSeverity;
+}
+
+export interface JourneyMapSummaryView {
+  placement: JourneyMapPlacement;
+  heading: string;
+  detail: string;
+  routeVisible: boolean;
+  mapPointCount: number;
+}
+
+export interface JourneyContextTextItemView {
+  id: string;
+  title: string;
+  detail: string;
+  source: string;
+  severity: JourneyAnswerSeverity;
+  href?: string;
+}
+
+export interface JourneyTravellerAnswerView {
+  mode: JourneyTravellerMode;
+  headline: string;
+  primaryMeta: string;
+  supportingText: string;
+  severity: JourneyAnswerSeverity;
+  primaryItineraryId?: string;
+  handoff: {
+    label?: string;
+    url?: string;
+  };
+  steps: JourneyStepView[];
+  routeOptions: JourneyRouteOptionView[];
+  mapSummary: JourneyMapSummaryView;
+  context: {
+    mapPointCount: number;
+    primaryTextItems: JourneyContextTextItemView[];
+    disclosureLabel: string;
+  };
+}
+
 export interface JourneyContextItemView {
   id: string;
   title: string;
@@ -327,6 +379,98 @@ export function buildJourneyAnswerView(
   return handoffAnswer(plan);
 }
 
+function cleanStepPlace(label?: string): string {
+  return shortPlaceLabel(label ?? "");
+}
+
+function stepTime(value?: string): string | undefined {
+  return value ? formatTravelDateTime(value) : undefined;
+}
+
+function walkStepFromLeg(leg: TravelPlanLeg, index: number): JourneyStepView {
+  const destination = cleanStepPlace(leg.to.stopName ?? leg.to.name);
+  return {
+    id: `step:${leg.id || index}:walk`,
+    kind: "walk",
+    label: `Gå til ${destination}`,
+    detail: [formatDuration(leg.durationSeconds), formatDistance(leg.distanceMeters)]
+      .filter(Boolean)
+      .join(" · "),
+    fromLabel: cleanStepPlace(leg.from.stopName ?? leg.from.name),
+    toLabel: destination,
+    severity: "ok",
+  };
+}
+
+function rideStepFromLeg(leg: TravelPlanLeg, index: number): JourneyStepView {
+  const line = lineLabel(leg);
+  const destination = cleanStepPlace(leg.to.stopName ?? leg.to.name);
+  const start = stepTime(leg.expectedStartTime ?? leg.aimedStartTime);
+  const end = stepTime(leg.expectedEndTime ?? leg.aimedEndTime);
+  return {
+    id: `step:${leg.id || index}:ride`,
+    kind: "ride",
+    label: `Ta ${line} mot ${destination}`,
+    detail: [start && end ? `${start} → ${end}` : undefined, formatDuration(leg.durationSeconds)]
+      .filter(Boolean)
+      .join(" · "),
+    lineLabel: line,
+    fromLabel: cleanStepPlace(leg.from.stopName ?? leg.from.name),
+    toLabel: destination,
+    severity: leg.cancelled ? "warning" : "ok",
+  };
+}
+
+function stepsForItinerary(itinerary: TravelPlanItinerary): JourneyStepView[] {
+  return itinerary.legs
+    .filter((leg) => !leg.cancelled)
+    .map((leg, index) =>
+      leg.mode === "walk" ? walkStepFromLeg(leg, index) : rideStepFromLeg(leg, index),
+    )
+    .filter((step) => step.detail || step.kind === "ride");
+}
+
+function stepsForWalkingRoute(plan: TravelPlanPayload): JourneyStepView[] {
+  if (!plan.walkingRoute) return [];
+  return [
+    {
+      id: "step:walking-route",
+      kind: "walk",
+      label: `Gå til ${shortPlaceLabel(plan.destination.label)}`,
+      detail: [
+        formatDuration(plan.walkingRoute.durationSeconds),
+        formatDistance(plan.walkingRoute.distanceMeters),
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      fromLabel: shortPlaceLabel(plan.origin.label),
+      toLabel: shortPlaceLabel(plan.destination.label),
+      severity: "ok",
+    },
+  ];
+}
+
+function itineraryPrimaryMeta(itinerary: TravelPlanItinerary): string {
+  return [
+    `${formatTravelDateTime(itinerary.departureTime)} → ${formatTravelDateTime(
+      itinerary.arrivalTime,
+    )}`,
+    formatDuration(itinerary.durationSeconds),
+    itineraryTransferLabel(itinerary),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function walkingRoutePrimaryMeta(plan: TravelPlanPayload): string {
+  return [
+    formatDuration(plan.walkingRoute?.durationSeconds),
+    formatDistance(plan.walkingRoute?.distanceMeters),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function sourceLabel(source: string): string {
   const normalized = source.toLocaleLowerCase("nb");
   if (normalized.includes("datex")) return "DATEX";
@@ -411,6 +555,107 @@ export function buildJourneyContextView(plan?: TravelPlanPayload): JourneyContex
       : "Varslene har ikke egne kartpunkter og vises kompakt.",
     mapCallouts,
     compactItems,
+  };
+}
+
+function mapSummaryForPlan(
+  plan: TravelPlanPayload | undefined,
+  selectedItineraryId?: string,
+): JourneyMapSummaryView {
+  const placement = getJourneyMapPlacement(plan, selectedItineraryId);
+  const context = buildJourneyContextView(plan);
+  return {
+    placement,
+    heading: placement === "primary" ? "Ruten vises på kartet" : "Kart brukes som støtte",
+    detail:
+      placement === "primary"
+        ? "Kartet viser valgt reise, stopp, gangetapper og relevante trafikkpunkt."
+        : "Kartet viser trafikkgrunnlaget når det finnes rute- eller kartkontekst.",
+    routeVisible: placement === "primary",
+    mapPointCount: context.mapPointCount,
+  };
+}
+
+function primaryContextItems(plan?: TravelPlanPayload): JourneyContextTextItemView[] {
+  return (plan?.publicTransportSuggestions ?? [])
+    .filter((suggestion) => suggestion.kind === "alert" && suggestion.distanceMeters === undefined)
+    .slice(0, 3)
+    .map((suggestion) => ({
+      id: suggestion.id,
+      title: suggestion.title,
+      detail: suggestion.detail,
+      source: sourceLabel(suggestion.source),
+      severity: transitSuggestionSeverity(suggestion),
+      href: suggestion.href,
+    }));
+}
+
+function contextDisclosureLabel(plan?: TravelPlanPayload): string {
+  const textCount = primaryContextItems(plan).length;
+  if (textCount) {
+    return `${textCount} linjevarsel${textCount === 1 ? "" : "er"}`;
+  }
+  return "Ingen kjente hindringer";
+}
+
+export function buildJourneyTravellerAnswer(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): JourneyTravellerAnswerView {
+  const baseAnswer = buildJourneyAnswerView(plan, selectedItineraryId);
+  if (!plan) {
+    return {
+      mode: "idle",
+      headline: baseAnswer.heading,
+      primaryMeta: "",
+      supportingText: baseAnswer.detail,
+      severity: baseAnswer.severity,
+      handoff: {},
+      steps: [],
+      routeOptions: [],
+      mapSummary: mapSummaryForPlan(undefined),
+      context: {
+        mapPointCount: 0,
+        primaryTextItems: [],
+        disclosureLabel: "Ingen valgt rute",
+      },
+    };
+  }
+
+  const itinerary = selectedItinerary(plan, selectedItineraryId);
+  const steps =
+    baseAnswer.kind === "transit" && itinerary
+      ? stepsForItinerary(itinerary)
+      : baseAnswer.kind === "walk" && plan.walkingRoute
+        ? stepsForWalkingRoute(plan)
+        : isWalkOnlyItinerary(itinerary)
+          ? stepsForItinerary(itinerary)
+          : [];
+
+  return {
+    mode: baseAnswer.kind,
+    headline: baseAnswer.heading,
+    primaryMeta:
+      baseAnswer.kind === "transit" && itinerary
+        ? itineraryPrimaryMeta(itinerary)
+        : baseAnswer.kind === "walk" && plan.walkingRoute
+          ? walkingRoutePrimaryMeta(plan)
+          : baseAnswer.meta,
+    supportingText: baseAnswer.detail,
+    severity: baseAnswer.severity,
+    primaryItineraryId: baseAnswer.primaryItineraryId,
+    handoff: {
+      label: baseAnswer.handoffLabel,
+      url: baseAnswer.handoffUrl,
+    },
+    steps,
+    routeOptions: baseAnswer.routeOptions,
+    mapSummary: mapSummaryForPlan(plan, selectedItineraryId),
+    context: {
+      mapPointCount: buildJourneyContextView(plan).mapPointCount,
+      primaryTextItems: primaryContextItems(plan),
+      disclosureLabel: contextDisclosureLabel(plan),
+    },
   };
 }
 

@@ -7,6 +7,7 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   buildJourneyAnswerView,
+  buildJourneyTravellerAnswer,
   buildJourneyContextView,
   getJourneyMapPlacement,
   shouldShowJourneyMap,
@@ -387,5 +388,205 @@ describe("traffic journey answer view", () => {
         }),
       ),
     ).toBe("hidden");
+  });
+
+  it("builds a traveller-first bus answer with concrete steps", () => {
+    const planWithItinerary = plan({
+      itineraries: [
+        itinerary({
+          departureTime: "2026-06-01T09:10:00.000Z",
+          arrivalTime: "2026-06-01T09:28:00.000Z",
+          legs: [
+            leg({
+              id: "leg-walk-start",
+              mode: "walk",
+              from: {
+                name: "Munkegata",
+                coordinate: [10.393742, 63.432883],
+              },
+              to: {
+                name: "Søndre gate",
+                stopName: "Søndre gate",
+                coordinate: [10.395, 63.431],
+              },
+              aimedStartTime: "2026-06-01T09:06:00.000Z",
+              expectedStartTime: "2026-06-01T09:06:00.000Z",
+              aimedEndTime: "2026-06-01T09:10:00.000Z",
+              expectedEndTime: "2026-06-01T09:10:00.000Z",
+              durationSeconds: 240,
+              distanceMeters: 300,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+            leg({
+              to: {
+                name: "Lade",
+                stopName: "Lade",
+                coordinate: [10.463, 63.433],
+              },
+              aimedStartTime: "2026-06-01T09:10:00.000Z",
+              expectedStartTime: "2026-06-01T09:10:00.000Z",
+              aimedEndTime: "2026-06-01T09:28:00.000Z",
+              expectedEndTime: "2026-06-01T09:28:00.000Z",
+            }),
+            leg({
+              id: "leg-walk-end",
+              mode: "walk",
+              from: {
+                name: "Lade gård",
+                stopName: "Lade gård",
+                coordinate: [10.463, 63.433],
+              },
+              to: {
+                name: "Lade gård",
+                coordinate: [10.463, 63.433],
+              },
+              aimedStartTime: "2026-06-01T09:28:00.000Z",
+              expectedStartTime: "2026-06-01T09:28:00.000Z",
+              aimedEndTime: "2026-06-01T09:30:00.000Z",
+              expectedEndTime: "2026-06-01T09:30:00.000Z",
+              durationSeconds: 120,
+              distanceMeters: 120,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+          ],
+        }),
+      ],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: generatedAt,
+        source: "Entur Journey Planner",
+      },
+    });
+
+    const answer = buildJourneyTravellerAnswer(planWithItinerary, "itinerary-1");
+
+    expect(answer.mode).toBe("transit");
+    expect(answer.headline).toBe("Ta Buss 2 fra Søndre gate");
+    expect(answer.primaryMeta).toBe("11:10 → 11:28 · 18 min · Direkte");
+    expect(answer.steps.map((step) => step.label)).toEqual([
+      "Gå til Søndre gate",
+      "Ta Buss 2 mot Lade",
+      "Gå til Lade gård",
+    ]);
+    expect(answer.mapSummary.heading).toBe("Ruten vises på kartet");
+    expect(answer.context.primaryTextItems).toEqual([]);
+  });
+
+  it("builds a walking answer when walkingRoute is the primary fallback", () => {
+    const answer = buildJourneyTravellerAnswer({
+      ...plan(),
+      primaryMode: "walk",
+      walkingRoute: {
+        source: "direct",
+        distanceMeters: 3500,
+        durationSeconds: 2580,
+        detail: "Gangtid estimert fra luftlinjekorridor.",
+        confidence: "corridor",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-01T23:30:00.000Z",
+        source: "Entur Journey Planner",
+      },
+    });
+
+    expect(answer.mode).toBe("walk");
+    expect(answer.headline).toBe("Gå til Lade gård");
+    expect(answer.primaryMeta).toBe("43 min · 3,5 km");
+    expect(answer.steps.map((step) => step.label)).toEqual(["Gå til Lade gård"]);
+    expect(answer.handoff.label).toBe("Sjekk AtB/Entur");
+  });
+
+  it("uses operator handoff when no concrete journey or walking route exists", () => {
+    const planWithItinerary = plan({
+      itineraries: [itinerary()],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: generatedAt,
+        source: "Entur Journey Planner",
+      },
+    });
+
+    const answer = buildJourneyTravellerAnswer({
+      ...planWithItinerary,
+      primaryMode: "fallback",
+      walkingRoute: undefined,
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-01T23:30:00.000Z",
+        source: "Entur Journey Planner",
+      },
+    });
+
+    expect(answer.mode).toBe("handoff");
+    expect(answer.headline).toBe("Sjekk AtB/Entur");
+    expect(answer.steps).toEqual([]);
+    expect(answer.handoff.label).toBe("Åpne AtB/Entur");
+  });
+
+  it("keeps map-point traffic out of primary text items", () => {
+    const planWithItinerary = plan({
+      itineraries: [itinerary()],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: generatedAt,
+        source: "Entur Journey Planner",
+      },
+    });
+
+    const answer = buildJourneyTravellerAnswer({
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "roadwork-1",
+            source: "vegvesen_traffic_info",
+            sourceEventId: "roadwork-1",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    });
+
+    expect(answer.context.mapPointCount).toBe(1);
+    expect(answer.context.primaryTextItems.map((item) => item.title)).toEqual(["Endret rute"]);
+    expect(answer.context.disclosureLabel).toBe("1 linjevarsel");
   });
 });
