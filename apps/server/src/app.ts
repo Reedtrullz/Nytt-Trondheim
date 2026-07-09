@@ -112,6 +112,7 @@ import {
   resolveTravelPlanPlacesAndRoute,
   routeBounds,
   TravelPlanRequestError,
+  withNextTransitOptionFromComparisonSources,
 } from "./traffic/travel-plan.js";
 import {
   fetchEnturTravelPlaceSuggestions,
@@ -1550,7 +1551,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       }
       res.json({
         activePreset: query.preset,
-        selectedPlan,
+        selectedPlan: withNextTransitOptionFromComparisonSources(
+          selectedPlan,
+          sources,
+          query.preset,
+        ),
         sources,
         generatedAt: new Date().toISOString(),
       });

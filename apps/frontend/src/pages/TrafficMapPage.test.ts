@@ -35,6 +35,7 @@ import {
   buildTravelTimeComparisonModel,
   canonicalTravelPlannerQuery,
   compactRouteChoiceOptions,
+  TravelPlanCard,
   departureBoardContextFromPlan,
   departureBoardContextFromSuggestion,
   departureLineFilterKey,
@@ -58,6 +59,7 @@ import {
   routeDepartureConfidenceSummary,
   routePositions,
   buildRouteContextSummary,
+  shouldOpenPostSearchMap,
   selectedDepartureMatch,
   selectedDepartureStatus,
   selectedRouteWatchSummary,
@@ -68,6 +70,7 @@ import {
   travelTimeComparisonLiveCheckFromRouteDepartureConfidence,
   upsertRememberedDepartureBoard,
   travelPlanDecision,
+  travelPlanModeSummary,
   type RememberedDepartureBoard,
   upsertRememberedTravelRoute,
   type RememberedTravelRoute,
@@ -387,6 +390,7 @@ describe("remembered departure boards", () => {
 const plan: TravelPlanPayload = {
   origin: { query: "start", label: "Start", coordinate: [10.39, 63.39] },
   destination: { query: "mål", label: "Mål", coordinate: [10.41, 63.4] },
+  primaryMode: "walk",
   route: {
     source: "direct",
     geometry: {
@@ -399,6 +403,20 @@ const plan: TravelPlanPayload = {
     },
     distanceMeters: 1200,
     detail: "Direkterute",
+  },
+  walkingRoute: {
+    source: "direct",
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [10.39, 63.39],
+        [10.41, 63.4],
+      ],
+    },
+    distanceMeters: 1200,
+    durationSeconds: 900,
+    detail: "Gangtid estimert fra luftlinjekorridor.",
+    confidence: "corridor",
   },
   trafficImpacts: [],
   publicTransportSuggestions: [],
@@ -415,6 +433,8 @@ const plan: TravelPlanPayload = {
 
 const planWithItinerary: TravelPlanPayload = {
   ...plan,
+  primaryMode: "transit",
+  walkingRoute: undefined,
   itineraries: [
     {
       id: "itinerary-1",
@@ -422,8 +442,8 @@ const planWithItinerary: TravelPlanPayload = {
       decisionReason: "Normal reise.",
       labels: ["best_now"],
       departureTime: "2026-06-01T09:10:00.000Z",
-      arrivalTime: "2026-06-01T09:27:00.000Z",
-      durationSeconds: 1020,
+      arrivalTime: "2026-06-01T09:28:00.000Z",
+      durationSeconds: 1080,
       transferCount: 0,
       walkTimeSeconds: 180,
       realtime: true,
@@ -435,8 +455,8 @@ const planWithItinerary: TravelPlanPayload = {
           id: "leg-bus-3",
           mode: "bus",
           from: {
-            name: "Munkegata",
-            stopName: "Munkegata",
+            name: "Søndre gate",
+            stopName: "Søndre gate",
             stopId: "NSR:StopPlace:41613",
             coordinate: [10.3951, 63.4305],
           },
@@ -447,17 +467,17 @@ const planWithItinerary: TravelPlanPayload = {
           },
           aimedStartTime: "2026-06-01T09:10:00.000Z",
           expectedStartTime: "2026-06-01T09:10:00.000Z",
-          aimedEndTime: "2026-06-01T09:27:00.000Z",
-          expectedEndTime: "2026-06-01T09:27:00.000Z",
-          durationSeconds: 1020,
+          aimedEndTime: "2026-06-01T09:28:00.000Z",
+          expectedEndTime: "2026-06-01T09:28:00.000Z",
+          durationSeconds: 1080,
           distanceMeters: 4850,
           realtime: true,
           cancelled: false,
           replacementTransport: false,
-          lineId: "ATB:Line:3",
-          publicCode: "3",
-          lineName: "Lade - Hallset",
-          serviceJourneyId: "ATB:ServiceJourney:3",
+          lineId: "ATB:Line:2",
+          publicCode: "2",
+          lineName: "Strindheim - Kolstad",
+          serviceJourneyId: "ATB:ServiceJourney:2",
           geometry: {
             type: "LineString",
             coordinates: [
@@ -488,13 +508,13 @@ const departureBoard: PublicTransportDepartureBoardPayload = {
     {
       id: "departure:3",
       stopId: "NSR:StopPlace:41613",
-      stopName: "Munkegata",
+      stopName: "Søndre gate",
       stopDistanceMeters: 80,
       mode: "bus",
-      lineId: "ATB:Line:3",
-      publicCode: "3",
-      lineName: "Lade - Hallset",
-      serviceJourneyId: "ATB:ServiceJourney:3",
+      lineId: "ATB:Line:2",
+      publicCode: "2",
+      lineName: "Strindheim - Kolstad",
+      serviceJourneyId: "ATB:ServiceJourney:2",
       destinationName: "Leangen",
       aimedDepartureTime: "2026-06-01T09:10:00.000Z",
       expectedDepartureTime: "2026-06-01T09:10:00.000Z",
@@ -573,6 +593,15 @@ const planWithTransfer: TravelPlanPayload = {
       ],
     },
   ],
+};
+
+const walkingPrimaryPlanWithRetainedTransitItinerary: TravelPlanPayload = {
+  ...planWithItinerary,
+  primaryMode: "walk",
+  walkingRoute: plan.walkingRoute,
+  journeyPlanner: {
+    ...plan.journeyPlanner,
+  },
 };
 
 function planWithTravelDuration(input: {
@@ -869,7 +898,7 @@ describe("TrafficMapPage route overlay helpers", () => {
   it("uses the selected itinerary boarding stop when building a departure-board center", () => {
     expect(departureBoardContextFromPlan(planWithItinerary, "itinerary-1")).toEqual({
       scope: "origin",
-      label: "Munkegata",
+      label: "Søndre gate",
       center: { lat: 63.4305, lon: 10.3951 },
       startTime: "2026-06-01T09:10:00.000Z",
     });
@@ -896,7 +925,7 @@ describe("TrafficMapPage route overlay helpers", () => {
 
     expect(options[0]).toMatchObject({
       key: departureLineFilterKey(delayedDeparture),
-      label: "Buss 3 mot Leangen",
+      label: "Buss 2 mot Leangen",
       count: 2,
       severity: "warning",
     });
@@ -923,10 +952,10 @@ describe("TrafficMapPage route overlay helpers", () => {
       {
         id: "itinerary-transfer:leg-bus-3:0",
         index: 0,
-        label: "Start: Munkegata",
+        label: "Start: Søndre gate",
         context: {
           scope: "origin",
-          label: "Munkegata",
+          label: "Søndre gate",
           center: { lat: 63.4305, lon: 10.3951 },
           startTime: "2026-06-01T09:10:00.000Z",
         },
@@ -1047,7 +1076,7 @@ describe("TrafficMapPage route overlay helpers", () => {
       severity: "warning",
       items: [
         {
-          label: "Buss 3: Holdeplass flyttet",
+          label: "Buss 2: Holdeplass flyttet",
           detail: "Bruk midlertidig holdeplass ved Munkegata.",
           source: "Entur avvik",
         },
@@ -1414,7 +1443,7 @@ describe("TrafficMapPage route overlay helpers", () => {
             stopId: "NSR:StopPlace:99999",
             stopName: "Prinsens gate",
             stopDistanceMeters: 180,
-            serviceJourneyId: "ATB:ServiceJourney:3",
+            serviceJourneyId: "ATB:ServiceJourney:2",
           },
         ],
       }),
@@ -1474,14 +1503,14 @@ describe("TrafficMapPage route overlay helpers", () => {
     ).toEqual({
       label: "Ikke i tavla",
       detail:
-        "Reiserådet bruker Buss 3 fra Munkegata kl. 1. juni 11:10, men Nytt fant ikke samme avgang i live-tavla. Sjekk holdeplass, plattform og avvik hos AtB/Entur.",
+        "Reiserådet bruker Buss 2 fra Søndre gate kl. 1. juni 11:10, men Nytt fant ikke samme avgang i live-tavla. Sjekk holdeplass, plattform og avvik hos AtB/Entur.",
       severity: "watch",
     });
 
     expect(selectedDepartureStatus(undefined, planWithItinerary.itineraries[0]?.legs[0])).toEqual({
       label: "Sjekk",
       detail:
-        "Reiserådet bruker Buss 3 fra Munkegata kl. 1. juni 11:10. Live-tavla er ikke lastet inn, så sjekk linje og holdeplass hos AtB/Entur.",
+        "Reiserådet bruker Buss 2 fra Søndre gate kl. 1. juni 11:10. Live-tavla er ikke lastet inn, så sjekk linje og holdeplass hos AtB/Entur.",
       severity: "watch",
     });
   });
@@ -1497,7 +1526,7 @@ describe("TrafficMapPage route overlay helpers", () => {
     ).toEqual({
       label: "Sjekk AtB/Entur",
       detail:
-        "Avgangstavla er utilgjengelig akkurat nå. Reiserådet bruker fortsatt Buss 3 fra Munkegata kl. 1. juni 11:10, men avgang, plattform og avvik må sjekkes hos AtB/Entur.",
+        "Avgangstavla er utilgjengelig akkurat nå. Reiserådet bruker fortsatt Buss 2 fra Søndre gate kl. 1. juni 11:10, men avgang, plattform og avvik må sjekkes hos AtB/Entur.",
       severity: "warning",
     });
 
@@ -1511,7 +1540,7 @@ describe("TrafficMapPage route overlay helpers", () => {
     ).toEqual({
       label: "Ingen tavletreff",
       detail:
-        "Avgangstavla for Valgt område har ingen avganger for valgt tidsrom. Reiserådet bruker Buss 3 fra Munkegata kl. 1. juni 11:10; sjekk AtB/Entur før du drar.",
+        "Avgangstavla for Valgt område har ingen avganger for valgt tidsrom. Reiserådet bruker Buss 2 fra Søndre gate kl. 1. juni 11:10; sjekk AtB/Entur før du drar.",
       severity: "watch",
     });
   });
@@ -1659,7 +1688,7 @@ describe("TrafficMapPage route overlay helpers", () => {
         ],
       }),
     ).toMatchObject({
-      heading: "Sjekk ruten før du drar",
+      heading: "Gå til Mål",
       roadImpactCount: 1,
       alertCount: 1,
       vehicleCount: 1,
@@ -1678,14 +1707,14 @@ describe("TrafficMapPage route overlay helpers", () => {
         },
       }),
     ).toMatchObject({
-      heading: "Sjekk AtB/Entur før du drar",
-      detail: expect.stringContaining("Entur reisesøk er ikke tilgjengelig"),
+      heading: "Gå til Mål",
+      detail: expect.stringContaining("Kollektivsøket feilet akkurat nå."),
       severity: "warning",
     });
 
     expect(travelPlanDecision(plan)).toMatchObject({
-      heading: "Ingen konkrete Entur-reiser funnet",
-      detail: expect.stringContaining("Sjekk AtB/Entur"),
+      heading: "Gå til Mål",
+      detail: expect.stringContaining("Ingen kollektivreise akkurat nå."),
       severity: "watch",
     });
   });
@@ -1694,6 +1723,8 @@ describe("TrafficMapPage route overlay helpers", () => {
     expect(
       travelPlanDecision({
         ...plan,
+        primaryMode: "transit",
+        walkingRoute: undefined,
         itineraries: [
           {
             id: "itinerary-1",
@@ -1751,9 +1782,77 @@ describe("TrafficMapPage route overlay helpers", () => {
         },
       }),
     ).toMatchObject({
-      heading: "Sjekk ruten før du drar",
+      heading: "Ta Buss 3 fra Munkegata",
       itineraryCount: 1,
-      severity: "warning",
+      severity: "watch",
+    });
+  });
+
+  describe("mode-aware travel answer", () => {
+    it("turns no-transit plans into a walking answer", () => {
+      expect(travelPlanDecision(plan)).toMatchObject({
+        heading: "Gå til Mål",
+        detail: "Ingen kollektivreise akkurat nå. Gangruta tar ca. 15 min og er 1,2 km.",
+        itineraryCount: 0,
+        severity: "watch",
+      });
+
+      expect(travelPlanModeSummary(plan)).toEqual({
+        label: "Gange",
+        detail: "15 min · 1,2 km · Mål",
+        contextLabel: "Trafikk langs gangruta",
+      });
+    });
+
+    it("keeps transit plans focused on the selected line and boarding stop", () => {
+      expect(travelPlanDecision(planWithItinerary)).toMatchObject({
+        heading: "Ta Buss 2 fra Søndre gate",
+        detail: expect.stringContaining("18 min"),
+        itineraryCount: 1,
+        severity: "ok",
+      });
+
+      expect(travelPlanModeSummary(planWithItinerary)).toMatchObject({
+        label: "Kollektiv",
+        contextLabel: "Trafikk langs ruten",
+      });
+    });
+
+    it("keeps walking-primary plans focused on the walking route instead of retained transit legs", () => {
+      expect(departureBoardContextFromPlan(walkingPrimaryPlanWithRetainedTransitItinerary)).toEqual(
+        {
+          scope: "origin",
+          label: "Start",
+          center: { lat: 63.39, lon: 10.39 },
+        },
+      );
+      expect(routeDepartureCheckpoints(walkingPrimaryPlanWithRetainedTransitItinerary)).toEqual([]);
+      expect(
+        selectedDepartureMatch(
+          walkingPrimaryPlanWithRetainedTransitItinerary,
+          "itinerary-1",
+          departureBoard,
+        ),
+      ).toBeUndefined();
+    });
+
+    it("uses a clear handoff when no transit or walking answer is available", () => {
+      const noAnswer: TravelPlanPayload = {
+        ...plan,
+        primaryMode: "fallback",
+        walkingRoute: undefined,
+        journeyPlanner: {
+          ...plan.journeyPlanner,
+          status: "unavailable",
+          detail: "Entur reisesøk er ikke tilgjengelig akkurat nå.",
+        },
+      };
+
+      expect(travelPlanDecision(noAnswer)).toMatchObject({
+        heading: "Sjekk AtB/Entur",
+        detail: expect.stringContaining("Entur reisesøk er ikke tilgjengelig"),
+        severity: "warning",
+      });
     });
   });
 
@@ -1976,6 +2075,42 @@ describe("TrafficMapPage route overlay helpers", () => {
     });
   });
 
+  describe("post-search map placement", () => {
+    it("opens the map immediately for walking answers", () => {
+      expect(shouldOpenPostSearchMap(plan)).toBe(true);
+    });
+
+    it("opens the map for transit answers with route context", () => {
+      expect(
+        shouldOpenPostSearchMap({
+          ...planWithItinerary,
+          trafficImpacts: [
+            {
+              event: {
+                id: "traffic-point-1",
+                source: "vegvesen_traffic_info",
+                sourceEventId: "traffic-point-1",
+                category: "roadworks",
+                severity: "medium",
+                state: "active",
+                title: "Vegarbeid langs ruten",
+                updatedAt: "2026-06-01T09:00:00.000Z",
+                geometry: { type: "Point", coordinates: [10.4, 63.4] },
+              },
+              distanceMeters: 80,
+              severity: "medium",
+              summary: "80 m fra foreslått rute",
+            },
+          ],
+        }),
+      ).toBe(true);
+    });
+
+    it("keeps the map closed before a search", () => {
+      expect(shouldOpenPostSearchMap()).toBe(false);
+    });
+  });
+
   describe("route context map focus", () => {
     const trafficEvent = (overrides: Partial<TrafficMapEvent>): TrafficMapEvent => ({
       id: "event:one",
@@ -2099,6 +2234,60 @@ describe("TrafficMapPage route overlay helpers", () => {
       expect(html).toContain('href="https://www.atb.no/reise/"');
       expect(html).not.toContain("disabled");
       expect(html).not.toContain("Se trafikk langs ruten");
+    });
+
+    it("RouteContextFallback uses walking-specific route context titles without regressing transit wording", () => {
+      const walkingSummary = {
+        count: 1,
+        mapPointCount: 1,
+        blockingCount: 0,
+        heading: "1 kartpunkt",
+        detail: "Kartet viser plassering av 1 kartpunkt som bør vurderes underveis.",
+        items: [
+          {
+            id: "traffic:walk",
+            kind: "traffic" as const,
+            title: "Vegarbeid ved Elgeseter",
+            detail: "Hold til høyre forbi sperringen.",
+            source: "Vegvesen",
+            severity: "watch" as const,
+            placement: "near_route" as const,
+            placementLabel: "Nær ruten · 45 m",
+            distanceLabel: "45 m fra ruten",
+            eventId: "walk",
+            focusable: true,
+          },
+        ],
+      };
+
+      const walkingHtml = renderToStaticMarkup(
+        createElement(TravelPlanCard, {
+          plan,
+          loading: false,
+          routeContextSummary: walkingSummary,
+          onSelectItinerary: () => undefined,
+        }),
+      );
+
+      expect(walkingHtml).toContain("Trafikk langs gangruta");
+      expect(walkingHtml).toContain("Kartpunkter langs gangruta");
+      expect(walkingHtml).toContain('class="travel-plan-context-note"');
+      expect(walkingHtml).toContain("1 kartpunkt · Trafikk langs gangruta");
+      expect(walkingHtml).not.toContain("Kartpunkter langs valgt rute");
+
+      const transitHtml = renderToStaticMarkup(
+        createElement(TravelPlanCard, {
+          plan: planWithItinerary,
+          loading: false,
+          routeContextSummary: walkingSummary,
+          onSelectItinerary: () => undefined,
+        }),
+      );
+
+      expect(transitHtml).toContain("Trafikk langs ruten");
+      expect(transitHtml).toContain("Kartpunkter langs ruten");
+      expect(transitHtml).toContain('class="travel-plan-context-note"');
+      expect(transitHtml).toContain("1 kartpunkt · Trafikk langs ruten");
     });
   });
 });

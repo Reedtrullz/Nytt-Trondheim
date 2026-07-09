@@ -11,11 +11,14 @@ import type {
   TravelPlanLegMode,
   TravelPlanLegNotice,
   TravelPlanLegPlace,
+  TravelPlanNextTransitOption,
   TravelPlanPayload,
   TravelPlanPlace,
   TravelPlanRoute,
   TravelPlanTrafficImpact,
   TravelPlanTransitSuggestion,
+  TravelPlanComparisonPreset,
+  TravelPlanComparisonSource,
 } from "@nytt/shared";
 import type { Geometry, LineString } from "geojson";
 import type { Bounds, Coordinate, CoordinateSegment } from "./geo.js";
@@ -53,6 +56,7 @@ const ROUTE_TRANSIT_BUFFER_METERS = 1_200;
 const ROUTE_CONTEXT_LOOK_BEHIND_MS = 15 * 60_000;
 const ROUTE_CONTEXT_MIN_LOOK_AHEAD_MS = 2 * 60 * 60_000;
 const ROUTE_CONTEXT_AFTER_ROUTE_PADDING_MS = 60 * 60_000;
+const WALKING_SPEED_METERS_PER_SECOND = 1.35;
 const ENTUR_JOURNEY_PLANNER_ENDPOINT = "https://api.entur.io/journey-planner/v3/graphql";
 const TRONDELAG_TRAVEL_BOUNDS = {
   north: 64.7,
@@ -1400,6 +1404,112 @@ function sourceStatuses(sourceHealth: SourceHealth[]): TrafficMapSourceStatus[] 
     }));
 }
 
+export function estimateWalkingDurationSeconds(distanceMeters: number): number {
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return 0;
+  return Math.max(60, Math.round(distanceMeters / WALKING_SPEED_METERS_PER_SECOND / 60) * 60);
+}
+
+function walkingRouteFromTravelRoute(
+  route: TravelPlanRoute,
+  hasUsableTransitItinerary: boolean,
+): TravelPlanPayload["walkingRoute"] {
+  if (hasUsableTransitItinerary) return undefined;
+  if (!Number.isFinite(route.distanceMeters) || route.distanceMeters <= 0) return undefined;
+  if (route.geometry.type !== "LineString" || route.geometry.coordinates.length < 2) {
+    return undefined;
+  }
+  const confidence = route.source === "osrm" ? "route" : "corridor";
+  return {
+    source: route.source,
+    geometry: route.geometry,
+    distanceMeters: route.distanceMeters,
+    durationSeconds: estimateWalkingDurationSeconds(route.distanceMeters),
+    detail:
+      confidence === "route"
+        ? "Gangtid estimert fra rutelengde. Ruten vises som OSRM-korridor."
+        : "Gangtid estimert fra luftlinjekorridor fordi rutetjenesten ikke ga detaljert gangrute.",
+    confidence,
+  };
+}
+
+function isUsableTransitItinerary(itinerary: TravelPlanItinerary): boolean {
+  return itinerary.decision !== "avoid" && itinerary.modes.some((mode) => mode !== "walk");
+}
+
+function firstTransitLeg(itinerary: TravelPlanItinerary): TravelPlanLeg | undefined {
+  return itinerary.legs.find((leg) => leg.mode !== "walk" && !leg.cancelled);
+}
+
+function transitModeLabel(mode: TravelPlanLegMode): string {
+  switch (mode) {
+    case "bus":
+      return "Buss";
+    case "tram":
+      return "Trikk";
+    case "rail":
+      return "Tog";
+    case "water":
+      return "Båt";
+    case "metro":
+      return "T-bane";
+    default:
+      return "Kollektiv";
+  }
+}
+
+function nextTransitOptionFromItinerary(
+  itinerary?: TravelPlanItinerary,
+): TravelPlanNextTransitOption | undefined {
+  if (!itinerary || !isUsableTransitItinerary(itinerary)) return undefined;
+  const leg = firstTransitLeg(itinerary);
+  if (!leg) return undefined;
+  return {
+    departureTime: itinerary.departureTime,
+    arrivalTime: itinerary.arrivalTime,
+    lineLabel: leg.publicCode
+      ? `${transitModeLabel(leg.mode)} ${leg.publicCode}`
+      : transitModeLabel(leg.mode),
+    boardingStopName: leg.from.stopName ?? leg.from.name,
+    durationSeconds: itinerary.durationSeconds,
+    transferCount: itinerary.transferCount,
+    handoffUrl: itinerary.handoffUrl,
+  };
+}
+
+const comparisonPresetOrder: TravelPlanComparisonPreset[] = ["now", "in30", "in60", "in120"];
+
+export function withNextTransitOptionFromComparisonSources(
+  selectedPlan: TravelPlanPayload,
+  sources: TravelPlanComparisonSource[],
+  activePreset: TravelPlanComparisonPreset,
+): TravelPlanPayload {
+  if (selectedPlan.primaryMode === "transit" || selectedPlan.nextTransitOption) {
+    return selectedPlan;
+  }
+  const activeIndex = comparisonPresetOrder.indexOf(activePreset);
+  const candidateSources = sources.filter((source) => {
+    if (!source.plan) return false;
+    if (source.preset === activePreset) return false;
+    const presetIndex = comparisonPresetOrder.indexOf(source.preset);
+    return presetIndex > activeIndex;
+  });
+  const nextTransitOption = candidateSources
+    .map((source) =>
+      nextTransitOptionFromItinerary(source.plan?.itineraries.find(isUsableTransitItinerary)),
+    )
+    .find((option) => option !== undefined);
+  return nextTransitOption ? { ...selectedPlan, nextTransitOption } : selectedPlan;
+}
+
+function primaryModeForTravelPlan(
+  itineraries: TravelPlanItinerary[],
+  walkingRoute: TravelPlanPayload["walkingRoute"],
+): TravelPlanPayload["primaryMode"] {
+  if (itineraries.some(isUsableTransitItinerary)) return "transit";
+  if (walkingRoute) return "walk";
+  return "fallback";
+}
+
 export function buildTravelPlanPayload(input: {
   origin: TravelPlanPlace;
   destination: TravelPlanPlace;
@@ -1435,10 +1545,15 @@ export function buildTravelPlanPayload(input: {
       contextAlerts,
     ),
   );
+  const hasUsableTransitItinerary = itineraries.some(isUsableTransitItinerary);
+  const walkingRoute = walkingRouteFromTravelRoute(input.route, hasUsableTransitItinerary);
+  const primaryMode = primaryModeForTravelPlan(itineraries, walkingRoute);
   return {
     origin: input.origin,
     destination: input.destination,
     route: input.route,
+    primaryMode,
+    ...(walkingRoute ? { walkingRoute } : {}),
     trafficImpacts: trafficImpactsForRoute,
     publicTransportSuggestions: transitSuggestions(input.vehicles, contextAlerts, input.route),
     itineraries,
