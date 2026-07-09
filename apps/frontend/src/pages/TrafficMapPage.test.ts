@@ -5,9 +5,10 @@ import type {
   TravelPlanPayload,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
-import { createElement } from "react";
+import { Children, createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TrafficLayerVisibility } from "../components/map/TrafficFilterPanel.js";
+import { TrafficJourneyAnswer } from "./TrafficJourneyAnswer.js";
 
 vi.mock("react-leaflet", () => ({
   CircleMarker: () => null,
@@ -672,6 +673,16 @@ function departureFixture(
   };
 }
 
+function findElementByType(node: ReactNode, type: string) {
+  if (!isValidElement(node)) return undefined;
+  if (node.type === type) return node;
+  for (const child of Children.toArray(node.props.children)) {
+    const match = findElementByType(child, type);
+    if (match) return match;
+  }
+  return undefined;
+}
+
 describe("TravelPlanCard journey answer", () => {
   it("renders the concrete journey instruction before route diagnostics", () => {
     const html = renderToStaticMarkup(
@@ -865,8 +876,8 @@ describe("TrafficJourneyAnswer", () => {
     expect(html).toContain("Ta Buss 2 mot Lade");
     expect(html).toContain("Gå til Lade gård");
     expect(html).toContain("Åpne hos AtB/Entur");
+    expect(html).toContain("Valgt reiseforslag ser best ut");
     expect(html).not.toContain("Kollektivvalg");
-    expect(html).not.toContain("Valgt reiseforslag ser best ut");
   });
 
   it("renders walking as the primary answer without pretending there is transit", () => {
@@ -973,6 +984,158 @@ describe("TrafficJourneyAnswer", () => {
     expect(html).toContain("Live-tavla viser at et annet valg har bedre margin.");
     expect(html).toContain("Buss 71");
     expect(html).toContain("Live-tavle matcher avgangen.");
+  });
+
+  it("keeps a single live option visible instead of falling back to plan-only alternatives", () => {
+    const alternateItinerary = planWithTravelDuration({
+      id: "itinerary-2",
+      departureTime: "2026-06-01T09:16:00.000Z",
+      arrivalTime: "2026-06-01T09:38:00.000Z",
+      durationSeconds: 22 * 60,
+      decision: "watch",
+    }).itineraries[0]!;
+    const planWithAlternatives: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [planWithItinerary.itineraries[0]!, alternateItinerary],
+    };
+    const routeChoiceModel: RouteChoiceModel = {
+      heading: "Live-valget står seg",
+      detail: "Live-tavla bekrefter bare ett trygt valg akkurat nå.",
+      recommendedItineraryId: "itinerary-1",
+      options: [
+        {
+          kind: "recommended",
+          label: "Anbefalt",
+          itineraryId: "itinerary-1",
+          selected: true,
+          recommended: true,
+          severity: "ok",
+          score: 1,
+          summary: "11:10-11:28",
+          lineSummary: "Buss 2",
+          detail: "Live-tavla matcher valgt avgang.",
+          meta: "18 min · Direkte · Rolig",
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithAlternatives,
+        loading: false,
+        routeChoiceModel,
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Live-valget står seg");
+    expect(html).toContain("Live-tavla matcher valgt avgang.");
+    expect(html).not.toContain("Færrest bytter");
+  });
+
+  it("preserves each live option summary in the compact route choice UI", () => {
+    const routeChoiceModel: RouteChoiceModel = {
+      heading: "Velg mellom live-bekreftede avganger",
+      detail: "Tidsvinduene skiller valgene akkurat nå.",
+      recommendedItineraryId: "itinerary-live",
+      options: [
+        {
+          kind: "recommended",
+          label: "Anbefalt",
+          itineraryId: "itinerary-live",
+          selected: false,
+          recommended: true,
+          severity: "ok",
+          score: 12,
+          summary: "11:16-11:38",
+          lineSummary: "Buss 71",
+          detail: "Live-tavle matcher avgangen.",
+          meta: "22 min · Direkte · Rolig",
+        },
+        {
+          kind: "fastest",
+          label: "Raskest",
+          itineraryId: "itinerary-1",
+          selected: true,
+          recommended: false,
+          severity: "warning",
+          score: 86,
+          summary: "11:10-11:28",
+          lineSummary: "Buss 2",
+          detail: "Live-tavla viser at avgangen må sjekkes.",
+          meta: "18 min · Direkte · Sjekk",
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeChoiceModel,
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("11:16-11:38");
+    expect(html).toContain("11:10-11:28");
+  });
+
+  it("does not reselect an already-selected live option", () => {
+    const onSelectItinerary = vi.fn();
+    const tree = TrafficJourneyAnswer({
+      answer: {
+        mode: "transit",
+        headline: "Ta Buss 2 fra Søndre gate",
+        primaryMeta: "11:10 → 11:28 · 18 min · Direkte",
+        supportingText: "Live-tavla matcher valgt avgang.",
+        severity: "ok",
+        primaryItineraryId: "itinerary-1",
+        handoff: {
+          label: "Åpne hos AtB/Entur",
+          url: "https://www.atb.no/reiseplanlegger/",
+        },
+        steps: [],
+        routeOptions: [],
+        mapSummary: {
+          placement: "primary",
+          heading: "Kart",
+          detail: "Viser valgt reise.",
+          routeVisible: true,
+          mapPointCount: 0,
+        },
+        context: {
+          mapPointCount: 0,
+          primaryTextItems: [],
+          disclosureLabel: "Ingen avvik",
+        },
+      },
+      onSelectItinerary,
+      routeChoice: {
+        heading: "Live-valget står seg",
+        detail: "Ikke bytt uten grunn.",
+        options: [
+          {
+            itineraryId: "itinerary-1",
+            label: "Anbefalt",
+            selected: true,
+            recommended: true,
+            severity: "ok",
+            lineSummary: "Buss 2",
+            detail: "Live-tavla matcher valgt avgang.",
+            meta: "18 min · Direkte · Rolig",
+            summary: "11:10-11:28",
+          },
+        ],
+      },
+    });
+
+    const button = findElementByType(tree, "button");
+    expect(button).toBeDefined();
+    button?.props.onClick();
+    expect(onSelectItinerary).not.toHaveBeenCalled();
   });
 
   it("keeps a meaningful live route watch compact and visible", () => {

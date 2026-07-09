@@ -106,7 +106,7 @@ export function TrafficJourneyAnswer({
         </aside>
       ) : null}
 
-      {routeChoice && routeChoice.options.length > 1 ? (
+      {routeChoice && routeChoice.options.length ? (
         <section className="traffic-journey-alternatives" aria-label="Andre reiseforslag">
           <h3>{routeChoice.heading}</h3>
           <p>{routeChoice.detail}</p>
@@ -121,10 +121,15 @@ export function TrafficJourneyAnswer({
                   }`.trim() || undefined
                 }
                 aria-pressed={option.selected}
-                onClick={() => onSelectItinerary?.(option.itineraryId)}
+                onClick={() => {
+                  if (!option.selected) {
+                    onSelectItinerary?.(option.itineraryId);
+                  }
+                }}
               >
                 <strong>{option.label}</strong>
                 <span>{option.lineSummary}</span>
+                <small>{option.summary}</small>
                 <small>{option.meta}</small>
                 <small>{option.detail}</small>
               </button>
@@ -141,7 +146,11 @@ export function TrafficJourneyAnswer({
                 type="button"
                 className={option.selected ? "selected" : undefined}
                 aria-pressed={option.selected}
-                onClick={() => onSelectItinerary?.(option.itineraryId)}
+                onClick={() => {
+                  if (!option.selected) {
+                    onSelectItinerary?.(option.itineraryId);
+                  }
+                }}
               >
                 <strong>{option.label}</strong>
                 <span>{option.summary}</span>

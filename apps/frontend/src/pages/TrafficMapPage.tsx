@@ -4665,6 +4665,9 @@ export function TrafficMapPage() {
   }
 
   function handleSelectItinerary(itineraryId: string): void {
+    if (itineraryId === selectedItineraryId) {
+      return;
+    }
     setSelectedItineraryId(itineraryId);
     const context = departureBoardContextFromPlan(travelPlan, itineraryId);
     if (context) {
