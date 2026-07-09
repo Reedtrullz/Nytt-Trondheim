@@ -665,6 +665,38 @@ describe("TravelPlanCard journey answer", () => {
     expect(html).not.toContain("Ruteoppsummering");
   });
 
+  it("does not instruct travellers to board a cancelled-only itinerary", () => {
+    const cancelledPlan: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [
+        {
+          ...planWithItinerary.itineraries[0]!,
+          decision: "avoid",
+          decisionReason: "Avgangen er innstilt.",
+          legs: planWithItinerary.itineraries[0]!.legs.map((leg) => ({
+            ...leg,
+            cancelled: true,
+          })),
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: cancelledPlan,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: cancelledPlan,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Sjekk AtB/Entur");
+    expect(html).not.toContain("Start med Buss");
+  });
+
   it("does not render route context inside the main answer card", () => {
     const planWithContext: TravelPlanPayload = {
       ...planWithItinerary,

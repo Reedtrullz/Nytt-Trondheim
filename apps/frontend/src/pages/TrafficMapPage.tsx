@@ -1028,6 +1028,7 @@ function transitTextMatches(left?: string, right?: string): boolean {
 }
 
 function isBoardingLeg(leg: TravelPlanLeg): boolean {
+  if (leg.cancelled) return false;
   if (leg.mode === "walk") return false;
   return Boolean(leg.publicCode || leg.lineId || leg.from.stopId || leg.from.stopName);
 }
