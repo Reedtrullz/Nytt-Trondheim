@@ -513,6 +513,99 @@ describe("traffic journey answer view", () => {
     expect(answer.handoff.label).toBe("Sjekk AtB/Entur");
   });
 
+  it("prefers a concrete walk-only itinerary over walkingRoute fallback detail", () => {
+    const answer = buildJourneyTravellerAnswer({
+      ...plan(),
+      primaryMode: "walk",
+      walkingRoute: {
+        source: "direct",
+        distanceMeters: 3500,
+        durationSeconds: 2580,
+        detail: "Gangtid estimert fra luftlinjekorridor.",
+        confidence: "corridor",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+      itineraries: [
+        itinerary({
+          id: "walk-itinerary",
+          decision: "good",
+          decisionReason: "Entur foreslår gange hele veien.",
+          labels: [],
+          departureTime: "2026-06-01T09:10:00.000Z",
+          arrivalTime: "2026-06-01T09:28:00.000Z",
+          durationSeconds: 1080,
+          transferCount: 0,
+          walkTimeSeconds: 1080,
+          modes: ["walk"],
+          legs: [
+            leg({
+              id: "walk-leg-1",
+              mode: "walk",
+              from: {
+                name: "Munkegata",
+                coordinate: [10.393742, 63.432883],
+              },
+              to: {
+                name: "Solsiden",
+                coordinate: [10.418, 63.436],
+              },
+              aimedStartTime: "2026-06-01T09:10:00.000Z",
+              expectedStartTime: "2026-06-01T09:10:00.000Z",
+              aimedEndTime: "2026-06-01T09:18:00.000Z",
+              expectedEndTime: "2026-06-01T09:18:00.000Z",
+              durationSeconds: 480,
+              distanceMeters: 700,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+            leg({
+              id: "walk-leg-2",
+              mode: "walk",
+              from: {
+                name: "Solsiden",
+                coordinate: [10.418, 63.436],
+              },
+              to: {
+                name: "Lade gård",
+                coordinate: [10.463, 63.433],
+              },
+              aimedStartTime: "2026-06-01T09:18:00.000Z",
+              expectedStartTime: "2026-06-01T09:18:00.000Z",
+              aimedEndTime: "2026-06-01T09:28:00.000Z",
+              expectedEndTime: "2026-06-01T09:28:00.000Z",
+              durationSeconds: 600,
+              distanceMeters: 900,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+          ],
+        }),
+      ],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte et gangforslag.",
+        requestedDepartureTime: "2026-06-01T09:10:00.000Z",
+        source: "Entur Journey Planner",
+      },
+    });
+
+    expect(answer.mode).toBe("walk");
+    expect(answer.primaryItineraryId).toBe("walk-itinerary");
+    expect(answer.primaryMeta).toBe("11:10 → 11:28 · 18 min · Direkte");
+    expect(answer.steps.map((step) => step.label)).toEqual(["Gå til Solsiden", "Gå til Lade gård"]);
+    expect(answer.supportingText).toBe("Entur foreslår gange hele veien.");
+  });
+
   it("uses operator handoff when no concrete journey or walking route exists", () => {
     const planWithItinerary = plan({
       itineraries: [itinerary()],

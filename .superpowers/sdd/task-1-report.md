@@ -107,3 +107,45 @@ Observed result:
 
 - `apps/frontend/src/pages/trafficJourneyView.test.ts` passed
 - 14 tests passed, 0 failed
+
+## 2026-07-09 Task 1 takeover follow-up
+
+### Fix scope
+
+- Fixed `buildJourneyTravellerAnswer(...)` precedence so a selected concrete walk-only Entur itinerary keeps its own traveller steps and itinerary-style primary meta even when `plan.walkingRoute` is also present.
+- Kept the change inside the traveller-answer adapter only; `buildJourneyAnswerView(...)` selection logic and fallback walking-route behavior were left intact.
+
+### TDD Evidence
+
+#### RED
+
+Command:
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && npm test -- apps/frontend/src/pages/trafficJourneyView.test.ts -t "prefers a concrete walk-only itinerary over walkingRoute fallback detail"
+```
+
+Observed failure:
+
+- `prefers a concrete walk-only itinerary over walkingRoute fallback detail`
+  - expected `11:10 → 11:28 · 18 min · Direkte`
+  - received `43 min · 3,5 km`
+- Failure confirmed the traveller adapter was taking `walkingRoutePrimaryMeta(plan)` before the selected walk-only itinerary branch.
+
+#### GREEN
+
+Command:
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && npm test -- apps/frontend/src/pages/trafficJourneyView.test.ts
+```
+
+Observed result:
+
+- `apps/frontend/src/pages/trafficJourneyView.test.ts` passed
+- 15 tests passed, 0 failed
+
+### Self-review
+
+- Scope stayed bounded to the reported precedence bug plus its regression test in the owned frontend files.
+- Edge behavior checked: fallback walking-route answers still use corridor meta/step only when there is no concrete walk-only itinerary selected; transit and handoff branches are unchanged.

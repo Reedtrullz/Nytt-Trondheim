@@ -626,14 +626,15 @@ export function buildJourneyTravellerAnswer(
   }
 
   const itinerary = selectedItinerary(plan, selectedItineraryId);
+  const concreteWalkItinerary = isWalkOnlyItinerary(itinerary);
   const steps =
     baseAnswer.kind === "transit" && itinerary
       ? stepsForItinerary(itinerary)
-      : baseAnswer.kind === "walk" && plan.walkingRoute
-        ? stepsForWalkingRoute(plan)
-        : isWalkOnlyItinerary(itinerary)
+      : concreteWalkItinerary
           ? stepsForItinerary(itinerary)
-          : [];
+          : baseAnswer.kind === "walk" && plan.walkingRoute
+            ? stepsForWalkingRoute(plan)
+            : [];
 
   return {
     mode: baseAnswer.kind,
@@ -641,9 +642,11 @@ export function buildJourneyTravellerAnswer(
     primaryMeta:
       baseAnswer.kind === "transit" && itinerary
         ? itineraryPrimaryMeta(itinerary)
-        : baseAnswer.kind === "walk" && plan.walkingRoute
-          ? walkingRoutePrimaryMeta(plan)
-          : baseAnswer.meta,
+        : concreteWalkItinerary
+          ? itineraryPrimaryMeta(itinerary)
+          : baseAnswer.kind === "walk" && plan.walkingRoute
+            ? walkingRoutePrimaryMeta(plan)
+            : baseAnswer.meta,
     supportingText: baseAnswer.detail,
     severity: baseAnswer.severity,
     primaryItineraryId: baseAnswer.primaryItineraryId,
