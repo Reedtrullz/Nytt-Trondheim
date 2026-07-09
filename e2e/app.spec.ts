@@ -2789,41 +2789,34 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await expect(page.locator(".travel-planner-panel-post-search")).toBeVisible();
   await expect(page.locator(".travel-planner-copy")).toHaveCount(0);
   await expect(page.locator(".route-planner-form-compact")).toBeVisible();
-  await expect(page.locator(".travel-plan-result-workspace")).toBeVisible();
+  await expect(page.locator(".travel-plan-result")).toBeVisible();
   await expect(page.locator("h1#travel-planner-heading")).toHaveText("Ta Buss 3 fra Munkegata");
-  await expect(page.getByText("11:10 → 11:27 · 17 min · Direkte · 4 min gange")).toBeVisible();
+  await expect(page.locator(".traffic-journey-answer")).toContainText(
+    "11:10 → 11:27 · 17 min · Direkte",
+  );
   await expect(page.getByText("Reiseråd nå", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Ruteoppsummering")).toHaveCount(0);
-  await expect(page.getByLabel("Velg reiseforslag")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Ta Buss 3 fra/ })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText("Buss 3");
-  await expect(page.getByLabel("Velg reiseforslag")).toContainText("Anbefalt");
-  await expect(page.getByText("Start med Buss 3 fra Munkegata")).toBeVisible();
-  await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
-    "Sjekk dette før avreise",
-  );
-  await expect(page.getByLabel("Dette kan påvirke valgt reise")).toContainText(
-    "Forsinkelse på linje 3",
-  );
+  await expect(page.getByLabel("Andre reiseforslag")).toBeVisible();
+  await expect(page.getByLabel("Andre reiseforslag")).toContainText("Buss 3");
+  await expect(page.getByLabel("Andre reiseforslag")).toContainText("Anbefalt");
+  await expect(page.getByText("Ta Buss 3 mot Leangen")).toBeVisible();
+  await expect(page.getByLabel("Sjekk før avreise")).toContainText("Sjekk dette før avreise");
+  await expect(page.getByLabel("Sjekk før avreise")).toContainText("Forsinkelse på linje 3");
   await expect(page.getByLabel("Trafikk langs reisen")).toContainText(
     "Veiarbeid på E6 ved Leangen",
   );
   await expect(page.getByLabel("Trafikk langs reisen")).toContainText("Forsinkelse på linje 3");
   await expect(page.getByText("Kartpunkter langs valgt rute")).toHaveCount(0);
   await expect(page.getByText("Se trafikk langs ruten")).toHaveCount(0);
+  await expect(page.locator(".traffic-primary-map-section")).toContainText("Kartet viser ruten");
+  await expect(page.locator(".traffic-primary-map-section")).toContainText("Stopp, gangetapper");
   await expect(page.locator("details.traffic-map-disclosure")).toHaveCount(0);
-  await expect(page.locator(".traffic-primary-map-section")).toContainText(
-    "Rute og trafikk langs valgt reise",
-  );
   await expect(page.locator(".traffic-map")).toBeVisible();
   const routeContextChip = page
     .getByLabel("Trafikk langs reisen")
     .getByRole("button", { name: /Veiarbeid på E6 ved Leangen/ });
   await routeContextChip.click();
   await expect(routeContextChip).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("region", { name: "Valgt reiseforslag" })).toContainText(
-    "Lade - Hallset",
-  );
   await openTrafficDisclosure(page, "Dra nå eller vent?");
   const comparison = page.getByLabel("Dra nå eller vent");
   await expect(comparison).toContainText("Dra nå eller vent?");
@@ -2850,21 +2843,21 @@ test("traffic map travel planner shows route-specific traffic and public transpo
   await page.getByLabel("Når?").selectOption("in120");
   await expect.poll(() => travelPlanRequestUrls.length).toBeGreaterThanOrEqual(2);
   await expect(page).toHaveURL(/tid=in120/);
-  expect(
-    departureRequestUrls.some(
-      (url) =>
-        url.searchParams.get("lat") === "63.4305" &&
-        url.searchParams.get("lon") === "10.3951" &&
-        url.searchParams.get("startTime") === "2026-06-01T11:10:00.000Z",
-    ),
-  ).toBe(true);
+  await expect
+    .poll(() =>
+      departureRequestUrls.some(
+        (url) =>
+          url.searchParams.get("lat") === "63.4305" &&
+          url.searchParams.get("lon") === "10.3951" &&
+          url.searchParams.get("startTime") === "2026-06-01T11:10:00.000Z",
+      ),
+    )
+    .toBe(true);
   await expect(
     page.getByText("Nytt vurderer reiserisiko, ikke billetter eller garanti."),
   ).toBeVisible();
   await expect(
-    page
-      .getByRole("region", { name: "Valgt reiseforslag" })
-      .getByRole("link", { name: "Åpne hos AtB/Entur" }),
+    page.locator(".traffic-journey-answer").getByRole("link", { name: "Åpne hos AtB/Entur" }),
   ).toHaveAttribute("href", "https://www.atb.no/reiseplanlegger/");
   await page.getByText("Se datagrunnlag").click();
   await expect(page.getByText("Entur Journey Planner", { exact: true })).toBeVisible();

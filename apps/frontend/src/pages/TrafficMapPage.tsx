@@ -998,6 +998,13 @@ function selectedItineraryPositions(
   return positions.length >= 2 ? positions : routePositions(plan);
 }
 
+function selectedBoardingLegForMap(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): TravelPlanLeg | undefined {
+  return firstTransitLeg(selectedItineraryForPlan(plan, selectedItineraryId));
+}
+
 function severityColor(severity: TrafficEventSeverity): string {
   switch (severity) {
     case "critical":
@@ -2374,6 +2381,10 @@ function TravelPlanLayer({
   const destination = latLngFromGeoJsonPosition(plan.destination.coordinate);
   const routeSeverity = strongestRouteImpact(plan);
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
+  const boardingLeg = selectedBoardingLegForMap(plan, selectedItineraryId);
+  const boardingPosition = boardingLeg?.from.coordinate
+    ? latLngFromGeoJsonPosition(boardingLeg.from.coordinate)
+    : undefined;
   return (
     <>
       {positions.length >= 2 ? (
@@ -2420,6 +2431,24 @@ function TravelPlanLayer({
       {origin ? (
         <CircleMarker center={origin} radius={7} pathOptions={{ color: "#16a34a" }}>
           <Popup>{plan.origin.label}</Popup>
+        </CircleMarker>
+      ) : null}
+      {boardingPosition ? (
+        <CircleMarker
+          center={boardingPosition}
+          radius={8}
+          pathOptions={{ color: "#19549a", fillOpacity: 0.9 }}
+        >
+          <Popup>
+            <article className="traffic-popup">
+              <strong>
+                {boardingLeg?.publicCode
+                  ? `Ta ${modeLabel(boardingLeg.mode)} ${boardingLeg.publicCode}`
+                  : "Start kollektivreisen"}
+              </strong>
+              <p>{boardingLeg?.from.stopName ?? boardingLeg?.from.name}</p>
+            </article>
+          </Popup>
         </CircleMarker>
       ) : null}
       {destination ? (
@@ -4972,12 +5001,12 @@ export function TrafficMapPage() {
           className="traffic-primary-map-section"
           aria-labelledby="traffic-primary-map-heading"
         >
-          <header>
+          <header className="traffic-primary-map-header">
             <p className="label">Kart for reisen</p>
-            <h2 id="traffic-primary-map-heading">Rute og trafikk langs valgt reise</h2>
+            <h2 id="traffic-primary-map-heading">Kartet viser ruten</h2>
             <p>
-              Kartet viser valgt reise, relevante trafikkpunkt og kollektivkontekst. Bruk AtB/Entur
-              for endelig avgang og billett.
+              Stopp, gangetapper og trafikkpunkt vises her. Varsler uten kartpunkt ligger under
+              reisen.
             </p>
           </header>
           {trafficMapWorkspace}

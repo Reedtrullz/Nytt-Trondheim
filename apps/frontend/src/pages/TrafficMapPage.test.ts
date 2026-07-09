@@ -121,6 +121,23 @@ describe("TrafficMapPage layer helpers", () => {
   });
 });
 
+describe("traffic map route proof", () => {
+  it("uses route-proof copy instead of route diagnostics copy after a transit search", () => {
+    const mode = travelMapDisplayMode(planWithItinerary, "itinerary-1");
+    expect(mode).toBe("primary");
+
+    const html = renderToStaticMarkup(
+      createElement(RouteContextFallback, {
+        summary: buildRouteContextSummary(planWithItinerary),
+        plan: planWithItinerary,
+      }),
+    );
+
+    expect(html).not.toContain("Ruteoppsummering");
+    expect(html).not.toContain("Tekstfallback");
+  });
+});
+
 describe("remembered travel routes", () => {
   it("deduplicates routes by actual query and preserves pinning", () => {
     const first = upsertRememberedTravelRoute(
