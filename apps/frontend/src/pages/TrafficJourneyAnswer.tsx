@@ -1,12 +1,48 @@
 import type { JourneyTravellerAnswerView } from "./trafficJourneyView.js";
+import { safeExternalUrl } from "../safeExternalUrl.js";
+
+export interface TrafficJourneyRouteChoice {
+  itineraryId: string;
+  label: string;
+  selected: boolean;
+  recommended: boolean;
+  severity: "ok" | "watch" | "warning";
+  lineSummary: string;
+  detail: string;
+  meta: string;
+}
+
+export interface TrafficJourneyRouteChoiceView {
+  heading: string;
+  detail: string;
+  options: TrafficJourneyRouteChoice[];
+}
+
+export interface TrafficJourneyRouteWatchView {
+  heading: string;
+  detail: string;
+  severity: "ok" | "watch" | "warning";
+  items: Array<{
+    id: string;
+    label: string;
+    detail: string;
+    severity: "ok" | "watch" | "warning";
+    source: string;
+  }>;
+}
 
 export function TrafficJourneyAnswer({
   answer,
   onSelectItinerary,
+  routeChoice,
+  routeWatch,
 }: {
   answer: JourneyTravellerAnswerView;
   onSelectItinerary?: (itineraryId: string) => void;
+  routeChoice?: TrafficJourneyRouteChoiceView;
+  routeWatch?: TrafficJourneyRouteWatchView;
 }) {
+  const handoffUrl = safeExternalUrl(answer.handoff.url);
   return (
     <article
       className={`traffic-journey-answer traffic-journey-answer-${answer.severity}`}
@@ -19,10 +55,10 @@ export function TrafficJourneyAnswer({
           <p className="traffic-journey-answer-meta">{answer.primaryMeta}</p>
         ) : null}
         <p>{answer.supportingText}</p>
-        {answer.handoff.url && answer.handoff.label ? (
+        {handoffUrl && answer.handoff.label ? (
           <a
             className="traffic-journey-answer-handoff"
-            href={answer.handoff.url}
+            href={handoffUrl}
             target="_blank"
             rel="noreferrer noopener"
           >
@@ -48,7 +84,54 @@ export function TrafficJourneyAnswer({
         </ol>
       ) : null}
 
-      {answer.routeOptions.length > 1 ? (
+      {routeWatch && routeWatch.severity !== "ok" ? (
+        <aside
+          className={`traffic-journey-watch traffic-journey-watch-${routeWatch.severity}`}
+          aria-label="Sjekk før avreise"
+        >
+          <strong>{routeWatch.heading}</strong>
+          <p>{routeWatch.detail}</p>
+          {routeWatch.items.length ? (
+            <ul>
+              {routeWatch.items.map((item) => (
+                <li key={item.id} className={`traffic-journey-watch-item-${item.severity}`}>
+                  <strong>{item.label}</strong>
+                  <span>
+                    {item.detail} · {item.source}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </aside>
+      ) : null}
+
+      {routeChoice && routeChoice.options.length > 1 ? (
+        <section className="traffic-journey-alternatives" aria-label="Andre reiseforslag">
+          <h3>{routeChoice.heading}</h3>
+          <p>{routeChoice.detail}</p>
+          <div>
+            {routeChoice.options.map((option) => (
+              <button
+                key={`${option.label}:${option.itineraryId}`}
+                type="button"
+                className={
+                  `${option.selected ? "selected " : ""}${
+                    option.recommended ? "recommended" : ""
+                  }`.trim() || undefined
+                }
+                aria-pressed={option.selected}
+                onClick={() => onSelectItinerary?.(option.itineraryId)}
+              >
+                <strong>{option.label}</strong>
+                <span>{option.lineSummary}</span>
+                <small>{option.meta}</small>
+                <small>{option.detail}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : answer.routeOptions.length > 1 ? (
         <section className="traffic-journey-alternatives" aria-label="Andre reiseforslag">
           <h3>Andre valg</h3>
           <div>

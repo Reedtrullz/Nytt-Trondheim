@@ -2699,6 +2699,8 @@ export function TravelPlanCard({
   loading,
   error,
   selectedItineraryId,
+  routeChoiceModel,
+  routeWatchSummary,
   onSelectItinerary,
 }: {
   plan?: TravelPlanPayload;
@@ -2707,7 +2709,6 @@ export function TravelPlanCard({
   selectedItineraryId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
-  showAnswerHeading?: boolean;
   onSelectItinerary: (itineraryId: string) => void;
 }) {
   if (error) {
@@ -2732,9 +2733,21 @@ export function TravelPlanCard({
     );
   }
   const travellerAnswer = buildJourneyTravellerAnswer(plan, selectedItineraryId);
+  const routeChoice = routeChoiceModel
+    ? {
+        heading: routeChoiceModel.heading,
+        detail: routeChoiceModel.detail,
+        options: compactRouteChoiceOptions(routeChoiceModel),
+      }
+    : undefined;
   return (
     <section id="travel-plan-result" className="travel-plan-result" aria-live="polite">
-      <TrafficJourneyAnswer answer={travellerAnswer} onSelectItinerary={onSelectItinerary} />
+      <TrafficJourneyAnswer
+        answer={travellerAnswer}
+        onSelectItinerary={onSelectItinerary}
+        routeChoice={routeChoice}
+        routeWatch={routeWatchSummary}
+      />
     </section>
   );
 }
@@ -3808,7 +3821,6 @@ function TravelPlannerPanel({
             selectedItineraryId={selectedItineraryId}
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
-            showAnswerHeading={!travelPlan}
             onSelectItinerary={onSelectItinerary}
           />
           {travelTimeComparison.status !== "idle" ? (

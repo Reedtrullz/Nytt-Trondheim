@@ -903,6 +903,132 @@ describe("TrafficJourneyAnswer", () => {
     expect(html).toContain("43 min");
     expect(html).not.toContain("Start med Buss");
   });
+
+  it("does not render a non-http(s) operator handoff", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: {
+          ...planWithItinerary,
+          itineraries: [
+            {
+              ...planWithItinerary.itineraries[0]!,
+              handoffUrl: "javascript:alert('uventet')",
+            },
+          ],
+        },
+        loading: false,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("href=\"javascript:alert('uventet')\"");
+    expect(html).not.toContain("Åpne hos AtB/Entur");
+  });
+
+  it("renders the live route recommendation instead of plan-only alternatives", () => {
+    const routeChoiceModel: RouteChoiceModel = {
+      heading: "Et annet reiseforslag ser tryggere ut",
+      detail: "Live-tavla viser at et annet valg har bedre margin.",
+      recommendedItineraryId: "itinerary-live",
+      options: [
+        {
+          kind: "recommended",
+          label: "Anbefalt",
+          itineraryId: "itinerary-live",
+          selected: false,
+          recommended: true,
+          severity: "ok",
+          score: 12,
+          summary: "11:16-11:38",
+          lineSummary: "Buss 71",
+          detail: "Live-tavle matcher avgangen.",
+          meta: "22 min · Direkte · Rolig",
+        },
+        {
+          kind: "fastest",
+          label: "Raskest",
+          itineraryId: "itinerary-1",
+          selected: true,
+          recommended: false,
+          severity: "warning",
+          score: 86,
+          summary: "11:10-11:28",
+          lineSummary: "Buss 2",
+          detail: "Live-tavla viser at avgangen må sjekkes.",
+          meta: "18 min · Direkte · Sjekk",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeChoiceModel,
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Et annet reiseforslag ser tryggere ut");
+    expect(html).toContain("Live-tavla viser at et annet valg har bedre margin.");
+    expect(html).toContain("Buss 71");
+    expect(html).toContain("Live-tavle matcher avgangen.");
+  });
+
+  it("keeps a meaningful live route watch compact and visible", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        selectedItineraryId: "itinerary-1",
+        routeWatchSummary: {
+          heading: "Sjekk dette før avreise",
+          detail: "1 punkt kan påvirke reiseforslaget.",
+          severity: "warning",
+          items: [
+            {
+              id: "itinerary-1:live-board",
+              label: "Søndre gate: Innstilt",
+              detail: "Avgangen er innstilt. Velg et annet reiseforslag hos AtB/Entur.",
+              severity: "warning",
+              source: "Live-tavle",
+            },
+          ],
+        },
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Sjekk dette før avreise");
+    expect(html).toContain("Søndre gate: Innstilt");
+    expect(html).toContain("Live-tavle");
+  });
+
+  it("preserves the loading, error, and no-plan status branches", () => {
+    const loadingHtml = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        loading: true,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+    const errorHtml = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        loading: false,
+        error: "Kunne ikke hente reiseråd.",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+    const emptyHtml = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        loading: false,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(loadingHtml).toContain("Henter reiseråd ...");
+    expect(errorHtml).toContain("Kunne ikke hente reiseråd.");
+    expect(emptyHtml).toContain("Skriv inn start og mål");
+  });
 });
 
 describe("JourneyContextChips", () => {
