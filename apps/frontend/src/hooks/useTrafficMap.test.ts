@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  optionalTrafficMapFlagFromKey,
-  optionalTrafficMapFlagKey,
-} from "./useTrafficMap.js";
+import { optionalTrafficMapFlagFromKey, optionalTrafficMapFlagKey } from "./useTrafficMap.js";
 
 describe("useTrafficMap optional flag keys", () => {
   it("preserves omitted include flags as undefined instead of false", () => {
