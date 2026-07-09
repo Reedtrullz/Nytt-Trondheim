@@ -11,11 +11,14 @@ import type {
   TravelPlanLegMode,
   TravelPlanLegNotice,
   TravelPlanLegPlace,
+  TravelPlanNextTransitOption,
   TravelPlanPayload,
   TravelPlanPlace,
   TravelPlanRoute,
   TravelPlanTrafficImpact,
   TravelPlanTransitSuggestion,
+  TravelPlanComparisonPreset,
+  TravelPlanComparisonSource,
 } from "@nytt/shared";
 import type { Geometry, LineString } from "geojson";
 import type { Bounds, Coordinate, CoordinateSegment } from "./geo.js";
@@ -1431,6 +1434,69 @@ function walkingRouteFromTravelRoute(
 
 function isUsableTransitItinerary(itinerary: TravelPlanItinerary): boolean {
   return itinerary.decision !== "avoid" && itinerary.modes.some((mode) => mode !== "walk");
+}
+
+function firstTransitLeg(itinerary: TravelPlanItinerary): TravelPlanLeg | undefined {
+  return itinerary.legs.find((leg) => leg.mode !== "walk" && !leg.cancelled);
+}
+
+function transitModeLabel(mode: TravelPlanLegMode): string {
+  switch (mode) {
+    case "bus":
+      return "Buss";
+    case "tram":
+      return "Trikk";
+    case "rail":
+      return "Tog";
+    case "water":
+      return "Båt";
+    case "metro":
+      return "T-bane";
+    default:
+      return "Kollektiv";
+  }
+}
+
+function nextTransitOptionFromItinerary(
+  itinerary?: TravelPlanItinerary,
+): TravelPlanNextTransitOption | undefined {
+  if (!itinerary || !isUsableTransitItinerary(itinerary)) return undefined;
+  const leg = firstTransitLeg(itinerary);
+  if (!leg) return undefined;
+  return {
+    departureTime: itinerary.departureTime,
+    arrivalTime: itinerary.arrivalTime,
+    lineLabel: leg.publicCode ? `${transitModeLabel(leg.mode)} ${leg.publicCode}` : transitModeLabel(leg.mode),
+    boardingStopName: leg.from.stopName ?? leg.from.name,
+    durationSeconds: itinerary.durationSeconds,
+    transferCount: itinerary.transferCount,
+    handoffUrl: itinerary.handoffUrl,
+  };
+}
+
+const comparisonPresetOrder: TravelPlanComparisonPreset[] = ["now", "in30", "in60", "in120"];
+
+export function withNextTransitOptionFromComparisonSources(
+  selectedPlan: TravelPlanPayload,
+  sources: TravelPlanComparisonSource[],
+  activePreset: TravelPlanComparisonPreset,
+): TravelPlanPayload {
+  if (selectedPlan.primaryMode === "transit" || selectedPlan.nextTransitOption) {
+    return selectedPlan;
+  }
+  const activeIndex = comparisonPresetOrder.indexOf(activePreset);
+  const candidateSources = sources.filter((source) => {
+    if (!source.plan) return false;
+    if (source.preset === activePreset) return false;
+    const presetIndex = comparisonPresetOrder.indexOf(source.preset);
+    return presetIndex > activeIndex;
+  });
+  const nextTransitOption = candidateSources
+    .map((source) =>
+      nextTransitOptionFromItinerary(source.plan?.itineraries.find(isUsableTransitItinerary)),
+    )
+    .find((option) => option !== undefined);
+  return nextTransitOption ? { ...selectedPlan, nextTransitOption } : selectedPlan;
 }
 
 function primaryModeForTravelPlan(

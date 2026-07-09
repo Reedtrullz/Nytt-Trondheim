@@ -67,9 +67,14 @@ function estimateWalkingDurationSeconds(distanceMeters: number): number {
   return Math.max(60, Math.round(distanceMeters / 1.35 / 60) * 60);
 }
 
+function hasUsableTransitItinerary(itinerary: Record<string, any>): boolean {
+  const modes = Array.isArray(itinerary.modes) ? itinerary.modes : [];
+  return itinerary.decision !== "avoid" && modes.some((mode) => mode !== "walk");
+}
+
 function withModeAwareTravelPlanMock(plan: Record<string, any>) {
   const itineraries = Array.isArray(plan.itineraries) ? plan.itineraries : [];
-  if (itineraries.length > 0) {
+  if (itineraries.some(hasUsableTransitItinerary)) {
     return {
       ...plan,
       primaryMode: "transit",

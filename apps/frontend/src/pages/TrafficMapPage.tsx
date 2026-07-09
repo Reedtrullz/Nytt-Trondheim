@@ -929,14 +929,18 @@ export function routePositions(plan: TravelPlanPayload): [number, number][] {
   return latLngsFromLineString(plan.route.geometry);
 }
 
+function isUsableTransitItinerary(itinerary: TravelPlanItinerary): boolean {
+  return itinerary.decision !== "avoid" && itinerary.modes.some((mode) => mode !== "walk");
+}
+
 function selectedItineraryForPlan(
   plan?: TravelPlanPayload,
   selectedItineraryId?: string,
 ): TravelPlanItinerary | undefined {
-  return (
-    plan?.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
-    plan?.itineraries[0]
-  );
+  if (!plan || plan.primaryMode !== "transit") return undefined;
+  const selected = plan.itineraries.find((itinerary) => itinerary.id === selectedItineraryId);
+  if (selected && isUsableTransitItinerary(selected)) return selected;
+  return plan.itineraries.find(isUsableTransitItinerary);
 }
 
 export function departureBoardContextFromPlan(
@@ -2355,9 +2359,7 @@ function TravelPlanLayer({
   const origin = latLngFromGeoJsonPosition(plan.origin.coordinate);
   const destination = latLngFromGeoJsonPosition(plan.destination.coordinate);
   const routeSeverity = strongestRouteImpact(plan);
-  const selectedItinerary =
-    plan.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
-    plan.itineraries[0];
+  const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   return (
     <>
       {positions.length >= 2 ? (
@@ -4914,13 +4916,16 @@ export function TrafficMapPage() {
         (await fetchTravelPlan(request, { signal: controller.signal }));
       if (travelPlanRequestIdRef.current !== requestId) return;
       setTravelPlan(payload);
-      setSelectedItineraryId(payload.itineraries[0]?.id);
+      setSelectedItineraryId(selectedItineraryForPlan(payload)?.id);
       if (comparisonPayload && comparisonPreset) {
         setTravelTimeComparisonFromSources(comparisonPayload.sources, comparisonPreset);
       } else {
         setTravelTimeComparison({ status: "idle" });
       }
-      const originContext = departureBoardContextFromPlan(payload, payload.itineraries[0]?.id);
+      const originContext = departureBoardContextFromPlan(
+        payload,
+        selectedItineraryForPlan(payload)?.id,
+      );
       if (originContext) {
         loadDepartureBoard(originContext);
       }

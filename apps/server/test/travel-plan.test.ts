@@ -1862,3 +1862,99 @@ describe("traffic travel planner API", () => {
     expect(payload.walkingRoute).toBeUndefined();
   });
 });
+
+describe("travel-plan comparison next transit option", () => {
+  it("adds the next transit option from future comparison presets when the selected plan is walk-primary", async () => {
+    const runtime = await testApp();
+    try {
+      vi.spyOn(runtime.store, "listTrafficMapEvents").mockResolvedValue([]);
+      vi.spyOn(runtime.store, "listOfficialEvents").mockResolvedValue([]);
+      vi.spyOn(runtime.store, "listPublicTransportVehicles").mockResolvedValue([]);
+      vi.spyOn(runtime.store, "listPublicTransportServiceAlerts").mockResolvedValue([]);
+      vi.spyOn(runtime.store, "listSourceHealth").mockResolvedValue(sourceHealth);
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input, init) => {
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : input.url;
+          if (url.startsWith("https://nominatim.openstreetmap.org/search")) {
+            const requestUrl = new URL(url);
+            const query = requestUrl.searchParams.get("q") ?? "";
+            const destination = query.toLocaleLowerCase("nb").includes("leangen");
+            return Response.json([
+              {
+                display_name: destination ? "Leangen, Trondheim" : "Munkegata, Trondheim",
+                lat: destination ? 63.433 : 63.4305,
+                lon: destination ? 10.464 : 10.3951,
+              },
+            ]);
+          }
+          if (url.startsWith("https://router.project-osrm.org/route/v1/driving/")) {
+            return Response.json({
+              routes: [
+                {
+                  distance: 4850,
+                  duration: 600,
+                  geometry: {
+                    type: "LineString",
+                    coordinates: [
+                      [10.3951, 63.4305],
+                      [10.464, 63.433],
+                    ],
+                  },
+                },
+              ],
+            });
+          }
+          if (url === "https://api.entur.io/journey-planner/v3/graphql") {
+            const body = JSON.parse(String(init?.body ?? "{}")) as {
+              variables?: { dateTime?: string };
+            };
+            const requestedTime = Date.parse(body.variables?.dateTime ?? "");
+            const deltaMinutes = (requestedTime - Date.now()) / 60_000;
+            return deltaMinutes < 20 ? enturTripResponse({ empty: true }) : enturTripResponse();
+          }
+          throw new Error(`Unexpected fetch: ${url}`);
+        }),
+      );
+
+      const agent = request.agent(runtime.app);
+      await agent.get("/api/session").expect(200);
+      const response = await agent
+        .get("/api/map/travel-plan/compare?from=Munkegata&to=Leangen&preset=now")
+        .expect(200);
+
+      expect(response.body.selectedPlan).toMatchObject({
+        primaryMode: "walk",
+        nextTransitOption: {
+          departureTime: "2026-06-01T07:10:00.000Z",
+          arrivalTime: "2026-06-01T07:27:00.000Z",
+          lineLabel: "Buss 3",
+          boardingStopName: "Munkegata",
+          durationSeconds: 1020,
+          transferCount: 0,
+          handoffUrl: "https://www.atb.no/reiseplanlegger/",
+        },
+      });
+      expect(response.body.sources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            preset: "in30",
+            plan: expect.objectContaining({
+              primaryMode: "transit",
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      if (runtime.pool) {
+        await runtime.pool.end();
+      }
+    }
+  });
+});

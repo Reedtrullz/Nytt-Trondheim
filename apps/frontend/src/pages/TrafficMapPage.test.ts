@@ -595,6 +595,15 @@ const planWithTransfer: TravelPlanPayload = {
   ],
 };
 
+const walkingPrimaryPlanWithRetainedTransitItinerary: TravelPlanPayload = {
+  ...planWithItinerary,
+  primaryMode: "walk",
+  walkingRoute: plan.walkingRoute,
+  journeyPlanner: {
+    ...plan.journeyPlanner,
+  },
+};
+
 function planWithTravelDuration(input: {
   id: string;
   departureTime: string;
@@ -1807,6 +1816,24 @@ describe("TrafficMapPage route overlay helpers", () => {
         label: "Kollektiv",
         contextLabel: "Trafikk langs ruten",
       });
+    });
+
+    it("keeps walking-primary plans focused on the walking route instead of retained transit legs", () => {
+      expect(departureBoardContextFromPlan(walkingPrimaryPlanWithRetainedTransitItinerary)).toEqual(
+        {
+          scope: "origin",
+          label: "Start",
+          center: { lat: 63.39, lon: 10.39 },
+        },
+      );
+      expect(routeDepartureCheckpoints(walkingPrimaryPlanWithRetainedTransitItinerary)).toEqual([]);
+      expect(
+        selectedDepartureMatch(
+          walkingPrimaryPlanWithRetainedTransitItinerary,
+          "itinerary-1",
+          departureBoard,
+        ),
+      ).toBeUndefined();
     });
 
     it("uses a clear handoff when no transit or walking answer is available", () => {
