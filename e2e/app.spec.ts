@@ -5330,6 +5330,28 @@ test("mobile traffic page prioritizes travel planning before map summaries and f
   );
   await expect(choices.getByRole("button", { name: /Anbefalt/ })).toBeEnabled();
 
+  const answerBox = travelAdvice.first();
+  const routeMap = postSearchMap.first();
+  const trafficNow = trafficPicture.getByText("Trafikkbildet nå", { exact: true }).first();
+  await expect(answerBox).toBeVisible();
+  await expect(routeMap).toBeVisible();
+  await expect(trafficNow).toBeVisible();
+
+  const answerTop = await answerBox.boundingBox();
+  const mapTop = await routeMap.boundingBox();
+  const trafficTop = await trafficNow.boundingBox();
+  expect(answerTop?.y ?? 0).toBeLessThan(mapTop?.y ?? 0);
+  expect(mapTop?.y ?? 0).toBeLessThan(trafficTop?.y ?? 0);
+  const answerPresentation = await answerBox.evaluate((element) => {
+    const styles = window.getComputedStyle(element);
+    return {
+      borderLeftWidth: Number.parseFloat(styles.borderLeftWidth),
+      paddingTop: Number.parseFloat(styles.paddingTop),
+    };
+  });
+  expect(answerPresentation.borderLeftWidth).toBeGreaterThanOrEqual(4);
+  expect(answerPresentation.paddingTop).toBeGreaterThanOrEqual(14);
+
   const adviceBox = await travelAdvice.boundingBox();
   const postSearchBox = await postSearchPanel.boundingBox();
   const choicesBox = await choices.boundingBox();
