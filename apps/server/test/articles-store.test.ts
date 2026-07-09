@@ -399,6 +399,7 @@ describe("article store", () => {
   });
 
   it("adds DATEX public verification and situation links to related production articles", async () => {
+    const freshSituationTimestamp = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const article: Article = {
       id: "article-road",
       source: "adressa",
@@ -419,8 +420,8 @@ describe("article store", () => {
       status: "active",
       verificationStatus: "Offentlig bekreftet",
       importance: "high",
-      updatedAt: "2026-07-02T09:40:00.000Z",
-      createdAt: "2026-07-02T09:20:00.000Z",
+      updatedAt: freshSituationTimestamp,
+      createdAt: freshSituationTimestamp,
       locationLabel: "E6",
       officialSource: "datex",
       officialEventId: "datex-e6",
@@ -428,7 +429,7 @@ describe("article store", () => {
         rule: "official_source",
         sourceIds: ["datex"],
         articleIds: [],
-        activatedAt: "2026-07-02T09:20:00.000Z",
+        activatedAt: freshSituationTimestamp,
       },
       relatedArticleIds: ["article-road"],
       evidence: [
@@ -777,6 +778,7 @@ describe("article store", () => {
   });
 
   it("does not add a public verification badge without official DATEX evidence", async () => {
+    const freshSituationTimestamp = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const article: Article = {
       id: "article-road-unverified",
       source: "adressa",
@@ -797,8 +799,8 @@ describe("article store", () => {
       status: "active",
       verificationStatus: "Offentlig bekreftet",
       importance: "high",
-      updatedAt: "2026-07-02T09:40:00.000Z",
-      createdAt: "2026-07-02T09:20:00.000Z",
+      updatedAt: freshSituationTimestamp,
+      createdAt: freshSituationTimestamp,
       locationLabel: "E6",
       officialSource: "datex",
       officialEventId: "datex-e6-unverified",
@@ -806,7 +808,7 @@ describe("article store", () => {
         rule: "official_source",
         sourceIds: ["datex"],
         articleIds: [],
-        activatedAt: "2026-07-02T09:20:00.000Z",
+        activatedAt: freshSituationTimestamp,
       },
       relatedArticleIds: ["article-road-unverified"],
       evidence: [
@@ -844,6 +846,7 @@ describe("article store", () => {
   });
 
   it("does not add a public verification badge before the linked situation is officially verified", async () => {
+    const freshSituationTimestamp = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const article: Article = {
       id: "article-road-preliminary",
       source: "adressa",
@@ -864,8 +867,8 @@ describe("article store", () => {
       status: "preliminary",
       verificationStatus: "Foreløpig fra rapportering",
       importance: "medium",
-      updatedAt: "2026-07-02T09:40:00.000Z",
-      createdAt: "2026-07-02T09:20:00.000Z",
+      updatedAt: freshSituationTimestamp,
+      createdAt: freshSituationTimestamp,
       locationLabel: "E6",
       officialSource: "datex",
       officialEventId: "datex-e6-preliminary",
@@ -873,7 +876,7 @@ describe("article store", () => {
         rule: "official_source",
         sourceIds: ["datex"],
         articleIds: [],
-        activatedAt: "2026-07-02T09:20:00.000Z",
+        activatedAt: freshSituationTimestamp,
       },
       relatedArticleIds: ["article-road-preliminary"],
       evidence: [

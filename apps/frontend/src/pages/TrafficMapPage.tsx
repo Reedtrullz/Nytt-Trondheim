@@ -65,6 +65,12 @@ import {
   visibleByDefault,
   visibleInTrafficLayers,
 } from "../trafficViewModel.js";
+import {
+  buildJourneyAnswerView,
+  buildJourneyContextView,
+  getJourneyMapPlacement,
+  type JourneyContextItemView,
+} from "./trafficJourneyView.js";
 
 interface TrafficTimeWindow {
   states: TrafficEventState[];
@@ -1026,6 +1032,7 @@ function transitTextMatches(left?: string, right?: string): boolean {
 }
 
 function isBoardingLeg(leg: TravelPlanLeg): boolean {
+  if (leg.cancelled) return false;
   if (leg.mode === "walk") return false;
   return Boolean(leg.publicCode || leg.lineId || leg.from.stopId || leg.from.stopName);
 }
@@ -2086,13 +2093,6 @@ export type RouteContextSummary = {
   items: RouteContextItem[];
 };
 
-function routeContextTitle(plan?: TravelPlanPayload, summary?: RouteContextSummary): string {
-  if (plan?.primaryMode === "walk") {
-    return summary?.mapPointCount ? "Kartpunkter langs gangruta" : "Trafikk langs gangruta";
-  }
-  return summary?.mapPointCount ? "Kartpunkter langs ruten" : "Trafikk langs ruten";
-}
-
 function routeContextEmptyTarget(plan?: TravelPlanPayload): string {
   return plan?.primaryMode === "walk" ? "gangruta" : "ruten";
 }
@@ -2230,6 +2230,18 @@ export function buildRouteContextSummary(plan?: TravelPlanPayload): RouteContext
         : "Rutevarslene har ikke egne kartpunkter og vises som kompakt tekst.",
     items,
   };
+}
+
+export type TravelMapDisplayMode = "primary" | "support-open" | "support-closed";
+
+export function travelMapDisplayMode(
+  plan?: TravelPlanPayload,
+  selectedItineraryId?: string,
+): TravelMapDisplayMode {
+  const placement = getJourneyMapPlacement(plan, selectedItineraryId);
+  if (placement === "primary") return "primary";
+  if (!plan || placement === "context") return "support-open";
+  return "support-closed";
 }
 
 export function RouteContextFallback({
@@ -2748,28 +2760,113 @@ function SelectedItineraryPanel({ itinerary }: { itinerary?: TravelPlanItinerary
   );
 }
 
+function JourneyContextChip({
+  item,
+  focusItem,
+  selected,
+  onFocusItem,
+}: {
+  item: JourneyContextItemView;
+  focusItem?: RouteContextItem;
+  selected: boolean;
+  onFocusItem?: (item: RouteContextItem) => void;
+}) {
+  const className = `journey-context-chip journey-context-chip-${item.severity}${
+    selected ? " selected" : ""
+  }`;
+  const content = (
+    <>
+      <strong>{item.title}</strong>
+      <span>{[item.distanceLabel, item.source].filter(Boolean).join(" · ") || item.detail}</span>
+    </>
+  );
+  if (focusItem && onFocusItem) {
+    return (
+      <button
+        type="button"
+        className={className}
+        aria-pressed={selected}
+        onClick={() => onFocusItem(focusItem)}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  const safeHref = safeExternalUrl(item.href);
+  if (safeHref) {
+    return (
+      <a className={className} href={safeHref} target="_blank" rel="noreferrer noopener">
+        {content}
+      </a>
+    );
+  }
+
+  return <span className={className}>{content}</span>;
+}
+
+export function JourneyContextChips({
+  plan,
+  routeContextSummary,
+  selectedEventId,
+  onFocusItem,
+}: {
+  plan: TravelPlanPayload;
+  routeContextSummary: RouteContextSummary;
+  selectedEventId?: string;
+  onFocusItem?: (item: RouteContextItem) => void;
+}) {
+  const context = buildJourneyContextView(plan);
+  if (!context.count) return null;
+  return (
+    <section className="journey-context-chips" aria-label="Trafikk langs reisen">
+      <header>
+        <h3>Trafikk langs reisen</h3>
+        <p>
+          {context.heading}
+          {context.detail ? ` · ${context.detail}` : ""}
+        </p>
+      </header>
+      <div className="journey-context-chip-list">
+        {context.compactItems.map((item) => {
+          const focusItem = item.mapEventId
+            ? routeContextSummary.items.find(
+                (candidate) => eventIdForRouteContextItem(candidate) === item.mapEventId,
+              )
+            : undefined;
+          return (
+            <JourneyContextChip
+              key={item.id}
+              item={item}
+              focusItem={focusItem}
+              selected={Boolean(item.mapEventId && item.mapEventId === selectedEventId)}
+              onFocusItem={onFocusItem}
+            />
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function TravelPlanCard({
   plan,
   loading,
   error,
   selectedItineraryId,
-  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
-  routeContextSummary,
+  showAnswerHeading = true,
   onSelectItinerary,
-  onFocusRouteContextItem,
 }: {
   plan?: TravelPlanPayload;
   loading: boolean;
   error?: string;
   selectedItineraryId?: string;
-  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
-  routeContextSummary: RouteContextSummary;
+  showAnswerHeading?: boolean;
   onSelectItinerary: (itineraryId: string) => void;
-  onFocusRouteContextItem?: (item: RouteContextItem) => void;
 }) {
   if (error) {
     return (
@@ -2792,38 +2889,31 @@ export function TravelPlanCard({
       </p>
     );
   }
-  const duration = formatDuration(plan.route.durationSeconds);
-  const decision = travelPlanDecision(plan);
-  const modeSummary = travelPlanModeSummary(plan);
+  const answer = buildJourneyAnswerView(plan, selectedItineraryId);
+  const answerHandoffUrl = safeExternalUrl(answer.handoffUrl);
   const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
   const showFallbackSuggestions =
     plan.primaryMode !== "transit" && plan.publicTransportSuggestions.length > 0;
-  const routeContextSummaryTitle = routeContextTitle(plan, routeContextSummary);
-  const contextIntro =
-    routeContextSummary.count > 0
-      ? `${routeContextSummary.heading} · ${modeSummary.contextLabel}`
-      : undefined;
   return (
     <article
-      className={`travel-plan-card travel-plan-card-${decision.severity}`}
+      className={`travel-plan-card travel-plan-card-${answer.severity} journey-answer-card`}
       aria-live="polite"
     >
-      <header>
+      <header className="journey-answer-header">
         <p className="label">Reiseråd nå</p>
-        <h2>{decision.heading}</h2>
-        <p>{decision.detail}</p>
-        <div className="travel-plan-route-summary" aria-label="Ruteoppsummering">
-          <strong>
-            {plan.origin.label} → {plan.destination.label}
-          </strong>
-          <span>
-            {formatDistance(plan.route.distanceMeters)}
-            {duration ? ` · ${duration}` : ""} · {plan.route.detail}
-          </span>
-          <small>
-            {modeSummary.label} · {modeSummary.detail}
-          </small>
-        </div>
+        {showAnswerHeading ? <h2>{answer.heading}</h2> : null}
+        {answer.meta ? <p className="journey-answer-meta">{answer.meta}</p> : null}
+        <p>{answer.detail}</p>
+        {answerHandoffUrl ? (
+          <a
+            className="journey-answer-handoff"
+            href={answerHandoffUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            {answer.handoffLabel ?? "Sjekk AtB/Entur"}
+          </a>
+        ) : null}
       </header>
       <section className="travel-plan-journey-section">
         <h3>Kollektivvalg</h3>
@@ -2855,14 +2945,6 @@ export function TravelPlanCard({
           </div>
         ) : null}
       </section>
-      {contextIntro ? <p className="travel-plan-context-note">{contextIntro}</p> : null}
-      <RouteContextFallback
-        summary={routeContextSummary}
-        plan={plan}
-        title={routeContextSummaryTitle}
-        onFocusItem={onFocusRouteContextItem}
-        selectedEventId={selectedEventId}
-      />
       {showFallbackSuggestions ? (
         <details className="travel-secondary-disclosure">
           <summary>Kollektivkontekst</summary>
@@ -3725,11 +3807,8 @@ function TravelPlannerPanel({
   travelPlanLoading,
   travelPlanError,
   selectedItineraryId,
-  selectedEventId,
   routeChoiceModel,
   routeWatchSummary,
-  routeContextSummary,
-  onFocusRouteContextItem,
   travelTimeComparison,
   selectedOriginSuggestion,
   selectedDestinationSuggestion,
@@ -3762,11 +3841,8 @@ function TravelPlannerPanel({
   travelPlanLoading: boolean;
   travelPlanError?: string;
   selectedItineraryId?: string;
-  selectedEventId?: string;
   routeChoiceModel?: RouteChoiceModel;
   routeWatchSummary?: SelectedRouteWatchSummary;
-  routeContextSummary: RouteContextSummary;
-  onFocusRouteContextItem?: (item: RouteContextItem) => void;
   travelTimeComparison: TravelTimeComparisonState;
   selectedOriginSuggestion?: TravelPlaceSuggestion;
   selectedDestinationSuggestion?: TravelPlaceSuggestion;
@@ -3802,13 +3878,20 @@ function TravelPlannerPanel({
   const formClassName = `route-planner-form route-planner-form-primary${
     hasTravelResult ? " route-planner-form-compact" : ""
   }`;
+  const postSearchHeading = travelPlan
+    ? buildJourneyAnswerView(travelPlan, selectedItineraryId).heading
+    : travelPlanLoading
+      ? "Henter reiseråd ..."
+      : travelPlanError
+        ? "Kunne ikke hente reiseråd"
+        : "Planlegg reisen";
   return (
     <section className={panelClassName} aria-labelledby="travel-planner-heading">
       {hasTravelResult ? (
         <header className="travel-planner-post-heading">
           <div>
             <p className="label">Reise og trafikk</p>
-            <h1 id="travel-planner-heading">Planlegg reisen</h1>
+            <h1 id="travel-planner-heading">{postSearchHeading}</h1>
           </div>
           <div className="travel-planner-actions" aria-label="Kollektivvalg">
             <button
@@ -3966,12 +4049,10 @@ function TravelPlannerPanel({
             loading={travelPlanLoading}
             error={travelPlanError}
             selectedItineraryId={selectedItineraryId}
-            selectedEventId={selectedEventId}
             routeChoiceModel={routeChoiceModel}
             routeWatchSummary={routeWatchSummary}
-            routeContextSummary={routeContextSummary}
+            showAnswerHeading={!travelPlan}
             onSelectItinerary={onSelectItinerary}
-            onFocusRouteContextItem={onFocusRouteContextItem}
           />
           {travelTimeComparison.status !== "idle" ? (
             <details className="travel-secondary-disclosure travel-time-disclosure">
@@ -4991,6 +5072,83 @@ export function TrafficMapPage() {
     });
   }, [autoTravelSearchPending]);
 
+  const mapDisplayMode = travelMapDisplayMode(travelPlan, selectedItineraryId);
+  const trafficMapWorkspace = (
+    <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
+      <button
+        type="button"
+        className="traffic-mobile-layers-button"
+        aria-expanded={mobileLayersOpen}
+        aria-controls="traffic-workspace-sidebar"
+        onClick={() => setMobileLayersOpen((open) => !open)}
+      >
+        Kartlag og filtre
+      </button>
+      <div
+        id="traffic-workspace-sidebar"
+        className={`traffic-workspace-sidebar${mobileLayersOpen ? " open" : ""}`}
+      >
+        <TrafficFilterPanel
+          selectedCategories={selectedCategories}
+          selectedSeverities={selectedSeverities}
+          selectedPreset={selectedPreset}
+          visibleContextLayers={visibleContextLayers}
+          onCategoriesChange={handleCategoriesChange}
+          onSeveritiesChange={handleSeveritiesChange}
+          onPresetChange={applyPreset}
+          onContextLayersChange={handleContextLayersChange}
+        />
+        <TrafficLegend />
+        {loading || error ? (
+          <section className="traffic-status-card">
+            <h2>Datastatus</h2>
+            <button type="button" onClick={reload} disabled={loading}>
+              {loading ? "Oppdaterer ..." : "Oppdater"}
+            </button>
+            {error ? <p role="alert">{error}</p> : <p>Henter trafikkdata ...</p>}
+          </section>
+        ) : null}
+      </div>
+      <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
+        <TileLayer attribution="© Kartverket" url={tiles} />
+        <MapAccessibility label="Trafikkart for Trondheim" />
+        <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
+        <TrafficMapFocus
+          selectedEvent={selectedEvent}
+          travelPlan={travelPlan}
+          selectedItineraryId={selectedItineraryId}
+        />
+        {visibleContextLayers.travelTime ? (
+          <CorridorImpactLayer
+            impacts={data?.corridorImpacts}
+            selectedImpactId={selectedCorridorId}
+            onSelectImpact={setSelectedCorridorId}
+          />
+        ) : null}
+        {visibleTrafficEventsWithRouteContext.length > 0 ? (
+          <TrafficLayer
+            events={visibleTrafficEventsWithRouteContext}
+            highlightedEventIds={highlightedEventIds}
+            showEstimatedNews={visibleContextLayers.estimatedNews}
+            onSelectEvent={setSelectedEventId}
+          />
+        ) : null}
+        {data ? (
+          <RoadContextLayer
+            weather={visibleContextLayers.weatherRisk ? data.weather : []}
+            cameras={visibleContextLayers.weatherRisk ? data.cameras : []}
+            counters={visibleContextLayers.weatherRisk ? data.counters : []}
+          />
+        ) : null}
+        <PublicTransportLayer
+          payload={publicTransportDisplayData}
+          visible={publicTransportVisible}
+        />
+        <TravelPlanLayer plan={travelPlan} selectedItineraryId={selectedItineraryId} />
+      </MapContainer>
+    </section>
+  );
+
   return (
     <main className="traffic-page-shell">
       <TravelPlannerPanel
@@ -5001,11 +5159,8 @@ export function TrafficMapPage() {
         travelPlanLoading={travelPlanLoading}
         travelPlanError={travelPlanError}
         selectedItineraryId={selectedItineraryId}
-        selectedEventId={selectedEventId}
         routeChoiceModel={routeChoiceModel}
         routeWatchSummary={routeWatchSummary}
-        routeContextSummary={routeContextSummary}
-        onFocusRouteContextItem={handleRouteContextFocus}
         travelTimeComparison={travelTimeComparison}
         selectedOriginSuggestion={selectedOriginSuggestion}
         selectedDestinationSuggestion={selectedDestinationSuggestion}
@@ -5031,85 +5186,30 @@ export function TrafficMapPage() {
         onToggleDisruptions={togglePublicTransportDisruptions}
         onToggleVehicles={togglePublicTransportVehicles}
       />
-      <details
-        className="traffic-support-disclosure traffic-map-disclosure"
-        open={!travelPlan || shouldOpenPostSearchMap(travelPlan)}
-      >
-        <summary>{travelPlan ? "Kart for valgt reise" : "Kart og trafikkgrunnlag"}</summary>
-        <section className="traffic-workspace" aria-label="Trafikkart og kartlag">
-          <button
-            type="button"
-            className="traffic-mobile-layers-button"
-            aria-expanded={mobileLayersOpen}
-            aria-controls="traffic-workspace-sidebar"
-            onClick={() => setMobileLayersOpen((open) => !open)}
-          >
-            Kartlag og filtre
-          </button>
-          <div
-            id="traffic-workspace-sidebar"
-            className={`traffic-workspace-sidebar${mobileLayersOpen ? " open" : ""}`}
-          >
-            <TrafficFilterPanel
-              selectedCategories={selectedCategories}
-              selectedSeverities={selectedSeverities}
-              selectedPreset={selectedPreset}
-              visibleContextLayers={visibleContextLayers}
-              onCategoriesChange={handleCategoriesChange}
-              onSeveritiesChange={handleSeveritiesChange}
-              onPresetChange={applyPreset}
-              onContextLayersChange={handleContextLayersChange}
-            />
-            <TrafficLegend />
-            {loading || error ? (
-              <section className="traffic-status-card">
-                <h2>Datastatus</h2>
-                <button type="button" onClick={reload} disabled={loading}>
-                  {loading ? "Oppdaterer ..." : "Oppdater"}
-                </button>
-                {error ? <p role="alert">{error}</p> : <p>Henter trafikkdata ...</p>}
-              </section>
-            ) : null}
-          </div>
-          <MapContainer center={trondheimCenter} zoom={12} className="traffic-map">
-            <TileLayer attribution="© Kartverket" url={tiles} />
-            <MapAccessibility label="Trafikkart for Trondheim" />
-            <MapBoundsWatcher onBoundsChange={handleBoundsChange} />
-            <TrafficMapFocus
-              selectedEvent={selectedEvent}
-              travelPlan={travelPlan}
-              selectedItineraryId={selectedItineraryId}
-            />
-            {visibleContextLayers.travelTime ? (
-              <CorridorImpactLayer
-                impacts={data?.corridorImpacts}
-                selectedImpactId={selectedCorridorId}
-                onSelectImpact={setSelectedCorridorId}
-              />
-            ) : null}
-            {visibleTrafficEventsWithRouteContext.length > 0 ? (
-              <TrafficLayer
-                events={visibleTrafficEventsWithRouteContext}
-                highlightedEventIds={highlightedEventIds}
-                showEstimatedNews={visibleContextLayers.estimatedNews}
-                onSelectEvent={setSelectedEventId}
-              />
-            ) : null}
-            {data ? (
-              <RoadContextLayer
-                weather={visibleContextLayers.weatherRisk ? data.weather : []}
-                cameras={visibleContextLayers.weatherRisk ? data.cameras : []}
-                counters={visibleContextLayers.weatherRisk ? data.counters : []}
-              />
-            ) : null}
-            <PublicTransportLayer
-              payload={publicTransportDisplayData}
-              visible={publicTransportVisible}
-            />
-            <TravelPlanLayer plan={travelPlan} selectedItineraryId={selectedItineraryId} />
-          </MapContainer>
+      {mapDisplayMode === "primary" ? (
+        <section
+          className="traffic-primary-map-section"
+          aria-labelledby="traffic-primary-map-heading"
+        >
+          <header>
+            <p className="label">Kart for reisen</p>
+            <h2 id="traffic-primary-map-heading">Rute og trafikk langs valgt reise</h2>
+            <p>
+              Kartet viser valgt reise, relevante trafikkpunkt og kollektivkontekst. Bruk AtB/Entur
+              for endelig avgang og billett.
+            </p>
+          </header>
+          {trafficMapWorkspace}
         </section>
-      </details>
+      ) : null}
+      {travelPlan ? (
+        <JourneyContextChips
+          plan={travelPlan}
+          routeContextSummary={routeContextSummary}
+          selectedEventId={selectedEventId}
+          onFocusItem={handleRouteContextFocus}
+        />
+      ) : null}
       {routeDepartureCheckpointsForSelection.length > 1 ? (
         <details className="traffic-support-disclosure">
           <summary>Live-sjekk av bytter</summary>
@@ -5150,6 +5250,16 @@ export function TrafficMapPage() {
           ...travelPlanSources,
         ]}
       />
+
+      {mapDisplayMode !== "primary" ? (
+        <details
+          className="traffic-support-disclosure traffic-map-disclosure"
+          open={mapDisplayMode === "support-open"}
+        >
+          <summary>Kart og trafikkgrunnlag</summary>
+          {trafficMapWorkspace}
+        </details>
+      ) : null}
 
       <section className="traffic-bottom-panel" aria-label="Trafikkdetaljer">
         <div className="traffic-bottom-list">

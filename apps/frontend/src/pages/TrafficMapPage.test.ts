@@ -35,7 +35,6 @@ import {
   buildTravelTimeComparisonModel,
   canonicalTravelPlannerQuery,
   compactRouteChoiceOptions,
-  TravelPlanCard,
   departureBoardContextFromPlan,
   departureBoardContextFromSuggestion,
   departureLineFilterKey,
@@ -50,10 +49,13 @@ import {
   readRememberedDepartureBoards,
   readRememberedTravelRoutes,
   eventIdForRouteContextItem,
+  JourneyContextChips,
   mergeRouteContextTrafficEvents,
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
   RouteContextFallback,
+  TravelPlanCard,
+  travelMapDisplayMode,
   routeDepartureCheckpoints,
   routeDepartureConfidenceItems,
   routeDepartureConfidenceSummary,
@@ -669,6 +671,199 @@ function departureFixture(
     ...override,
   };
 }
+
+describe("TravelPlanCard journey answer", () => {
+  it("renders the concrete journey instruction before route diagnostics", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithItinerary,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Ta Buss 2 fra Søndre gate");
+    expect(html).toContain("11:10 → 11:28 · 18 min · Direkte · 3 min gange");
+    expect(html).not.toContain("Sjekk ruten før du drar");
+    expect(html).not.toContain("Ruteoppsummering");
+  });
+
+  it("does not instruct travellers to board a cancelled-only itinerary", () => {
+    const cancelledPlan: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [
+        {
+          ...planWithItinerary.itineraries[0]!,
+          decision: "avoid",
+          decisionReason: "Avgangen er innstilt.",
+          legs: planWithItinerary.itineraries[0]!.legs.map((leg) => ({
+            ...leg,
+            cancelled: true,
+          })),
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: cancelledPlan,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: cancelledPlan,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Sjekk AtB/Entur");
+    expect(html).not.toContain("Start med Buss");
+  });
+
+  it("does not render route context inside the main answer card", () => {
+    const planWithContext: TravelPlanPayload = {
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "route-roadwork",
+            source: "datex",
+            sourceEventId: "route-roadwork",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithContext,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithContext,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("Trafikk langs reisen");
+    expect(html).not.toContain("Vegarbeid ved Bakklandet");
+    expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+});
+
+describe("JourneyContextChips", () => {
+  it("keeps route context as compact journey chips instead of bulky fallback text", () => {
+    const planWithContext: TravelPlanPayload = {
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "route-roadwork",
+            source: "datex",
+            sourceEventId: "route-roadwork",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(JourneyContextChips, {
+        plan: planWithContext,
+        routeContextSummary: buildRouteContextSummary(planWithContext),
+      }),
+    );
+
+    expect(html).toContain("Trafikk langs reisen");
+    expect(html).toContain("Vegarbeid ved Bakklandet");
+    expect(html).toContain("Endret rute");
+    expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+});
+
+describe("traffic journey map placement", () => {
+  it("uses a primary map for actionable journeys and support disclosure for context-only corridors", () => {
+    expect(travelMapDisplayMode(planWithItinerary)).toBe("primary");
+    expect(
+      travelMapDisplayMode({
+        ...planWithItinerary,
+        itineraries: [
+          {
+            ...planWithItinerary.itineraries[0]!,
+            legs: [
+              {
+                ...planWithItinerary.itineraries[0]!.legs[0]!,
+                geometry: { type: "LineString", coordinates: [] },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBe("support-open");
+    expect(travelMapDisplayMode(plan)).toBe("primary");
+    expect(
+      travelMapDisplayMode({
+        ...plan,
+        primaryMode: "fallback",
+        walkingRoute: undefined,
+      }),
+    ).toBe("support-open");
+    expect(
+      travelMapDisplayMode({
+        ...plan,
+        primaryMode: "fallback",
+        walkingRoute: undefined,
+        route: {
+          source: "direct",
+          detail: "Rute kunne ikke beregnes.",
+          distanceMeters: 0,
+          geometry: { type: "LineString", coordinates: [] },
+        },
+      }),
+    ).toBe("support-closed");
+    expect(travelMapDisplayMode(undefined)).toBe("support-open");
+  });
+});
 
 describe("TrafficMapPage route overlay helpers", () => {
   it("restores a submitted travel plan from the URL", () => {
@@ -2261,33 +2456,27 @@ describe("TrafficMapPage route overlay helpers", () => {
       };
 
       const walkingHtml = renderToStaticMarkup(
-        createElement(TravelPlanCard, {
+        createElement(RouteContextFallback, {
+          summary: walkingSummary,
           plan,
-          loading: false,
-          routeContextSummary: walkingSummary,
-          onSelectItinerary: () => undefined,
+          title: "Kartpunkter langs gangruta",
         }),
       );
 
-      expect(walkingHtml).toContain("Trafikk langs gangruta");
       expect(walkingHtml).toContain("Kartpunkter langs gangruta");
-      expect(walkingHtml).toContain('class="travel-plan-context-note"');
-      expect(walkingHtml).toContain("1 kartpunkt · Trafikk langs gangruta");
+      expect(walkingHtml).toContain("1 kartpunkt");
       expect(walkingHtml).not.toContain("Kartpunkter langs valgt rute");
 
       const transitHtml = renderToStaticMarkup(
-        createElement(TravelPlanCard, {
+        createElement(RouteContextFallback, {
+          summary: walkingSummary,
           plan: planWithItinerary,
-          loading: false,
-          routeContextSummary: walkingSummary,
-          onSelectItinerary: () => undefined,
+          title: "Kartpunkter langs ruten",
         }),
       );
 
-      expect(transitHtml).toContain("Trafikk langs ruten");
       expect(transitHtml).toContain("Kartpunkter langs ruten");
-      expect(transitHtml).toContain('class="travel-plan-context-note"');
-      expect(transitHtml).toContain("1 kartpunkt · Trafikk langs ruten");
+      expect(transitHtml).toContain("1 kartpunkt");
     });
   });
 });
