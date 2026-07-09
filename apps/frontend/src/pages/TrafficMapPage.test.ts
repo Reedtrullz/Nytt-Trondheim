@@ -688,7 +688,7 @@ describe("TravelPlanCard journey answer", () => {
     );
 
     expect(html).toContain("Ta Buss 2 fra Søndre gate");
-    expect(html).toContain("11:10 → 11:28 · 18 min · Direkte · 3 min gange");
+    expect(html).toContain("11:10 → 11:28 · 18 min · Direkte");
     expect(html).not.toContain("Sjekk ruten før du drar");
     expect(html).not.toContain("Ruteoppsummering");
   });
@@ -772,6 +772,136 @@ describe("TravelPlanCard journey answer", () => {
     expect(html).not.toContain("Trafikk langs reisen");
     expect(html).not.toContain("Vegarbeid ved Bakklandet");
     expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+});
+
+describe("TrafficJourneyAnswer", () => {
+  const travellerStepPlan: TravelPlanPayload = {
+    ...planWithItinerary,
+    destination: { ...plan.destination, label: "Lade gård" },
+    itineraries: [
+      {
+        ...planWithItinerary.itineraries[0]!,
+        legs: [
+          {
+            id: "leg-walk-to-sondre-gate",
+            mode: "walk",
+            from: { ...plan.origin, name: "Munkegata" },
+            to: {
+              name: "Søndre gate",
+              stopName: "Søndre gate",
+              stopId: "NSR:StopPlace:41613",
+              coordinate: [10.3951, 63.4305],
+            },
+            durationSeconds: 180,
+            distanceMeters: 210,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [10.393742, 63.432883],
+                [10.3951, 63.4305],
+              ],
+            },
+            realtime: true,
+            cancelled: false,
+            replacementTransport: false,
+            notices: [],
+          },
+          {
+            ...planWithItinerary.itineraries[0]!.legs[0]!,
+            to: {
+              name: "Lade",
+              stopName: "Lade",
+              coordinate: [10.463, 63.433],
+            },
+          },
+          {
+            id: "leg-walk-to-lade-gard",
+            mode: "walk",
+            from: {
+              name: "Lade",
+              stopName: "Lade",
+              coordinate: [10.463, 63.433],
+            },
+            to: {
+              name: "Lade gård",
+              coordinate: [10.464, 63.433],
+            },
+            durationSeconds: 120,
+            distanceMeters: 130,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [10.463, 63.433],
+                [10.464, 63.433],
+              ],
+            },
+            realtime: true,
+            cancelled: false,
+            replacementTransport: false,
+            notices: [],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("renders instruction, steps, alternatives, and handoff without bulky diagnostics", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: travellerStepPlan,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: travellerStepPlan,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Ta Buss 2 fra Søndre gate");
+    expect(html).toContain("Gå til Søndre gate");
+    expect(html).toContain("Ta Buss 2 mot Lade");
+    expect(html).toContain("Gå til Lade gård");
+    expect(html).toContain("Åpne hos AtB/Entur");
+    expect(html).not.toContain("Kollektivvalg");
+    expect(html).not.toContain("Valgt reiseforslag ser best ut");
+  });
+
+  it("renders walking as the primary answer without pretending there is transit", () => {
+    const walkingPlan: TravelPlanPayload = {
+      ...plan,
+      destination: { ...plan.destination, label: "Lade gård" },
+      primaryMode: "walk",
+      itineraries: [],
+      walkingRoute: {
+        source: "direct",
+        distanceMeters: 3500,
+        durationSeconds: 2580,
+        detail: "Gangtid estimert fra luftlinjekorridor.",
+        confidence: "corridor",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: walkingPlan,
+        loading: false,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Gå til Lade gård");
+    expect(html).toContain("43 min");
+    expect(html).not.toContain("Start med Buss");
   });
 });
 

@@ -67,10 +67,12 @@ import {
 } from "../trafficViewModel.js";
 import {
   buildJourneyAnswerView,
+  buildJourneyTravellerAnswer,
   buildJourneyContextView,
   getJourneyMapPlacement,
   type JourneyContextItemView,
 } from "./trafficJourneyView.js";
+import { TrafficJourneyAnswer } from "./TrafficJourneyAnswer.js";
 
 interface TrafficTimeWindow {
   states: TrafficEventState[];
@@ -2530,40 +2532,6 @@ function TrafficMapFocus({
   return null;
 }
 
-function SelectedRouteWatchPanel({ summary }: { summary?: SelectedRouteWatchSummary }) {
-  if (!summary) return null;
-  return (
-    <section
-      className={`selected-route-watch selected-route-watch-${summary.severity}`}
-      aria-label="Dette kan påvirke valgt reise"
-    >
-      <header>
-        <div>
-          <p className="label">Valgt reise</p>
-          <h3>{summary.heading}</h3>
-          <p>{summary.detail}</p>
-        </div>
-        <span>{summary.items.length ? `${summary.items.length} punkt` : "OK"}</span>
-      </header>
-      {summary.items.length ? (
-        <ul>
-          {summary.items.map((item) => (
-            <li key={item.id} className={`selected-route-watch-item-${item.severity}`}>
-              <strong>{item.label}</strong>
-              <span>{item.detail}</span>
-              <small>{item.source}</small>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="selected-route-watch-clear">
-          Fortsett likevel å sjekke AtB/Entur rett før avreise.
-        </p>
-      )}
-    </section>
-  );
-}
-
 function TravelTimeComparisonPanel({
   state,
   activePreset,
@@ -2632,129 +2600,6 @@ function TravelTimeComparisonPanel({
       )}
       <footer>
         Valgt reise live-sjekkes mer detaljert. Andre tider er en lett Entur-sammenligning.
-      </footer>
-    </section>
-  );
-}
-
-function RouteChoicePanel({
-  model,
-  onSelectItinerary,
-}: {
-  model?: RouteChoiceModel;
-  onSelectItinerary: (itineraryId: string) => void;
-}) {
-  if (!model) return null;
-  const displayOptions = compactRouteChoiceOptions(model);
-  return (
-    <section className="route-choice-panel" aria-label="Velg reiseforslag">
-      <header>
-        <div>
-          <p className="label">Reisevalg</p>
-          <h3>{model.heading}</h3>
-          <p>{model.detail}</p>
-        </div>
-        <span>{displayOptions.length} valg</span>
-      </header>
-      <div className="route-choice-list">
-        {displayOptions.map((option) => (
-          <button
-            key={option.itineraryId}
-            type="button"
-            className={`route-choice-option route-choice-option-${option.severity}${
-              option.recommended ? " recommended" : ""
-            }${option.selected ? " selected" : ""}`}
-            aria-pressed={option.selected}
-            aria-current={option.selected ? "true" : undefined}
-            onClick={() => {
-              if (!option.selected) {
-                onSelectItinerary(option.itineraryId);
-              }
-            }}
-          >
-            <span>{option.label}</span>
-            <strong>{option.summary}</strong>
-            <small className="route-choice-lines">{option.lineSummary}</small>
-            <em>{option.meta}</em>
-            <small>{option.detail}</small>
-          </button>
-        ))}
-      </div>
-      <footer>
-        Live-tavla vektes for valgt reiseforslag. Velg et annet forslag for å sjekke start og
-        eventuelle bytter.
-      </footer>
-    </section>
-  );
-}
-
-function SelectedItineraryPanel({ itinerary }: { itinerary?: TravelPlanItinerary }) {
-  if (!itinerary) return null;
-  const boardingLeg = firstBoardingLeg(itinerary);
-  const safeHandoff = safeExternalUrl(itinerary.handoffUrl);
-  const noticeCount = itinerary.legs.reduce((count, leg) => count + leg.notices.length, 0);
-  return (
-    <section className="selected-itinerary-panel" aria-label="Valgt reiseforslag">
-      <header>
-        <div>
-          <p className="label">Valgt reiseforslag</p>
-          <h3>
-            {formatTravelDateTime(itinerary.departureTime)} →{" "}
-            {formatTravelDateTime(itinerary.arrivalTime)}
-          </h3>
-          <p>
-            {formatDuration(itinerary.durationSeconds)} · {itineraryTransferLabel(itinerary)} ·{" "}
-            {formatDuration(itinerary.walkTimeSeconds)} gange
-          </p>
-        </div>
-        <span>{comparisonLineSummary(itinerary)}</span>
-      </header>
-      {boardingLeg ? (
-        <div className="selected-itinerary-boarding">
-          <strong>
-            Start med {legLineLabel(boardingLeg)} fra {legStopLabel(boardingLeg)}
-          </strong>
-          <span>
-            {formatTravelDateTime(legDepartureTime(boardingLeg) ?? itinerary.departureTime)}
-          </span>
-        </div>
-      ) : null}
-      <ol className="selected-itinerary-timeline">
-        {itinerary.legs.map((leg) => (
-          <li key={leg.id} className={`selected-itinerary-leg selected-itinerary-leg-${leg.mode}`}>
-            <div className="selected-itinerary-leg-time">
-              <strong>{formatTravelDateTime(leg.expectedStartTime)}</strong>
-              <span>{formatTravelDateTime(leg.expectedEndTime)}</span>
-            </div>
-            <div className="selected-itinerary-leg-body">
-              <strong>
-                {leg.publicCode ? `${modeLabel(leg.mode)} ${leg.publicCode}` : modeLabel(leg.mode)}
-              </strong>
-              <span>
-                {leg.from.stopName ?? leg.from.name} → {leg.to.stopName ?? leg.to.name}
-              </span>
-              {leg.lineName ? <small>{leg.lineName}</small> : null}
-              {leg.notices.length ? (
-                <div className="itinerary-leg-notices">
-                  {leg.notices.slice(0, 3).map((notice) => (
-                    <span key={notice.id}>{notice.title}</span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ol>
-      <footer className="selected-itinerary-footer">
-        <span>
-          {itinerary.realtime ? "Sanntid inkludert" : "Rutetid"} · {noticeCount} varsel
-          {noticeCount === 1 ? "" : "er"}
-        </span>
-        {safeHandoff ? (
-          <a href={safeHandoff} target="_blank" rel="noreferrer noopener">
-            Åpne hos AtB/Entur
-          </a>
-        ) : null}
       </footer>
     </section>
   );
@@ -2854,9 +2699,6 @@ export function TravelPlanCard({
   loading,
   error,
   selectedItineraryId,
-  routeChoiceModel,
-  routeWatchSummary,
-  showAnswerHeading = true,
   onSelectItinerary,
 }: {
   plan?: TravelPlanPayload;
@@ -2889,96 +2731,11 @@ export function TravelPlanCard({
       </p>
     );
   }
-  const answer = buildJourneyAnswerView(plan, selectedItineraryId);
-  const answerHandoffUrl = safeExternalUrl(answer.handoffUrl);
-  const selectedItinerary = selectedItineraryForPlan(plan, selectedItineraryId);
-  const showFallbackSuggestions =
-    plan.primaryMode !== "transit" && plan.publicTransportSuggestions.length > 0;
+  const travellerAnswer = buildJourneyTravellerAnswer(plan, selectedItineraryId);
   return (
-    <article
-      className={`travel-plan-card travel-plan-card-${answer.severity} journey-answer-card`}
-      aria-live="polite"
-    >
-      <header className="journey-answer-header">
-        <p className="label">Reiseråd nå</p>
-        {showAnswerHeading ? <h2>{answer.heading}</h2> : null}
-        {answer.meta ? <p className="journey-answer-meta">{answer.meta}</p> : null}
-        <p>{answer.detail}</p>
-        {answerHandoffUrl ? (
-          <a
-            className="journey-answer-handoff"
-            href={answerHandoffUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            {answer.handoffLabel ?? "Sjekk AtB/Entur"}
-          </a>
-        ) : null}
-      </header>
-      <section className="travel-plan-journey-section">
-        <h3>Kollektivvalg</h3>
-        {plan.journeyPlanner.status === "unavailable" ? (
-          <p className="route-planner-status warning">{plan.journeyPlanner.detail}</p>
-        ) : null}
-        {plan.primaryMode === "walk" && plan.walkingRoute ? (
-          <section className="walking-answer-card" aria-label="Anbefalt gangrute">
-            <strong>Gangrute</strong>
-            <span>
-              {formatDuration(plan.walkingRoute.durationSeconds)} ·{" "}
-              {formatDistance(plan.walkingRoute.distanceMeters)}
-            </span>
-            <small>{plan.walkingRoute.detail}</small>
-          </section>
-        ) : null}
-        {plan.primaryMode === "fallback" && plan.journeyPlanner.status === "empty" ? (
-          <p className="route-planner-status warning">
-            Ingen konkrete Entur-reiser funnet, og Nytt klarte ikke å lage en trygg gangrute.
-          </p>
-        ) : null}
-        {plan.primaryMode === "transit" && plan.itineraries.length ? (
-          <div className="travel-plan-result-workspace">
-            <RouteChoicePanel model={routeChoiceModel} onSelectItinerary={onSelectItinerary} />
-            <div className="travel-plan-selected-workspace">
-              <SelectedItineraryPanel itinerary={selectedItinerary} />
-              <SelectedRouteWatchPanel summary={routeWatchSummary} />
-            </div>
-          </div>
-        ) : null}
-      </section>
-      {showFallbackSuggestions ? (
-        <details className="travel-secondary-disclosure">
-          <summary>Kollektivkontekst</summary>
-          <p>
-            Nytt viser trafikk- og avvikskontekst; bruk AtB/Entur for billetter og endelig
-            reisevalg.
-          </p>
-          <ul>
-            {plan.publicTransportSuggestions.map((suggestion) => (
-              <li key={suggestion.id}>
-                <strong>{suggestion.title}</strong>
-                <span>
-                  {suggestion.detail} · {suggestion.source}
-                  {suggestion.distanceMeters !== undefined
-                    ? ` · ${formatDistance(suggestion.distanceMeters)} fra ruten`
-                    : ""}
-                </span>
-                {(() => {
-                  const safeHref = safeExternalUrl(suggestion.href);
-                  return safeHref ? (
-                    <a href={safeHref} target="_blank" rel="noreferrer noopener">
-                      Åpne reiseplanlegger
-                    </a>
-                  ) : null;
-                })()}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-      <footer className="travel-plan-disclaimer">
-        Nytt vurderer reiserisiko, ikke billetter eller garanti. Sjekk alltid AtB/Entur før du drar.
-      </footer>
-    </article>
+    <section id="travel-plan-result" className="travel-plan-result" aria-live="polite">
+      <TrafficJourneyAnswer answer={travellerAnswer} onSelectItinerary={onSelectItinerary} />
+    </section>
   );
 }
 
@@ -3949,7 +3706,7 @@ function TravelPlannerPanel({
                 label="Hvor er du?"
                 value={originInput}
                 placeholder="F.eks. Munkegata eller 63.43, 10.39"
-                describedBy="travel-plan-result"
+                describedBy="travel-plan-result-container"
                 hasError={Boolean(travelPlanError)}
                 selectedSuggestion={selectedOriginSuggestion}
                 resetToken={suggestionResetToken}
@@ -3978,7 +3735,7 @@ function TravelPlannerPanel({
                 label="Hvor skal du?"
                 value={destinationInput}
                 placeholder="F.eks. Leangen"
-                describedBy="travel-plan-result"
+                describedBy="travel-plan-result-container"
                 hasError={Boolean(travelPlanError)}
                 selectedSuggestion={selectedDestinationSuggestion}
                 resetToken={suggestionResetToken}
@@ -4043,7 +3800,7 @@ function TravelPlannerPanel({
             />
           ) : null}
         </div>
-        <div id="travel-plan-result" className="travel-planner-result">
+        <div id="travel-plan-result-container" className="travel-planner-result">
           <TravelPlanCard
             plan={travelPlan}
             loading={travelPlanLoading}
