@@ -53,6 +53,8 @@ import {
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
   RouteContextFallback,
+  TravelPlanCard,
+  travelMapDisplayMode,
   routeDepartureCheckpoints,
   routeDepartureConfidenceItems,
   routeDepartureConfidenceSummary,
@@ -640,6 +642,99 @@ function departureFixture(
     ...override,
   };
 }
+
+describe("TravelPlanCard journey answer", () => {
+  it("renders the concrete journey instruction before route diagnostics", () => {
+    const routeContextSummary = buildRouteContextSummary(planWithItinerary);
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithItinerary,
+          selectedItineraryId: "itinerary-1",
+        }),
+        routeContextSummary,
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Ta Buss 3 fra Munkegata");
+    expect(html).toContain("11:10 → 11:27 · 17 min · Direkte · 3 min gange");
+    expect(html).not.toContain("Sjekk ruten før du drar");
+  });
+
+  it("keeps route context as compact journey chips instead of bulky fallback text", () => {
+    const planWithContext: TravelPlanPayload = {
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "route-roadwork",
+            source: "datex",
+            sourceEventId: "route-roadwork",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithContext,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithContext,
+          selectedItineraryId: "itinerary-1",
+        }),
+        routeContextSummary: buildRouteContextSummary(planWithContext),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Trafikk langs reisen");
+    expect(html).toContain("Vegarbeid ved Bakklandet");
+    expect(html).toContain("Endret rute");
+    expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+});
+
+describe("traffic journey map placement", () => {
+  it("uses a primary map for actionable journeys and support disclosure for context-only corridors", () => {
+    expect(travelMapDisplayMode(planWithItinerary)).toBe("primary");
+    expect(travelMapDisplayMode(plan)).toBe("support-open");
+    expect(
+      travelMapDisplayMode({
+        ...plan,
+        route: {
+          source: "direct",
+          detail: "Rute kunne ikke beregnes.",
+          distanceMeters: 0,
+          geometry: { type: "LineString", coordinates: [] },
+        },
+      }),
+    ).toBe("support-closed");
+    expect(travelMapDisplayMode(undefined)).toBe("support-open");
+  });
+});
 
 describe("TrafficMapPage route overlay helpers", () => {
   it("restores a submitted travel plan from the URL", () => {

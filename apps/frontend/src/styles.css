@@ -10412,6 +10412,21 @@ button {
   border-left-color: var(--terracotta);
 }
 
+.journey-answer-header {
+  display: grid;
+  gap: 8px;
+}
+
+.journey-answer-meta {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.journey-answer-handoff {
+  width: fit-content;
+}
+
 .travel-plan-route-summary {
   display: grid;
   gap: 3px;
@@ -11236,6 +11251,86 @@ button {
   color: var(--blue);
   font-size: 12px;
   text-decoration: none;
+}
+
+.journey-context-chips {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.journey-context-chips header {
+  display: grid;
+  gap: 3px;
+}
+
+.journey-context-chips h3 {
+  margin: 0;
+  font: 16px/1.2 var(--sans);
+}
+
+.journey-context-chips p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.journey-context-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.journey-context-chip {
+  display: inline-grid;
+  gap: 2px;
+  max-width: min(280px, 100%);
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+  text-decoration: none;
+}
+
+button.journey-context-chip {
+  cursor: pointer;
+  font: inherit;
+}
+
+.journey-context-chip strong,
+.journey-context-chip span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.journey-context-chip strong {
+  font-size: 12px;
+}
+
+.journey-context-chip span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.journey-context-chip-watch {
+  border-color: color-mix(in srgb, var(--amber) 52%, var(--line));
+  background: color-mix(in srgb, var(--paper) 88%, var(--amber) 12%);
+}
+
+.journey-context-chip-warning {
+  border-color: color-mix(in srgb, var(--terracotta) 48%, var(--line));
+  background: color-mix(in srgb, var(--paper) 88%, var(--terracotta) 12%);
+}
+
+.journey-context-chip.selected {
+  outline: 2px solid color-mix(in srgb, var(--blue) 40%, transparent);
+  outline-offset: 1px;
 }
 
 .route-context-empty {
@@ -12518,6 +12613,41 @@ button {
   min-height: 640px;
   border: 1px solid var(--line);
   background: var(--paper);
+}
+
+.traffic-primary-map-section {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  background: var(--page);
+}
+
+.traffic-primary-map-section > header {
+  display: grid;
+  gap: 6px;
+}
+
+.traffic-primary-map-section h2 {
+  margin: 0;
+  font: 30px/1.1 var(--serif);
+}
+
+.traffic-primary-map-section p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.traffic-primary-map-section .traffic-workspace {
+  min-height: 480px;
+}
+
+.traffic-primary-map-section .traffic-map {
+  min-height: 480px;
 }
 
 .traffic-workspace-sidebar {
@@ -13852,28 +13982,33 @@ button {
   }
 
   .traffic-support-disclosure {
-    order: 4;
-  }
-
-  .traffic-map-disclosure {
     order: 5;
   }
 
-  .traffic-data-disclosure {
+  .traffic-map-disclosure {
     order: 6;
   }
 
-  .traffic-bottom-panel {
+  .traffic-data-disclosure {
     order: 7;
   }
 
-  .route-departure-confidence {
+  .traffic-bottom-panel {
+    order: 8;
+  }
+
+  .traffic-primary-map-section {
     order: 2;
     padding: 14px;
   }
 
-  .departure-board-panel {
+  .route-departure-confidence {
     order: 3;
+    padding: 14px;
+  }
+
+  .departure-board-panel {
+    order: 4;
     padding: 14px;
   }
 
@@ -14119,14 +14254,19 @@ button {
 
   .traffic-map {
     order: 1;
-    min-height: 520px;
+    min-height: 420px;
     max-width: 100%;
     min-width: 0;
   }
 
+  .traffic-primary-map-section .traffic-workspace,
+  .traffic-primary-map-section .traffic-map {
+    min-height: 420px;
+  }
+
   .traffic-bottom-panel {
     display: block;
-    order: 6;
+    order: 8;
   }
 
   .traffic-bottom-list {
