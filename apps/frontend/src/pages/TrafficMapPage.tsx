@@ -2737,7 +2737,16 @@ export function TravelPlanCard({
     ? {
         heading: routeChoiceModel.heading,
         detail: routeChoiceModel.detail,
-        options: compactRouteChoiceOptions(routeChoiceModel),
+        options: compactRouteChoiceOptions(routeChoiceModel).map((option) => ({
+          itineraryId: option.itineraryId,
+          label: option.label,
+          selected: option.selected,
+          recommended: option.recommended,
+          summary: option.summary,
+          lineSummary: option.lineSummary,
+          detail: option.detail,
+          meta: option.meta,
+        })),
       }
     : undefined;
   return (

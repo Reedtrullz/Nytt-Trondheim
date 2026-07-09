@@ -5,7 +5,7 @@ import type {
   TravelPlanPayload,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
-import { Children, createElement, isValidElement, type ReactNode } from "react";
+import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TrafficLayerVisibility } from "../components/map/TrafficFilterPanel.js";
 import { TrafficJourneyAnswer } from "./TrafficJourneyAnswer.js";
@@ -673,11 +673,22 @@ function departureFixture(
   };
 }
 
-function findElementByType(node: ReactNode, type: string) {
-  if (!isValidElement(node)) return undefined;
+interface ElementWithChildrenProps {
+  children?: ReactNode;
+}
+
+interface ButtonElementProps extends ElementWithChildrenProps {
+  onClick?: () => void;
+}
+
+function findElementByType<TProps extends ElementWithChildrenProps>(
+  node: ReactNode,
+  type: string,
+): ReactElement<TProps> | undefined {
+  if (!isValidElement<TProps>(node)) return undefined;
   if (node.type === type) return node;
   for (const child of Children.toArray(node.props.children)) {
-    const match = findElementByType(child, type);
+    const match = findElementByType<TProps>(child, type);
     if (match) return match;
   }
   return undefined;
@@ -797,6 +808,10 @@ describe("TrafficJourneyAnswer", () => {
           {
             id: "leg-walk-to-sondre-gate",
             mode: "walk",
+            aimedStartTime: "2026-06-01T09:07:00.000Z",
+            expectedStartTime: "2026-06-01T09:07:00.000Z",
+            aimedEndTime: "2026-06-01T09:10:00.000Z",
+            expectedEndTime: "2026-06-01T09:10:00.000Z",
             from: { ...plan.origin, name: "Munkegata" },
             to: {
               name: "Søndre gate",
@@ -829,6 +844,10 @@ describe("TrafficJourneyAnswer", () => {
           {
             id: "leg-walk-to-lade-gard",
             mode: "walk",
+            aimedStartTime: "2026-06-01T09:28:00.000Z",
+            expectedStartTime: "2026-06-01T09:28:00.000Z",
+            aimedEndTime: "2026-06-01T09:30:00.000Z",
+            expectedEndTime: "2026-06-01T09:30:00.000Z",
             from: {
               name: "Lade",
               stopName: "Lade",
@@ -1122,7 +1141,6 @@ describe("TrafficJourneyAnswer", () => {
             label: "Anbefalt",
             selected: true,
             recommended: true,
-            severity: "ok",
             lineSummary: "Buss 2",
             detail: "Live-tavla matcher valgt avgang.",
             meta: "18 min · Direkte · Rolig",
@@ -1132,9 +1150,11 @@ describe("TrafficJourneyAnswer", () => {
       },
     });
 
-    const button = findElementByType(tree, "button");
+    const button = findElementByType<ButtonElementProps>(tree, "button");
     expect(button).toBeDefined();
-    button?.props.onClick();
+    const onClick = button?.props.onClick;
+    expect(onClick).toBeDefined();
+    onClick?.();
     expect(onSelectItinerary).not.toHaveBeenCalled();
   });
 

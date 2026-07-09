@@ -6,7 +6,7 @@ export interface TrafficJourneyRouteChoice {
   label: string;
   selected: boolean;
   recommended: boolean;
-  severity: "ok" | "watch" | "warning";
+  summary: string;
   lineSummary: string;
   detail: string;
   meta: string;
