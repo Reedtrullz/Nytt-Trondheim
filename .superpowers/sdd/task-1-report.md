@@ -69,3 +69,41 @@ Observed result:
 - Disk hygiene check: `df -h /System/Volumes/Data` showed 69 GiB available before test work.
 - Verification used Node `v22.22.3`.
 
+## 2026-07-09 Reviewer follow-up
+
+### Fix scope
+
+- Preserved mixed-context disclosure behavior where line alerts can remain the primary traveller disclosure label.
+- Fixed map-only traveller context so route-adjacent traffic points still disclose as `kartpunkt`.
+- Fixed traveller steps so cancelled ride legs surface as warning steps instead of disappearing.
+
+### TDD Evidence
+
+#### RED
+
+Command:
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && npm test -- apps/frontend/src/pages/trafficJourneyView.test.ts
+```
+
+Observed failures:
+
+- `discloses map-only traffic context when no line alerts exist`
+  - expected `1 kartpunkt`
+  - received `Ingen kjente hindringer`
+- `keeps cancelled ride legs as warning steps in traveller answers`
+  - cancelled ride step was missing from `answer.steps`
+
+#### GREEN
+
+Command:
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && npm test -- apps/frontend/src/pages/trafficJourneyView.test.ts
+```
+
+Observed result:
+
+- `apps/frontend/src/pages/trafficJourneyView.test.ts` passed
+- 14 tests passed, 0 failed

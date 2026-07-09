@@ -589,4 +589,86 @@ describe("traffic journey answer view", () => {
     expect(answer.context.primaryTextItems.map((item) => item.title)).toEqual(["Endret rute"]);
     expect(answer.context.disclosureLabel).toBe("1 linjevarsel");
   });
+
+  it("discloses map-only traffic context when no line alerts exist", () => {
+    const answer = buildJourneyTravellerAnswer(
+      plan({
+        trafficImpacts: [
+          {
+            event: trafficEvent({
+              id: "traffic:map-only",
+              source: "vegvesen_traffic_info",
+            }),
+            distanceMeters: 121,
+            severity: "medium",
+            summary: "121 m fra foreslått rute.",
+          },
+        ],
+      }),
+    );
+
+    expect(answer.context.mapPointCount).toBe(1);
+    expect(answer.context.primaryTextItems).toEqual([]);
+    expect(answer.context.disclosureLabel).toBe("1 kartpunkt");
+  });
+
+  it("keeps cancelled ride legs as warning steps in traveller answers", () => {
+    const answer = buildJourneyTravellerAnswer(
+      plan({
+        itineraries: [
+          itinerary({
+            decision: "watch",
+            decisionReason: "Første avgang er innstilt.",
+            labels: [],
+            departureTime: "2026-06-01T09:10:00.000Z",
+            arrivalTime: "2026-06-01T09:40:00.000Z",
+            durationSeconds: 1800,
+            transferCount: 1,
+            walkTimeSeconds: 240,
+            legs: [
+              leg({
+                id: "leg-cancelled-bus",
+                cancelled: true,
+                aimedStartTime: "2026-06-01T09:10:00.000Z",
+                expectedStartTime: "2026-06-01T09:10:00.000Z",
+                aimedEndTime: "2026-06-01T09:22:00.000Z",
+                expectedEndTime: "2026-06-01T09:22:00.000Z",
+                to: {
+                  name: "Midtbyen",
+                  stopName: "Midtbyen",
+                  coordinate: [10.41, 63.43],
+                },
+              }),
+              leg({
+                id: "leg-active-bus",
+                from: {
+                  name: "Midtbyen",
+                  stopName: "Midtbyen",
+                  stopId: "NSR:Quay:2",
+                  coordinate: [10.41, 63.43],
+                },
+                aimedStartTime: "2026-06-01T09:25:00.000Z",
+                expectedStartTime: "2026-06-01T09:25:00.000Z",
+                aimedEndTime: "2026-06-01T09:40:00.000Z",
+                expectedEndTime: "2026-06-01T09:40:00.000Z",
+              }),
+            ],
+          }),
+        ],
+        journeyPlanner: {
+          status: "ok",
+          detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+          requestedDepartureTime: generatedAt,
+          source: "Entur Journey Planner",
+        },
+      }),
+    );
+
+    expect(answer.mode).toBe("transit");
+    expect(answer.steps.map((step) => step.label)).toEqual([
+      "Ta Buss 2 mot Midtbyen",
+      "Ta Buss 2 mot Lade gård",
+    ]);
+    expect(answer.steps.map((step) => step.severity)).toEqual(["warning", "ok"]);
+  });
 });

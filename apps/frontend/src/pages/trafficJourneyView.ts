@@ -423,7 +423,6 @@ function rideStepFromLeg(leg: TravelPlanLeg, index: number): JourneyStepView {
 
 function stepsForItinerary(itinerary: TravelPlanItinerary): JourneyStepView[] {
   return itinerary.legs
-    .filter((leg) => !leg.cancelled)
     .map((leg, index) =>
       leg.mode === "walk" ? walkStepFromLeg(leg, index) : rideStepFromLeg(leg, index),
     )
@@ -591,9 +590,13 @@ function primaryContextItems(plan?: TravelPlanPayload): JourneyContextTextItemVi
 }
 
 function contextDisclosureLabel(plan?: TravelPlanPayload): string {
+  const mapPointCount = buildJourneyContextView(plan).mapPointCount;
   const textCount = primaryContextItems(plan).length;
   if (textCount) {
     return `${textCount} linjevarsel${textCount === 1 ? "" : "er"}`;
+  }
+  if (mapPointCount) {
+    return `${mapPointCount} kartpunkt${mapPointCount === 1 ? "" : "er"}`;
   }
   return "Ingen kjente hindringer";
 }
