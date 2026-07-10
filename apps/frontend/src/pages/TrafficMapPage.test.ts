@@ -2,12 +2,14 @@ import type {
   PublicTransportDeparture,
   PublicTransportDepartureBoardPayload,
   TrafficMapEvent,
+  TravelPlanLeg,
   TravelPlanPayload,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
-import { createElement } from "react";
+import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TrafficLayerVisibility } from "../components/map/TrafficFilterPanel.js";
+import { TrafficJourneyAnswer } from "./TrafficJourneyAnswer.js";
 
 vi.mock("react-leaflet", () => ({
   CircleMarker: () => null,
@@ -54,6 +56,7 @@ import {
   removeRememberedDepartureBoard,
   removeRememberedTravelRoute,
   RouteContextFallback,
+  selectedBoardingMarkerForMap,
   TravelPlanCard,
   travelMapDisplayMode,
   routeDepartureCheckpoints,
@@ -117,6 +120,94 @@ describe("TrafficMapPage layer helpers", () => {
         weatherRisk: true,
       }),
     ).toBe(true);
+  });
+});
+
+describe("traffic map route proof", () => {
+  it("uses route-proof copy instead of route diagnostics copy after a transit search", () => {
+    const mode = travelMapDisplayMode(planWithItinerary, "itinerary-1");
+    expect(mode).toBe("primary");
+
+    const html = renderToStaticMarkup(
+      createElement(RouteContextFallback, {
+        summary: buildRouteContextSummary(planWithItinerary),
+        plan: planWithItinerary,
+      }),
+    );
+
+    expect(html).not.toContain("Ruteoppsummering");
+    expect(html).not.toContain("Tekstfallback");
+  });
+
+  it("prefers the first metadata-backed boarding leg for the map marker", () => {
+    const itinerary = planWithItinerary.itineraries[0]!;
+    const baseLeg = itinerary.legs[0]!;
+    const transitLikeLeg: TravelPlanLeg = {
+      ...baseLeg,
+      id: "leg-transit-like",
+      lineId: undefined,
+      publicCode: undefined,
+      from: {
+        name: "Mellomstopp",
+        coordinate: [10.396, 63.431],
+      },
+    };
+    const boardingLeg: TravelPlanLeg = {
+      ...baseLeg,
+      id: "leg-boarding",
+      from: {
+        name: "Torget",
+        stopName: "Torget",
+        stopId: "NSR:StopPlace:999",
+        coordinate: [10.397, 63.432],
+      },
+    };
+    const markerPlan: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [{ ...itinerary, legs: [transitLikeLeg, boardingLeg] }],
+    };
+    expect(selectedBoardingMarkerForMap(markerPlan, itinerary.id)).toMatchObject({
+      leg: { id: "leg-boarding" },
+      position: [63.432, 10.397],
+      stopLabel: "Torget",
+    });
+  });
+
+  it("omits coordinate-less markers and supplies nonblank fallback copy", () => {
+    const itinerary = planWithItinerary.itineraries[0]!;
+    const baseLeg = itinerary.legs[0]!;
+    const fallbackLeg: TravelPlanLeg = {
+      ...baseLeg,
+      id: "leg-fallback",
+      lineId: undefined,
+      publicCode: undefined,
+      from: { name: "", coordinate: [10.396, 63.431] },
+    };
+    const fallbackPlan: TravelPlanPayload = {
+      ...planWithItinerary,
+      origin: { ...planWithItinerary.origin, label: "", query: "" },
+      itineraries: [{ ...itinerary, legs: [fallbackLeg] }],
+    };
+    expect(selectedBoardingMarkerForMap(fallbackPlan, itinerary.id)).toMatchObject({
+      leg: { id: "leg-fallback" },
+      stopLabel: "Startpunkt for kollektivreisen",
+    });
+
+    const coordinateLessPlan: TravelPlanPayload = {
+      ...fallbackPlan,
+      itineraries: [
+        {
+          ...itinerary,
+          legs: [
+            {
+              ...fallbackLeg,
+              from: { name: "" } as unknown as TravelPlanLeg["from"],
+            },
+          ],
+        },
+      ],
+    };
+    expect(selectedBoardingMarkerForMap(coordinateLessPlan, itinerary.id)).toBeUndefined();
   });
 });
 
@@ -672,6 +763,27 @@ function departureFixture(
   };
 }
 
+interface ElementWithChildrenProps {
+  children?: ReactNode;
+}
+
+interface ButtonElementProps extends ElementWithChildrenProps {
+  onClick?: () => void;
+}
+
+function findElementByType<TProps extends ElementWithChildrenProps>(
+  node: ReactNode,
+  type: string,
+): ReactElement<TProps> | undefined {
+  if (!isValidElement<TProps>(node)) return undefined;
+  if (node.type === type) return node;
+  for (const child of Children.toArray(node.props.children)) {
+    const match = findElementByType<TProps>(child, type);
+    if (match) return match;
+  }
+  return undefined;
+}
+
 describe("TravelPlanCard journey answer", () => {
   it("renders the concrete journey instruction before route diagnostics", () => {
     const html = renderToStaticMarkup(
@@ -688,7 +800,7 @@ describe("TravelPlanCard journey answer", () => {
     );
 
     expect(html).toContain("Ta Buss 2 fra Søndre gate");
-    expect(html).toContain("11:10 → 11:28 · 18 min · Direkte · 3 min gange");
+    expect(html).toContain("11:10 → 11:28 · 18 min · Direkte");
     expect(html).not.toContain("Sjekk ruten før du drar");
     expect(html).not.toContain("Ruteoppsummering");
   });
@@ -772,6 +884,521 @@ describe("TravelPlanCard journey answer", () => {
     expect(html).not.toContain("Trafikk langs reisen");
     expect(html).not.toContain("Vegarbeid ved Bakklandet");
     expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+
+  it("keeps geometry-less line alerts out of the answer card", () => {
+    const planWithLineAlert: TravelPlanPayload = {
+      ...planWithItinerary,
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithLineAlert,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithLineAlert,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("Hva påvirker reisen?");
+    expect(html).not.toContain("Endret rute");
+  });
+});
+
+describe("route context demotion", () => {
+  it("does not repeat map-point traffic as bulky text before the map", () => {
+    const planWithMapPoint: TravelPlanPayload = {
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "roadwork-1",
+            source: "vegvesen_traffic_info",
+            sourceEventId: "roadwork-1",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithMapPoint,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithMapPoint,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("Vegarbeid ved Bakklandet");
+    expect(html).not.toContain("Kartpunkter langs valgt rute");
+  });
+});
+
+describe("TrafficJourneyAnswer", () => {
+  const travellerStepPlan: TravelPlanPayload = {
+    ...planWithItinerary,
+    destination: { ...plan.destination, label: "Lade gård" },
+    itineraries: [
+      {
+        ...planWithItinerary.itineraries[0]!,
+        legs: [
+          {
+            id: "leg-walk-to-sondre-gate",
+            mode: "walk",
+            aimedStartTime: "2026-06-01T09:07:00.000Z",
+            expectedStartTime: "2026-06-01T09:07:00.000Z",
+            aimedEndTime: "2026-06-01T09:10:00.000Z",
+            expectedEndTime: "2026-06-01T09:10:00.000Z",
+            from: { ...plan.origin, name: "Munkegata" },
+            to: {
+              name: "Søndre gate",
+              stopName: "Søndre gate",
+              stopId: "NSR:StopPlace:41613",
+              coordinate: [10.3951, 63.4305],
+            },
+            durationSeconds: 180,
+            distanceMeters: 210,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [10.393742, 63.432883],
+                [10.3951, 63.4305],
+              ],
+            },
+            realtime: true,
+            cancelled: false,
+            replacementTransport: false,
+            notices: [],
+          },
+          {
+            ...planWithItinerary.itineraries[0]!.legs[0]!,
+            to: {
+              name: "Lade",
+              stopName: "Lade",
+              coordinate: [10.463, 63.433],
+            },
+          },
+          {
+            id: "leg-walk-to-lade-gard",
+            mode: "walk",
+            aimedStartTime: "2026-06-01T09:28:00.000Z",
+            expectedStartTime: "2026-06-01T09:28:00.000Z",
+            aimedEndTime: "2026-06-01T09:30:00.000Z",
+            expectedEndTime: "2026-06-01T09:30:00.000Z",
+            from: {
+              name: "Lade",
+              stopName: "Lade",
+              coordinate: [10.463, 63.433],
+            },
+            to: {
+              name: "Lade gård",
+              coordinate: [10.464, 63.433],
+            },
+            durationSeconds: 120,
+            distanceMeters: 130,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [10.463, 63.433],
+                [10.464, 63.433],
+              ],
+            },
+            realtime: true,
+            cancelled: false,
+            replacementTransport: false,
+            notices: [],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("renders instruction, steps, alternatives, and handoff without bulky diagnostics", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: travellerStepPlan,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: travellerStepPlan,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Ta Buss 2 fra Søndre gate");
+    expect(html).toContain("Gå til Søndre gate");
+    expect(html).toContain("Ta Buss 2 mot Lade");
+    expect(html).toContain("Gå til Lade gård");
+    expect(html).toContain("Åpne hos AtB/Entur");
+    expect(html).toContain("Valgt reiseforslag ser best ut");
+    expect(html).not.toContain("Kollektivvalg");
+  });
+
+  it("renders walking as the primary answer without pretending there is transit", () => {
+    const walkingPlan: TravelPlanPayload = {
+      ...plan,
+      destination: { ...plan.destination, label: "Lade gård" },
+      primaryMode: "walk",
+      itineraries: [],
+      walkingRoute: {
+        source: "direct",
+        distanceMeters: 3500,
+        durationSeconds: 2580,
+        detail: "Gangtid estimert fra luftlinjekorridor.",
+        confidence: "corridor",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: walkingPlan,
+        loading: false,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Gå til Lade gård");
+    expect(html).toContain("43 min");
+    expect(html).not.toContain("Start med Buss");
+  });
+
+  it("does not render a non-http(s) operator handoff", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: {
+          ...planWithItinerary,
+          itineraries: [
+            {
+              ...planWithItinerary.itineraries[0]!,
+              handoffUrl: "javascript:alert('uventet')",
+            },
+          ],
+        },
+        loading: false,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("href=\"javascript:alert('uventet')\"");
+    expect(html).not.toContain("Åpne hos AtB/Entur");
+  });
+
+  it("renders the live route recommendation instead of plan-only alternatives", () => {
+    const routeChoiceModel: RouteChoiceModel = {
+      heading: "Et annet reiseforslag ser tryggere ut",
+      detail: "Live-tavla viser at et annet valg har bedre margin.",
+      recommendedItineraryId: "itinerary-live",
+      options: [
+        {
+          kind: "recommended",
+          label: "Anbefalt",
+          itineraryId: "itinerary-live",
+          selected: false,
+          recommended: true,
+          severity: "ok",
+          score: 12,
+          summary: "11:16-11:38",
+          lineSummary: "Buss 71",
+          detail: "Live-tavle matcher avgangen.",
+          meta: "22 min · Direkte · Rolig",
+        },
+        {
+          kind: "fastest",
+          label: "Raskest",
+          itineraryId: "itinerary-1",
+          selected: true,
+          recommended: false,
+          severity: "warning",
+          score: 86,
+          summary: "11:10-11:28",
+          lineSummary: "Buss 2",
+          detail: "Live-tavla viser at avgangen må sjekkes.",
+          meta: "18 min · Direkte · Sjekk",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeChoiceModel,
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Et annet reiseforslag ser tryggere ut");
+    expect(html).toContain("Live-tavla viser at et annet valg har bedre margin.");
+    expect(html).toContain("Buss 71");
+    expect(html).toContain("Live-tavle matcher avgangen.");
+  });
+
+  it("keeps a single live option visible instead of falling back to plan-only alternatives", () => {
+    const alternateItinerary = planWithTravelDuration({
+      id: "itinerary-2",
+      departureTime: "2026-06-01T09:16:00.000Z",
+      arrivalTime: "2026-06-01T09:38:00.000Z",
+      durationSeconds: 22 * 60,
+      decision: "watch",
+    }).itineraries[0]!;
+    const planWithAlternatives: TravelPlanPayload = {
+      ...planWithItinerary,
+      itineraries: [planWithItinerary.itineraries[0]!, alternateItinerary],
+    };
+    const routeChoiceModel: RouteChoiceModel = {
+      heading: "Live-valget står seg",
+      detail: "Live-tavla bekrefter bare ett trygt valg akkurat nå.",
+      recommendedItineraryId: "itinerary-1",
+      options: [
+        {
+          kind: "recommended",
+          label: "Anbefalt",
+          itineraryId: "itinerary-1",
+          selected: true,
+          recommended: true,
+          severity: "ok",
+          score: 1,
+          summary: "11:10-11:28",
+          lineSummary: "Buss 2",
+          detail: "Live-tavla matcher valgt avgang.",
+          meta: "18 min · Direkte · Rolig",
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithAlternatives,
+        loading: false,
+        routeChoiceModel,
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Live-valget står seg");
+    expect(html).toContain("Live-tavla matcher valgt avgang.");
+    expect(html).not.toContain("Færrest bytter");
+  });
+
+  it("preserves each live option summary in the compact route choice UI", () => {
+    const routeChoiceModel: RouteChoiceModel = {
+      heading: "Velg mellom live-bekreftede avganger",
+      detail: "Tidsvinduene skiller valgene akkurat nå.",
+      recommendedItineraryId: "itinerary-live",
+      options: [
+        {
+          kind: "recommended",
+          label: "Anbefalt",
+          itineraryId: "itinerary-live",
+          selected: false,
+          recommended: true,
+          severity: "ok",
+          score: 12,
+          summary: "11:16-11:38",
+          lineSummary: "Buss 71",
+          detail: "Live-tavle matcher avgangen.",
+          meta: "22 min · Direkte · Rolig",
+        },
+        {
+          kind: "fastest",
+          label: "Raskest",
+          itineraryId: "itinerary-1",
+          selected: true,
+          recommended: false,
+          severity: "warning",
+          score: 86,
+          summary: "11:10-11:28",
+          lineSummary: "Buss 2",
+          detail: "Live-tavla viser at avgangen må sjekkes.",
+          meta: "18 min · Direkte · Sjekk",
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeChoiceModel,
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("11:16-11:38");
+    expect(html).toContain("11:10-11:28");
+  });
+
+  it("separates compact alert titles from their details", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        routeWatchSummary: {
+          heading: "Følg med på valgt reise",
+          detail: "1 punkt kan påvirke reiseforslaget.",
+          severity: "watch",
+          items: [
+            {
+              id: "delay-2",
+              label: "Buss 2: Mindre forsinkelse",
+              detail: "Omtrent 2 minutter.",
+              severity: "watch",
+              source: "Entur avvik",
+            },
+          ],
+        },
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Buss 2: Mindre forsinkelse</strong> <span>Omtrent 2 minutter.");
+  });
+
+  it("does not reselect an already-selected live option", () => {
+    const onSelectItinerary = vi.fn();
+    const tree = TrafficJourneyAnswer({
+      answer: {
+        mode: "transit",
+        headline: "Ta Buss 2 fra Søndre gate",
+        primaryMeta: "11:10 → 11:28 · 18 min · Direkte",
+        supportingText: "Live-tavla matcher valgt avgang.",
+        severity: "ok",
+        primaryItineraryId: "itinerary-1",
+        handoff: {
+          label: "Åpne hos AtB/Entur",
+          url: "https://www.atb.no/reiseplanlegger/",
+        },
+        steps: [],
+        routeOptions: [],
+        mapSummary: {
+          placement: "primary",
+          heading: "Kart",
+          detail: "Viser valgt reise.",
+          routeVisible: true,
+          mapPointCount: 0,
+        },
+        context: {
+          mapPointCount: 0,
+          primaryTextItems: [],
+          disclosureLabel: "Ingen avvik",
+        },
+      },
+      onSelectItinerary,
+      routeChoice: {
+        heading: "Live-valget står seg",
+        detail: "Ikke bytt uten grunn.",
+        options: [
+          {
+            itineraryId: "itinerary-1",
+            label: "Anbefalt",
+            selected: true,
+            recommended: true,
+            lineSummary: "Buss 2",
+            detail: "Live-tavla matcher valgt avgang.",
+            meta: "18 min · Direkte · Rolig",
+            summary: "11:10-11:28",
+          },
+        ],
+      },
+    });
+
+    const button = findElementByType<ButtonElementProps>(tree, "button");
+    expect(button).toBeDefined();
+    const onClick = button?.props.onClick;
+    expect(onClick).toBeDefined();
+    onClick?.();
+    expect(onSelectItinerary).not.toHaveBeenCalled();
+  });
+
+  it("keeps a meaningful live route watch compact and visible", () => {
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithItinerary,
+        loading: false,
+        selectedItineraryId: "itinerary-1",
+        routeWatchSummary: {
+          heading: "Sjekk dette før avreise",
+          detail: "1 punkt kan påvirke reiseforslaget.",
+          severity: "warning",
+          items: [
+            {
+              id: "itinerary-1:live-board",
+              label: "Søndre gate: Innstilt",
+              detail: "Avgangen er innstilt. Velg et annet reiseforslag hos AtB/Entur.",
+              severity: "warning",
+              source: "Live-tavle",
+            },
+          ],
+        },
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Sjekk dette før avreise");
+    expect(html).toContain("Søndre gate: Innstilt");
+    expect(html).toContain("Live-tavle");
+  });
+
+  it("preserves the loading, error, and no-plan status branches", () => {
+    const loadingHtml = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        loading: true,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+    const errorHtml = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        loading: false,
+        error: "Kunne ikke hente reiseråd.",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+    const emptyHtml = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        loading: false,
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(loadingHtml).toContain("Henter reiseråd ...");
+    expect(errorHtml).toContain("Kunne ikke hente reiseråd.");
+    expect(emptyHtml).toContain("Skriv inn start og mål");
   });
 });
 
@@ -2028,6 +2655,12 @@ describe("TrafficMapPage route overlay helpers", () => {
           "itinerary-1",
           departureBoard,
         ),
+      ).toBeUndefined();
+      expect(
+        buildRouteChoiceModel({
+          plan: walkingPrimaryPlanWithRetainedTransitItinerary,
+          selectedItineraryId: "itinerary-1",
+        }),
       ).toBeUndefined();
     });
 

@@ -7,6 +7,7 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   buildJourneyAnswerView,
+  buildJourneyTravellerAnswer,
   buildJourneyContextView,
   getJourneyMapPlacement,
   shouldShowJourneyMap,
@@ -219,6 +220,34 @@ describe("traffic journey answer view", () => {
     expect(answer.detail).toContain("Entur foreslår gange");
   });
 
+  it("keeps a walking-primary result on the walking route when transit legs are retained", () => {
+    const answer = buildJourneyTravellerAnswer(
+      plan({
+        primaryMode: "walk",
+        walkingRoute: {
+          source: "osrm",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.393742, 63.432883],
+              [10.463, 63.433],
+            ],
+          },
+          distanceMeters: 3500,
+          durationSeconds: 2520,
+          detail: "Gangruta er beregnet med OSRM.",
+          confidence: "route",
+        },
+        itineraries: [itinerary()],
+      }),
+    );
+
+    expect(answer.mode).toBe("walk");
+    expect(answer.headline).toBe("Gå til Lade gård");
+    expect(answer.steps.map((step) => step.label)).toEqual(["Gå til Lade gård"]);
+    expect(answer.routeOptions).toEqual([]);
+  });
+
   it("does not call the driving traffic corridor a walking route", () => {
     const answer = buildJourneyAnswerView(plan());
 
@@ -387,5 +416,380 @@ describe("traffic journey answer view", () => {
         }),
       ),
     ).toBe("hidden");
+  });
+
+  it("builds a traveller-first bus answer with concrete steps", () => {
+    const planWithItinerary = plan({
+      itineraries: [
+        itinerary({
+          departureTime: "2026-06-01T09:10:00.000Z",
+          arrivalTime: "2026-06-01T09:28:00.000Z",
+          legs: [
+            leg({
+              id: "leg-walk-start",
+              mode: "walk",
+              from: {
+                name: "Munkegata",
+                coordinate: [10.393742, 63.432883],
+              },
+              to: {
+                name: "Søndre gate",
+                stopName: "Søndre gate",
+                coordinate: [10.395, 63.431],
+              },
+              aimedStartTime: "2026-06-01T09:06:00.000Z",
+              expectedStartTime: "2026-06-01T09:06:00.000Z",
+              aimedEndTime: "2026-06-01T09:10:00.000Z",
+              expectedEndTime: "2026-06-01T09:10:00.000Z",
+              durationSeconds: 240,
+              distanceMeters: 300,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+            leg({
+              to: {
+                name: "Lade",
+                stopName: "Lade",
+                coordinate: [10.463, 63.433],
+              },
+              aimedStartTime: "2026-06-01T09:10:00.000Z",
+              expectedStartTime: "2026-06-01T09:10:00.000Z",
+              aimedEndTime: "2026-06-01T09:28:00.000Z",
+              expectedEndTime: "2026-06-01T09:28:00.000Z",
+            }),
+            leg({
+              id: "leg-walk-end",
+              mode: "walk",
+              from: {
+                name: "Lade gård",
+                stopName: "Lade gård",
+                coordinate: [10.463, 63.433],
+              },
+              to: {
+                name: "Lade gård",
+                coordinate: [10.463, 63.433],
+              },
+              aimedStartTime: "2026-06-01T09:28:00.000Z",
+              expectedStartTime: "2026-06-01T09:28:00.000Z",
+              aimedEndTime: "2026-06-01T09:30:00.000Z",
+              expectedEndTime: "2026-06-01T09:30:00.000Z",
+              durationSeconds: 120,
+              distanceMeters: 120,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+          ],
+        }),
+      ],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: generatedAt,
+        source: "Entur Journey Planner",
+      },
+    });
+
+    const answer = buildJourneyTravellerAnswer(planWithItinerary, "itinerary-1");
+
+    expect(answer.mode).toBe("transit");
+    expect(answer.headline).toBe("Ta Buss 2 fra Søndre gate");
+    expect(answer.primaryMeta).toBe("11:10 → 11:28 · 18 min · Direkte");
+    expect(answer.steps.map((step) => step.label)).toEqual([
+      "Gå til Søndre gate",
+      "Ta Buss 2 mot Lade",
+      "Gå til Lade gård",
+    ]);
+    expect(answer.mapSummary.heading).toBe("Ruten vises på kartet");
+    expect(answer.context.primaryTextItems).toEqual([]);
+  });
+
+  it("builds a walking answer when walkingRoute is the primary fallback", () => {
+    const answer = buildJourneyTravellerAnswer({
+      ...plan(),
+      primaryMode: "walk",
+      walkingRoute: {
+        source: "direct",
+        distanceMeters: 3500,
+        durationSeconds: 2580,
+        detail: "Gangtid estimert fra luftlinjekorridor.",
+        confidence: "corridor",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-01T23:30:00.000Z",
+        source: "Entur Journey Planner",
+      },
+    });
+
+    expect(answer.mode).toBe("walk");
+    expect(answer.headline).toBe("Gå til Lade gård");
+    expect(answer.primaryMeta).toBe("43 min · 3,5 km");
+    expect(answer.steps.map((step) => step.label)).toEqual(["Gå til Lade gård"]);
+    expect(answer.handoff.label).toBe("Sjekk AtB/Entur");
+  });
+
+  it("prefers a concrete walk-only itinerary over walkingRoute fallback detail", () => {
+    const answer = buildJourneyTravellerAnswer({
+      ...plan(),
+      primaryMode: "walk",
+      walkingRoute: {
+        source: "direct",
+        distanceMeters: 3500,
+        durationSeconds: 2580,
+        detail: "Gangtid estimert fra luftlinjekorridor.",
+        confidence: "corridor",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [10.393742, 63.432883],
+            [10.463, 63.433],
+          ],
+        },
+      },
+      itineraries: [
+        itinerary({
+          id: "walk-itinerary",
+          decision: "good",
+          decisionReason: "Entur foreslår gange hele veien.",
+          labels: [],
+          departureTime: "2026-06-01T09:10:00.000Z",
+          arrivalTime: "2026-06-01T09:28:00.000Z",
+          durationSeconds: 1080,
+          transferCount: 0,
+          walkTimeSeconds: 1080,
+          modes: ["walk"],
+          legs: [
+            leg({
+              id: "walk-leg-1",
+              mode: "walk",
+              from: {
+                name: "Munkegata",
+                coordinate: [10.393742, 63.432883],
+              },
+              to: {
+                name: "Solsiden",
+                coordinate: [10.418, 63.436],
+              },
+              aimedStartTime: "2026-06-01T09:10:00.000Z",
+              expectedStartTime: "2026-06-01T09:10:00.000Z",
+              aimedEndTime: "2026-06-01T09:18:00.000Z",
+              expectedEndTime: "2026-06-01T09:18:00.000Z",
+              durationSeconds: 480,
+              distanceMeters: 700,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+            leg({
+              id: "walk-leg-2",
+              mode: "walk",
+              from: {
+                name: "Solsiden",
+                coordinate: [10.418, 63.436],
+              },
+              to: {
+                name: "Lade gård",
+                coordinate: [10.463, 63.433],
+              },
+              aimedStartTime: "2026-06-01T09:18:00.000Z",
+              expectedStartTime: "2026-06-01T09:18:00.000Z",
+              aimedEndTime: "2026-06-01T09:28:00.000Z",
+              expectedEndTime: "2026-06-01T09:28:00.000Z",
+              durationSeconds: 600,
+              distanceMeters: 900,
+              publicCode: undefined,
+              lineId: undefined,
+              lineName: undefined,
+              serviceJourneyId: undefined,
+            }),
+          ],
+        }),
+      ],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte et gangforslag.",
+        requestedDepartureTime: "2026-06-01T09:10:00.000Z",
+        source: "Entur Journey Planner",
+      },
+    });
+
+    expect(answer.mode).toBe("walk");
+    expect(answer.primaryItineraryId).toBe("walk-itinerary");
+    expect(answer.primaryMeta).toBe("11:10 → 11:28 · 18 min · Direkte");
+    expect(answer.steps.map((step) => step.label)).toEqual(["Gå til Solsiden", "Gå til Lade gård"]);
+    expect(answer.supportingText).toBe("Entur foreslår gange hele veien.");
+  });
+
+  it("uses operator handoff when no concrete journey or walking route exists", () => {
+    const planWithItinerary = plan({
+      itineraries: [itinerary()],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: generatedAt,
+        source: "Entur Journey Planner",
+      },
+    });
+
+    const answer = buildJourneyTravellerAnswer({
+      ...planWithItinerary,
+      primaryMode: "fallback",
+      walkingRoute: undefined,
+      itineraries: [],
+      journeyPlanner: {
+        status: "empty",
+        detail: "Ingen konkrete Entur-reiser funnet for valgt tidspunkt.",
+        requestedDepartureTime: "2026-06-01T23:30:00.000Z",
+        source: "Entur Journey Planner",
+      },
+    });
+
+    expect(answer.mode).toBe("handoff");
+    expect(answer.headline).toBe("Sjekk AtB/Entur");
+    expect(answer.steps).toEqual([]);
+    expect(answer.handoff.label).toBe("Åpne AtB/Entur");
+  });
+
+  it("keeps map-point traffic out of primary text items", () => {
+    const planWithItinerary = plan({
+      itineraries: [itinerary()],
+      journeyPlanner: {
+        status: "ok",
+        detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+        requestedDepartureTime: generatedAt,
+        source: "Entur Journey Planner",
+      },
+    });
+
+    const answer = buildJourneyTravellerAnswer({
+      ...planWithItinerary,
+      trafficImpacts: [
+        {
+          event: {
+            id: "roadwork-1",
+            source: "vegvesen_traffic_info",
+            sourceEventId: "roadwork-1",
+            category: "roadworks",
+            severity: "medium",
+            state: "active",
+            title: "Vegarbeid ved Bakklandet",
+            updatedAt: "2026-06-01T09:00:00.000Z",
+            geometry: { type: "Point", coordinates: [10.4, 63.43] },
+          },
+          distanceMeters: 121,
+          severity: "medium",
+          summary: "121 m fra foreslått rute.",
+        },
+      ],
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    });
+
+    expect(answer.context.mapPointCount).toBe(1);
+    expect(answer.context.primaryTextItems.map((item) => item.title)).toEqual(["Endret rute"]);
+    expect(answer.context.disclosureLabel).toBe("1 linjevarsel");
+  });
+
+  it("discloses map-only traffic context when no line alerts exist", () => {
+    const answer = buildJourneyTravellerAnswer(
+      plan({
+        trafficImpacts: [
+          {
+            event: trafficEvent({
+              id: "traffic:map-only",
+              source: "vegvesen_traffic_info",
+            }),
+            distanceMeters: 121,
+            severity: "medium",
+            summary: "121 m fra foreslått rute.",
+          },
+        ],
+      }),
+    );
+
+    expect(answer.context.mapPointCount).toBe(1);
+    expect(answer.context.primaryTextItems).toEqual([]);
+    expect(answer.context.disclosureLabel).toBe("1 kartpunkt");
+  });
+
+  it("keeps cancelled ride legs as warning steps in traveller answers", () => {
+    const answer = buildJourneyTravellerAnswer(
+      plan({
+        itineraries: [
+          itinerary({
+            decision: "watch",
+            decisionReason: "Første avgang er innstilt.",
+            labels: [],
+            departureTime: "2026-06-01T09:10:00.000Z",
+            arrivalTime: "2026-06-01T09:40:00.000Z",
+            durationSeconds: 1800,
+            transferCount: 1,
+            walkTimeSeconds: 240,
+            legs: [
+              leg({
+                id: "leg-cancelled-bus",
+                cancelled: true,
+                aimedStartTime: "2026-06-01T09:10:00.000Z",
+                expectedStartTime: "2026-06-01T09:10:00.000Z",
+                aimedEndTime: "2026-06-01T09:22:00.000Z",
+                expectedEndTime: "2026-06-01T09:22:00.000Z",
+                to: {
+                  name: "Midtbyen",
+                  stopName: "Midtbyen",
+                  coordinate: [10.41, 63.43],
+                },
+              }),
+              leg({
+                id: "leg-active-bus",
+                from: {
+                  name: "Midtbyen",
+                  stopName: "Midtbyen",
+                  stopId: "NSR:Quay:2",
+                  coordinate: [10.41, 63.43],
+                },
+                aimedStartTime: "2026-06-01T09:25:00.000Z",
+                expectedStartTime: "2026-06-01T09:25:00.000Z",
+                aimedEndTime: "2026-06-01T09:40:00.000Z",
+                expectedEndTime: "2026-06-01T09:40:00.000Z",
+              }),
+            ],
+          }),
+        ],
+        journeyPlanner: {
+          status: "ok",
+          detail: "Entur Journey Planner returnerte konkrete reiseforslag.",
+          requestedDepartureTime: generatedAt,
+          source: "Entur Journey Planner",
+        },
+      }),
+    );
+
+    expect(answer.mode).toBe("transit");
+    expect(answer.steps.map((step) => step.label)).toEqual([
+      "Ta Buss 2 mot Midtbyen",
+      "Ta Buss 2 mot Lade gård",
+    ]);
+    expect(answer.steps.map((step) => step.severity)).toEqual(["warning", "ok"]);
   });
 });
