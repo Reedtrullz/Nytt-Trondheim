@@ -885,6 +885,36 @@ describe("TravelPlanCard journey answer", () => {
     expect(html).not.toContain("Vegarbeid ved Bakklandet");
     expect(html).not.toContain("Kartpunkter langs valgt rute");
   });
+
+  it("keeps geometry-less line alerts out of the answer card", () => {
+    const planWithLineAlert: TravelPlanPayload = {
+      ...planWithItinerary,
+      publicTransportSuggestions: [
+        {
+          id: "line-alert",
+          kind: "alert",
+          title: "Endret rute",
+          detail: "Linje 3 kjører via Lerkendal.",
+          source: "Entur avvik",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(TravelPlanCard, {
+        plan: planWithLineAlert,
+        loading: false,
+        routeChoiceModel: buildRouteChoiceModel({
+          plan: planWithLineAlert,
+          selectedItineraryId: "itinerary-1",
+        }),
+        selectedItineraryId: "itinerary-1",
+        onSelectItinerary: () => undefined,
+      }),
+    );
+
+    expect(html).not.toContain("Hva påvirker reisen?");
+    expect(html).not.toContain("Endret rute");
+  });
 });
 
 describe("route context demotion", () => {

@@ -161,22 +161,6 @@ export function TrafficJourneyAnswer({
         </section>
       ) : null}
 
-      {answer.context.primaryTextItems.length ? (
-        <details className="traffic-journey-context-disclosure">
-          <summary>Hva påvirker reisen? {answer.context.disclosureLabel}</summary>
-          <ul>
-            {answer.context.primaryTextItems.map((item) => (
-              <li key={item.id}>
-                <strong>{item.title}</strong>
-                <span>
-                  {item.detail} · {item.source}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-
       <footer>Nytt vurderer reiserisiko, ikke billetter eller garanti.</footer>
     </article>
   );
