@@ -188,10 +188,9 @@ function selectedItinerary(
   plan?: TravelPlanPayload,
   selectedItineraryId?: string,
 ): TravelPlanItinerary | undefined {
-  return (
-    plan?.itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ??
-    plan?.itineraries[0]
-  );
+  const itineraries =
+    plan?.primaryMode === "walk" ? plan.itineraries.filter(isWalkOnlyItinerary) : plan?.itineraries;
+  return itineraries?.find((itinerary) => itinerary.id === selectedItineraryId) ?? itineraries?.[0];
 }
 
 function itinerarySeverity(itinerary: TravelPlanItinerary): JourneyAnswerSeverity {
@@ -250,7 +249,9 @@ function routeOptions(
   selectedItineraryId?: string,
 ): JourneyRouteOptionView[] {
   const selected = selectedItinerary(plan, selectedItineraryId);
-  return plan.itineraries
+  const itineraries =
+    plan.primaryMode === "walk" ? plan.itineraries.filter(isWalkOnlyItinerary) : plan.itineraries;
+  return itineraries
     .filter(hasActionableJourney)
     .slice(0, 5)
     .map((itinerary) => ({

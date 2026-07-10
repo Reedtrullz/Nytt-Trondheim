@@ -2656,6 +2656,12 @@ describe("TrafficMapPage route overlay helpers", () => {
           departureBoard,
         ),
       ).toBeUndefined();
+      expect(
+        buildRouteChoiceModel({
+          plan: walkingPrimaryPlanWithRetainedTransitItinerary,
+          selectedItineraryId: "itinerary-1",
+        }),
+      ).toBeUndefined();
     });
 
     it("uses a clear handoff when no transit or walking answer is available", () => {

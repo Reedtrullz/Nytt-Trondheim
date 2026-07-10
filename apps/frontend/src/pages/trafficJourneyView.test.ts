@@ -220,6 +220,34 @@ describe("traffic journey answer view", () => {
     expect(answer.detail).toContain("Entur foreslår gange");
   });
 
+  it("keeps a walking-primary result on the walking route when transit legs are retained", () => {
+    const answer = buildJourneyTravellerAnswer(
+      plan({
+        primaryMode: "walk",
+        walkingRoute: {
+          source: "osrm",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [10.393742, 63.432883],
+              [10.463, 63.433],
+            ],
+          },
+          distanceMeters: 3500,
+          durationSeconds: 2520,
+          detail: "Gangruta er beregnet med OSRM.",
+          confidence: "route",
+        },
+        itineraries: [itinerary()],
+      }),
+    );
+
+    expect(answer.mode).toBe("walk");
+    expect(answer.headline).toBe("Gå til Lade gård");
+    expect(answer.steps.map((step) => step.label)).toEqual(["Gå til Lade gård"]);
+    expect(answer.routeOptions).toEqual([]);
+  });
+
   it("does not call the driving traffic corridor a walking route", () => {
     const answer = buildJourneyAnswerView(plan());
 

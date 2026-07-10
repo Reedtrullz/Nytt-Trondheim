@@ -1771,7 +1771,7 @@ export function buildRouteChoiceModel(input: {
 }): RouteChoiceModel | undefined {
   const plan = input.plan;
   const itineraries = plan?.itineraries ?? [];
-  if (!plan || !itineraries.length) return undefined;
+  if (!plan || plan.primaryMode !== "transit" || !itineraries.length) return undefined;
 
   const evaluated = new Map(
     itineraries.map((itinerary) => {
