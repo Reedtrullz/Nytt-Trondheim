@@ -20,6 +20,7 @@ export interface AuthUser {
 
 export interface AuthAccountStore {
   ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false>;
+  authUserById(id: string): Promise<AuthUser | undefined>;
 }
 
 export function authorizeGitHubProfile(
@@ -101,9 +102,30 @@ export function configureAuth(
     throw new Error("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required in production.");
   }
 
-  passport.serializeUser((user, done) => done(null, user));
-  passport.deserializeUser((user: Express.User, done) => done(null, user));
-  passport.use(
+  const authenticator = new passport.Passport();
+  authenticator.serializeUser((user, done) => done(null, user.id));
+  authenticator.deserializeUser((serialized: unknown, done) => {
+    // Accept the pre-migration object shape so sessions issued by the previous release
+    // are revalidated instead of being trusted or needlessly logged out during rollout.
+    const id =
+      typeof serialized === "string"
+        ? serialized
+        : typeof serialized === "object" &&
+            serialized !== null &&
+            "id" in serialized &&
+            typeof serialized.id === "string"
+          ? serialized.id
+          : undefined;
+    if (!id) {
+      done(null, false);
+      return;
+    }
+    accountStore
+      .authUserById(id)
+      .then((user) => done(null, user ?? false))
+      .catch((error: Error) => done(error));
+  });
+  authenticator.use(
     new GitHubStrategy(
       {
         clientID: config.githubClientId,
@@ -125,13 +147,13 @@ export function configureAuth(
       },
     ),
   );
-  app.use(passport.initialize());
-  app.use(passport.session());
+  app.use(authenticator.initialize());
+  app.use(authenticator.session());
   // GitHub Apps grant user-token access through configured permissions, not OAuth scopes.
-  app.get("/auth/github", passport.authenticate("github"));
+  app.get("/auth/github", authenticator.authenticate("github"));
   app.get(
     "/auth/github/callback",
-    passport.authenticate("github", { failureRedirect: "/logg-inn?auth=denied" }),
+    authenticator.authenticate("github", { failureRedirect: "/logg-inn?auth=denied" }),
     (_req, res) => res.redirect("/"),
   );
   app.post("/auth/logout", requireUser, requireCsrf(config), (req, res, next) => {
@@ -148,7 +170,9 @@ export function requireUser(req: Request, res: Response, next: NextFunction): vo
     return;
   }
   if (req.user?.status === "revoked") {
-    res.status(403).json({ error: "Tilgangen er tilbakekalt." });
+    req.logout(() => {
+      req.session.destroy(() => res.status(403).json({ error: "Tilgangen er tilbakekalt." }));
+    });
     return;
   }
   res.status(401).json({ error: "Innlogging kreves.", loginUrl: "/logg-inn" });
@@ -183,7 +207,14 @@ export function requireCsrf(config: AppConfig) {
       return;
     }
     const expected = csrfToken(req);
-    const supplied = req.get("x-csrf-token") ?? "";
+    const bodyToken =
+      typeof req.body === "object" &&
+      req.body !== null &&
+      "_csrf" in req.body &&
+      typeof req.body._csrf === "string"
+        ? req.body._csrf
+        : "";
+    const supplied = req.get("x-csrf-token") ?? bodyToken;
     const expectedBuffer = Buffer.from(expected);
     const suppliedBuffer = Buffer.from(supplied);
     if (

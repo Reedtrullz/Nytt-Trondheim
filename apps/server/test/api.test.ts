@@ -169,11 +169,24 @@ async function loginViewer(runtime: Awaited<ReturnType<typeof testAppWithEmail>>
     "owner",
   );
   const agent = request.agent(runtime.app);
+  await confirmEmailLogin(agent, grant.invite.token);
+  return agent;
+}
+
+async function confirmEmailLogin(agent: ReturnType<typeof request.agent>, token: string) {
+  const confirmation = await agent
+    .get(`/auth/email/callback?token=${encodeURIComponent(token)}`)
+    .expect(200)
+    .expect("Cache-Control", /no-store/);
+  const csrf = confirmation.text.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  expect(csrf).toBeDefined();
   await agent
-    .get(`/auth/email/callback?token=${encodeURIComponent(grant.invite.token)}`)
+    .post("/auth/email/callback")
+    .set("Origin", "http://localhost")
+    .type("form")
+    .send({ token, _csrf: csrf })
     .expect(302)
     .expect("Location", "/");
-  return agent;
 }
 
 function addMemorySituation(store: Store, situation: Situation): void {
@@ -736,10 +749,16 @@ describe("private situation API", () => {
     expect(decision.invite).toBeDefined();
 
     const viewerAgent = request.agent(app);
+    const confirmationUrl = `/auth/email/callback?token=${encodeURIComponent(
+      decision.invite!.token,
+    )}`;
     await viewerAgent
-      .get(`/auth/email/callback?token=${encodeURIComponent(decision.invite!.token)}`)
-      .expect(302)
-      .expect("Location", "/");
+      .get(confirmationUrl)
+      .expect(200)
+      .expect("Cache-Control", /no-store/);
+    await viewerAgent.get("/api/session").expect(401);
+    await viewerAgent.get(confirmationUrl).expect(200);
+    await confirmEmailLogin(viewerAgent, decision.invite!.token);
     const session = await viewerAgent.get("/api/session").expect(200);
     expect(session.body.user).toMatchObject({
       email: "viewer@example.test",
@@ -756,6 +775,18 @@ describe("private situation API", () => {
       .post("/api/situations/skogbrann-bymarka/exports")
       .set("X-CSRF-Token", session.body.csrfToken as string)
       .expect(403);
+
+    const replayAgent = request.agent(app);
+    const replayConfirmation = await replayAgent.get(confirmationUrl).expect(200);
+    const replayCsrf = replayConfirmation.text.match(/name="_csrf" value="([^"]+)"/)?.[1];
+    await replayAgent
+      .post("/auth/email/callback")
+      .set("Origin", "http://localhost")
+      .type("form")
+      .send({ token: decision.invite!.token, _csrf: replayCsrf })
+      .expect(302)
+      .expect("Location", "/logg-inn?email=invalid");
+    await replayAgent.get("/api/session").expect(401);
   });
 
   it("keeps private timeline entries out of viewer situation endpoints", async () => {
@@ -798,9 +829,38 @@ describe("private situation API", () => {
       official: false,
       provenance: "private_annotation",
     } satisfies Situation["timeline"][number];
+    const privateKindOnlyEntry = {
+      id: "timeline-private-kind-only",
+      situationId: sampleSituation.id,
+      timestamp: "2026-06-15T07:15:00.000Z",
+      kind: "private_annotation",
+      title: "Privat uten eksplisitt proveniens",
+      detail: "Intern kind-only observasjon.",
+      sourceLabel: "Privat markering",
+      sourceUrl: "",
+      official: false,
+    } satisfies Situation["timeline"][number];
+    const privateIdOnlyEntry = {
+      id: "timeline-private-id-only",
+      situationId: sampleSituation.id,
+      timestamp: "2026-06-15T07:20:00.000Z",
+      kind: "review_action",
+      title: "Privat koblet markering",
+      detail: "Intern privateAnnotationId-observasjon.",
+      sourceLabel: "Privat markering",
+      sourceUrl: "",
+      official: false,
+      privateAnnotationId: "annotation-two",
+    } satisfies Situation["timeline"][number];
     const situation = {
       ...sampleSituation,
-      timeline: [publicEntry, privateAnnotationEntry, privateReviewEntry],
+      timeline: [
+        publicEntry,
+        privateAnnotationEntry,
+        privateReviewEntry,
+        privateKindOnlyEntry,
+        privateIdOnlyEntry,
+      ],
     } satisfies Situation;
     const workspace = {
       situation,
@@ -822,6 +882,8 @@ describe("private situation API", () => {
           "timeline-public",
           "timeline-private-annotation",
           "timeline-private-review",
+          "timeline-private-kind-only",
+          "timeline-private-id-only",
         ]);
       });
 
@@ -843,6 +905,16 @@ describe("private situation API", () => {
         expect(response.body.situation.timeline.map((entry: { id: string }) => entry.id)).toEqual([
           "timeline-public",
         ]);
+      });
+    await viewer
+      .get("/api/situations/workspace-map")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.timeline.map((entry: { id: string }) => entry.id)).toEqual([
+          "timeline-public",
+        ]);
+        expect(JSON.stringify(response.body)).not.toContain("kind-only observasjon");
+        expect(JSON.stringify(response.body)).not.toContain("privateAnnotationId-observasjon");
       });
   });
 
@@ -1052,6 +1124,66 @@ describe("private situation API", () => {
       .expect(202)
       .expect({ status: "received" });
     expect(sentEmails).toHaveLength(0);
+  });
+
+  it("invalidates an existing viewer session when access is revoked", async () => {
+    const runtime = await testAppWithEmail(false);
+    const viewerAgent = await loginViewer(runtime);
+    const users = await runtime.store.listUsers("owner");
+    const viewer = users.items.find((user) => user.email === "timeline-viewer@example.test");
+    expect(viewer).toBeDefined();
+
+    await viewerAgent.get("/api/session").expect(200);
+    await runtime.store.updateUser(viewer!.id, { status: "revoked" }, "owner");
+
+    await viewerAgent
+      .get("/api/session")
+      .expect(403)
+      .expect({ error: "Tilgangen er tilbakekalt." });
+
+    await runtime.store.updateUser(viewer!.id, { status: "active" }, "owner");
+    await viewerAgent
+      .get("/api/session")
+      .expect(401)
+      .expect({ error: "Innlogging kreves.", loginUrl: "/logg-inn" });
+  });
+
+  it("deletes both current and legacy PostgreSQL sessions when revoking a viewer", async () => {
+    const captured: Array<{ sql: string; params?: unknown[] }> = [];
+    const userRow = {
+      id: "viewer-id",
+      displayName: "Viewer",
+      email: "viewer@example.test",
+      role: "viewer",
+      status: "active",
+      createdAt: "2026-07-12T20:00:00.000Z",
+      updatedAt: "2026-07-12T20:00:00.000Z",
+      lastLoginAt: "2026-07-12T20:00:00.000Z",
+    };
+    const client = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push({ sql: normalizedSql, params });
+        if (normalizedSql.startsWith("SELECT id, display_name")) return { rows: [userRow] };
+        if (normalizedSql.startsWith("UPDATE users")) {
+          return { rows: [{ ...userRow, status: "revoked" }] };
+        }
+        return { rows: [] };
+      },
+      release: vi.fn(),
+    };
+    const fakePool = { connect: async () => client };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await store.updateUser("viewer-id", { status: "revoked" }, "owner");
+
+    const deletion = captured.find((query) => query.sql.startsWith('DELETE FROM "session"'));
+    expect(deletion).toEqual({
+      sql: expect.stringContaining("sess->'passport'->'user'->>'id' = $1"),
+      params: ["viewer-id"],
+    });
+    expect(captured.at(-1)?.sql).toBe("COMMIT");
+    expect(client.release).toHaveBeenCalledOnce();
   });
 
   it("includes a provenance explanation for situation workspaces", async () => {

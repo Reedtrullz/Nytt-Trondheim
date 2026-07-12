@@ -425,12 +425,13 @@ export function officialTrafficSituationsFromEvents(
   });
 }
 
-export function resolvedOfficialTrafficSituationsForMissingDatex(
+export function preservedOfficialTrafficSituationsForMissingDatex(
   existingSituations: Situation[],
   activeDatexEventIds: Set<string>,
-  resolvedAt: string,
 ): Situation[] {
-  const sourceLabel = "Statens vegvesen DATEX";
+  // Snapshot omission is not affirmative evidence that an incident has ended.
+  // Keep the last confirmed state until DATEX supplies an explicit state/validity change
+  // or another trusted update resolves it.
   return existingSituations
     .filter(
       (situation) =>
@@ -439,30 +440,7 @@ export function resolvedOfficialTrafficSituationsForMissingDatex(
         situation.officialEventId &&
         !activeDatexEventIds.has(situation.officialEventId),
     )
-    .map((situation) => {
-      const sourceUrl =
-        situation.evidence.find(
-          (evidence) => evidence.source === "datex" && evidence.provenance === "official",
-        )?.sourceUrl ?? "";
-      return {
-        ...situation,
-        status: "resolved",
-        updatedAt: resolvedAt,
-        timeline: [
-          ...situation.timeline,
-          {
-            id: `timeline-datex-resolved-${situation.officialEventId}`,
-            situationId: situation.id,
-            timestamp: resolvedAt,
-            title: "DATEX-hendelsen er ikke lenger aktiv",
-            detail: "Statens vegvesen DATEX-snapshot inneholder ikke lenger denne hendelsen.",
-            sourceLabel,
-            sourceUrl,
-            official: true,
-          },
-        ],
-      } satisfies Situation;
-    });
+    .map((situation) => structuredClone(situation));
 }
 
 export function resolvedDuplicateOfficialTrafficSituationsForMergedDatex(

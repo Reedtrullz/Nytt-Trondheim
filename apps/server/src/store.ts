@@ -325,6 +325,7 @@ export interface Store {
   grantUserAccess(input: UserGrantInput, login: string): Promise<UserGrantResult>;
   updateUser(id: string, input: UserUpdateInput, login: string): Promise<UserUpdateResult>;
   ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false>;
+  authUserById(id: string): Promise<AuthUser | undefined>;
   getBootstrap(login: string): Promise<BootstrapPayload>;
   listArticles(filters: ArticleFilters, login: string): Promise<ArticlePage>;
   listCityPulseStories(filters: ArticleFilters, login: string): Promise<CityPulseStoryPage>;
@@ -3805,6 +3806,18 @@ export class MemoryStore implements Store {
     };
   }
 
+  async authUserById(id: string): Promise<AuthUser | undefined> {
+    const user = this.users.find((item) => item.id === id);
+    if (!user) return undefined;
+    const githubIdentity = this.userIdentities.find(
+      (item) => item.userId === id && item.provider === "github",
+    );
+    return {
+      ...authUserFromAppUser(user),
+      login: githubIdentity?.providerSubject ?? user.email ?? user.id,
+    };
+  }
+
   async getBootstrap(): Promise<BootstrapPayload> {
     const storyPage = await this.listCityPulseStories({
       scope: "trondheim",
@@ -5137,31 +5150,53 @@ export class PgStore implements Store {
   }
 
   async updateUser(id: string, input: UserUpdateInput, login: string): Promise<UserUpdateResult> {
-    const current = await this.rowForUserId(this.pool, id);
-    if (!current) throw Object.assign(new Error("Brukeren finnes ikke."), { status: 404 });
-    if (current.role === "owner" && input.status === "revoked") {
-      throw Object.assign(new Error("Eierkontoen kan ikke tilbakekalles her."), { status: 400 });
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await this.rowForUserId(client, id);
+      if (!current) throw Object.assign(new Error("Brukeren finnes ikke."), { status: 404 });
+      if (current.role === "owner" && input.status === "revoked") {
+        throw Object.assign(new Error("Eierkontoen kan ikke tilbakekalles her."), { status: 400 });
+      }
+      const result = await client.query<UserRow>(
+        `UPDATE users
+         SET status = COALESCE($2, status), updated_at = now()
+         WHERE id = $1
+         RETURNING id, display_name AS "displayName", email, role, status,
+                   created_at AS "createdAt", updated_at AS "updatedAt",
+                   last_login_at AS "lastLoginAt"`,
+        [id, input.status ?? null],
+      );
+      const user = appUserFromRow(result.rows[0]!);
+      if (input.status === "revoked") {
+        await client.query(
+          `DELETE FROM "session"
+           WHERE sess->'passport'->>'user' = $1
+              OR sess->'passport'->'user'->>'id' = $1`,
+          [id],
+        );
+      }
+      let invite: UserUpdateResult["invite"];
+      if (input.resendInvite && user.email && user.status === "active") {
+        const token = await this.issuePgAuthToken(client, "invite", inviteTtlMs, {
+          userId: user.id,
+          email: user.email,
+          createdBy: login,
+        });
+        invite = { email: user.email, displayName: user.displayName, token };
+      }
+      await client.query("COMMIT");
+      return { user, ...(invite ? { invite } : {}) };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Preserve the original failure.
+      }
+      throw error;
+    } finally {
+      client.release();
     }
-    const result = await this.pool.query<UserRow>(
-      `UPDATE users
-       SET status = COALESCE($2, status), updated_at = now()
-       WHERE id = $1
-       RETURNING id, display_name AS "displayName", email, role, status,
-                 created_at AS "createdAt", updated_at AS "updatedAt",
-                 last_login_at AS "lastLoginAt"`,
-      [id, input.status ?? null],
-    );
-    const user = appUserFromRow(result.rows[0]!);
-    if (!input.resendInvite || !user.email || user.status !== "active") return { user };
-    const token = await this.issuePgAuthToken(this.pool, "invite", inviteTtlMs, {
-      userId: user.id,
-      email: user.email,
-      createdBy: login,
-    });
-    return {
-      user,
-      invite: { email: user.email, displayName: user.displayName, token },
-    };
   }
 
   async ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false> {
@@ -5229,6 +5264,29 @@ export class PgStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  async authUserById(id: string): Promise<AuthUser | undefined> {
+    const result = await this.pool.query<UserRow & { login: string }>(
+      `SELECT u.id, u.display_name AS "displayName", u.email, u.role, u.status,
+              u.created_at AS "createdAt", u.updated_at AS "updatedAt",
+              u.last_login_at AS "lastLoginAt",
+              COALESCE(
+                (SELECT ui.provider_subject
+                 FROM user_identities ui
+                 WHERE ui.user_id = u.id AND ui.provider = 'github'
+                 ORDER BY ui.created_at ASC
+                 LIMIT 1),
+                u.email,
+                u.id
+              ) AS login
+       FROM users u
+       WHERE u.id = $1`,
+      [id],
+    );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return { ...authUserFromAppUser(appUserFromRow(row)), login: row.login };
   }
 
   async seedDevelopmentData(): Promise<void> {

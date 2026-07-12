@@ -27,7 +27,6 @@ import {
   runWithConcurrency,
   sourceHealthFromDeepSeekAnalysis,
   sourceHealthFromPushDelivery,
-  shouldResolveMissingDatexSituations,
 } from "../src/index.js";
 import { normalizeDatexCredentialedEndpoint } from "../src/datex.js";
 
@@ -635,11 +634,6 @@ describe("worker lifecycle helpers", () => {
       expect.not.objectContaining({ coverageBundle: expect.anything() }),
       expect.not.objectContaining({ coverageBundle: expect.anything() }),
     ]);
-  });
-
-  it("resolves missing DATEX situations only after a fresh snapshot", () => {
-    expect(shouldResolveMissingDatexSituations(true)).toBe(true);
-    expect(shouldResolveMissingDatexSituations(false)).toBe(false);
   });
 
   it("skips overlapping collection cycles while one is in flight", async () => {

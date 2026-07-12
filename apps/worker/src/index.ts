@@ -44,7 +44,6 @@ import {
   promotableDatexEventIds,
   resolvedDuplicateOfficialTrafficSituationsForMergedDatex,
   resolvedNonPromotableOfficialTrafficSituations,
-  resolvedOfficialTrafficSituationsForMissingDatex,
 } from "./clusters.js";
 import {
   collectDatexSituationEvents,
@@ -230,10 +229,6 @@ export function collectorRunFromMetric(metric: WorkerSourceMetricInput): SourceC
         }
       : {}),
   };
-}
-
-export function shouldResolveMissingDatexSituations(freshSnapshot: boolean): boolean {
-  return freshSnapshot;
 }
 
 const softDeepSeekOutputFailureMarkers = [
@@ -1528,15 +1523,6 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     activeDatexSituationIds,
     new Date().toISOString(),
   );
-  const resolvedDatexSituations = shouldResolveMissingDatexSituations(
-    freshDatexSnapshotEventIds !== undefined,
-  )
-    ? resolvedOfficialTrafficSituationsForMissingDatex(
-        trackedSituations,
-        activeDatexEventIds,
-        new Date().toISOString(),
-      )
-    : [];
   const situationsToPersist = [
     ...deterministicSituations,
     ...aiSituationUpdates,
@@ -1544,7 +1530,6 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     ...politiloggenSituations,
     ...resolvedDuplicateDatexSituations,
     ...resolvedNonPromotableDatexSituations,
-    ...resolvedDatexSituations,
   ];
   await runWithConcurrency(situationsToPersist, 6, (situation) =>
     repository.upsertSituation(situation),

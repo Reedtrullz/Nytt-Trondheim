@@ -6,7 +6,7 @@ import {
   promotableDatexEventIds,
   resolvedDuplicateOfficialTrafficSituationsForMergedDatex,
   resolvedNonPromotableOfficialTrafficSituations,
-  resolvedOfficialTrafficSituationsForMissingDatex,
+  preservedOfficialTrafficSituationsForMissingDatex,
 } from "../src/clusters.js";
 import { promotableDatexEvent } from "./fixtures/incident-fixtures.js";
 
@@ -383,23 +383,19 @@ describe("official traffic situation promotion", () => {
     expect(situation?.activationBasis?.rule).toBe("official_source");
   });
 
-  it("resolves active DATEX situations whose official event is missing from the latest snapshot", () => {
+  it("keeps active DATEX situations open when an event is missing from the latest snapshot", () => {
     const [existing] = officialTrafficSituationsFromEvents([datexEvent], []);
-    const [resolved] = resolvedOfficialTrafficSituationsForMissingDatex(
+    const [preserved] = preservedOfficialTrafficSituationsForMissingDatex(
       [existing!],
       new Set<string>(),
-      "2026-05-28T10:30:00.000Z",
     );
 
-    expect(resolved).toMatchObject({
+    expect(preserved).toMatchObject({
       id: existing?.id,
-      status: "resolved",
-      updatedAt: "2026-05-28T10:30:00.000Z",
+      status: "active",
+      updatedAt: existing?.updatedAt,
     });
-    expect(resolved?.timeline.at(-1)).toMatchObject({
-      title: "DATEX-hendelsen er ikke lenger aktiv",
-      official: true,
-    });
+    expect(preserved?.timeline).toEqual(existing?.timeline);
   });
 
   it("does not treat DATEX traffic events as MET/NVE warning context", () => {

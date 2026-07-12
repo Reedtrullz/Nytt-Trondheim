@@ -335,6 +335,11 @@
 
     - name: Promote candidate and validate production
       block:
+        - name: Capture candidate promotion timestamp
+          ansible.builtin.command: date -u +%Y-%m-%dT%H:%M:%S.%6NZ
+          register: candidate_promotion_started_at
+          changed_when: false
+
         - name: Promote API and worker
           ansible.builtin.command: docker compose --env-file .env.production up -d app worker
           args:
@@ -486,11 +491,12 @@
         - name: Verify worker has a recent completed cycle
           ansible.builtin.shell: |
             set -euo pipefail
-            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -At <<'SQL'
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -At <<'SQL'
               SELECT count(*)
               FROM worker_cycle_metrics
               WHERE id='latest'
-                AND cycle_completed_at > now() - interval '2 hours'
+                AND cycle_started_at >= :'candidate_promotion_started_at'::timestamptz
+                AND cycle_completed_at >= :'candidate_promotion_started_at'::timestamptz
                 AND cycle_completed_at >= cycle_started_at;
             SQL
             )"
@@ -507,11 +513,12 @@
         - name: Verify traffic source health after candidate promotion
           ansible.builtin.shell: |
             set -euo pipefail
-            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -Atqc "
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -Atqc "
               SELECT count(*)
               FROM source_health
               WHERE source IN ('vegvesen_traffic_info','trafikkdata')
-                AND state='ok';
+                AND state='ok'
+                AND last_checked_at >= :'candidate_promotion_started_at'::timestamptz;
             ")"
             test "$count" -eq 2
           args:
@@ -526,11 +533,12 @@
         - name: Verify DATEX source health rows when DATEX is enabled
           ansible.builtin.shell: |
             set -euo pipefail
-            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -Atqc "
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -Atqc "
               SELECT count(*)
               FROM source_health
               WHERE source IN ('datex','datex_travel_time')
-                AND state='ok';
+                AND state='ok'
+                AND last_checked_at >= :'candidate_promotion_started_at'::timestamptz;
             ")"
             test "$count" -eq 2
           args:
@@ -548,10 +556,23 @@
         - name: Verify Entur source health and provenance invariants when tables exist
           ansible.builtin.shell: |
             set -euo pipefail
+            entur_source_health_count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -Atqc "
+              SELECT CASE
+                WHEN to_regclass('public.public_transport_vehicles') IS NULL
+                  OR to_regclass('public.public_transport_service_alerts') IS NULL THEN 2
+                ELSE (
+                  SELECT count(*)
+                  FROM source_health
+                  WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
+                    AND state='ok'
+                    AND last_checked_at >= :'candidate_promotion_started_at'::timestamptz
+                )
+              END;
+            ")"
+            test "$entur_source_health_count" -eq 2
             docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 <<'SQL'
             DO $$
             DECLARE
-              entur_source_health_count integer;
               accidental_vehicle_source_items integer;
               accidental_official_events integer;
               accidental_entur_situations integer;
@@ -560,15 +581,6 @@
                  OR to_regclass('public.public_transport_service_alerts') IS NULL THEN
                 RAISE NOTICE 'Skipping Entur verification because public transport tables do not exist yet.';
                 RETURN;
-              END IF;
-
-              SELECT count(*) INTO entur_source_health_count
-              FROM source_health
-              WHERE source IN ('entur_vehicle_positions','entur_service_alerts')
-                AND state='ok';
-
-              IF entur_source_health_count <> 2 THEN
-                RAISE EXCEPTION 'Expected 2 healthy Entur source_health rows, found %', entur_source_health_count;
               END IF;
 
               SELECT count(*) INTO accidental_vehicle_source_items
