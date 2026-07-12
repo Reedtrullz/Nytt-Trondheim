@@ -1735,8 +1735,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/situations/workspace-map", async (req, res, next) => {
     try {
       const query = workspaceMapQuerySchema.parse(req.query);
+      const isOwner = req.user?.role === "owner";
       const effectiveQuery =
-        req.user?.role === "owner"
+        isOwner
           ? query
           : {
               ...query,
@@ -1746,14 +1747,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const login = currentLogin(req);
       const includeDismissed = effectiveQuery.statuses?.includes("dismissed") ?? false;
       const situations = await store.listSituations(
-        { includeDismissed, limit: 100, publicOnly: req.user?.role !== "owner" },
+        { includeDismissed, limit: 100, publicOnly: !isOwner },
         login,
       );
       const workspaceRows = await Promise.all(
         situations.items.map(async (situation) => {
           const [workspace, sourceItems] = await Promise.all([
             store.getWorkspace(situation.id, login),
-            store.listSituationSourceItems(situation.id, login),
+            isOwner ? store.listSituationSourceItems(situation.id, login) : Promise.resolve([]),
           ]);
           if (!workspace) return undefined;
           return { workspace, sourceItems };
@@ -1766,9 +1767,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const mappedSituations = entries
         .map(({ workspace, sourceItems }) =>
           mapFirstSituationFromWorkspace(
-            req.user?.role === "owner"
-              ? workspace.situation
-              : viewerSafeWorkspace(workspace).situation,
+            isOwner ? workspace.situation : viewerSafeWorkspace(workspace).situation,
             sourceItems,
             effectiveQuery,
           ),
@@ -1777,7 +1776,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const visibleIds = new Set(mappedSituations.map((situation) => situation.id));
       const timeline = entries
         .filter(({ workspace }) => visibleIds.has(workspace.situation.id))
-        .flatMap(({ workspace }) => workspace.situation.timeline)
+        .flatMap(({ workspace }) =>
+          isOwner ? workspace.situation.timeline : viewerSafeTimeline(workspace.situation.timeline),
+        )
         .filter((entry) => timelineEntryMatchesWorkspaceQuery(entry, effectiveQuery))
         .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
         .slice(0, 100);
@@ -1806,7 +1807,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
             "situations",
             "evidence",
             "preparedness_context",
-            ...(req.user?.role === "owner" ? ["private_annotations" as const] : []),
+            ...(isOwner ? ["private_annotations" as const] : []),
           ],
           sourceFilters: {
             providers: effectiveQuery.sources,

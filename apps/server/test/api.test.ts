@@ -798,9 +798,38 @@ describe("private situation API", () => {
       official: false,
       provenance: "private_annotation",
     } satisfies Situation["timeline"][number];
+    const privateKindOnlyEntry = {
+      id: "timeline-private-kind-only",
+      situationId: sampleSituation.id,
+      timestamp: "2026-06-15T07:15:00.000Z",
+      kind: "private_annotation",
+      title: "Privat uten eksplisitt proveniens",
+      detail: "Intern kind-only observasjon.",
+      sourceLabel: "Privat markering",
+      sourceUrl: "",
+      official: false,
+    } satisfies Situation["timeline"][number];
+    const privateIdOnlyEntry = {
+      id: "timeline-private-id-only",
+      situationId: sampleSituation.id,
+      timestamp: "2026-06-15T07:20:00.000Z",
+      kind: "review_action",
+      title: "Privat koblet markering",
+      detail: "Intern privateAnnotationId-observasjon.",
+      sourceLabel: "Privat markering",
+      sourceUrl: "",
+      official: false,
+      privateAnnotationId: "annotation-two",
+    } satisfies Situation["timeline"][number];
     const situation = {
       ...sampleSituation,
-      timeline: [publicEntry, privateAnnotationEntry, privateReviewEntry],
+      timeline: [
+        publicEntry,
+        privateAnnotationEntry,
+        privateReviewEntry,
+        privateKindOnlyEntry,
+        privateIdOnlyEntry,
+      ],
     } satisfies Situation;
     const workspace = {
       situation,
@@ -822,6 +851,8 @@ describe("private situation API", () => {
           "timeline-public",
           "timeline-private-annotation",
           "timeline-private-review",
+          "timeline-private-kind-only",
+          "timeline-private-id-only",
         ]);
       });
 
@@ -843,6 +874,16 @@ describe("private situation API", () => {
         expect(response.body.situation.timeline.map((entry: { id: string }) => entry.id)).toEqual([
           "timeline-public",
         ]);
+      });
+    await viewer
+      .get("/api/situations/workspace-map")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.timeline.map((entry: { id: string }) => entry.id)).toEqual([
+          "timeline-public",
+        ]);
+        expect(JSON.stringify(response.body)).not.toContain("kind-only observasjon");
+        expect(JSON.stringify(response.body)).not.toContain("privateAnnotationId-observasjon");
       });
   });
 
