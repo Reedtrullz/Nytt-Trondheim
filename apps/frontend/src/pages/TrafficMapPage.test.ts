@@ -2188,6 +2188,51 @@ describe("TrafficMapPage route overlay helpers", () => {
     });
   });
 
+  it("lets remembered live status overturn a stale most-robust label", () => {
+    const labelledRobust = {
+      ...planWithItinerary.itineraries[0]!,
+      id: "itinerary-labelled-robust",
+      labels: ["most_robust"] as TravelPlanPayload["itineraries"][number]["labels"],
+      departureTime: "2026-06-01T09:10:00.000Z",
+      arrivalTime: "2026-06-01T09:30:00.000Z",
+      durationSeconds: 1_200,
+    };
+    const liveRobust = {
+      ...labelledRobust,
+      id: "itinerary-live-robust",
+      labels: [] as TravelPlanPayload["itineraries"][number]["labels"],
+      departureTime: "2026-06-01T09:15:00.000Z",
+      arrivalTime: "2026-06-01T09:40:00.000Z",
+      durationSeconds: 1_500,
+    };
+
+    const model = buildRouteChoiceModel({
+      plan: {
+        ...planWithItinerary,
+        itineraries: [labelledRobust, liveRobust],
+      },
+      selectedItineraryId: "itinerary-live-robust",
+      liveStatuses: {
+        "itinerary-labelled-robust": {
+          label: "Innstilt",
+          detail: "Avgangen er innstilt.",
+          severity: "warning",
+        },
+        "itinerary-live-robust": {
+          label: "Sanntid",
+          detail: "Avgangen er bekreftet i sanntid.",
+          severity: "ok",
+        },
+      },
+    });
+
+    expect(model?.options.find((option) => option.kind === "robust")).toMatchObject({
+      itineraryId: "itinerary-live-robust",
+      severity: "ok",
+    });
+    expect(model?.options.find((option) => option.kind === "robust")?.meta).toContain("25 min");
+  });
+
   it("keeps walk-only itinerary choices calm instead of inventing live-board warnings", () => {
     const walkingLeg = {
       ...planWithItinerary.itineraries[0]!.legs[0]!,

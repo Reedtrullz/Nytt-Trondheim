@@ -1810,9 +1810,12 @@ export function buildRouteChoiceModel(input: {
       itineraries,
       (itinerary) => itinerary.transferCount * 30 + Math.round(itinerary.durationSeconds / 60),
     )[0]!;
-  const robustItinerary =
-    itineraries.find((itinerary) => itinerary.labels.includes("most_robust")) ??
-    sortedItineraries(itineraries, (itinerary) => evaluatedFor(itinerary).robustScore)[0]!;
+  // The upstream label is only a planning-time hint. Live departure checks can make another
+  // itinerary more robust, so always rank the latest evaluated state here.
+  const robustItinerary = sortedItineraries(
+    itineraries,
+    (itinerary) => evaluatedFor(itinerary).robustScore,
+  )[0]!;
   const itineraryByKind: Record<RouteChoiceKind, TravelPlanItinerary> = {
     recommended: recommendedItinerary,
     fastest: fastestItinerary,
