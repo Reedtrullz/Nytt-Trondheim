@@ -1095,6 +1095,66 @@ describe("private situation API", () => {
     expect(sentEmails).toHaveLength(0);
   });
 
+  it("invalidates an existing viewer session when access is revoked", async () => {
+    const runtime = await testAppWithEmail(false);
+    const viewerAgent = await loginViewer(runtime);
+    const users = await runtime.store.listUsers("owner");
+    const viewer = users.items.find((user) => user.email === "timeline-viewer@example.test");
+    expect(viewer).toBeDefined();
+
+    await viewerAgent.get("/api/session").expect(200);
+    await runtime.store.updateUser(viewer!.id, { status: "revoked" }, "owner");
+
+    await viewerAgent
+      .get("/api/session")
+      .expect(403)
+      .expect({ error: "Tilgangen er tilbakekalt." });
+
+    await runtime.store.updateUser(viewer!.id, { status: "active" }, "owner");
+    await viewerAgent
+      .get("/api/session")
+      .expect(401)
+      .expect({ error: "Innlogging kreves.", loginUrl: "/logg-inn" });
+  });
+
+  it("deletes both current and legacy PostgreSQL sessions when revoking a viewer", async () => {
+    const captured: Array<{ sql: string; params?: unknown[] }> = [];
+    const userRow = {
+      id: "viewer-id",
+      displayName: "Viewer",
+      email: "viewer@example.test",
+      role: "viewer",
+      status: "active",
+      createdAt: "2026-07-12T20:00:00.000Z",
+      updatedAt: "2026-07-12T20:00:00.000Z",
+      lastLoginAt: "2026-07-12T20:00:00.000Z",
+    };
+    const client = {
+      async query(sql: string, params?: unknown[]) {
+        const normalizedSql = sql.replace(/\s+/g, " ").trim();
+        captured.push({ sql: normalizedSql, params });
+        if (normalizedSql.startsWith("SELECT id, display_name")) return { rows: [userRow] };
+        if (normalizedSql.startsWith("UPDATE users")) {
+          return { rows: [{ ...userRow, status: "revoked" }] };
+        }
+        return { rows: [] };
+      },
+      release: vi.fn(),
+    };
+    const fakePool = { connect: async () => client };
+    const store = new PgStore(fakePool as unknown as ConstructorParameters<typeof PgStore>[0]);
+
+    await store.updateUser("viewer-id", { status: "revoked" }, "owner");
+
+    const deletion = captured.find((query) => query.sql.startsWith('DELETE FROM "session"'));
+    expect(deletion).toEqual({
+      sql: expect.stringContaining("sess->'passport'->'user'->>'id' = $1"),
+      params: ["viewer-id"],
+    });
+    expect(captured.at(-1)?.sql).toBe("COMMIT");
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
   it("includes a provenance explanation for situation workspaces", async () => {
     const { agent } = await ownerAgent();
     const response = await agent.get("/api/situations/skogbrann-bymarka").expect(200);

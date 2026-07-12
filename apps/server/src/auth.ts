@@ -20,6 +20,7 @@ export interface AuthUser {
 
 export interface AuthAccountStore {
   ensureGitHubOwner(profile: Profile, allowedLogin: string): Promise<AuthUser | false>;
+  authUserById(id: string): Promise<AuthUser | undefined>;
 }
 
 export function authorizeGitHubProfile(
@@ -101,8 +102,28 @@ export function configureAuth(
     throw new Error("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required in production.");
   }
 
-  passport.serializeUser((user, done) => done(null, user));
-  passport.deserializeUser((user: Express.User, done) => done(null, user));
+  passport.serializeUser((user, done) => done(null, user.id));
+  passport.deserializeUser((serialized: unknown, done) => {
+    // Accept the pre-migration object shape so sessions issued by the previous release
+    // are revalidated instead of being trusted or needlessly logged out during rollout.
+    const id =
+      typeof serialized === "string"
+        ? serialized
+        : typeof serialized === "object" &&
+            serialized !== null &&
+            "id" in serialized &&
+            typeof serialized.id === "string"
+          ? serialized.id
+          : undefined;
+    if (!id) {
+      done(null, false);
+      return;
+    }
+    accountStore
+      .authUserById(id)
+      .then((user) => done(null, user ?? false))
+      .catch((error: Error) => done(error));
+  });
   passport.use(
     new GitHubStrategy(
       {
@@ -148,7 +169,9 @@ export function requireUser(req: Request, res: Response, next: NextFunction): vo
     return;
   }
   if (req.user?.status === "revoked") {
-    res.status(403).json({ error: "Tilgangen er tilbakekalt." });
+    req.logout(() => {
+      req.session.destroy(() => res.status(403).json({ error: "Tilgangen er tilbakekalt." }));
+    });
     return;
   }
   res.status(401).json({ error: "Innlogging kreves.", loginUrl: "/logg-inn" });
