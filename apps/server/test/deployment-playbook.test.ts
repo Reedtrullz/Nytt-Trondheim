@@ -111,6 +111,8 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toContain("state='ok'");
     expect(task).toContain("last_checked_at >= :'candidate_promotion_started_at'::timestamptz");
     expect(task).toContain("-v candidate_promotion_started_at=");
+    expect(task).toContain("<<'SQL'");
+    expect(task).not.toContain("-Atqc");
     expect(task).toContain("until:");
     expect(task).toMatch(/retries:\s*\d+/);
   });
@@ -137,6 +139,7 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
     expect(task).toContain("state='ok'");
     expect(task).toContain("last_checked_at >= :'candidate_promotion_started_at'::timestamptz");
+    expect(task).toContain("<<'SQL'");
     expect(task).toContain('test "$count" -eq 2');
     expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
     expect(task).toContain("register: traffic_source_health");
@@ -167,5 +170,7 @@ describe("deployment playbook Entur verification", () => {
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("last_checked_at >= :'candidate_promotion_started_at'::timestamptz");
     expect(task).toContain("-v candidate_promotion_started_at=");
+    expect(task).toContain("<<'SQL'");
+    expect(task).not.toContain("-Atqc");
   });
 });
