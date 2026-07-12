@@ -38,6 +38,12 @@ describe("deployment playbook Entur verification", () => {
     expect(rescueStart).toBeGreaterThan(blockStart);
 
     const validationBlock = playbook.slice(blockStart, rescueStart);
+    const timestampCapture = validationBlock.indexOf(
+      "- name: Capture candidate promotion timestamp",
+    );
+    const promotion = validationBlock.indexOf("- name: Promote API and worker");
+    expect(timestampCapture).toBeGreaterThan(-1);
+    expect(timestampCapture).toBeLessThan(promotion);
     expect(validationBlock).toContain("- name: Promote API and worker");
     expect(validationBlock).toContain("- name: Verify production health");
     expect(validationBlock).toContain("- name: Capture promoted worker startup state");
@@ -94,7 +100,7 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toMatch(/poll:\s*15/);
   });
 
-  it("requires DATEX source health rows to be ok without per-source timestamp coupling", () => {
+  it("requires DATEX source health rows to come from the promoted candidate window", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify DATEX source health rows when DATEX is enabled",
     );
@@ -103,8 +109,8 @@ describe("deployment playbook Entur verification", () => {
 
     expect(taskStart).toBeGreaterThan(-1);
     expect(task).toContain("state='ok'");
-    expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
-    expect(task).not.toContain("candidate_validation_started_at.stdout");
+    expect(task).toContain("last_checked_at >= :'candidate_promotion_started_at'::timestamptz");
+    expect(task).toContain("-v candidate_promotion_started_at=");
     expect(task).toContain("until:");
     expect(task).toMatch(/retries:\s*\d+/);
   });
@@ -121,14 +127,16 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toContain("worker health is $health");
     expect(task).toContain("- name: Verify worker has a recent completed cycle");
     expect(task).toContain("FROM worker_cycle_metrics");
-    expect(task).toContain("cycle_completed_at > now() - interval '2 hours'");
+    expect(task).toContain("cycle_started_at >= :'candidate_promotion_started_at'::timestamptz");
+    expect(task).toContain("cycle_completed_at >= :'candidate_promotion_started_at'::timestamptz");
     expect(task).toContain("register: promoted_worker_cycle");
     expect(task).toContain("until: promoted_worker_cycle.rc == 0");
-    expect(task).not.toContain("candidate_validation_started_at.stdout");
+    expect(task).toContain("candidate_promotion_started_at.stdout");
     expect(task).toContain("- name: Verify traffic source health after candidate promotion");
     expect(task).toContain("FROM source_health");
     expect(task).toContain("source IN ('vegvesen_traffic_info','trafikkdata')");
     expect(task).toContain("state='ok'");
+    expect(task).toContain("last_checked_at >= :'candidate_promotion_started_at'::timestamptz");
     expect(task).toContain('test "$count" -eq 2');
     expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
     expect(task).toContain("register: traffic_source_health");
@@ -149,7 +157,7 @@ describe("deployment playbook Entur verification", () => {
     );
   });
 
-  it("requires healthy Entur source health rows without deploy-time freshness coupling", () => {
+  it("requires healthy Entur source rows from the promoted candidate window", () => {
     const taskStart = playbook.indexOf(
       "- name: Verify Entur source health and provenance invariants when tables exist",
     );
@@ -157,7 +165,7 @@ describe("deployment playbook Entur verification", () => {
     const task = playbook.slice(taskStart, taskEnd);
 
     expect(taskStart).toBeGreaterThan(-1);
-    expect(task).not.toMatch(/last_checked_at\s*>\s*now\(\)\s*-\s*interval/);
-    expect(task).not.toContain("candidate_validation_started_at.stdout");
+    expect(task).toContain("last_checked_at >= :'candidate_promotion_started_at'::timestamptz");
+    expect(task).toContain("-v candidate_promotion_started_at=");
   });
 });
