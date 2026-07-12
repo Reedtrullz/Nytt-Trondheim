@@ -102,8 +102,9 @@ export function configureAuth(
     throw new Error("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required in production.");
   }
 
-  passport.serializeUser((user, done) => done(null, user.id));
-  passport.deserializeUser((serialized: unknown, done) => {
+  const authenticator = new passport.Passport();
+  authenticator.serializeUser((user, done) => done(null, user.id));
+  authenticator.deserializeUser((serialized: unknown, done) => {
     // Accept the pre-migration object shape so sessions issued by the previous release
     // are revalidated instead of being trusted or needlessly logged out during rollout.
     const id =
@@ -124,7 +125,7 @@ export function configureAuth(
       .then((user) => done(null, user ?? false))
       .catch((error: Error) => done(error));
   });
-  passport.use(
+  authenticator.use(
     new GitHubStrategy(
       {
         clientID: config.githubClientId,
@@ -146,13 +147,13 @@ export function configureAuth(
       },
     ),
   );
-  app.use(passport.initialize());
-  app.use(passport.session());
+  app.use(authenticator.initialize());
+  app.use(authenticator.session());
   // GitHub Apps grant user-token access through configured permissions, not OAuth scopes.
-  app.get("/auth/github", passport.authenticate("github"));
+  app.get("/auth/github", authenticator.authenticate("github"));
   app.get(
     "/auth/github/callback",
-    passport.authenticate("github", { failureRedirect: "/logg-inn?auth=denied" }),
+    authenticator.authenticate("github", { failureRedirect: "/logg-inn?auth=denied" }),
     (_req, res) => res.redirect("/"),
   );
   app.post("/auth/logout", requireUser, requireCsrf(config), (req, res, next) => {
@@ -206,7 +207,14 @@ export function requireCsrf(config: AppConfig) {
       return;
     }
     const expected = csrfToken(req);
-    const supplied = req.get("x-csrf-token") ?? "";
+    const bodyToken =
+      typeof req.body === "object" &&
+      req.body !== null &&
+      "_csrf" in req.body &&
+      typeof req.body._csrf === "string"
+        ? req.body._csrf
+        : "";
+    const supplied = req.get("x-csrf-token") ?? bodyToken;
     const expectedBuffer = Buffer.from(expected);
     const suppliedBuffer = Buffer.from(supplied);
     if (

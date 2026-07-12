@@ -379,6 +379,14 @@ function appUrl(config: AppConfig, path: string): string {
   return new URL(path, config.publicOrigin).toString();
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!,
+  );
+}
+
 function accessVerificationEmail(config: AppConfig, input: { displayName: string; token: string }) {
   const url = appUrl(config, `/auth/access/verify?token=${encodeURIComponent(input.token)}`);
   return {
@@ -1082,6 +1090,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   });
 
   app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "10kb" }));
   configureAuth(app, config, store, pool);
 
   app.get("/auth/access/verify", async (req, res, next) => {
@@ -1117,19 +1126,56 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/auth/email/callback", async (req, res, next) => {
     try {
       const token = typeof req.query.token === "string" ? req.query.token : "";
-      const user = token ? await store.consumeEmailLoginToken(token) : undefined;
-      if (!user) {
+      if (!token) {
         res.redirect("/logg-inn?email=invalid");
         return;
       }
-      req.login(user, (error) => {
-        if (error) return next(error);
-        res.redirect("/");
-      });
+      res.setHeader("Cache-Control", "no-store");
+      res.status(200).type("html").send(`<!doctype html>
+<html lang="nb">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bekreft innlogging – Nytt Trondheim</title>
+  </head>
+  <body>
+    <main>
+      <h1>Bekreft innlogging</h1>
+      <p>Trykk på knappen for å bruke engangslenken og logge inn på Nytt Trondheim.</p>
+      <form method="post" action="/auth/email/callback">
+        <input type="hidden" name="token" value="${escapeHtmlAttribute(token)}">
+        <input type="hidden" name="_csrf" value="${escapeHtmlAttribute(csrfToken(req))}">
+        <button type="submit">Logg inn</button>
+      </form>
+    </main>
+  </body>
+</html>`);
     } catch (error) {
       next(error);
     }
   });
+
+  app.post(
+    "/auth/email/callback",
+    requirePublicSameOrigin(config),
+    requireCsrf(config),
+    async (req, res, next) => {
+      try {
+        const token = typeof req.body.token === "string" ? req.body.token : "";
+        const user = token ? await store.consumeEmailLoginToken(token) : undefined;
+        if (!user) {
+          res.redirect("/logg-inn?email=invalid");
+          return;
+        }
+        req.login(user, (error) => {
+          if (error) return next(error);
+          res.redirect("/");
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   app.post("/api/access-requests", requirePublicSameOrigin(config), async (req, res, next) => {
     try {
@@ -1736,14 +1782,13 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const query = workspaceMapQuerySchema.parse(req.query);
       const isOwner = req.user?.role === "owner";
-      const effectiveQuery =
-        isOwner
-          ? query
-          : {
-              ...query,
-              includePrivateAnnotations: false,
-              layers: query.layers?.filter((layer) => layer !== "private_annotations"),
-            };
+      const effectiveQuery = isOwner
+        ? query
+        : {
+            ...query,
+            includePrivateAnnotations: false,
+            layers: query.layers?.filter((layer) => layer !== "private_annotations"),
+          };
       const login = currentLogin(req);
       const includeDismissed = effectiveQuery.statuses?.includes("dismissed") ?? false;
       const situations = await store.listSituations(

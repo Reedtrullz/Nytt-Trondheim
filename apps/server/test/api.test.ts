@@ -169,11 +169,24 @@ async function loginViewer(runtime: Awaited<ReturnType<typeof testAppWithEmail>>
     "owner",
   );
   const agent = request.agent(runtime.app);
+  await confirmEmailLogin(agent, grant.invite.token);
+  return agent;
+}
+
+async function confirmEmailLogin(agent: ReturnType<typeof request.agent>, token: string) {
+  const confirmation = await agent
+    .get(`/auth/email/callback?token=${encodeURIComponent(token)}`)
+    .expect(200)
+    .expect("Cache-Control", /no-store/);
+  const csrf = confirmation.text.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  expect(csrf).toBeDefined();
   await agent
-    .get(`/auth/email/callback?token=${encodeURIComponent(grant.invite.token)}`)
+    .post("/auth/email/callback")
+    .set("Origin", "http://localhost")
+    .type("form")
+    .send({ token, _csrf: csrf })
     .expect(302)
     .expect("Location", "/");
-  return agent;
 }
 
 function addMemorySituation(store: Store, situation: Situation): void {
@@ -736,10 +749,16 @@ describe("private situation API", () => {
     expect(decision.invite).toBeDefined();
 
     const viewerAgent = request.agent(app);
+    const confirmationUrl = `/auth/email/callback?token=${encodeURIComponent(
+      decision.invite!.token,
+    )}`;
     await viewerAgent
-      .get(`/auth/email/callback?token=${encodeURIComponent(decision.invite!.token)}`)
-      .expect(302)
-      .expect("Location", "/");
+      .get(confirmationUrl)
+      .expect(200)
+      .expect("Cache-Control", /no-store/);
+    await viewerAgent.get("/api/session").expect(401);
+    await viewerAgent.get(confirmationUrl).expect(200);
+    await confirmEmailLogin(viewerAgent, decision.invite!.token);
     const session = await viewerAgent.get("/api/session").expect(200);
     expect(session.body.user).toMatchObject({
       email: "viewer@example.test",
@@ -756,6 +775,18 @@ describe("private situation API", () => {
       .post("/api/situations/skogbrann-bymarka/exports")
       .set("X-CSRF-Token", session.body.csrfToken as string)
       .expect(403);
+
+    const replayAgent = request.agent(app);
+    const replayConfirmation = await replayAgent.get(confirmationUrl).expect(200);
+    const replayCsrf = replayConfirmation.text.match(/name="_csrf" value="([^"]+)"/)?.[1];
+    await replayAgent
+      .post("/auth/email/callback")
+      .set("Origin", "http://localhost")
+      .type("form")
+      .send({ token: decision.invite!.token, _csrf: replayCsrf })
+      .expect(302)
+      .expect("Location", "/logg-inn?email=invalid");
+    await replayAgent.get("/api/session").expect(401);
   });
 
   it("keeps private timeline entries out of viewer situation endpoints", async () => {
