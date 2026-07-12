@@ -513,13 +513,14 @@
         - name: Verify traffic source health after candidate promotion
           ansible.builtin.shell: |
             set -euo pipefail
-            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -Atqc "
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -At <<'SQL'
               SELECT count(*)
               FROM source_health
               WHERE source IN ('vegvesen_traffic_info','trafikkdata')
                 AND state='ok'
                 AND last_checked_at >= :'candidate_promotion_started_at'::timestamptz;
-            ")"
+            SQL
+            )"
             test "$count" -eq 2
           args:
             chdir: "{{ app_dir }}"
@@ -533,13 +534,14 @@
         - name: Verify DATEX source health rows when DATEX is enabled
           ansible.builtin.shell: |
             set -euo pipefail
-            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -Atqc "
+            count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -At <<'SQL'
               SELECT count(*)
               FROM source_health
               WHERE source IN ('datex','datex_travel_time')
                 AND state='ok'
                 AND last_checked_at >= :'candidate_promotion_started_at'::timestamptz;
-            ")"
+            SQL
+            )"
             test "$count" -eq 2
           args:
             chdir: "{{ app_dir }}"
@@ -556,7 +558,7 @@
         - name: Verify Entur source health and provenance invariants when tables exist
           ansible.builtin.shell: |
             set -euo pipefail
-            entur_source_health_count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -Atqc "
+            entur_source_health_count="$(docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 -v candidate_promotion_started_at="{{ candidate_promotion_started_at.stdout }}" -At <<'SQL'
               SELECT CASE
                 WHEN to_regclass('public.public_transport_vehicles') IS NULL
                   OR to_regclass('public.public_transport_service_alerts') IS NULL THEN 2
@@ -568,7 +570,8 @@
                     AND last_checked_at >= :'candidate_promotion_started_at'::timestamptz
                 )
               END;
-            ")"
+            SQL
+            )"
             test "$entur_source_health_count" -eq 2
             docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 <<'SQL'
             DO $$
