@@ -11,10 +11,17 @@ describe("deployment playbook Entur verification", () => {
     const appBlock = compose.slice(appStart, workerStart);
     const workerBlock = compose.slice(workerStart);
 
-    expect(appBlock).toContain("curl -f http://localhost:8080/health");
+    expect(appBlock).toContain("curl -f http://localhost:8080/health/live");
+    expect(appBlock).not.toContain("/health/ready");
     expect(appBlock).not.toContain("worker_cycle_metrics");
     expect(workerBlock).toContain("worker_cycle_metrics");
     expect(workerBlock).not.toContain("curl -f http://localhost:8080/health");
+  });
+
+  it("uses readiness checks for canary, production and rollback validation", () => {
+    expect(playbook).toContain('url: "http://127.0.0.1:{{ canary_port }}/health/ready"');
+    expect(playbook).toContain('url: "https://nytt.reidar.tech/health/ready"');
+    expect(playbook).not.toContain('url: "https://nytt.reidar.tech/health"');
   });
 
   it("waits for healthy Entur source rows instead of passing on degraded placeholders", () => {
