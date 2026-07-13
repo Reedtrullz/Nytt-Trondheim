@@ -20,6 +20,7 @@ export interface HomeStoryCard {
   category: Article["category"];
   channelLabel: string;
   topicLabels: string[];
+  articleCount: number;
   sourceCount: number;
   updateCount: number;
   sourceSummary: string;
@@ -31,6 +32,7 @@ export interface HomeStoryCard {
   cardKind: "situasjon" | "hendelse" | "tema" | "oppdatering" | "sak";
   sourceConfidence: SourceConfidenceSummary;
   matchConfidence?: CoverageMatchConfidence;
+  matchRationale?: string;
   verification?: HomeStoryVerification;
 }
 
@@ -190,7 +192,8 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     category: group.primary.category,
     channelLabel: articleCategoryLabels[group.primary.category],
     topicLabels: storyTopicLabels(group),
-    sourceCount: group.sourceLabels.length,
+    articleCount: group.articles.length,
+    sourceCount: new Set(group.articles.map((article) => article.source)).size,
     updateCount: group.articles.length,
     sourceSummary: sourceSummary(group),
     clusterLabel: sourceClusterLabelForGroup(group),
@@ -201,8 +204,28 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     cardKind: cardKindFor(group),
     sourceConfidence: storySourceConfidence(group),
     matchConfidence: group.bundle?.matchConfidence,
+    matchRationale: group.bundle?.matchConfidence?.rationale,
     verification: storyVerification(group),
   };
+}
+
+export function coverageMatchExplanation(card: HomeStoryCard): string {
+  const signals = card.group.acceptedEdges?.flatMap((edge) => edge.signals) ?? [];
+  if (card.cardKind === "tema") return "Felles tema og kamp";
+  if (signals.some((signal) => signal.kind === "situation_id")) {
+    return "Samme offisielle hendelse";
+  }
+  if (
+    signals.some(
+      (signal) => signal.kind === "shared_place" || signal.kind === "generic_place_incident",
+    )
+  ) {
+    return "Felles sted og hendelsestype";
+  }
+  if (signals.some((signal) => signal.kind === "near_duplicate")) {
+    return "Samme publiserte sak";
+  }
+  return card.matchRationale ?? "Sammenfallende dekning";
 }
 
 export function homeStoryCardForStory(story: CityPulseStory): HomeStoryCard {
@@ -211,6 +234,7 @@ export function homeStoryCardForStory(story: CityPulseStory): HomeStoryCard {
     ...card,
     category: story.category,
     channelLabel: articleCategoryLabels[story.category],
+    articleCount: story.articleIds.length,
     sourceCount: story.sourceCount,
     updateCount: story.updateCount,
     latestAt: story.latestAt,

@@ -1840,6 +1840,108 @@ button {
   line-height: 1.28;
 }
 
+.coverage-source-cluster {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+  max-width: 760px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 92%, var(--blue) 8%);
+}
+
+.coverage-source-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.coverage-source-heading strong {
+  color: var(--green);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.coverage-source-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.coverage-source-list {
+  display: grid;
+  gap: 6px;
+}
+
+.coverage-source-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.coverage-source-row:hover,
+a.coverage-source-row:focus-visible {
+  border-left-color: var(--blue);
+  background: color-mix(in srgb, var(--paper) 88%, var(--blue) 12%);
+}
+
+.coverage-source-row b,
+.coverage-source-row small {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.coverage-source-row b {
+  color: var(--blue);
+}
+
+.coverage-source-row small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverage-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.coverage-source-actions button {
+  min-height: 30px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.coverage-source-actions .coverage-correction-open {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+@media (max-width: 520px) {
+  .coverage-source-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .lead-footer {
   margin-top: auto;
   padding-top: 18px;

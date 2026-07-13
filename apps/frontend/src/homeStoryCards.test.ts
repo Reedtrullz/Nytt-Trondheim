@@ -2,6 +2,7 @@ import type { Article, ArticleCoverageEdge, CityPulseStory } from "@nytt/shared"
 import { describe, expect, it } from "vitest";
 import { groupHomeArticles } from "./homeArticleGroups.js";
 import {
+  coverageMatchExplanation,
   homeArticleGroupForStory,
   homeStoryCardForGroup,
   homeStoryCardForStory,
@@ -41,6 +42,40 @@ function directStrongIncidentEdge(left: string, right: string): ArticleCoverageE
 }
 
 describe("home story cards", () => {
+  it("keeps article count, unique source count, and match rationale distinct", () => {
+    const coverageBundle = {
+      id: "coverage:v2:counted-group",
+      kind: "incident",
+      confidence: "medium",
+      reason: "Samme hendelse",
+      generatedAt: "2026-07-12T21:00:00.000Z",
+      matcherVersion: "v2",
+      matchConfidence: {
+        tier: "moderate",
+        score: 0.76,
+        rationale: "Felles sted og hendelsestype",
+      },
+    } as const;
+    const group = groupHomeArticles([
+      article({ id: "nrk-a", coverageBundle }),
+      article({ id: "nrk-b", url: "https://example.test/nrk-b", coverageBundle }),
+      article({
+        id: "adressa-a",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        url: "https://example.test/adressa-a",
+        coverageBundle,
+      }),
+    ])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.articleCount).toBe(3);
+    expect(card.sourceCount).toBe(2);
+    expect(card.matchRationale).toBe("Felles sted og hendelsestype");
+    expect(coverageMatchExplanation(card)).toBe("Felles sted og hendelsestype");
+  });
+
   it("keeps moderate match confidence separate from newsroom source trust", () => {
     const coverageBundle = {
       id: "coverage:v2:construction-fire",

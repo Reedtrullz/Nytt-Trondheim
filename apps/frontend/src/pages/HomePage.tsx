@@ -25,6 +25,7 @@ import {
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
+import { CoverageSourceCluster } from "../components/news/CoverageSourceCluster.js";
 import {
   articleCategories,
   articleCategoryDescriptions,
@@ -66,7 +67,6 @@ import {
 import {
   homeStoryCardsForGroups,
   homeStoryCardsForStories,
-  sourceClusterLabelForGroup,
   type HomeStoryCard,
   type HomeStoryVerification,
 } from "../homeStoryCards.js";
@@ -529,45 +529,6 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
   return <SituationBanner situations={activeSituations} />;
 }
 
-function SourceCluster({ group }: { group: HomeArticleGroup }) {
-  if (group.articles.length < 2) return null;
-  const label = sourceClusterLabelForGroup(group);
-  if (!label) return null;
-  return (
-    <div className="source-cluster" aria-label={label}>
-      <span>{label}</span>
-      <div className="source-cluster-list">
-        {group.articles.map((article) => {
-          const articleUrl = safeExternalUrl(article.url);
-          const sourceLabel = `${article.sourceLabel} · ${formatTime(article.publishedAt)}`;
-          const title = article.id === group.primary.id ? "Hovedsak" : article.title;
-          const content = (
-            <>
-              <b>{sourceLabel}</b>
-              <small>{title}</small>
-            </>
-          );
-          return articleUrl ? (
-            <a
-              className="source-cluster-item"
-              href={articleUrl}
-              key={article.id}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              {content}
-            </a>
-          ) : (
-            <span className="source-cluster-item" key={article.id}>
-              {content}
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function LeadStory({
   card,
   saving,
@@ -580,7 +541,6 @@ function LeadStory({
   canSave: boolean;
 }) {
   const article = card.primary;
-  const group = card.group;
   const articleUrl = safeExternalUrl(article.url);
   return (
     <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
@@ -621,7 +581,7 @@ function LeadStory({
           ))}
         </div>
         <StoryVerificationProof verification={card.verification} />
-        <SourceCluster group={group} />
+        <CoverageSourceCluster card={card} canCorrect={false} onCorrect={() => undefined} />
         <div className="lead-footer">
           <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
           {articleUrl ? (
@@ -921,7 +881,7 @@ function StoryCard({
           ))}
         </div>
         <StoryVerificationProof verification={card.verification} />
-        <SourceCluster group={card.group} />
+        <CoverageSourceCluster card={card} canCorrect={false} onCorrect={() => undefined} />
       </div>
       <div className="story-card-side">
         {card.isClustered ? (
