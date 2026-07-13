@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeArticleCoverage,
   analyzeArticleCoverageV2,
+  articleCoverageEvidence,
   evaluateArticleCoverageCorpus,
+  highDetailNearDuplicatePolicy,
   isHighDetailCrossSourceNearDuplicate,
 } from "../src/index.js";
 import { articleCoverageGoldenCases } from "./fixtures/article-coverage-golden.js";
@@ -79,5 +81,34 @@ describe("coverage matcher golden corpus", () => {
           memberArticleIds.includes("dora-police") && memberArticleIds.includes("dora-nrk"),
       ),
     ).toBe(false);
+  });
+
+  it("keeps generic cross-source boilerplate outside the high-detail policy", () => {
+    const fixture = articleCoverageGoldenCases.find(
+      ({ id }) => id === "generic-boilerplate-is-not-high-detail",
+    );
+    expect(fixture).toBeDefined();
+    const [left, right] = fixture!.articles;
+    expect(left).toBeDefined();
+    expect(right).toBeDefined();
+    const evidence = articleCoverageEvidence(left!, right!, "v2");
+    expect(evidence.sharedBodyTokenCount).toBeGreaterThanOrEqual(
+      highDetailNearDuplicatePolicy.minBodyOverlap,
+    );
+    expect(evidence.bodyScore).toBeGreaterThanOrEqual(highDetailNearDuplicatePolicy.minBodyScore);
+    expect(evidence.bodyScore).toBeLessThan(0.5);
+    expect(evidence.sharedDistinctiveTokenCount).toBeLessThan(
+      highDetailNearDuplicatePolicy.minDistinctiveOverlap,
+    );
+    expect(isHighDetailCrossSourceNearDuplicate(left!, right!)).toBe(false);
+
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      const analysis = analyze(fixture!.articles, "2026-07-13T20:10:00.000Z");
+      expect(
+        analysis.bundles.some(({ memberArticleIds }) =>
+          [left!.id, right!.id].every((id) => memberArticleIds.includes(id)),
+        ),
+      ).toBe(false);
+    }
   });
 });
