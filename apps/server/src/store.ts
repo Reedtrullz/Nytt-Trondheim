@@ -20,6 +20,7 @@ import type {
   ArticleTopic,
   Attachment,
   BootstrapPayload,
+  CityPulseStory,
   CityPulseStoryPage,
   CommandCenterBriefingArticleSummary,
   CommandCenterBriefingPayload,
@@ -31,6 +32,10 @@ import type {
   CoverageBundlePage,
   CoverageBundleQueryInput,
   CoverageBundleSummary,
+  CoverageBundleCorrection,
+  CoverageBundleCorrectionResult,
+  CoverageBundleSplitRequest,
+  CoverageCorrectionExport,
   CoverageGenerationSummary,
   EvidenceItem,
   MapFeature,
@@ -119,6 +124,7 @@ import {
   isLocalSportsCoverageText,
   isNewsroomPublicVerificationSource,
   publicLeadLongRunningSituationAgeMs,
+  recomputeCoverageStories,
   isPublicSituation,
   sampleArticles,
   sampleBootstrap,
@@ -337,6 +343,16 @@ export interface Store {
     filters: CoverageBundleQueryInput,
     login: string,
   ): Promise<CoverageBundlePage>;
+  splitCoverageBundle(
+    bundleId: string,
+    input: CoverageBundleSplitRequest,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult>;
+  undoCoverageCorrection(
+    correctionId: string,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult>;
+  exportCoverageCorrections(sinceDays: number): Promise<CoverageCorrectionExport>;
   listNotificationTriggers(
     filters: NotificationTriggerQueryInput,
     login: string,
@@ -454,6 +470,35 @@ export interface Store {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+export class CoverageBundleConflictError extends Error {
+  readonly statusCode = 409;
+
+  constructor(
+    message: string,
+    readonly replacementStories: CityPulseStory[],
+  ) {
+    super(message);
+  }
+}
+
+async function withPgTransaction<T>(
+  pool: pg.Pool,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function encodeCursor(timestamp: string, id: string): string {
@@ -1592,6 +1637,37 @@ interface NormalizedCoverageBundleRow {
   missing_article_ids: string[];
   primary_count: number | string;
   updated_at: Date | string;
+}
+
+interface CoverageCorrectionRow {
+  id: string;
+  generation_id: string;
+  original_bundle_id: string;
+  anchor_article_id: string;
+  rejected_article_id: string;
+  matcher_version: "v1" | "v2";
+  evidence_fingerprint: string;
+  status: "active" | "reverted";
+  created_at: Date | string;
+  reverted_at: Date | string | null;
+}
+
+function coverageCorrectionFromRow(row: CoverageCorrectionRow): CoverageBundleCorrection {
+  return {
+    id: row.id,
+    originalBundleId: row.original_bundle_id,
+    anchorArticleId: row.anchor_article_id,
+    rejectedArticleId: row.rejected_article_id,
+    matcherVersion: row.matcher_version,
+    evidenceFingerprint: row.evidence_fingerprint,
+    status: row.status,
+    createdAt: new Date(row.created_at).toISOString(),
+    ...(row.reverted_at ? { revertedAt: new Date(row.reverted_at).toISOString() } : {}),
+  };
+}
+
+function normalizedCorrectionText(value: string, maxLength: number): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
 
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
@@ -3541,6 +3617,15 @@ function withTrafficPulseStaleOverlay(
 
 export class MemoryStore implements Store {
   private articles = clone(sampleArticles);
+  private readonly coverageShadowGeneratedAt = new Date().toISOString();
+  private coverageCorrections: Array<
+    CoverageBundleCorrection & {
+      generationId: string;
+      createdBy: string;
+      reason?: string;
+      revertedBy?: string;
+    }
+  > = [];
   private situations = new Map([[sampleSituation.id, clone(sampleSituation)]]);
   private tasks = clone(sampleTasks);
   private notes = clone(sampleNotes);
@@ -4011,8 +4096,9 @@ export class MemoryStore implements Store {
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
-    const generatedAt = new Date().toISOString();
     const projection = filters.projection ?? "legacy";
+    const generatedAt =
+      projection === "shadow" ? this.coverageShadowGeneratedAt : new Date().toISOString();
     if (projection === "active" || projection === "superseded") {
       const summary = emptyCoverageBundleSummary();
       summary.projectionState = projection;
@@ -4021,7 +4107,14 @@ export class MemoryStore implements Store {
     }
     const analysis =
       projection === "shadow"
-        ? analyzeArticleCoverageV2(this.articles, generatedAt)
+        ? analyzeArticleCoverageV2(this.articles, generatedAt, {
+            rejectedPairs: this.coverageCorrections
+              .filter(({ status }) => status === "active")
+              .map(({ id, anchorArticleId, rejectedArticleId }) => ({
+                articleIds: [anchorArticleId, rejectedArticleId],
+                correctionId: id,
+              })),
+          })
         : analyzeArticleCoverage(this.articles, generatedAt);
     const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
@@ -4080,6 +4173,179 @@ export class MemoryStore implements Store {
       nextCursor:
         cursorFiltered.length > limit && last ? encodeCursor(last.lastSeenAt, last.id) : undefined,
     };
+  }
+
+  async splitCoverageBundle(
+    bundleId: string,
+    input: CoverageBundleSplitRequest,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    const activePairs = this.coverageCorrections.filter(({ status }) => status === "active");
+    const analysis = analyzeArticleCoverageV2(this.articles, this.coverageShadowGeneratedAt, {
+      rejectedPairs: activePairs.map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId],
+        correctionId: id,
+      })),
+    });
+    const bundle = analysis.bundles.find(({ id }) => id === bundleId);
+    const currentStories = recomputeCoverageStories(
+      this.articles,
+      activePairs.map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId],
+        correctionId: id,
+      })),
+      this.coverageShadowGeneratedAt,
+    );
+    const duplicateCorrections = input.rejectedArticleIds.flatMap((rejectedArticleId) => {
+      const orderedPair = [input.anchorArticleId, rejectedArticleId].sort().join("\0");
+      const existing = activePairs.find(
+        (correction) =>
+          correction.originalBundleId === bundleId &&
+          [correction.anchorArticleId, correction.rejectedArticleId].sort().join("\0") ===
+            orderedPair,
+      );
+      return existing ? [existing] : [];
+    });
+    if (duplicateCorrections.length === input.rejectedArticleIds.length) {
+      const affectedIds = new Set([input.anchorArticleId, ...input.rejectedArticleIds]);
+      return {
+        corrections: clone(duplicateCorrections),
+        removedStoryIds: [bundleId],
+        replacementStories: currentStories.filter(({ articleIds }) =>
+          articleIds.some((id) => affectedIds.has(id)),
+        ),
+      };
+    }
+    if (
+      !bundle ||
+      bundle.generatedAt !== input.expectedGeneratedAt ||
+      !bundle.memberArticleIds.includes(input.anchorArticleId) ||
+      input.rejectedArticleIds.some((id) => !bundle.memberArticleIds.includes(id))
+    ) {
+      throw new CoverageBundleConflictError(
+        "Dekningsgruppen er endret. Last inn den oppdaterte gruppen.",
+        currentStories,
+      );
+    }
+    const created: CoverageBundleCorrection[] = [];
+    for (const rejectedArticleId of input.rejectedArticleIds) {
+      const existing = this.coverageCorrections.find(
+        (correction) =>
+          correction.status === "active" &&
+          new Set([correction.anchorArticleId, correction.rejectedArticleId]).size ===
+            new Set([input.anchorArticleId, rejectedArticleId]).size &&
+          [correction.anchorArticleId, correction.rejectedArticleId].every((id) =>
+            [input.anchorArticleId, rejectedArticleId].includes(id),
+          ),
+      );
+      if (existing) {
+        created.push(existing);
+        continue;
+      }
+      const edge = analysis.edges?.find((candidate) =>
+        candidate.articleIds.every((id) => [input.anchorArticleId, rejectedArticleId].includes(id)),
+      );
+      const correction: (typeof this.coverageCorrections)[number] = {
+        id: randomUUID(),
+        generationId: "memory-shadow",
+        originalBundleId: bundleId,
+        anchorArticleId: input.anchorArticleId,
+        rejectedArticleId,
+        matcherVersion: "v2",
+        evidenceFingerprint:
+          edge?.evidenceFingerprint ??
+          `v2:no-edge:${[input.anchorArticleId, rejectedArticleId].sort().join(":")}`,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        createdBy: actorId,
+        ...(input.reason ? { reason: input.reason } : {}),
+      };
+      this.coverageCorrections.push(correction);
+      created.push(correction);
+    }
+    const rejectedPairs = this.coverageCorrections
+      .filter(({ status }) => status === "active")
+      .map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId] as [string, string],
+        correctionId: id,
+      }));
+    const originalMembers = new Set(bundle.memberArticleIds);
+    return {
+      corrections: clone(created),
+      removedStoryIds: [bundleId],
+      replacementStories: recomputeCoverageStories(
+        this.articles,
+        rejectedPairs,
+        this.coverageShadowGeneratedAt,
+      ).filter(({ articleIds }) => articleIds.some((id) => originalMembers.has(id))),
+    };
+  }
+
+  async undoCoverageCorrection(
+    correctionId: string,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    const correction = this.coverageCorrections.find(({ id }) => id === correctionId);
+    if (!correction) {
+      throw Object.assign(new Error("Korrigeringen finnes ikke."), { status: 404 });
+    }
+    if (correction.status === "active") {
+      correction.status = "reverted";
+      correction.revertedAt = new Date().toISOString();
+      correction.revertedBy = actorId;
+    }
+    const rejectedPairs = this.coverageCorrections
+      .filter(({ status }) => status === "active")
+      .map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId] as [string, string],
+        correctionId: id,
+      }));
+    const affected = new Set([correction.anchorArticleId, correction.rejectedArticleId]);
+    return {
+      corrections: [clone(correction)],
+      removedStoryIds: [],
+      replacementStories: recomputeCoverageStories(
+        this.articles,
+        rejectedPairs,
+        this.coverageShadowGeneratedAt,
+      ).filter(({ articleIds }) => articleIds.some((id) => affected.has(id))),
+    };
+  }
+
+  async exportCoverageCorrections(sinceDays: number): Promise<CoverageCorrectionExport> {
+    const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
+    const rows = this.coverageCorrections
+      .filter(({ createdAt }) => Date.parse(createdAt) >= cutoff)
+      .flatMap((correction) => {
+        const anchor = this.articles.find(({ id }) => id === correction.anchorArticleId);
+        const rejected = this.articles.find(({ id }) => id === correction.rejectedArticleId);
+        if (!anchor || !rejected) return [];
+        return [
+          {
+            correctionId: correction.id,
+            label: "separate" as const,
+            articleIds: [anchor.id, rejected.id] as [string, string],
+            sources: [anchor.source, rejected.source] as [SourceId, SourceId],
+            normalizedTitles: [
+              normalizedCorrectionText(anchor.title, 160),
+              normalizedCorrectionText(rejected.title, 160),
+            ] as [string, string],
+            normalizedExcerpts: [
+              normalizedCorrectionText(anchor.excerpt, 280),
+              normalizedCorrectionText(rejected.excerpt, 280),
+            ] as [string, string],
+            matcherVersion: correction.matcherVersion,
+            evidenceFingerprint: correction.evidenceFingerprint,
+            createdAt: correction.createdAt,
+          },
+        ];
+      })
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.correctionId.localeCompare(right.correctionId),
+      );
+    return { schemaVersion: 1, generatedAt: new Date().toISOString(), rows };
   }
 
   async listNotificationTriggers(
@@ -5998,6 +6264,287 @@ export class PgStore implements Store {
         cursorFiltered.length > limit && pageItems.at(-1)
           ? encodeCursor(pageItems.at(-1)!.lastSeenAt, pageItems.at(-1)!.id)
           : undefined,
+    };
+  }
+
+  async splitCoverageBundle(
+    bundleId: string,
+    input: CoverageBundleSplitRequest,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    return withPgTransaction(this.pool, async (client) => {
+      const bundleResult = await client.query<{
+        id: string;
+        generation_id: string;
+        generated_at: Date | string;
+        matcher_version: "v1" | "v2";
+      }>(
+        `SELECT cb.id, cb.generation_id, cbv.generated_at, cg.matcher_version
+         FROM coverage_bundles cb
+         JOIN coverage_bundle_versions cbv
+           ON cbv.generation_id=cb.generation_id AND cbv.bundle_id=cb.id
+         JOIN coverage_bundle_generations cg ON cg.id=cb.generation_id
+         WHERE cb.id=$1 AND cb.state IN ('shadow','active') AND cg.status='completed'
+         FOR UPDATE OF cb, cg`,
+        [bundleId],
+      );
+      const bundle = bundleResult.rows[0];
+      if (!bundle) {
+        throw Object.assign(new Error("Dekningsgruppen finnes ikke."), { status: 404 });
+      }
+      const memberResult = await client.query<{ article_id: string }>(
+        `SELECT article_id
+         FROM coverage_bundle_members
+         WHERE generation_id=$1 AND bundle_id=$2
+         ORDER BY article_id`,
+        [bundle.generation_id, bundleId],
+      );
+      const originalMemberIds = memberResult.rows.map(({ article_id }) => article_id);
+      const articleResult = await client.query<{ payload: Article }>(
+        `SELECT a.payload
+         FROM coverage_generation_articles cga
+         JOIN articles a ON a.id=cga.article_id
+         WHERE cga.generation_id=$1
+         ORDER BY a.published_at DESC, a.id DESC`,
+        [bundle.generation_id],
+      );
+      const articles = articleResult.rows.map(({ payload }) => payload);
+      const activeCorrectionResult = await client.query<CoverageCorrectionRow>(
+        `SELECT cbc.*
+         FROM coverage_bundle_corrections cbc
+         JOIN coverage_generation_articles left_article
+           ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+         JOIN coverage_generation_articles right_article
+           ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+         WHERE cbc.status='active'
+         ORDER BY cbc.created_at, cbc.id`,
+        [bundle.generation_id],
+      );
+      const rejectedPairsBefore = activeCorrectionResult.rows.map((row) => ({
+        articleIds: [row.anchor_article_id, row.rejected_article_id] as [string, string],
+        correctionId: row.id,
+      }));
+      const currentStories = recomputeCoverageStories(
+        articles,
+        rejectedPairsBefore,
+        new Date(bundle.generated_at).toISOString(),
+      );
+      const currentGeneratedAt = new Date(bundle.generated_at).toISOString();
+      const memberIds = new Set(originalMemberIds);
+      if (
+        currentGeneratedAt !== new Date(input.expectedGeneratedAt).toISOString() ||
+        !memberIds.has(input.anchorArticleId) ||
+        input.rejectedArticleIds.some((id) => !memberIds.has(id))
+      ) {
+        throw new CoverageBundleConflictError(
+          "Dekningsgruppen er endret. Last inn den oppdaterte gruppen.",
+          currentStories.filter(({ articleIds }) => articleIds.some((id) => memberIds.has(id))),
+        );
+      }
+      const edgeResult = await client.query<{
+        left_article_id: string;
+        right_article_id: string;
+        evidence_fingerprint: string;
+      }>(
+        `SELECT left_article_id, right_article_id, evidence_fingerprint
+         FROM coverage_bundle_edges
+         WHERE generation_id=$1
+           AND (left_article_id=$2 OR right_article_id=$2)
+           AND (left_article_id=ANY($3::text[]) OR right_article_id=ANY($3::text[]))`,
+        [bundle.generation_id, input.anchorArticleId, input.rejectedArticleIds],
+      );
+      const fingerprintByPair = new Map(
+        edgeResult.rows.map((row) => [
+          [row.left_article_id, row.right_article_id].sort().join("\0"),
+          row.evidence_fingerprint,
+        ]),
+      );
+      const corrections: CoverageBundleCorrection[] = [];
+      for (const rejectedArticleId of input.rejectedArticleIds) {
+        const orderedIds = [input.anchorArticleId, rejectedArticleId].sort();
+        const evidenceFingerprint =
+          fingerprintByPair.get(orderedIds.join("\0")) ?? `v2:no-edge:${orderedIds.join(":")}`;
+        const inserted = await client.query<CoverageCorrectionRow>(
+          `INSERT INTO coverage_bundle_corrections
+            (generation_id, original_bundle_id, anchor_article_id, rejected_article_id,
+             matcher_version, evidence_fingerprint, reason, status, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8)
+           ON CONFLICT (
+             LEAST(anchor_article_id, rejected_article_id),
+             GREATEST(anchor_article_id, rejected_article_id)
+           ) WHERE status='active' DO NOTHING
+           RETURNING *`,
+          [
+            bundle.generation_id,
+            bundleId,
+            input.anchorArticleId,
+            rejectedArticleId,
+            bundle.matcher_version,
+            evidenceFingerprint,
+            input.reason ?? null,
+            actorId,
+          ],
+        );
+        let row = inserted.rows[0];
+        if (!row) {
+          const existing = await client.query<CoverageCorrectionRow>(
+            `SELECT * FROM coverage_bundle_corrections
+             WHERE status='active'
+               AND LEAST(anchor_article_id, rejected_article_id)=LEAST($1,$2)
+               AND GREATEST(anchor_article_id, rejected_article_id)=GREATEST($1,$2)
+             FOR UPDATE`,
+            [input.anchorArticleId, rejectedArticleId],
+          );
+          row = existing.rows[0];
+        }
+        if (!row) throw new Error("Active coverage correction could not be loaded");
+        corrections.push(coverageCorrectionFromRow(row));
+      }
+      const allActiveResult = await client.query<CoverageCorrectionRow>(
+        `SELECT cbc.*
+         FROM coverage_bundle_corrections cbc
+         JOIN coverage_generation_articles left_article
+           ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+         JOIN coverage_generation_articles right_article
+           ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+         WHERE cbc.status='active'
+         ORDER BY cbc.created_at, cbc.id`,
+        [bundle.generation_id],
+      );
+      const replacementStories = recomputeCoverageStories(
+        articles,
+        allActiveResult.rows.map((row) => ({
+          articleIds: [row.anchor_article_id, row.rejected_article_id],
+          correctionId: row.id,
+        })),
+        currentGeneratedAt,
+      ).filter(({ articleIds }) => articleIds.some((id) => memberIds.has(id)));
+      return { corrections, removedStoryIds: [bundleId], replacementStories };
+    });
+  }
+
+  async undoCoverageCorrection(
+    correctionId: string,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    return withPgTransaction(this.pool, async (client) => {
+      const existingResult = await client.query<CoverageCorrectionRow>(
+        `SELECT * FROM coverage_bundle_corrections WHERE id=$1 FOR UPDATE`,
+        [correctionId],
+      );
+      const existing = existingResult.rows[0];
+      if (!existing) {
+        throw Object.assign(new Error("Korrigeringen finnes ikke."), { status: 404 });
+      }
+      const activeBeforeResult = await client.query<CoverageCorrectionRow>(
+        `SELECT cbc.*
+         FROM coverage_bundle_corrections cbc
+         JOIN coverage_generation_articles left_article
+           ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+         JOIN coverage_generation_articles right_article
+           ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+         WHERE cbc.status='active'
+         ORDER BY cbc.created_at, cbc.id`,
+        [existing.generation_id],
+      );
+      let correction = existing;
+      if (existing.status === "active") {
+        const updated = await client.query<CoverageCorrectionRow>(
+          `UPDATE coverage_bundle_corrections
+           SET status='reverted', reverted_at=now(), reverted_by=$2
+           WHERE id=$1 AND status='active'
+           RETURNING *`,
+          [correctionId, actorId],
+        );
+        correction = updated.rows[0] ?? existing;
+      }
+      const articleResult = await client.query<{ payload: Article }>(
+        `SELECT a.payload
+         FROM coverage_generation_articles cga
+         JOIN articles a ON a.id=cga.article_id
+         WHERE cga.generation_id=$1
+         ORDER BY a.published_at DESC, a.id DESC`,
+        [existing.generation_id],
+      );
+      const generationResult = await client.query<{ completed_at: Date | string }>(
+        `SELECT completed_at FROM coverage_bundle_generations WHERE id=$1 AND status='completed'`,
+        [existing.generation_id],
+      );
+      const generatedAt = new Date(
+        generationResult.rows[0]?.completed_at ?? correction.created_at,
+      ).toISOString();
+      const activeAfterResult = await client.query<CoverageCorrectionRow>(
+        `SELECT cbc.*
+         FROM coverage_bundle_corrections cbc
+         JOIN coverage_generation_articles left_article
+           ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+         JOIN coverage_generation_articles right_article
+           ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+         WHERE cbc.status='active'
+         ORDER BY cbc.created_at, cbc.id`,
+        [existing.generation_id],
+      );
+      const articles = articleResult.rows.map(({ payload }) => payload);
+      const rejectedPairs = (rows: CoverageCorrectionRow[]) =>
+        rows.map((row) => ({
+          articleIds: [row.anchor_article_id, row.rejected_article_id] as [string, string],
+          correctionId: row.id,
+        }));
+      const affectedIds = new Set([existing.anchor_article_id, existing.rejected_article_id]);
+      const removedStoryIds = recomputeCoverageStories(
+        articles,
+        rejectedPairs(activeBeforeResult.rows),
+        generatedAt,
+      )
+        .filter(({ articleIds }) => articleIds.some((id) => affectedIds.has(id)))
+        .map(({ id }) => id);
+      const replacementStories = recomputeCoverageStories(
+        articles,
+        rejectedPairs(activeAfterResult.rows),
+        generatedAt,
+      ).filter(({ articleIds }) => articleIds.some((id) => affectedIds.has(id)));
+      return {
+        corrections: [coverageCorrectionFromRow(correction)],
+        removedStoryIds,
+        replacementStories,
+      };
+    });
+  }
+
+  async exportCoverageCorrections(sinceDays: number): Promise<CoverageCorrectionExport> {
+    const result = await this.pool.query<{
+      correction: CoverageCorrectionRow;
+      anchor: Article;
+      rejected: Article;
+    }>(
+      `SELECT to_jsonb(cbc) AS correction, anchor.payload AS anchor, rejected.payload AS rejected
+       FROM coverage_bundle_corrections cbc
+       JOIN articles anchor ON anchor.id=cbc.anchor_article_id
+       JOIN articles rejected ON rejected.id=cbc.rejected_article_id
+       WHERE cbc.created_at >= now() - make_interval(days => $1::int)
+       ORDER BY cbc.created_at, cbc.id`,
+      [sinceDays],
+    );
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      rows: result.rows.map(({ correction, anchor, rejected }) => ({
+        correctionId: correction.id,
+        label: "separate",
+        articleIds: [anchor.id, rejected.id],
+        sources: [anchor.source, rejected.source],
+        normalizedTitles: [
+          normalizedCorrectionText(anchor.title, 160),
+          normalizedCorrectionText(rejected.title, 160),
+        ],
+        normalizedExcerpts: [
+          normalizedCorrectionText(anchor.excerpt, 280),
+          normalizedCorrectionText(rejected.excerpt, 280),
+        ],
+        matcherVersion: correction.matcher_version,
+        evidenceFingerprint: correction.evidence_fingerprint,
+        createdAt: new Date(correction.created_at).toISOString(),
+      })),
     };
   }
 

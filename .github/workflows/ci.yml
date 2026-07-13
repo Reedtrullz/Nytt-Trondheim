@@ -87,6 +87,7 @@ jobs:
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           SELECT 'public.coverage_bundle_generations'::regclass;
+          SELECT 'public.coverage_generation_articles'::regclass;
           SELECT 'public.coverage_bundle_versions'::regclass;
           SELECT 'public.coverage_bundle_members'::regclass;
           SELECT 'public.coverage_bundle_edges'::regclass;

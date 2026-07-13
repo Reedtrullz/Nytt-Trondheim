@@ -103,6 +103,24 @@ function poolReturning(client: pg.PoolClient): pg.Pool {
 }
 
 describe("coverage generation repository", () => {
+  it("loads active rejected pairs for future generations", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: "correction-1",
+          anchor_article_id: "article-a",
+          rejected_article_id: "article-b",
+        },
+      ],
+    }));
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await expect(repository.activeCoverageRejectedPairs()).resolves.toEqual([
+      { articleIds: ["article-a", "article-b"], correctionId: "correction-1" },
+    ]);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("WHERE status='active'"));
+  });
+
   it("persists one completed shadow generation in a transaction", async () => {
     const client = transactionClient();
     const repository = new WorkerRepository(poolReturning(client));
@@ -120,6 +138,9 @@ describe("coverage generation repository", () => {
     expect(
       client.queries.some(({ sql }) => sql.includes("INSERT INTO coverage_bundle_members")),
     ).toBe(true);
+    expect(
+      client.queries.filter(({ sql }) => sql.includes("INSERT INTO coverage_generation_articles")),
+    ).toHaveLength(2);
     expect(
       client.queries.some(({ sql }) => sql.includes("INSERT INTO coverage_bundle_edges")),
     ).toBe(true);

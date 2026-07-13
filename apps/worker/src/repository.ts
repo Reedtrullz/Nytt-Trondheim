@@ -11,6 +11,7 @@ import type {
   ArticleCoverageAnalysis,
   ArticleCoverageBundleDecision,
   ArticleCoverageBundleKind,
+  CoverageRejectedPair,
   HomeSituationSummary,
   MorningBrief,
   NotificationTriggerCandidate,
@@ -251,6 +252,23 @@ export class WorkerRepository {
     }
   }
 
+  async activeCoverageRejectedPairs(): Promise<CoverageRejectedPair[]> {
+    const result = await this.pool.query<{
+      id: string;
+      anchor_article_id: string;
+      rejected_article_id: string;
+    }>(
+      `SELECT id, anchor_article_id, rejected_article_id
+       FROM coverage_bundle_corrections
+       WHERE status='active'
+       ORDER BY created_at, id`,
+    );
+    return result.rows.map((row) => ({
+      articleIds: [row.anchor_article_id, row.rejected_article_id],
+      correctionId: row.id,
+    }));
+  }
+
   async persistCoverageGeneration(input: PersistCoverageGenerationInput): Promise<string> {
     try {
       return await withTransaction(this.pool, async (client) => {
@@ -272,6 +290,13 @@ export class WorkerRepository {
         const storedIds = new Set(storedArticles.rows.map(({ id }) => id));
         if (articleIds.some((id) => !storedIds.has(id))) {
           throw new Error("Coverage generation references articles that are not stored");
+        }
+        for (const articleId of articleIds) {
+          await client.query(
+            `INSERT INTO coverage_generation_articles (generation_id, article_id)
+             VALUES ($1,$2)`,
+            [generationId, articleId],
+          );
         }
         for (const bundle of input.analysis.bundles) {
           if (bundle.memberArticleIds.length < 2) {

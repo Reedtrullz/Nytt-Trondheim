@@ -54,6 +54,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS coverage_bundle_generations_one_current_idx
   ON coverage_bundle_generations ((is_current))
   WHERE is_current AND status = 'completed' AND mode = 'active';
 
+CREATE TABLE IF NOT EXISTS coverage_generation_articles (
+  generation_id uuid NOT NULL REFERENCES coverage_bundle_generations(id) ON DELETE CASCADE,
+  article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (generation_id, article_id)
+);
+CREATE INDEX IF NOT EXISTS coverage_generation_articles_article_idx
+  ON coverage_generation_articles (article_id, generation_id);
+
 CREATE TABLE IF NOT EXISTS coverage_bundles (
   id text PRIMARY KEY,
   kind text NOT NULL CHECK (kind IN ('incident', 'topic', 'update')),

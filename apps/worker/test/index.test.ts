@@ -232,6 +232,36 @@ describe("worker lifecycle helpers", () => {
     });
   });
 
+  it("applies active corrections when preparing the next v2 generation", async () => {
+    const articles = [
+      newsArticle({ id: "corrected-a", situationId: "same-synthetic-case" }),
+      newsArticle({
+        id: "corrected-b",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        situationId: "same-synthetic-case",
+      }),
+    ];
+    const analyses = await prepareArticleCoverageAnalyses(
+      articles,
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v2",
+      [{ articleIds: ["corrected-a", "corrected-b"], correctionId: "correction-1" }],
+    );
+
+    expect(
+      analyses.shadow?.analysis.bundles.some(
+        ({ memberArticleIds }) =>
+          memberArticleIds.includes("corrected-a") && memberArticleIds.includes("corrected-b"),
+      ),
+    ).toBe(false);
+    expect(analyses.shadow?.analysis.edges?.[0]).toMatchObject({
+      reviewable: true,
+      correctionConflict: true,
+    });
+  });
+
   it("emits bounded numeric metrics for a persisted v2 generation", async () => {
     const articles = [
       newsArticle({ id: "coverage-a", places: ["Nærøysund"] }),

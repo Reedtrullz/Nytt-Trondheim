@@ -6,6 +6,7 @@ import type {
   Article,
   ArticleCoverageAnalysis,
   ArticleCoverageBundleDecision,
+  CoverageRejectedPair,
   OfficialEvent,
   PublicTransportServiceAlert,
   NotificationTriggerPage,
@@ -147,6 +148,7 @@ export async function prepareArticleCoverageAnalyses(
   geocoder: (articles: Article[]) => Promise<Article[]>,
   generatedAt = new Date().toISOString(),
   matcherVersion: "v1" | "v2" = "v1",
+  rejectedPairs: CoverageRejectedPair[] = [],
 ): Promise<PreparedCoverageAnalyses> {
   const geocoded = await geocoder(articles.map(stripArticleCoverageBundle));
   const clean = geocoded.map(stripArticleCoverageBundle);
@@ -156,7 +158,7 @@ export async function prepareArticleCoverageAnalyses(
       ? {
           shadow: {
             matcherVersion: "v2" as const,
-            analysis: analyzeArticleCoverageV2(clean, generatedAt),
+            analysis: analyzeArticleCoverageV2(clean, generatedAt, { rejectedPairs }),
           },
         }
       : {}),
@@ -256,12 +258,14 @@ async function prepareCollectedArticleCoverageAnalyses({
   generatedAt = new Date().toISOString(),
   geocoder = geocodeArticles,
   matcherVersion = "v1",
+  rejectedPairs = [],
 }: {
   articlesForGeocoding: Article[];
   articlesWithoutGeocoding?: Article[];
   generatedAt?: string;
   geocoder?: typeof geocodeArticles;
   matcherVersion?: "v1" | "v2";
+  rejectedPairs?: CoverageRejectedPair[];
 }): Promise<PreparedCoverageAnalyses> {
   const articlesForAnalysis = articlesForGeocoding.map(stripArticleCoverageBundle);
   const fixedArticlesForAnalysis = articlesWithoutGeocoding.map(stripArticleCoverageBundle);
@@ -269,7 +273,13 @@ async function prepareCollectedArticleCoverageAnalyses({
     ...(await geocoder(articlesForAnalysis)).map(stripArticleCoverageBundle),
     ...fixedArticlesForAnalysis,
   ];
-  return prepareArticleCoverageAnalyses(clean, async (items) => items, generatedAt, matcherVersion);
+  return prepareArticleCoverageAnalyses(
+    clean,
+    async (items) => items,
+    generatedAt,
+    matcherVersion,
+    rejectedPairs,
+  );
 }
 
 export async function prepareArticleCoverageAnalysis({
@@ -1439,11 +1449,13 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   }
   const coverageStartedAt = new Date().toISOString();
   const coverageGeneratedAt = new Date().toISOString();
+  const coverageRejectedPairs = await repository.activeCoverageRejectedPairs();
   const coverageAnalyses = await prepareCollectedArticleCoverageAnalyses({
     articlesForGeocoding: articleSets.flat(),
     articlesWithoutGeocoding,
     generatedAt: coverageGeneratedAt,
     matcherVersion: coverageMatcherVersion(),
+    rejectedPairs: coverageRejectedPairs,
   });
   const coverageCompletedAt = new Date().toISOString();
   const coverageGenerationId = await persistPreparedCoverage(

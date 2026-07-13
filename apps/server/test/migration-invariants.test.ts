@@ -27,6 +27,7 @@ describe("migration invariants", () => {
 
     for (const table of [
       "coverage_bundle_generations",
+      "coverage_generation_articles",
       "coverage_bundle_versions",
       "coverage_bundle_members",
       "coverage_bundle_edges",
