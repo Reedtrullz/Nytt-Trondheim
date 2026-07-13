@@ -534,6 +534,39 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
     provenance: "sanitized-production-shape",
   },
   {
+    id: "generic-boilerplate-is-not-high-detail",
+    articles: [
+      article("generic-boilerplate-nrk", {
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Kontroll ved havna",
+        excerpt:
+          "Flere personer og en mann var involvert. Et kjøretøy og en bil ble undersøkt. Forholdet var meldt til politiet. Kontroll ble gjennomført ved et utested. En komfyr, middag, brakke og byggeplass ble omtalt. Havnebetjent observerte blå jakke og motorsykkel ved lagerbygget før patruljen avsluttet oppdraget rolig.",
+        url: "https://example.test/generic-boilerplate-nrk",
+        category: "Krim",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-13T20:00:00.000Z",
+      }),
+      article("generic-boilerplate-adressa", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Uro utenfor lokale",
+        excerpt:
+          "Flere personer og en mann var involvert. Et kjøretøy og en bil ble undersøkt. Forholdet var meldt til politiet. Kontroll ble gjennomført ved et utested. En komfyr, middag, brakke og byggeplass ble omtalt. Dørvakten beskrev grønn skjorte og drosje ved restauranten før vaktene ryddet området stille.",
+        url: "https://example.test/generic-boilerplate-adressa",
+        category: "Krim",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-13T20:09:00.000Z",
+      }),
+    ],
+    expectedSamePairs: [],
+    expectedSeparatePairs: [["generic-boilerplate-nrk", "generic-boilerplate-adressa"]],
+    expectedGroups: [],
+    expectedVerifiedGroups: [],
+    critical: true,
+    provenance: "sanitized-production-shape",
+  },
+  {
     id: "owner-correction-history",
     articles: [
       article("correction-anchor", {

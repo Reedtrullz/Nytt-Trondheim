@@ -58,6 +58,7 @@ export interface ArticleCoveragePairEvidence {
   cityIncidentFingerprints: [string | undefined, string | undefined];
   sharedCityIncidentFingerprint?: string;
   sharedBodyTokenCount: number;
+  bodyScore: number;
   sharedDistinctiveTokenCount: number;
   titleScore: number;
   timeDistanceMs: number;
@@ -760,6 +761,7 @@ export function articleCoverageEvidence(
     cityIncidentFingerprints: [leftFingerprint, rightFingerprint],
     ...(sharedCityIncidentFingerprint ? { sharedCityIncidentFingerprint } : {}),
     sharedBodyTokenCount: body.overlap,
+    bodyScore: body.score,
     sharedDistinctiveTokenCount: distinctive.overlap,
     titleScore,
     timeDistanceMs,
@@ -788,30 +790,31 @@ function sameBroadCategory(left: Article, right: Article): boolean {
   return eventLike.has(left.category) && eventLike.has(right.category);
 }
 
-export function isHighDetailCrossSourceNearDuplicate(left: Article, right: Article): boolean {
+function isHighDetailCrossSourceNearDuplicateFromEvidence(
+  left: Article,
+  right: Article,
+  evidence: ArticleCoveragePairEvidence,
+): boolean {
   if (left.source === right.source || !sameBroadCategory(left, right)) return false;
-  const timeDistanceMs = Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt));
-  if (!Number.isFinite(timeDistanceMs) || timeDistanceMs > highDetailNearDuplicatePolicy.windowMs) {
-    return false;
-  }
-  const leftSubtype = articleIncidentSubtype(left);
-  const rightSubtype = articleIncidentSubtype(right);
   if (
-    hasConflictingSpecificPlaces(left, right) ||
-    subtypesConflict(leftSubtype, rightSubtype) ||
-    (left.situationId && right.situationId && left.situationId !== right.situationId)
+    !Number.isFinite(evidence.timeDistanceMs) ||
+    evidence.timeDistanceMs > highDetailNearDuplicatePolicy.windowMs ||
+    evidence.conflicts.length > 0
   ) {
     return false;
   }
-  const body = tokenSimilarity(articleBodyTokens(left), articleBodyTokens(right));
-  const distinctive = tokenSimilarity(
-    articleDistinctiveIncidentTokens(left),
-    articleDistinctiveIncidentTokens(right),
-  );
   return (
-    body.overlap >= highDetailNearDuplicatePolicy.minBodyOverlap &&
-    body.score >= highDetailNearDuplicatePolicy.minBodyScore &&
-    distinctive.overlap >= highDetailNearDuplicatePolicy.minDistinctiveOverlap
+    evidence.sharedBodyTokenCount >= highDetailNearDuplicatePolicy.minBodyOverlap &&
+    evidence.bodyScore >= highDetailNearDuplicatePolicy.minBodyScore &&
+    evidence.sharedDistinctiveTokenCount >= highDetailNearDuplicatePolicy.minDistinctiveOverlap
+  );
+}
+
+export function isHighDetailCrossSourceNearDuplicate(left: Article, right: Article): boolean {
+  return isHighDetailCrossSourceNearDuplicateFromEvidence(
+    left,
+    right,
+    articleCoverageEvidence(left, right, "v2"),
   );
 }
 
@@ -842,6 +845,7 @@ function articlePairSignalsForV2(
   left: Article,
   right: Article,
   evidence: ArticleCoveragePairEvidence,
+  highDetailNearDuplicate: boolean,
 ): ArticleCoverageDecisionSignal[] {
   const signals: ArticleCoverageDecisionSignal[] = [];
   if (left.situationId && left.situationId === right.situationId) {
@@ -854,7 +858,7 @@ function articlePairSignalsForV2(
   if (evidence.positiveIncidentEvidence.includes("shared_specific_place")) {
     signals.push({ kind: "shared_place", articleIds: evidence.articleIds });
   }
-  const body = tokenSimilarity(articleBodyTokens(left), articleBodyTokens(right));
+  const body = { overlap: evidence.sharedBodyTokenCount, score: evidence.bodyScore };
   if (left.url.length > 0 && left.url === right.url) {
     signals.push({ kind: "near_duplicate", articleIds: evidence.articleIds, score: 1 });
   } else if (evidence.titleScore >= 0.65) {
@@ -864,7 +868,7 @@ function articlePairSignalsForV2(
       score: evidence.titleScore,
     });
   } else if (
-    isHighDetailCrossSourceNearDuplicate(left, right) ||
+    highDetailNearDuplicate ||
     (normalizeText(left.excerpt).length > 0 &&
       normalizeText(left.excerpt) === normalizeText(right.excerpt)) ||
     (body.overlap >= 6 && body.score >= 0.6)
@@ -953,6 +957,7 @@ function automaticEvidenceEligible(
   evidence: ArticleCoveragePairEvidence,
   signals: ArticleCoverageDecisionSignal[],
   kind: ArticleCoverageEdgeKind,
+  highDetailNearDuplicate: boolean,
 ): boolean {
   if (
     evidence.positiveIncidentEvidence.includes("same_situation_id") &&
@@ -981,9 +986,7 @@ function automaticEvidenceEligible(
     return hasSignal(signals, "topical_thread") && evidence.timeDistanceMs <= topicalThreadWindowMs;
   }
   if (kind === "incident") {
-    return (
-      hasSignal(signals, "near_duplicate") && isHighDetailCrossSourceNearDuplicate(left, right)
-    );
+    return hasSignal(signals, "near_duplicate") && highDetailNearDuplicate;
   }
   if (
     left.url.length > 0 &&
@@ -1003,10 +1006,21 @@ export function articleCoverageEdge(
   right: Article,
 ): ArticleCoverageEdge | undefined {
   const evidence = articleCoverageEvidence(left, right, "v2");
-  const signals = articlePairSignalsForV2(left, right, evidence);
+  const highDetailNearDuplicate = isHighDetailCrossSourceNearDuplicateFromEvidence(
+    left,
+    right,
+    evidence,
+  );
+  const signals = articlePairSignalsForV2(left, right, evidence, highDetailNearDuplicate);
   const kind = coverageKindForPair(signals, evidence);
-  const automaticEvidence = automaticEvidenceEligible(left, right, evidence, signals, kind);
-  const highDetailNearDuplicate = isHighDetailCrossSourceNearDuplicate(left, right);
+  const automaticEvidence = automaticEvidenceEligible(
+    left,
+    right,
+    evidence,
+    signals,
+    kind,
+    highDetailNearDuplicate,
+  );
   const positiveCount = evidence.positiveIncidentEvidence.length;
   const hasBlockingConflict = evidence.conflicts.length > 0;
   const textScore = Math.min(
