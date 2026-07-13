@@ -25,6 +25,14 @@
 - All user-facing copy is Bokmål and all time formatting remains `Europe/Oslo` / `nb-NO`.
 - Use TDD and commit only the files named by each task.
 
+## Execution Status
+
+- Tasks 1-3 are complete on `codex/similar-case-redesign` in commits `d8a2c09e`,
+  `8e041952`, and `f1b72195`.
+- Tasks 4-7 remain. Continue with Task 4; do not repeat the completed red-green cycles.
+- The matching/trust-safety and lifecycle/corrections plans are complete prerequisites on the same
+  branch.
+
 ## File Map
 
 - Modify `apps/frontend/src/api.ts`: split/undo clients with typed `409` payloads.
@@ -65,7 +73,7 @@
 - Consumes: `CoverageBundleSplitRequest`, `CoverageBundleCorrectionResult`, `CityPulseStory`, and existing CSRF-aware `request()`.
 - Produces: `api.splitCoverageBundle()`, `api.undoCoverageCorrection()`, `CoverageCorrectionConflictError`, and `replaceCoverageStories()` for Tasks 3-4.
 
-- [ ] **Step 1: Write pure replacement tests**
+- [x] **Step 1: Write pure replacement tests**
 
 Create `apps/frontend/src/coverageStoryUpdates.test.ts`:
 
@@ -127,7 +135,7 @@ describe("replaceCoverageStories", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify the missing-module failure**
+- [x] **Step 2: Run the test and verify the missing-module failure**
 
 ```bash
 npm test -- --run apps/frontend/src/coverageStoryUpdates.test.ts
@@ -135,7 +143,7 @@ npm test -- --run apps/frontend/src/coverageStoryUpdates.test.ts
 
 Expected: FAIL because `coverageStoryUpdates.ts` does not exist.
 
-- [ ] **Step 3: Implement deterministic replacement**
+- [x] **Step 3: Implement deterministic replacement**
 
 Create `apps/frontend/src/coverageStoryUpdates.ts`:
 
@@ -161,7 +169,7 @@ export function replaceCoverageStories(
 }
 ```
 
-- [ ] **Step 4: Add typed API methods and `409` payload handling**
+- [x] **Step 4: Add typed API methods and `409` payload handling**
 
 Extend `ApiError` with optional typed data:
 
@@ -228,7 +236,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 Add API tests proving the CSRF header remains present for both mutation methods.
 
-- [ ] **Step 5: Run frontend API and replacement tests**
+- [x] **Step 5: Run frontend API and replacement tests**
 
 ```bash
 npm test -- --run apps/frontend/src/api.test.ts apps/frontend/src/coverageStoryUpdates.test.ts
@@ -237,7 +245,7 @@ npm run typecheck -w @nytt/frontend
 
 Expected: tests and typecheck PASS.
 
-- [ ] **Step 6: Commit typed correction plumbing**
+- [x] **Step 6: Commit typed correction plumbing**
 
 ```bash
 git add apps/frontend/src/api.ts apps/frontend/src/api.test.ts apps/frontend/src/coverageStoryUpdates.ts apps/frontend/src/coverageStoryUpdates.test.ts
@@ -264,7 +272,7 @@ git commit -m "feat: add coverage correction client"
 - Consumes: `HomeStoryCard.group`, `matchConfidence`, safe external URLs and existing time formatting.
 - Produces: `CoverageSourceCluster({ card, canCorrect, onCorrect })`, explicit `articleCount`, `sourceCount`, and `matchRationale` card fields for Task 3.
 
-- [ ] **Step 1: Create the reusable grouped-card fixture**
+- [x] **Step 1: Create the reusable grouped-card fixture**
 
 Create `apps/frontend/src/test-fixtures/homeStoryCards.ts`:
 
@@ -317,7 +325,7 @@ export function clusteredHomeStoryCard({
 }
 ```
 
-- [ ] **Step 2: Write compact rendering tests**
+- [x] **Step 2: Write compact rendering tests**
 
 Create `CoverageSourceCluster.test.tsx`:
 
@@ -353,7 +361,7 @@ describe("CoverageSourceCluster", () => {
 });
 ```
 
-- [ ] **Step 3: Run the component test and verify failure**
+- [x] **Step 3: Run the component test and verify failure**
 
 ```bash
 npm test -- --run apps/frontend/src/components/news/CoverageSourceCluster.test.tsx
@@ -361,7 +369,7 @@ npm test -- --run apps/frontend/src/components/news/CoverageSourceCluster.test.t
 
 Expected: FAIL because the component and fixture do not exist.
 
-- [ ] **Step 4: Add explicit card counts and rationale**
+- [x] **Step 4: Add explicit card counts and rationale**
 
 In `homeStoryCards.ts`, add to `HomeStoryCard`:
 
@@ -397,7 +405,7 @@ export function coverageMatchExplanation(card: HomeStoryCard): string {
 }
 ```
 
-- [ ] **Step 5: Implement the compact component**
+- [x] **Step 5: Implement the compact component**
 
 Create `CoverageSourceCluster.tsx` with local `expanded` state. Exclude the primary article from supporting rows, render `supporting.slice(0, expanded ? supporting.length : 2)`, use a real `<button aria-expanded>` for disclosure, safe external links, and a secondary correction button. The component root must have:
 
@@ -490,11 +498,11 @@ export function CoverageSourceCluster({
 
 Render match explanation separately from `StoryConfidenceBadge`; never label it `Kildetillit`.
 
-- [ ] **Step 6: Replace both inline `SourceCluster` usages**
+- [x] **Step 6: Replace both inline `SourceCluster` usages**
 
 Delete the private `SourceCluster` from `HomePage.tsx`. Import the new component for lead and ordinary cards. Add a separate `canCorrect?: boolean` prop to `HomePage`, thread `canCorrect` and `onCorrect` through `LeadStory`, `StoryCard` and their callers, and leave save behavior unchanged. In `App.tsx`, keep `canSave={isOwner}` and pass `canCorrect={isOwner && session?.capabilities?.coverageCorrections === true}`; do not infer correction authority from `canSave` inside `HomePage`.
 
-- [ ] **Step 7: Add compact responsive styles**
+- [x] **Step 7: Add compact responsive styles**
 
 Use CSS grid for rows, preserve existing editorial colors, and add:
 
@@ -524,7 +532,7 @@ Use CSS grid for rows, preserve existing editorial colors, and add:
 
 The render logic, not CSS alone, must limit the default DOM rows to two so screen readers do not encounter hidden extra links.
 
-- [ ] **Step 8: Run component, card and Home tests**
+- [x] **Step 8: Run component, card and Home tests**
 
 ```bash
 npm test -- --run apps/frontend/src/components/news/CoverageSourceCluster.test.tsx apps/frontend/src/homeStoryCards.test.ts apps/frontend/src/pages/HomePage.test.tsx
@@ -533,7 +541,7 @@ npm run typecheck -w @nytt/frontend
 
 Expected: tests/typecheck PASS; snapshots contain explicit article/source counts and no old all-expanded cluster.
 
-- [ ] **Step 9: Commit compact grouped cards**
+- [x] **Step 9: Commit compact grouped cards**
 
 ```bash
 git add apps/frontend/src/components/news/CoverageSourceCluster.tsx apps/frontend/src/components/news/CoverageSourceCluster.test.tsx apps/frontend/src/test-fixtures/homeStoryCards.ts apps/frontend/src/homeStoryCards.ts apps/frontend/src/homeStoryCards.test.ts apps/frontend/src/pages/HomePage.tsx apps/frontend/src/pages/HomePage.test.tsx apps/frontend/src/App.tsx apps/frontend/src/styles.css
@@ -557,7 +565,7 @@ git commit -m "feat: compact grouped news cards"
 - Consumes: API and replacement helper from Task 1; compact component callback from Task 2.
 - Produces: immediate owner split/undo with `CorrectionUndoState`, preserved scroll/focus and ARIA announcements.
 
-- [ ] **Step 1: Write correction-dialog render and selection tests**
+- [x] **Step 1: Write correction-dialog render and selection tests**
 
 Create `CoverageCorrectionDialog.test.tsx`:
 
@@ -601,7 +609,7 @@ describe("CoverageCorrectionDialog", () => {
 });
 ```
 
-- [ ] **Step 2: Run the dialog test and verify failure**
+- [x] **Step 2: Run the dialog test and verify failure**
 
 ```bash
 npm test -- --run apps/frontend/src/components/news/CoverageCorrectionDialog.test.tsx
@@ -609,7 +617,7 @@ npm test -- --run apps/frontend/src/components/news/CoverageCorrectionDialog.tes
 
 Expected: FAIL because the dialog is missing.
 
-- [ ] **Step 3: Implement the accessible correction dialog**
+- [x] **Step 3: Implement the accessible correction dialog**
 
 Build the controlled dialog exactly as follows:
 
@@ -746,7 +754,7 @@ export function CoverageCorrectionDialog({
 
 Do not allow selecting the primary as rejected in the first release.
 
-- [ ] **Step 4: Add HomePage correction and undo state**
+- [x] **Step 4: Add HomePage correction and undo state**
 
 Add:
 
@@ -770,7 +778,7 @@ Maintain `correctingCard`, `correctionPending`, `correctionError`, `correctionAn
 
 `handleCoverageUndo()` calls every correction ID sequentially, applies the final response, clears undo state, and announces `Grupperingen er gjenopprettet.` If one undo fails, retain the toast with `Kunne ikke angre hele endringen. Oppdater siden.` and refresh the feed.
 
-- [ ] **Step 5: Preserve focus and scroll**
+- [x] **Step 5: Preserve focus and scroll**
 
 Give each story card `id={`story-${card.id}`}` and `tabIndex={-1}`. Record `window.scrollY` before mutation. After state commit, `requestAnimationFrame()` restores scroll and focuses the first replacement card with `{ preventScroll: true }`. When the dialog closes without mutation, return focus to the originating `Feil gruppering?` button.
 
@@ -784,7 +792,7 @@ Render one page-level live region:
 
 Render the undo toast as `role="status"` with a real `Angre` button.
 
-- [ ] **Step 6: Add HomePage helper-level tests**
+- [x] **Step 6: Add HomePage helper-level tests**
 
 Because the project uses static rendering, export pure reducers:
 
@@ -802,7 +810,7 @@ export function coverageConflictState(
 
 Test immediate replacement, stale replacement, undo replacement, explicit announcement strings, owner-only action and no change to save state.
 
-- [ ] **Step 7: Run correction UI tests**
+- [x] **Step 7: Run correction UI tests**
 
 ```bash
 npm test -- --run apps/frontend/src/components/news/CoverageCorrectionDialog.test.tsx apps/frontend/src/pages/HomePage.test.tsx apps/frontend/src/coverageStoryUpdates.test.ts apps/frontend/src/api.test.ts
@@ -811,7 +819,7 @@ npm run typecheck -w @nytt/frontend
 
 Expected: all tests/typecheck PASS.
 
-- [ ] **Step 8: Commit immediate correction UX**
+- [x] **Step 8: Commit immediate correction UX**
 
 ```bash
 git add apps/frontend/src/components/news/CoverageCorrectionDialog.tsx apps/frontend/src/components/news/CoverageCorrectionDialog.test.tsx apps/frontend/src/pages/HomePage.tsx apps/frontend/src/pages/HomePage.test.tsx apps/frontend/src/styles.css
@@ -825,6 +833,8 @@ git commit -m "feat: split grouped stories immediately"
 **Files:**
 
 - Modify: `packages/shared/src/article-bundles.ts`
+- Modify: `apps/server/src/app.ts`
+- Modify: `apps/server/test/api.test.ts`
 - Modify: `apps/frontend/src/pages/CoverageBundlesPage.tsx`
 - Modify: `apps/frontend/src/pages/CoverageBundlesPage.test.tsx`
 - Modify: `apps/frontend/src/styles.css:5015-5335,13017-13590`
@@ -856,6 +866,18 @@ Add an error fixture with `integrityErrorCount: 1` and parity mismatch; assert a
 
 Add optional `correctionsEnabled?: boolean` to `CoverageBundlePage`, set it to `true` in the actionable fixture, and assert a second fixture with `false` omits `Splitt gruppe` and `Angre` while retaining read-only correction history.
 
+Add an API test using an owner session and `coverageCorrectionsEnabled: true`:
+
+```ts
+const response = await ownerAgent
+  .get("/api/operations/coverage-bundles?projection=shadow")
+  .expect(200);
+expect(response.body).toMatchObject({ correctionsEnabled: true });
+```
+
+Repeat with the feature flag disabled and expect `false`. This makes the UI capability an explicit
+server response rather than an assumption made by the browser.
+
 - [ ] **Step 2: Run the page test and verify failures**
 
 ```bash
@@ -873,6 +895,26 @@ Keep legacy filters available only when `projection=legacy`. Default query:
 ```
 
 Add controls for projection, match tier, corrected state and integrity. Preserve filter state in URL search params. Summary cards use normalized fields; show matcher version and latest successful generation time.
+
+Export URL helpers so query parsing remains independently testable:
+
+```ts
+export type CoverageWorkspaceFilters = {
+  projection: "legacy" | "shadow" | "active";
+  matchTier?: "strong" | "moderate" | "weak";
+  corrected?: "yes" | "no";
+  integrity?: "clean" | "error";
+  query?: string;
+  cursor?: string;
+  bundleId?: string;
+};
+
+export function coverageWorkspaceFilters(search: string): CoverageWorkspaceFilters;
+export function coverageWorkspaceSearch(filters: CoverageWorkspaceFilters): string;
+```
+
+Round-trip tests must prove that changing one filter preserves every other filter and that legacy
+`confidence` is discarded unless `projection=legacy`.
 
 - [ ] **Step 4: Bound and group review candidates**
 
@@ -905,11 +947,28 @@ Add an owner-only download link to `/api/operations/coverage-corrections/export?
 
 If integrity errors exist, show IDs and error classes without fabricating missing article titles. If parity is not clean, display `Skyggevisningen avviker fra dagens publiserte grupper` and keep promotion copy absent.
 
+In `apps/server/src/app.ts`, return the page and feature capability together:
+
+```ts
+const page = await store.listCoverageBundles(query, req.user.login);
+res.json({
+  ...page,
+  correctionsEnabled: config.coverageCorrectionsEnabled === true,
+});
+```
+
+In the page component, define one `loadCoveragePage()` callback and call it after successful split or
+undo. Reuse `CoverageCorrectionDialog`; hold only the selected bundle, pending action, and visible
+error locally. On `CoverageCorrectionConflictError`, show the stale-copy error and reload instead of
+optimistically claiming success. Disable the mutation buttons while a request is pending.
+
 - [ ] **Step 6: Run audit page tests and typecheck**
 
 ```bash
-npm test -- --run apps/frontend/src/pages/CoverageBundlesPage.test.tsx apps/frontend/src/components/news/CoverageCorrectionDialog.test.tsx
+npm test -- --run apps/frontend/src/pages/CoverageBundlesPage.test.tsx apps/frontend/src/components/news/CoverageCorrectionDialog.test.tsx apps/server/test/api.test.ts
 npm run typecheck -w @nytt/frontend
+npm run typecheck -w @nytt/server
+npm run typecheck -w @nytt/shared
 ```
 
 Expected: tests/typecheck PASS.
@@ -917,7 +976,7 @@ Expected: tests/typecheck PASS.
 - [ ] **Step 7: Commit the audit workspace**
 
 ```bash
-git add packages/shared/src/article-bundles.ts apps/frontend/src/pages/CoverageBundlesPage.tsx apps/frontend/src/pages/CoverageBundlesPage.test.tsx apps/frontend/src/styles.css
+git add packages/shared/src/article-bundles.ts apps/server/src/app.ts apps/server/test/api.test.ts apps/frontend/src/pages/CoverageBundlesPage.tsx apps/frontend/src/pages/CoverageBundlesPage.test.tsx apps/frontend/src/styles.css
 git commit -m "feat: make coverage audit actionable"
 ```
 
