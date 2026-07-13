@@ -255,6 +255,7 @@ describe("worker lifecycle helpers", () => {
 
     const repository = {
       upsertArticles: vi.fn(async () => undefined),
+      upsertCoverageArticles: vi.fn(async () => undefined),
       upsertCoverageBundles: vi.fn(async () => undefined),
       persistCoverageGeneration: vi.fn(async () => "generation-v2"),
     };
@@ -266,7 +267,10 @@ describe("worker lifecycle helpers", () => {
         "2026-07-12T20:59:59.000Z",
       ),
     ).resolves.toBe("generation-v2");
-    expect(repository.upsertArticles).toHaveBeenCalledWith(analyses.active.analysis.articles);
+    expect(repository.upsertCoverageArticles).toHaveBeenCalledWith(
+      analyses.active.analysis.articles,
+    );
+    expect(repository.upsertArticles).not.toHaveBeenCalled();
     expect(repository.upsertCoverageBundles).not.toHaveBeenCalled();
     expect(repository.persistCoverageGeneration).toHaveBeenCalledWith({
       matcherVersion: "v2",
