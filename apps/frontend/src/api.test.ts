@@ -181,13 +181,14 @@ describe("frontend source item API helpers", () => {
     await api.coverageBundles({
       kind: "incident",
       confidence: "high",
+      corrected: false,
       q: "Flatåsen",
       cursor: "cursor:one",
       limit: 25,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/operations/coverage-bundles?kind=incident&confidence=high&q=Flat%C3%A5sen&cursor=cursor%3Aone&limit=25",
+      "/api/operations/coverage-bundles?kind=incident&confidence=high&corrected=false&q=Flat%C3%A5sen&cursor=cursor%3Aone&limit=25",
       expect.objectContaining({ credentials: "include" }),
     );
   });

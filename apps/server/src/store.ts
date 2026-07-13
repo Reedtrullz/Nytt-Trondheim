@@ -15,6 +15,7 @@ import type {
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleDecision,
   ArticleCoverageBundleKind,
+  ArticleCoverageEdge,
   ArticlePage,
   ArticleTopic,
   Attachment,
@@ -30,6 +31,7 @@ import type {
   CoverageBundlePage,
   CoverageBundleQueryInput,
   CoverageBundleSummary,
+  CoverageGenerationSummary,
   EvidenceItem,
   MapFeature,
   MorningBrief,
@@ -105,11 +107,13 @@ import type {
 } from "@nytt/shared";
 import {
   analyzeArticleCoverage,
+  analyzeArticleCoverageV2,
   activationPolicyForSource,
   bootstrapWithMorningBrief,
   buildNotificationTriggerPage,
   cityPulseStoryFromGroup,
   comparePublicHomeSituations,
+  coverageProjectionParity,
   derivePublicVerificationForArticleGroup,
   groupHomeArticles,
   isLocalSportsCoverageText,
@@ -1560,6 +1564,36 @@ interface CoverageBundleRow {
   updated_at: Date | string;
 }
 
+interface NormalizedCoverageBundleRow {
+  id: string;
+  kind: ArticleCoverageBundleKind;
+  confidence: ArticleCoverageBundleConfidence;
+  reason: string;
+  generated_at: Date | string;
+  last_seen_at: Date | string;
+  last_seen_at_cursor: string;
+  primary_article_id: string;
+  member_article_ids: string[];
+  member_articles: Article[];
+  source_ids: SourceId[];
+  source_labels: string[];
+  match_tier: "strong" | "moderate";
+  match_score: number;
+  match_rationale: string;
+  edges: ArticleCoverageEdge[];
+  corrections: Array<{
+    id: string;
+    anchorArticleId: string;
+    rejectedArticleId: string;
+    status: "active" | "reverted";
+    createdAt: string;
+    revertedAt?: string;
+  }>;
+  missing_article_ids: string[];
+  primary_count: number | string;
+  updated_at: Date | string;
+}
+
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
   return {
     id: row.id,
@@ -2018,12 +2052,20 @@ function emptyCoverageBundleSummary(): CoverageBundleSummary {
     recentBundleCount: 0,
     byKind: { incident: 0, topic: 0, update: 0 },
     byConfidence: { high: 0, medium: 0 },
+    activeBundleCount: 0,
+    byMatchTier: { strong: 0, moderate: 0 },
+    reviewCandidateCount: 0,
+    activeCorrectionCount: 0,
+    integrityErrorCount: 0,
+    matcherVersion: "v1",
+    projectionState: "legacy",
   };
 }
 
 function summarizeCoverageBundleItems(items: CoverageBundleListItem[]): CoverageBundleSummary {
   const summary = emptyCoverageBundleSummary();
   summary.recentBundleCount = items.length;
+  summary.activeBundleCount = items.length;
   for (const item of items) {
     summary.byKind[item.kind] += 1;
     summary.byConfidence[item.confidence] += 1;
@@ -2087,6 +2129,11 @@ function coverageBundleItemFromDecision(
       return article ? [coverageBundleArticleSummary(article)] : [];
     }),
     nearMissArticles: coverageBundleNearMissArticleSummaries(decision.nearMisses, articlesById),
+    state: "legacy",
+    edges: [],
+    reviewCandidates: [],
+    corrections: [],
+    integrityErrors: [],
   };
 }
 
@@ -2114,6 +2161,70 @@ function coverageBundleItemFromRow(
       return article ? [coverageBundleArticleSummary(article)] : [];
     }),
     nearMissArticles: coverageBundleNearMissArticleSummaries(row.near_misses, articlesById),
+    state: "legacy",
+    edges: [],
+    reviewCandidates: [],
+    corrections: [],
+    integrityErrors: [],
+  };
+}
+
+function boundedCoverageReviewCandidates(edges: ArticleCoverageEdge[]): ArticleCoverageEdge[] {
+  const counts = new Map<string, number>();
+  return edges
+    .filter(({ reviewable }) => reviewable)
+    .sort((left, right) => right.score - left.score)
+    .filter((edge) => {
+      const reason = edge.correctionConflict
+        ? "correction_conflict"
+        : (edge.conflicts[0]?.kind ?? edge.tier);
+      const key = `${reason}:${edge.tier}`;
+      const count = counts.get(key) ?? 0;
+      if (count >= 5) return false;
+      counts.set(key, count + 1);
+      return true;
+    });
+}
+
+function normalizedCoverageBundleItemFromRow(
+  row: NormalizedCoverageBundleRow,
+  generation: CoverageGenerationSummary,
+  state: "shadow" | "active" | "superseded",
+): CoverageBundleListItem {
+  const integrityErrors = [
+    ...(row.member_article_ids.length < 2 ? ["fewer_than_two_members"] : []),
+    ...(Number(row.primary_count) !== 1 ? ["invalid_primary_count"] : []),
+    ...row.missing_article_ids.map((id) => `missing_article:${id}`),
+  ];
+  const memberArticles = row.member_articles.map(coverageBundleArticleSummary);
+  return {
+    id: row.id,
+    kind: row.kind,
+    confidence: row.confidence,
+    reason: row.reason,
+    generatedAt: new Date(row.generated_at).toISOString(),
+    matcherVersion: generation.matcherVersion,
+    matchConfidence: {
+      tier: row.match_tier,
+      score: row.match_score,
+      rationale: row.match_rationale,
+    },
+    primaryArticleId: row.primary_article_id,
+    memberArticleIds: row.member_article_ids,
+    sourceIds: row.source_ids,
+    sourceLabels: row.source_labels,
+    signals: row.edges.flatMap(({ signals }) => signals),
+    nearMisses: [],
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+    memberArticles,
+    nearMissArticles: [],
+    generation,
+    state,
+    edges: row.edges,
+    reviewCandidates: boundedCoverageReviewCandidates(row.edges),
+    corrections: row.corrections,
+    integrityErrors,
   };
 }
 
@@ -3901,7 +4012,17 @@ export class MemoryStore implements Store {
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
     const generatedAt = new Date().toISOString();
-    const analysis = analyzeArticleCoverage(this.articles, generatedAt);
+    const projection = filters.projection ?? "legacy";
+    if (projection === "active" || projection === "superseded") {
+      const summary = emptyCoverageBundleSummary();
+      summary.projectionState = projection;
+      summary.matcherVersion = "v2";
+      return { items: [], summary };
+    }
+    const analysis =
+      projection === "shadow"
+        ? analyzeArticleCoverageV2(this.articles, generatedAt)
+        : analyzeArticleCoverage(this.articles, generatedAt);
     const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
     const limit = filters.limit ?? 30;
@@ -3912,7 +4033,18 @@ export class MemoryStore implements Store {
             .flatMap((articleId) => articlesById.get(articleId)?.publishedAt ?? [])
             .sort()
             .at(-1) ?? generatedAt;
-        return coverageBundleItemFromDecision(bundle, articlesById, lastSeenAt, generatedAt);
+        const item = coverageBundleItemFromDecision(bundle, articlesById, lastSeenAt, generatedAt);
+        if (projection === "shadow") {
+          const memberIds = new Set(bundle.memberArticleIds);
+          item.state = "shadow";
+          item.edges = (analysis.edges ?? []).filter(({ articleIds, reviewable }) =>
+            reviewable
+              ? articleIds.some((id) => memberIds.has(id))
+              : articleIds.every((id) => memberIds.has(id)),
+          );
+          item.reviewCandidates = boundedCoverageReviewCandidates(item.edges);
+        }
+        return item;
       })
       .sort(
         (left, right) =>
@@ -3924,9 +4056,27 @@ export class MemoryStore implements Store {
     );
     const page = cursorFiltered.slice(0, limit);
     const last = page.at(-1);
+    const summary = summarizeCoverageBundleItems(filtered);
+    let parity;
+    if (projection === "shadow") {
+      const legacy = analyzeArticleCoverage(this.articles, generatedAt).bundles;
+      parity = coverageProjectionParity(legacy, analysis.bundles);
+      summary.matcherVersion = "v2";
+      summary.projectionState = "shadow";
+      summary.byMatchTier = {
+        strong: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "strong").length,
+        moderate: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "moderate")
+          .length,
+      };
+      summary.reviewCandidateCount = filtered.reduce(
+        (count, item) => count + item.reviewCandidates.length,
+        0,
+      );
+    }
     return {
       items: clone(page),
-      summary: summarizeCoverageBundleItems(filtered),
+      summary,
+      ...(parity ? { parity } : {}),
       nextCursor:
         cursorFiltered.length > limit && last ? encodeCursor(last.lastSeenAt, last.id) : undefined,
     };
@@ -5528,6 +5678,10 @@ export class PgStore implements Store {
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
+    const projection = filters.projection ?? "legacy";
+    if (projection !== "legacy") {
+      return this.listNormalizedCoverageBundles(filters, projection);
+    }
     const params: unknown[] = [];
     const where: string[] = [];
     if (filters.kind) {
@@ -5638,7 +5792,9 @@ export class PgStore implements Store {
     const summaryRow = summaryResult.rows[0];
     const summary: CoverageBundleSummary = summaryRow
       ? {
+          ...emptyCoverageBundleSummary(),
           recentBundleCount: Number(summaryRow.total),
+          activeBundleCount: Number(summaryRow.total),
           byKind: {
             incident: Number(summaryRow.incident),
             topic: Number(summaryRow.topic),
@@ -5660,6 +5816,187 @@ export class PgStore implements Store {
       nextCursor:
         result.rows.length > limit && lastRow
           ? encodeCursor(lastRow.last_seen_at_cursor, lastRow.id)
+          : undefined,
+    };
+  }
+
+  private async listNormalizedCoverageBundles(
+    filters: CoverageBundleQueryInput,
+    projection: "shadow" | "active" | "superseded",
+  ): Promise<CoverageBundlePage> {
+    const mode = projection === "active" ? "active" : "shadow";
+    const generationResult = await this.pool.query<{
+      id: string;
+      matcher_version: "v1" | "v2";
+      mode: "active" | "shadow";
+      started_at: Date | string;
+      completed_at: Date | string;
+      article_count: number;
+      bundle_count: number;
+      edge_count: number;
+      correction_conflict_count: number;
+    }>(
+      `SELECT id, matcher_version, mode, started_at, completed_at, article_count,
+              bundle_count, edge_count, correction_conflict_count
+       FROM coverage_bundle_generations
+       WHERE mode=$1 AND status='completed'
+       ORDER BY completed_at DESC, id DESC
+       LIMIT 1 OFFSET $2`,
+      [mode, projection === "superseded" ? 1 : 0],
+    );
+    const generationRow = generationResult.rows[0];
+    if (!generationRow) {
+      const summary = emptyCoverageBundleSummary();
+      summary.projectionState = projection;
+      summary.matcherVersion = "v2";
+      return { items: [], summary };
+    }
+    const generation: CoverageGenerationSummary = {
+      id: generationRow.id,
+      matcherVersion: generationRow.matcher_version,
+      mode: generationRow.mode,
+      status: "completed",
+      startedAt: new Date(generationRow.started_at).toISOString(),
+      completedAt: new Date(generationRow.completed_at).toISOString(),
+      articleCount: Number(generationRow.article_count),
+      bundleCount: Number(generationRow.bundle_count),
+      edgeCount: Number(generationRow.edge_count),
+      correctionConflictCount: Number(generationRow.correction_conflict_count),
+    };
+    const result = await this.pool.query<NormalizedCoverageBundleRow>(
+      `SELECT cb.id, cbv.kind, cbv.confidence, cbv.reason, cbv.generated_at,
+              cbv.last_seen_at,
+              to_char(cbv.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS last_seen_at_cursor,
+              cbv.primary_article_id, cbv.source_ids, cbv.source_labels,
+              cbv.match_tier, cbv.match_score, cbv.match_rationale, cb.updated_at,
+              COALESCE((
+                SELECT array_agg(cbm.article_id ORDER BY cbm.article_id)
+                FROM coverage_bundle_members cbm
+                WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+              ), '{}') AS member_article_ids,
+              COALESCE((
+                SELECT jsonb_agg(a.payload ORDER BY cbm.article_id)
+                FROM coverage_bundle_members cbm
+                JOIN articles a ON a.id=cbm.article_id
+                WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+              ), '[]'::jsonb) AS member_articles,
+              COALESCE((
+                SELECT array_agg(cbm.article_id ORDER BY cbm.article_id)
+                FROM coverage_bundle_members cbm
+                LEFT JOIN articles a ON a.id=cbm.article_id
+                WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+                  AND a.id IS NULL
+              ), '{}') AS missing_article_ids,
+              (SELECT count(*) FROM coverage_bundle_members cbm
+               WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+                 AND cbm.role='primary') AS primary_count,
+              COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'articleIds', jsonb_build_array(cbe.left_article_id, cbe.right_article_id),
+                  'tier', cbe.tier, 'score', cbe.score, 'kind', cbe.kind,
+                  'signals', cbe.signals, 'conflicts', cbe.conflicts,
+                  'evidenceFingerprint', cbe.evidence_fingerprint,
+                  'reviewable', cbe.status='reviewable',
+                  'correctionConflict', cbe.correction_conflict
+                ) ORDER BY cbe.score DESC, cbe.left_article_id, cbe.right_article_id)
+                FROM coverage_bundle_edges cbe
+                WHERE cbe.generation_id=cbv.generation_id
+                  AND (cbe.bundle_id=cbv.bundle_id OR (
+                    cbe.status='reviewable' AND EXISTS (
+                      SELECT 1 FROM coverage_bundle_members cbm
+                      WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+                        AND cbm.article_id IN (cbe.left_article_id, cbe.right_article_id)
+                    )
+                  ))
+              ), '[]'::jsonb) AS edges,
+              COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'id', cbc.id, 'anchorArticleId', cbc.anchor_article_id,
+                  'rejectedArticleId', cbc.rejected_article_id, 'status', cbc.status,
+                  'createdAt', cbc.created_at, 'revertedAt', cbc.reverted_at
+                ) ORDER BY cbc.created_at DESC, cbc.id DESC)
+                FROM coverage_bundle_corrections cbc
+                WHERE cbc.original_bundle_id=cbv.bundle_id
+              ), '[]'::jsonb) AS corrections
+       FROM coverage_bundle_versions cbv
+       JOIN coverage_bundle_generations cg ON cg.id = cbv.generation_id
+       JOIN coverage_bundles cb ON cb.id = cbv.bundle_id
+       WHERE ($1 = 'superseded' OR cb.state = $1)
+         AND cg.id=$2 AND cg.status = 'completed'
+       ORDER BY cbv.last_seen_at DESC, cb.id DESC`,
+      [projection, generation.id],
+    );
+    const allItems = result.rows.map((row) =>
+      normalizedCoverageBundleItemFromRow(row, generation, projection),
+    );
+    const filtered = filterCoverageBundleItems(allItems, filters).filter(
+      (item) =>
+        (!filters.matchTier || item.matchConfidence?.tier === filters.matchTier) &&
+        (filters.corrected === undefined ||
+          item.corrections.some(({ status }) => status === "active") ===
+            (filters.corrected === true || filters.corrected === "true")) &&
+        (!filters.integrity ||
+          (filters.integrity === "ok"
+            ? item.integrityErrors.length === 0
+            : item.integrityErrors.length > 0)),
+    );
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const cursorFiltered = filtered.filter((item) =>
+      beforeCursor(item.lastSeenAt, item.id, cursor),
+    );
+    const limit = filters.limit ?? 30;
+    const pageItems = cursorFiltered.slice(0, limit);
+    const legacyResult = await this.pool.query<{
+      id: string;
+      primary_article_id: string;
+      member_article_ids: string[];
+    }>(
+      `SELECT id, primary_article_id, member_article_ids
+       FROM coverage_bundles
+       WHERE state='legacy' OR (state IS NULL AND matcher_version='v1')
+       ORDER BY id`,
+    );
+    const parity = coverageProjectionParity(
+      legacyResult.rows.map((row) => ({
+        id: row.id,
+        primaryArticleId: row.primary_article_id,
+        memberArticleIds: row.member_article_ids,
+      })),
+      allItems.map((item) => ({
+        id: item.id,
+        primaryArticleId: item.primaryArticleId,
+        memberArticleIds: item.memberArticleIds,
+      })),
+    );
+    const summary = summarizeCoverageBundleItems(filtered);
+    summary.activeBundleCount = filtered.length;
+    summary.byMatchTier = {
+      strong: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "strong").length,
+      moderate: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "moderate")
+        .length,
+    };
+    summary.reviewCandidateCount = filtered.reduce(
+      (count, item) => count + item.reviewCandidates.length,
+      0,
+    );
+    summary.activeCorrectionCount = filtered.reduce(
+      (count, item) => count + item.corrections.filter(({ status }) => status === "active").length,
+      0,
+    );
+    summary.integrityErrorCount = filtered.reduce(
+      (count, item) => count + item.integrityErrors.length,
+      0,
+    );
+    summary.matcherVersion = generation.matcherVersion;
+    summary.projectionState = projection;
+    summary.generation = generation;
+    return {
+      items: clone(pageItems),
+      summary,
+      parity,
+      nextCursor:
+        cursorFiltered.length > limit && pageItems.at(-1)
+          ? encodeCursor(pageItems.at(-1)!.lastSeenAt, pageItems.at(-1)!.id)
           : undefined,
     };
   }

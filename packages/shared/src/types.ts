@@ -142,6 +142,28 @@ export interface ArticlePublicVerification {
 
 export type ArticleCoverageBundleKind = "incident" | "topic" | "update";
 export type ArticleCoverageBundleConfidence = "high" | "medium";
+export type CoverageProjectionState = "legacy" | "shadow" | "active" | "superseded";
+
+export interface CoverageGenerationSummary {
+  id: string;
+  matcherVersion: "v1" | "v2";
+  mode: "active" | "shadow";
+  status: "completed";
+  startedAt: string;
+  completedAt: string;
+  articleCount: number;
+  bundleCount: number;
+  edgeCount: number;
+  correctionConflictCount: number;
+}
+
+export interface CoverageProjectionParity {
+  legacyBundleCount: number;
+  normalizedBundleCount: number;
+  membershipMismatchCount: number;
+  primaryMismatchCount: number;
+  clean: boolean;
+}
 
 export interface CoverageMatchConfidence {
   tier: "strong" | "moderate";

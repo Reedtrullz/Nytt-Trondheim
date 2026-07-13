@@ -5,6 +5,9 @@ import type {
   ArticleCoverageBundleKind,
   CityPulseStory,
   CoverageMatchConfidence,
+  CoverageGenerationSummary,
+  CoverageProjectionState,
+  CoverageProjectionParity,
 } from "./types.js";
 import { isFootballClubBrannContext } from "./incident-text.js";
 import {
@@ -81,6 +84,19 @@ export interface CoverageBundleListItem extends ArticleCoverageBundleDecision {
   updatedAt: string;
   memberArticles: CoverageBundleArticleSummary[];
   nearMissArticles: CoverageBundleArticleSummary[];
+  generation?: CoverageGenerationSummary;
+  state: CoverageProjectionState;
+  edges: ArticleCoverageEdge[];
+  reviewCandidates: ArticleCoverageEdge[];
+  corrections: Array<{
+    id: string;
+    anchorArticleId: string;
+    rejectedArticleId: string;
+    status: "active" | "reverted";
+    createdAt: string;
+    revertedAt?: string;
+  }>;
+  integrityErrors: string[];
 }
 
 export interface CoverageBundleSummary {
@@ -88,12 +104,80 @@ export interface CoverageBundleSummary {
   byKind: Record<ArticleCoverageBundleKind, number>;
   byConfidence: Record<ArticleCoverageBundleConfidence, number>;
   latestGeneratedAt?: string;
+  activeBundleCount: number;
+  byMatchTier: { strong: number; moderate: number };
+  reviewCandidateCount: number;
+  activeCorrectionCount: number;
+  integrityErrorCount: number;
+  matcherVersion: "v1" | "v2";
+  projectionState: CoverageProjectionState;
+  generation?: CoverageGenerationSummary;
 }
 
 export interface CoverageBundlePage {
   items: CoverageBundleListItem[];
   summary: CoverageBundleSummary;
   nextCursor?: string;
+  parity?: CoverageProjectionParity;
+}
+
+type CoverageParityItem = {
+  id: string;
+  primaryArticleId: string;
+  memberArticleIds: string[];
+};
+
+export function coverageProjectionParity(
+  legacy: CoverageParityItem[],
+  normalized: CoverageParityItem[],
+): CoverageProjectionParity {
+  const canonical = (item: CoverageParityItem) =>
+    [...new Set(item.memberArticleIds)].sort().join("\0");
+  const groupByMembers = (items: CoverageParityItem[]) => {
+    const grouped = new Map<string, CoverageParityItem[]>();
+    for (const item of items) {
+      const key = canonical(item);
+      grouped.set(key, [...(grouped.get(key) ?? []), item]);
+    }
+    for (const values of grouped.values()) {
+      values.sort(
+        (left, right) =>
+          left.primaryArticleId.localeCompare(right.primaryArticleId) ||
+          left.id.localeCompare(right.id),
+      );
+    }
+    return grouped;
+  };
+  const legacyByMembers = groupByMembers(legacy);
+  const normalizedByMembers = groupByMembers(normalized);
+  const membershipKeys = new Set([...legacyByMembers.keys(), ...normalizedByMembers.keys()]);
+  const membershipMismatchCount = [...membershipKeys].reduce(
+    (count, key) =>
+      count +
+      Math.abs(
+        (legacyByMembers.get(key)?.length ?? 0) - (normalizedByMembers.get(key)?.length ?? 0),
+      ),
+    0,
+  );
+  const primaryMismatchCount = [...membershipKeys].reduce((count, key) => {
+    const legacyItems = legacyByMembers.get(key) ?? [];
+    const normalizedItems = normalizedByMembers.get(key) ?? [];
+    const pairedCount = Math.min(legacyItems.length, normalizedItems.length);
+    return (
+      count +
+      Array.from({ length: pairedCount }, (_, index) => index).filter(
+        (index) =>
+          legacyItems[index]?.primaryArticleId !== normalizedItems[index]?.primaryArticleId,
+      ).length
+    );
+  }, 0);
+  return {
+    legacyBundleCount: legacy.length,
+    normalizedBundleCount: normalized.length,
+    membershipMismatchCount,
+    primaryMismatchCount,
+    clean: membershipMismatchCount === 0 && primaryMismatchCount === 0,
+  };
 }
 
 const maxGroupAgeMs = 24 * 60 * 60 * 1000;

@@ -388,13 +388,14 @@ export class WorkerRepository {
           );
           await client.query(
             `INSERT INTO coverage_bundle_versions
-              (generation_id, bundle_id, kind, reason, primary_article_id, match_tier,
+              (generation_id, bundle_id, kind, confidence, reason, primary_article_id, match_tier,
                match_score, match_rationale, generated_at, last_seen_at, source_ids, source_labels)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
             [
               generationId,
               bundle.id,
               bundle.kind,
+              bundle.confidence,
               bundle.reason,
               bundle.primaryArticleId,
               match.tier,

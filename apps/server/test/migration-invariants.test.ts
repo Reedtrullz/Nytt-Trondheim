@@ -52,6 +52,12 @@ describe("migration invariants", () => {
     expect(normalizedSql).toContain(
       "WHERE is_current AND status = 'completed' AND mode = 'active'",
     );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_versions ADD COLUMN IF NOT EXISTS confidence text",
+    );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_versions ALTER COLUMN confidence SET NOT NULL",
+    );
     expect(normalizedSql).toContain("VALUES ('016_coverage_bundle_lifecycle')");
   });
 });

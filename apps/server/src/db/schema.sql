@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS coverage_bundle_versions (
   generation_id uuid NOT NULL REFERENCES coverage_bundle_generations(id) ON DELETE CASCADE,
   bundle_id text NOT NULL REFERENCES coverage_bundles(id) ON DELETE CASCADE,
   kind text NOT NULL CHECK (kind IN ('incident', 'topic', 'update')),
+  confidence text NOT NULL CHECK (confidence IN ('high', 'medium')),
   reason text NOT NULL,
   primary_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
   match_tier text NOT NULL CHECK (match_tier IN ('strong', 'moderate')),
@@ -120,6 +121,15 @@ CREATE TABLE IF NOT EXISTS coverage_bundle_versions (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (generation_id, bundle_id)
 );
+ALTER TABLE coverage_bundle_versions ADD COLUMN IF NOT EXISTS confidence text;
+UPDATE coverage_bundle_versions cbv
+SET confidence = cb.confidence
+FROM coverage_bundles cb
+WHERE cb.id = cbv.bundle_id AND cbv.confidence IS NULL;
+ALTER TABLE coverage_bundle_versions ALTER COLUMN confidence SET NOT NULL;
+ALTER TABLE coverage_bundle_versions DROP CONSTRAINT IF EXISTS coverage_bundle_versions_confidence_check;
+ALTER TABLE coverage_bundle_versions ADD CONSTRAINT coverage_bundle_versions_confidence_check
+  CHECK (confidence IN ('high', 'medium'));
 CREATE INDEX IF NOT EXISTS coverage_bundle_versions_last_seen_idx
   ON coverage_bundle_versions (generation_id, last_seen_at DESC, bundle_id DESC);
 

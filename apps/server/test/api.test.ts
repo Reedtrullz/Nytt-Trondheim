@@ -3360,7 +3360,7 @@ describe("private situation API", () => {
     (store as unknown as { articles: Article[] }).articles.unshift(...articles);
 
     const topic = await agent
-      .get("/api/operations/coverage-bundles?kind=topic&q=Rosenborg&limit=1")
+      .get("/api/operations/coverage-bundles?projection=legacy&kind=topic&q=Rosenborg&limit=1")
       .expect(200);
 
     expect(topic.body.summary).toMatchObject({
@@ -3383,12 +3383,14 @@ describe("private situation API", () => {
     expect(topic.body.items[0]).not.toHaveProperty("payload");
     expect(JSON.stringify(topic.body)).not.toContain("raw_payload");
 
-    const first = await agent.get("/api/operations/coverage-bundles?limit=1").expect(200);
+    const first = await agent
+      .get("/api/operations/coverage-bundles?projection=legacy&limit=1")
+      .expect(200);
     expect(first.body.items).toHaveLength(1);
     expect(first.body.nextCursor).toBeTruthy();
     const second = await agent
       .get(
-        `/api/operations/coverage-bundles?limit=1&cursor=${encodeURIComponent(
+        `/api/operations/coverage-bundles?projection=legacy&limit=1&cursor=${encodeURIComponent(
           first.body.nextCursor as string,
         )}`,
       )
