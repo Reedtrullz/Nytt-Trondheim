@@ -13,6 +13,16 @@
   DeepSeek run is local/experimental derived analysis rather than live provenance.
 - The exported workspace package is authenticated, persisted for protected re-download, sanitizes attachment paths and includes a checksum manifest; handle it as confidential.
 
+## Coverage Corrections
+
+Coverage split and undo mutations require an authenticated owner, the global API CSRF check, and the explicit `COVERAGE_CORRECTIONS_ENABLED=true` capability. The server writes the internal `users.id` as actor identity; login text is not used as a foreign key. A correction rejects only the selected unordered article pair and cannot generalize to a source, topic, place, or future unrelated article.
+
+Exact split replays are idempotent before stale-card validation, while partial duplicates insert only the new pair and advance the correction revision once. Audit responses retain full-split tombstones and label corrections `active` only when both endpoints exist in the selected generation; historical corrections remain visible for review but cannot affect current grouping or active-correction counts. Undo returns `404` for an unknown correction and a bounded `409` replacement set when the correction no longer applies to the current generation.
+
+Correction telemetry contains the action, bundle/correction identifier, and numeric result counts only. It must not contain article titles, excerpts, URLs, session data, credentials, or the owner's optional reason. The owner-only JSON export similarly omits actor identity and reason, normalizes whitespace, and bounds title/excerpt lengths; it is review material and is never imported automatically. Split/undo does not edit upstream records, `source_items`, situations, or public evidence.
+
+The correction API records the creation generation, stable original bundle target, unordered article pair, matcher version, evidence fingerprint, status, internal actor ID, and create/revert timestamps. Mutations also compare the current database correction revision and lock the current active generation, so stale concurrent requests fail with a bounded affected-story `409` instead of rewriting historical state. The optional reason remains private: it is excluded from telemetry and sanitized exports. Promotion accepts only one explicitly owner-reviewed completed shadow generation UUID and verifies one guarded row update; it cannot infer approval from bundle counts, correction activity, or CI success.
+
 ## Secrets Required For Deployment
 
 `SSH_PRIVATE_KEY`, `NYTT_REPO_DEPLOY_KEY`, `NYTT_POSTGRES_PASSWORD`, `NYTT_SESSION_SECRET`, `NYTT_GITHUB_CLIENT_ID`, `NYTT_GITHUB_CLIENT_SECRET`, `NYTT_SMTP_HOST`, `NYTT_SMTP_FROM`, `NYTT_SMTP_API_KEY`, `NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, `NYTT_RESTIC_REPOSITORY`, `NYTT_RESTIC_PASSWORD`, and `NYTT_RCLONE_CONFIG`.

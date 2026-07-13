@@ -25,6 +25,8 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm test
+      - name: Check coverage matcher quality
+        run: npm run check:coverage-matcher
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
 
@@ -81,8 +83,212 @@ jobs:
           SELECT count(*) AS schema_migration_count FROM schema_migrations;
           SELECT count(*) AS source_item_count FROM source_items;
           SQL
+      - name: Verify normalized coverage schema
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT 'public.coverage_bundle_generations'::regclass;
+          SELECT 'public.coverage_generation_articles'::regclass;
+          SELECT 'public.coverage_bundle_versions'::regclass;
+          SELECT 'public.coverage_bundle_members'::regclass;
+          SELECT 'public.coverage_bundle_edges'::regclass;
+          SELECT 'public.coverage_bundle_corrections'::regclass;
+          DO $$
+          DECLARE
+            actual_count integer;
+          BEGIN
+            SELECT count(*)
+            INTO actual_count
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'coverage_bundles'
+              AND column_name IN (
+                'generation_id',
+                'state',
+                'matcher_version',
+                'match_tier',
+                'match_score',
+                'match_rationale',
+                'first_seen_at',
+                'legacy_generation_id'
+              );
+            IF actual_count <> 8 THEN
+              RAISE EXCEPTION 'expected 8 normalized coverage columns, found %', actual_count;
+            END IF;
+          END
+          $$;
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+              FROM coverage_bundle_members cbm
+              LEFT JOIN articles a ON a.id = cbm.article_id
+              WHERE a.id IS NULL
+            ) THEN
+              RAISE EXCEPTION 'normalized coverage contains dangling article members';
+            END IF;
+          END
+          $$;
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+              FROM coverage_bundle_versions cbv
+              LEFT JOIN coverage_bundle_members cbm
+                ON cbm.generation_id = cbv.generation_id
+               AND cbm.bundle_id = cbv.bundle_id
+               AND cbm.role = 'primary'
+              GROUP BY cbv.generation_id, cbv.bundle_id
+              HAVING count(cbm.article_id) <> 1
+            ) THEN
+              RAISE EXCEPTION 'normalized coverage contains bundles with invalid primary counts';
+            END IF;
+          END
+          $$;
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+              FROM coverage_bundle_generations
+              WHERE status = 'completed' AND completed_at IS NULL
+            ) THEN
+              RAISE EXCEPTION 'normalized coverage contains incomplete completed generations';
+            END IF;
+          END
+          $$;
+          SQL
       - name: Run migration guardrail invariants
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration-invariants.sql
+      - name: Run normalized coverage lifecycle smoke
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO articles
+            (id, canonical_url, dedupe_key, source, published_at, scope, category, payload)
+          VALUES
+            ('ci-coverage-a', 'https://example.test/ci-coverage-a', 'ci-coverage-a', 'nrk', now(), 'trondheim', 'Hendelser', '{}'::jsonb),
+            ('ci-coverage-b', 'https://example.test/ci-coverage-b', 'ci-coverage-b', 'adressa', now(), 'trondheim', 'Hendelser', '{}'::jsonb);
+
+          INSERT INTO users (id, display_name, role, status)
+          VALUES ('ci-coverage-owner', 'CI owner', 'owner', 'active');
+
+          INSERT INTO coverage_bundle_generations
+            (id, matcher_version, mode, status, started_at, completed_at, article_count,
+             bundle_count, edge_count, correction_conflict_count)
+          VALUES
+            ('00000000-0000-4000-8000-000000000701', 'v2', 'shadow', 'completed',
+             now() - interval '1 second', now(), 2, 1, 1, 0);
+
+          INSERT INTO coverage_generation_articles (generation_id, article_id)
+          VALUES
+            ('00000000-0000-4000-8000-000000000701', 'ci-coverage-a'),
+            ('00000000-0000-4000-8000-000000000701', 'ci-coverage-b');
+
+          INSERT INTO coverage_bundles
+             (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
+              member_article_ids, source_ids, source_labels, payload, generation_id, state,
+              matcher_version, match_tier, match_score, match_rationale, first_seen_at,
+              legacy_generation_id)
+          VALUES
+            ('ci-coverage-legacy', 'incident', 'high', 'CI legacy', now(), now(),
+             'ci-coverage-a', ARRAY['ci-coverage-a','ci-coverage-b'], ARRAY['nrk','adressa'],
+              ARRAY['NRK','Adresseavisen'], '{}'::jsonb, NULL, 'legacy', 'v1', NULL, NULL, NULL, now(),
+              '00000000-0000-4000-8000-000000000701'),
+            ('ci-coverage-v2', 'incident', 'high', 'CI normalized', now(), now(),
+             'ci-coverage-a', ARRAY['ci-coverage-a','ci-coverage-b'], ARRAY['nrk','adressa'],
+             ARRAY['NRK','Adresseavisen'], '{}'::jsonb,
+              '00000000-0000-4000-8000-000000000701', 'shadow', 'v2', 'strong', 1,
+              'CI lifecycle smoke', now(), NULL);
+
+          INSERT INTO coverage_bundle_versions
+            (generation_id, bundle_id, kind, confidence, reason, primary_article_id, match_tier,
+             match_score, match_rationale, generated_at, last_seen_at, source_ids, source_labels)
+          VALUES
+            ('00000000-0000-4000-8000-000000000701', 'ci-coverage-v2', 'incident', 'high',
+             'CI normalized', 'ci-coverage-a', 'strong', 1, 'CI lifecycle smoke', now(), now(),
+             ARRAY['nrk','adressa'], ARRAY['NRK','Adresseavisen']);
+
+          INSERT INTO coverage_bundle_members (generation_id, bundle_id, article_id, role)
+          VALUES
+            ('00000000-0000-4000-8000-000000000701', 'ci-coverage-v2', 'ci-coverage-a', 'primary'),
+            ('00000000-0000-4000-8000-000000000701', 'ci-coverage-v2', 'ci-coverage-b', 'supporting');
+
+          INSERT INTO coverage_bundle_edges
+            (generation_id, bundle_id, left_article_id, right_article_id, tier, score, kind,
+             status, evidence_fingerprint)
+          VALUES
+            ('00000000-0000-4000-8000-000000000701', 'ci-coverage-v2', 'ci-coverage-a',
+             'ci-coverage-b', 'strong', 1, 'incident', 'accepted', 'ci-evidence');
+
+          BEGIN;
+          UPDATE coverage_bundle_generations SET is_current=false WHERE is_current;
+          UPDATE coverage_bundle_generations
+          SET mode='active', is_current=true
+          WHERE id='00000000-0000-4000-8000-000000000701'
+            AND matcher_version='v2' AND mode='shadow' AND status='completed';
+          UPDATE coverage_bundles SET state='active'
+          WHERE generation_id='00000000-0000-4000-8000-000000000701';
+          COMMIT;
+
+          DO $$
+          DECLARE
+            legacy_members text[];
+            active_members text[];
+          BEGIN
+            SELECT ARRAY(SELECT unnest(member_article_ids) ORDER BY 1)
+              INTO legacy_members FROM coverage_bundles WHERE id='ci-coverage-legacy';
+            SELECT array_agg(article_id ORDER BY article_id)
+              INTO active_members FROM coverage_bundle_members
+              WHERE generation_id='00000000-0000-4000-8000-000000000701';
+            IF legacy_members IS DISTINCT FROM active_members THEN
+              RAISE EXCEPTION 'story/audit membership differs after fixture promotion';
+            END IF;
+          END
+          $$;
+
+          INSERT INTO coverage_bundle_corrections
+            (id, generation_id, original_bundle_id, anchor_article_id, rejected_article_id,
+             matcher_version, evidence_fingerprint, reason, status, created_by)
+          VALUES
+            ('00000000-0000-4000-8000-000000000702',
+             '00000000-0000-4000-8000-000000000701', 'ci-coverage-v2', 'ci-coverage-a',
+             'ci-coverage-b', 'v2', 'ci-evidence', 'CI split smoke', 'active',
+             'ci-coverage-owner');
+          DO $$
+          BEGIN
+            IF (SELECT count(*) FROM coverage_bundle_corrections
+                WHERE id='00000000-0000-4000-8000-000000000702' AND status='active') <> 1
+               OR (SELECT count(*) FROM coverage_bundle_members
+                   WHERE generation_id='00000000-0000-4000-8000-000000000701') <> 2 THEN
+              RAISE EXCEPTION 'fixture split did not preserve base projection and exact active pair';
+            END IF;
+          END
+          $$;
+          UPDATE coverage_bundle_corrections
+          SET status='reverted', reverted_at=now(), reverted_by='ci-coverage-owner'
+          WHERE id='00000000-0000-4000-8000-000000000702';
+
+          DO $$
+          DECLARE
+            previous_projection_readable boolean;
+            correction_reverted boolean;
+          BEGIN
+            SELECT EXISTS (
+              SELECT 1 FROM coverage_bundles
+              WHERE id='ci-coverage-legacy' AND state='legacy'
+            ) INTO previous_projection_readable;
+            SELECT count(*) = 1 INTO correction_reverted
+            FROM coverage_bundle_corrections
+            WHERE id='00000000-0000-4000-8000-000000000702' AND status='reverted';
+            IF NOT previous_projection_readable OR NOT correction_reverted THEN
+              RAISE EXCEPTION 'undo or previous projection readability failed';
+            END IF;
+          END
+          $$;
+          SQL
+
+      - name: Run actual PgStore coverage lifecycle smoke
+        run: npx tsx scripts/coverage-lifecycle-smoke.ts
+      - name: Run coverage promotion control-flow smoke
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/coverage-promotion-control-flow.sql
 
   docker-build:
     name: Docker Build

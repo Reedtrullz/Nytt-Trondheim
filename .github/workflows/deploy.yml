@@ -1,5 +1,9 @@
 name: Deploy to VPS
 
+permissions:
+  actions: read
+  contents: read
+
 on:
   workflow_run:
     workflows: ["CI"]
@@ -14,6 +18,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy Nytt Trondheim
+    environment: production
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || (vars.NYTT_DEPLOY_ENABLED == 'true' && github.event.workflow_run.conclusion == 'success') }}
     env:
@@ -36,6 +41,14 @@ jobs:
       NYTT_ENTUR_CLIENT_NAME: ${{ vars.NYTT_ENTUR_CLIENT_NAME }}
       NYTT_ENTUR_CODESPACES: ${{ vars.NYTT_ENTUR_CODESPACES }}
       NYTT_ENTUR_VEHICLE_BOUNDS: ${{ vars.NYTT_ENTUR_VEHICLE_BOUNDS }}
+      NYTT_COVERAGE_PROJECTION_MODE: ${{ vars.NYTT_COVERAGE_PROJECTION_MODE }}
+      NYTT_COVERAGE_CORRECTIONS_ENABLED: ${{ vars.NYTT_COVERAGE_CORRECTIONS_ENABLED }}
+      NYTT_COVERAGE_MATCHER_VERSION: ${{ vars.NYTT_COVERAGE_MATCHER_VERSION }}
+      NYTT_COVERAGE_GENERATION_MODE: ${{ vars.NYTT_COVERAGE_GENERATION_MODE }}
+      NYTT_COVERAGE_ACTIVE_MIN_ARTICLES: ${{ vars.NYTT_COVERAGE_ACTIVE_MIN_ARTICLES }}
+      NYTT_COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO: ${{ vars.NYTT_COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO }}
+      NYTT_COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE: ${{ vars.NYTT_COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE }}
+      COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID: ${{ vars.COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID }}
       NYTT_DEPLOY_REF: ${{ github.event.workflow_run.head_sha || github.sha }}
       NYTT_DATEX_ENDPOINT: ${{ secrets.NYTT_DATEX_ENDPOINT }}
       NYTT_DATEX_USERNAME: ${{ secrets.NYTT_DATEX_USERNAME }}
@@ -45,6 +58,17 @@ jobs:
       NYTT_RCLONE_CONFIG: ${{ secrets.NYTT_RCLONE_CONFIG }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.NYTT_DEPLOY_REF }}
+      - name: Require successful exact-SHA CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          successful_runs="$(gh run list --workflow CI --commit "$NYTT_DEPLOY_REF" --status completed \
+            --json conclusion --jq 'map(select(.conclusion == "success")) | length')"
+          test "$successful_runs" -ge 1
       - name: Require production deployment secrets
         shell: bash
         run: |
@@ -88,4 +112,6 @@ jobs:
       - name: Smoke test SSH
         run: ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 "echo SSH_OK"
       - name: Run Ansible deployment
-        run: ansible-playbook -i inventory/hosts.yml ansible-playbook.yml
+        run: >-
+          ansible-playbook -i inventory/hosts.yml ansible-playbook.yml
+          -e coverage_v2_owner_reviewed_generation_id="${COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID:-}"

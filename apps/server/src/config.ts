@@ -14,6 +14,9 @@ export interface AppConfig {
   uploadDir: string;
   runtimeStatusDir: string;
   rateLimitEnabled: boolean;
+  coverageProjectionMode?: "legacy" | "normalized-shadow" | "normalized-active";
+  coverageCorrectionsEnabled?: boolean;
+  e2eCoverageFixtures?: boolean;
   webPushPublicKey?: string;
   webPushConfigured?: boolean;
   enturClientName?: string;
@@ -48,6 +51,27 @@ function sessionSecretForEnvironment(nodeEnv: string): string {
     throw new Error("SESSION_SECRET must be at least 32 characters in production");
   }
   return configured;
+}
+
+function booleanEnvironmentValue(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
+}
+
+function coverageProjectionModeFromEnvironment():
+  | "legacy"
+  | "normalized-shadow"
+  | "normalized-active" {
+  const value = process.env.COVERAGE_PROJECTION_MODE?.trim() ?? "legacy";
+  if (value === "legacy" || value === "normalized-shadow" || value === "normalized-active") {
+    return value;
+  }
+  throw new Error(
+    "COVERAGE_PROJECTION_MODE must be legacy, normalized-shadow or normalized-active",
+  );
 }
 
 function smtpConfigForEnvironment(nodeEnv: string): SmtpConfig | undefined {
@@ -89,6 +113,10 @@ export function loadConfig(): AppConfig {
   if (nodeEnv === "production" && process.env.SEED_DEMO === "true") {
     throw new Error("SEED_DEMO must not be enabled in production");
   }
+  const e2eCoverageFixtures = booleanEnvironmentValue("E2E_COVERAGE_FIXTURES", false);
+  if (nodeEnv === "production" && e2eCoverageFixtures) {
+    throw new Error("E2E_COVERAGE_FIXTURES must not be enabled in production");
+  }
   return {
     port: Number(process.env.PORT ?? 8080),
     nodeEnv,
@@ -103,6 +131,9 @@ export function loadConfig(): AppConfig {
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
+    coverageProjectionMode: coverageProjectionModeFromEnvironment(),
+    coverageCorrectionsEnabled: booleanEnvironmentValue("COVERAGE_CORRECTIONS_ENABLED", false),
+    e2eCoverageFixtures,
     webPushPublicKey,
     webPushConfigured: Boolean(webPushPublicKey && webPushPrivateKeyConfigured),
     enturClientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",

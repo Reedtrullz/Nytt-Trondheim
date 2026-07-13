@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import {
+  articleCoverageEvidence,
   comparePublicHomeSituations,
   publicLeadLongRunningSituationAgeMs,
   shouldFeaturePublicHomeSituation,
@@ -8,7 +9,10 @@ import {
 import type {
   AiProcessingRun,
   Article,
+  ArticleCoverageAnalysis,
   ArticleCoverageBundleDecision,
+  ArticleCoverageBundleKind,
+  CoverageRejectedPair,
   HomeSituationSummary,
   MorningBrief,
   NotificationTriggerCandidate,
@@ -33,6 +37,155 @@ import type {
 } from "@nytt/shared";
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
+
+export interface PersistCoverageGenerationInput {
+  matcherVersion: "v2";
+  mode: "shadow" | "active";
+  startedAt: string;
+  completedAt: string;
+  analysis: ArticleCoverageAnalysis;
+  legacyBundles: ArticleCoverageBundleDecision[];
+  correctionRevisionSnapshot?: number;
+  correctionConflictCount?: number;
+  activeVolumeGuard?: {
+    minimumArticleCount: number;
+    minimumPreviousRatio: number;
+    allowUnsafeOverride: boolean;
+  };
+}
+
+// Shared with the deployment promotion transaction. Both paths serialize changes to the current
+// coverage generation with PostgreSQL transaction-scoped advisory lock (20260713, 7).
+export const coverageGenerationAdvisoryLockKey = [20260713, 7] as const;
+
+export async function withTransaction<T>(
+  pool: pg.Pool,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function upsertLegacyCoverageBundles(
+  queryable: Queryable,
+  bundles: ArticleCoverageBundleDecision[],
+  seenAt: string,
+  legacyGenerationId: string | null,
+): Promise<void> {
+  for (const bundle of bundles) {
+    await queryable.query(
+      `INSERT INTO coverage_bundles
+        (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
+         member_article_ids, source_ids, source_labels, signals, near_misses, payload,
+         generation_id, state, matcher_version, legacy_generation_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,'legacy','v1',$14)
+       ON CONFLICT (id) DO UPDATE SET
+         kind=EXCLUDED.kind,
+         confidence=EXCLUDED.confidence,
+         reason=EXCLUDED.reason,
+         generated_at=EXCLUDED.generated_at,
+         last_seen_at=EXCLUDED.last_seen_at,
+         primary_article_id=EXCLUDED.primary_article_id,
+         member_article_ids=EXCLUDED.member_article_ids,
+         source_ids=EXCLUDED.source_ids,
+         source_labels=EXCLUDED.source_labels,
+         signals=EXCLUDED.signals,
+         near_misses=EXCLUDED.near_misses,
+         payload=EXCLUDED.payload,
+         generation_id=NULL,
+         state='legacy',
+         matcher_version='v1',
+         legacy_generation_id=EXCLUDED.legacy_generation_id,
+         updated_at=now()`,
+      [
+        bundle.id,
+        bundle.kind,
+        bundle.confidence,
+        bundle.reason,
+        bundle.generatedAt,
+        seenAt,
+        bundle.primaryArticleId,
+        bundle.memberArticleIds,
+        bundle.sourceIds,
+        bundle.sourceLabels,
+        JSON.stringify(bundle.signals),
+        JSON.stringify(bundle.nearMisses),
+        JSON.stringify(bundle),
+        legacyGenerationId,
+      ],
+    );
+  }
+  await queryable.query(
+    `UPDATE coverage_projection_revisions
+     SET legacy_revision=legacy_revision+1, updated_at=now()
+     WHERE projection='active'`,
+  );
+}
+
+type CoverageBundleIdentity = {
+  id: string;
+  kind: ArticleCoverageBundleKind;
+  memberArticleIds: string[];
+};
+
+export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
+  candidates: T[],
+  previous: CoverageBundleIdentity[],
+): T[];
+export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
+  candidates: T[],
+  previous: T[],
+): T[];
+export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
+  candidates: T[],
+  previous: CoverageBundleIdentity[],
+): T[] {
+  const availablePrevious = new Set(previous.map(({ id }) => id));
+  const assignments = new Map<number, string>();
+  const options = candidates
+    .flatMap((candidate, candidateIndex) =>
+      previous.flatMap((prior) => {
+        if (candidate.kind !== prior.kind) return [];
+        const priorMembers = new Set(prior.memberArticleIds);
+        const sharedCount = candidate.memberArticleIds.filter((id) => priorMembers.has(id)).length;
+        const threshold = Math.ceil(
+          Math.min(candidate.memberArticleIds.length, prior.memberArticleIds.length) / 2,
+        );
+        return sharedCount >= threshold
+          ? [{ candidateIndex, previousId: prior.id, sharedCount }]
+          : [];
+      }),
+    )
+    .sort(
+      (left, right) =>
+        right.sharedCount - left.sharedCount ||
+        left.previousId.localeCompare(right.previousId) ||
+        left.candidateIndex - right.candidateIndex,
+    );
+
+  for (const option of options) {
+    if (assignments.has(option.candidateIndex) || !availablePrevious.has(option.previousId))
+      continue;
+    assignments.set(option.candidateIndex, option.previousId);
+    availablePrevious.delete(option.previousId);
+  }
+
+  return candidates.map((candidate, index) => ({
+    ...candidate,
+    memberArticleIds: [...candidate.memberArticleIds],
+    id: assignments.get(index) ?? candidate.id,
+  }));
+}
 
 function morningBriefStorageId(generatedAt: string): string {
   const osloDate = new Intl.DateTimeFormat("sv-SE", {
@@ -82,18 +235,7 @@ export class WorkerRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   private async withTransaction<T>(work: (client: pg.PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const result = await work(client);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    return withTransaction(this.pool, work);
   }
 
   async upsertArticles(articles: Article[]): Promise<void> {
@@ -140,43 +282,436 @@ export class WorkerRepository {
     bundles: ArticleCoverageBundleDecision[],
     seenAt = new Date().toISOString(),
   ): Promise<void> {
-    for (const bundle of bundles) {
+    await upsertLegacyCoverageBundles(this.pool, bundles, seenAt, null);
+  }
+
+  async activeCoverageRejectedPairs(): Promise<{
+    revision: number;
+    pairs: CoverageRejectedPair[];
+  }> {
+    const result = await this.pool.query<{
+      id: string;
+      anchor_article_id: string;
+      rejected_article_id: string;
+      revision: number | string;
+    }>(
+      `SELECT cbc.id, cbc.anchor_article_id, cbc.rejected_article_id, revision.revision
+       FROM coverage_projection_revisions revision
+       LEFT JOIN coverage_bundle_corrections cbc ON cbc.status='active'
+       WHERE revision.projection='active'
+       ORDER BY cbc.created_at, cbc.id`,
+    );
+    return {
+      revision: Number(result.rows[0]?.revision ?? 0),
+      pairs: result.rows.flatMap((row) =>
+        row.id
+          ? [
+              {
+                articleIds: [row.anchor_article_id, row.rejected_article_id] as [string, string],
+                correctionId: row.id,
+              },
+            ]
+          : [],
+      ),
+    };
+  }
+
+  async persistCoverageGeneration(input: PersistCoverageGenerationInput): Promise<string> {
+    let generationId: string;
+    try {
+      generationId = await withTransaction(this.pool, async (client) => {
+        await client.query("SELECT pg_advisory_xact_lock($1,$2)", [
+          coverageGenerationAdvisoryLockKey[0],
+          coverageGenerationAdvisoryLockKey[1],
+        ]);
+        if (input.mode === "active") {
+          const currentResult = await client.query<{ id: string; article_count: number | string }>(
+            `SELECT id, article_count
+             FROM coverage_bundle_generations
+             WHERE is_current AND status='completed' AND mode='active'
+             FOR UPDATE`,
+          );
+          const guard = input.activeVolumeGuard ?? {
+            minimumArticleCount: 1,
+            minimumPreviousRatio: 0.5,
+            allowUnsafeOverride: false,
+          };
+          const previousCount = Number(currentResult.rows[0]?.article_count ?? 0);
+          const currentCount = input.analysis.articles.length;
+          if (
+            !guard.allowUnsafeOverride &&
+            (currentCount < guard.minimumArticleCount ||
+              (previousCount > 0 && currentCount / previousCount < guard.minimumPreviousRatio))
+          ) {
+            throw new Error("Coverage active candidate volume guard rejected the generation");
+          }
+        }
+        const generation = await client.query<{ id: string }>(
+          `INSERT INTO coverage_bundle_generations
+            (matcher_version, mode, status, started_at, article_count)
+           VALUES ($1,$2,'running',$3,$4)
+           RETURNING id`,
+          [input.matcherVersion, input.mode, input.startedAt, input.analysis.articles.length],
+        );
+        const generationId = generation.rows[0]?.id;
+        if (!generationId) throw new Error("Coverage generation insert returned no id");
+
+        await upsertLegacyCoverageBundles(
+          client,
+          input.legacyBundles,
+          input.completedAt,
+          generationId,
+        );
+
+        const articleIds = [...new Set(input.analysis.articles.map(({ id }) => id))];
+        const storedArticles = await client.query<{ id: string }>(
+          "SELECT id FROM articles WHERE id = ANY($1::text[])",
+          [articleIds],
+        );
+        const storedIds = new Set(storedArticles.rows.map(({ id }) => id));
+        if (articleIds.some((id) => !storedIds.has(id))) {
+          throw new Error("Coverage generation references articles that are not stored");
+        }
+        for (const articleId of articleIds) {
+          await client.query(
+            `INSERT INTO coverage_generation_articles (generation_id, article_id)
+             VALUES ($1,$2)`,
+            [generationId, articleId],
+          );
+        }
+        for (const bundle of input.analysis.bundles) {
+          if (bundle.memberArticleIds.length < 2) {
+            throw new Error(`Coverage bundle ${bundle.id} has fewer than two members`);
+          }
+          if (!bundle.memberArticleIds.includes(bundle.primaryArticleId)) {
+            throw new Error(`Coverage bundle ${bundle.id} has no primary member`);
+          }
+          if (!bundle.matchConfidence) {
+            throw new Error(`Coverage bundle ${bundle.id} has no match confidence`);
+          }
+          if (bundle.memberArticleIds.some((id) => !storedIds.has(id))) {
+            throw new Error(`Coverage bundle ${bundle.id} references an unstored article`);
+          }
+        }
+
+        const previousRows = await client.query<{
+          id: string;
+          kind: ArticleCoverageBundleKind;
+          memberArticleIds: string[];
+          generationId: string;
+        }>(
+          `WITH previous_generation AS (
+             SELECT id
+             FROM coverage_bundle_generations
+             WHERE mode=$1 AND status='completed'
+             ORDER BY completed_at DESC, id DESC
+             LIMIT 1
+           )
+           SELECT cbv.bundle_id AS id, cbv.kind,
+                  array_agg(cbm.article_id ORDER BY cbm.article_id) AS "memberArticleIds",
+                  cbv.generation_id AS "generationId"
+           FROM previous_generation pg
+           JOIN coverage_bundle_versions cbv ON cbv.generation_id=pg.id
+           JOIN coverage_bundle_members cbm
+             ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+           GROUP BY cbv.generation_id, cbv.bundle_id, cbv.kind
+           ORDER BY cbv.bundle_id`,
+          [input.mode],
+        );
+        const previousGenerationId = previousRows.rows[0]?.generationId;
+        const bundles = reuseCoverageBundleIds(
+          input.analysis.bundles,
+          previousRows.rows.map(({ id, kind, memberArticleIds }) => ({
+            id,
+            kind,
+            memberArticleIds,
+          })),
+        );
+
+        if (previousGenerationId) {
+          await client.query(
+            `UPDATE coverage_bundles
+             SET state = 'superseded', updated_at=now()
+             WHERE generation_id=$1`,
+            [previousGenerationId],
+          );
+        }
+
+        const bundleByArticle = new Map<string, string>();
+        for (const bundle of bundles) {
+          for (const articleId of bundle.memberArticleIds)
+            bundleByArticle.set(articleId, bundle.id);
+          const match = bundle.matchConfidence;
+          if (!match) throw new Error(`Coverage bundle ${bundle.id} has no match confidence`);
+          const state = input.mode === "active" ? "active" : "shadow";
+          await client.query(
+            `INSERT INTO coverage_bundles
+              (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
+               member_article_ids, source_ids, source_labels, signals, near_misses, payload,
+               generation_id, state, matcher_version, match_tier, match_score, match_rationale,
+               first_seen_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$5)
+             ON CONFLICT (id) DO UPDATE SET
+               kind=EXCLUDED.kind, confidence=EXCLUDED.confidence, reason=EXCLUDED.reason,
+               generated_at=EXCLUDED.generated_at, last_seen_at=EXCLUDED.last_seen_at,
+               primary_article_id=EXCLUDED.primary_article_id,
+               member_article_ids=EXCLUDED.member_article_ids, source_ids=EXCLUDED.source_ids,
+               source_labels=EXCLUDED.source_labels, signals=EXCLUDED.signals,
+               near_misses=EXCLUDED.near_misses, payload=EXCLUDED.payload,
+               generation_id=EXCLUDED.generation_id, state=EXCLUDED.state,
+               matcher_version=EXCLUDED.matcher_version, match_tier=EXCLUDED.match_tier,
+               match_score=EXCLUDED.match_score, match_rationale=EXCLUDED.match_rationale,
+               first_seen_at=COALESCE(coverage_bundles.first_seen_at, EXCLUDED.first_seen_at),
+               updated_at=now()`,
+            [
+              bundle.id,
+              bundle.kind,
+              bundle.confidence,
+              bundle.reason,
+              bundle.generatedAt,
+              input.completedAt,
+              bundle.primaryArticleId,
+              bundle.memberArticleIds,
+              bundle.sourceIds,
+              bundle.sourceLabels,
+              JSON.stringify(bundle.signals),
+              JSON.stringify(bundle.nearMisses),
+              JSON.stringify(bundle),
+              generationId,
+              state,
+              input.matcherVersion,
+              match.tier,
+              match.score,
+              match.rationale,
+            ],
+          );
+          await client.query(
+            `INSERT INTO coverage_bundle_versions
+              (generation_id, bundle_id, kind, confidence, reason, primary_article_id, match_tier,
+               match_score, match_rationale, generated_at, last_seen_at, source_ids, source_labels)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [
+              generationId,
+              bundle.id,
+              bundle.kind,
+              bundle.confidence,
+              bundle.reason,
+              bundle.primaryArticleId,
+              match.tier,
+              match.score,
+              match.rationale,
+              bundle.generatedAt,
+              input.completedAt,
+              bundle.sourceIds,
+              bundle.sourceLabels,
+            ],
+          );
+          for (const articleId of bundle.memberArticleIds) {
+            const admittedByArticleIds = (input.analysis.edges ?? [])
+              .filter(
+                (edge) =>
+                  !edge.reviewable &&
+                  edge.tier !== "weak" &&
+                  edge.articleIds.includes(articleId) &&
+                  edge.articleIds.every((id) => bundle.memberArticleIds.includes(id)),
+              )
+              .map((edge) => edge.articleIds.find((id) => id !== articleId))
+              .filter((id): id is string => Boolean(id))
+              .sort()
+              .slice(0, 2);
+            await client.query(
+              `INSERT INTO coverage_bundle_members
+                (generation_id, bundle_id, article_id, role, admitted_by_article_ids)
+               VALUES ($1,$2,$3,$4,$5)`,
+              [
+                generationId,
+                bundle.id,
+                articleId,
+                articleId === bundle.primaryArticleId ? "primary" : "supporting",
+                admittedByArticleIds,
+              ],
+            );
+          }
+        }
+
+        for (const edge of input.analysis.edges ?? []) {
+          const [leftArticleId, rightArticleId] = [...edge.articleIds].sort() as [string, string];
+          const leftArticle = input.analysis.articles.find(({ id }) => id === leftArticleId);
+          const rightArticle = input.analysis.articles.find(({ id }) => id === rightArticleId);
+          if (!leftArticle || !rightArticle) {
+            throw new Error("Coverage edge references an article outside the generation snapshot");
+          }
+          const pairEvidence = articleCoverageEvidence(leftArticle, rightArticle, "v2");
+          const leftBundleId = bundleByArticle.get(leftArticleId);
+          const accepted = !edge.reviewable && edge.tier !== "weak" && edge.conflicts.length === 0;
+          const bundleId =
+            accepted && leftBundleId === bundleByArticle.get(rightArticleId)
+              ? (leftBundleId ?? null)
+              : null;
+          await client.query(
+            `INSERT INTO coverage_bundle_edges
+              (generation_id, bundle_id, left_article_id, right_article_id, tier, score, kind,
+               status, signals, conflicts, evidence_fingerprint, correction_conflict,
+               positive_incident_evidence)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [
+              generationId,
+              bundleId,
+              leftArticleId,
+              rightArticleId,
+              edge.tier,
+              edge.score,
+              edge.kind,
+              accepted ? "accepted" : "reviewable",
+              JSON.stringify(edge.signals),
+              JSON.stringify(edge.conflicts),
+              edge.evidenceFingerprint,
+              edge.correctionConflict,
+              pairEvidence.positiveIncidentEvidence,
+            ],
+          );
+        }
+
+        const candidateHealth = await client.query<{
+          parity_clean: boolean;
+          integrity_error_count: number | string;
+        }>(
+          `WITH legacy AS (
+             SELECT ARRAY(SELECT DISTINCT unnest(cb.member_article_ids) ORDER BY 1) AS members,
+                    cb.primary_article_id
+             FROM coverage_bundles cb
+             WHERE cb.legacy_generation_id=$1 AND cb.state='legacy' AND cb.matcher_version='v1'
+           ), normalized AS (
+             SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) AS members,
+                    cbv.primary_article_id
+             FROM coverage_bundle_versions cbv
+             JOIN coverage_bundle_members cbm
+               ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+             WHERE cbv.generation_id=$1
+             GROUP BY cbv.bundle_id, cbv.primary_article_id
+           ), parity_mismatches AS (
+             (SELECT * FROM legacy EXCEPT ALL SELECT * FROM normalized)
+             UNION ALL
+             (SELECT * FROM normalized EXCEPT ALL SELECT * FROM legacy)
+           ), invalid_primary AS (
+             SELECT cbv.bundle_id
+             FROM coverage_bundle_versions cbv
+             LEFT JOIN coverage_bundle_members cbm
+               ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+              AND cbm.role='primary'
+             WHERE cbv.generation_id=$1
+             GROUP BY cbv.bundle_id
+             HAVING count(cbm.article_id) <> 1
+           ), stable_mismatches AS (
+             SELECT cbv.bundle_id
+             FROM coverage_bundle_versions cbv
+             LEFT JOIN coverage_bundles stable
+               ON stable.id=cbv.bundle_id AND stable.generation_id=cbv.generation_id
+              AND stable.matcher_version='v2'
+              AND stable.state=CASE WHEN $2='active' THEN 'active' ELSE 'shadow' END
+             WHERE cbv.generation_id=$1
+               AND (stable.id IS NULL
+                 OR stable.primary_article_id IS DISTINCT FROM cbv.primary_article_id
+                 OR ARRAY(SELECT DISTINCT unnest(stable.member_article_ids) ORDER BY 1)
+                    IS DISTINCT FROM ARRAY(
+                      SELECT DISTINCT member.article_id
+                      FROM coverage_bundle_members member
+                      WHERE member.generation_id=cbv.generation_id
+                        AND member.bundle_id=cbv.bundle_id
+                      ORDER BY member.article_id
+                    ))
+           )
+           SELECT NOT EXISTS(SELECT 1 FROM parity_mismatches) AS parity_clean,
+             (SELECT count(*) FROM coverage_bundle_members cbm
+              LEFT JOIN articles a ON a.id=cbm.article_id
+              WHERE cbm.generation_id=$1 AND a.id IS NULL)
+             + (SELECT count(*) FROM invalid_primary)
+             + (SELECT count(*) FROM stable_mismatches)
+             + CASE WHEN $3::int = (SELECT count(*) FROM coverage_generation_articles
+                                    WHERE generation_id=$1)
+                       AND $4::int = (SELECT count(*) FROM coverage_bundle_versions
+                                     WHERE generation_id=$1)
+               THEN 0 ELSE 1 END AS integrity_error_count`,
+          [generationId, input.mode, input.analysis.articles.length, bundles.length],
+        );
+        const health = candidateHealth.rows[0];
+        if (health?.parity_clean !== true || Number(health.integrity_error_count) !== 0) {
+          throw new Error("Coverage generation candidate failed parity or integrity validation");
+        }
+        await client.query(
+          `UPDATE coverage_bundle_generations
+           SET status='completed', completed_at=$2, bundle_count=$3, edge_count=$4,
+               correction_conflict_count=$5, correction_revision_snapshot=$6,
+               health_outcome='healthy'
+           WHERE id=$1 AND status='running'`,
+          [
+            generationId,
+            input.completedAt,
+            bundles.length,
+            input.analysis.edges?.length ?? 0,
+            input.correctionConflictCount ?? 0,
+            input.correctionRevisionSnapshot ?? 0,
+          ],
+        );
+        if (input.mode === "active") {
+          await client.query(
+            `UPDATE coverage_bundles
+             SET state='superseded', updated_at=now()
+             WHERE matcher_version='v2' AND state='active'
+               AND generation_id IS DISTINCT FROM $1`,
+            [generationId],
+          );
+          await client.query(
+            `UPDATE coverage_bundle_generations
+             SET is_current=false
+             WHERE is_current AND mode='active' AND id<>$1`,
+            [generationId],
+          );
+          await client.query(`UPDATE coverage_bundle_generations SET is_current=true WHERE id=$1`, [
+            generationId,
+          ]);
+        }
+        return generationId;
+      });
+    } catch (error) {
+      const errorClass =
+        typeof error === "object" && error !== null && "constructor" in error
+          ? error.constructor.name
+          : "Error";
       await this.pool.query(
-        `INSERT INTO coverage_bundles
-          (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
-           member_article_ids, source_ids, source_labels, signals, near_misses, payload)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         ON CONFLICT (id) DO UPDATE SET
-           kind=EXCLUDED.kind,
-           confidence=EXCLUDED.confidence,
-           reason=EXCLUDED.reason,
-           generated_at=EXCLUDED.generated_at,
-           last_seen_at=EXCLUDED.last_seen_at,
-           primary_article_id=EXCLUDED.primary_article_id,
-           member_article_ids=EXCLUDED.member_article_ids,
-           source_ids=EXCLUDED.source_ids,
-           source_labels=EXCLUDED.source_labels,
-           signals=EXCLUDED.signals,
-           near_misses=EXCLUDED.near_misses,
-           payload=EXCLUDED.payload,
-           updated_at=now()`,
+        `INSERT INTO coverage_bundle_generations
+          (matcher_version, mode, status, started_at, completed_at, article_count, error_class)
+         VALUES ($1,$2,'failed',$3,$4,$5,$6)`,
         [
-          bundle.id,
-          bundle.kind,
-          bundle.confidence,
-          bundle.reason,
-          bundle.generatedAt,
-          seenAt,
-          bundle.primaryArticleId,
-          bundle.memberArticleIds,
-          bundle.sourceIds,
-          bundle.sourceLabels,
-          JSON.stringify(bundle.signals),
-          JSON.stringify(bundle.nearMisses),
-          JSON.stringify(bundle),
+          input.matcherVersion,
+          input.mode,
+          input.startedAt,
+          input.completedAt,
+          input.analysis.articles.length,
+          errorClass || "Error",
         ],
       );
+      throw error;
     }
+    await this.pruneCoverageGenerations(input.completedAt);
+    return generationId;
+  }
+
+  async pruneCoverageGenerations(now: string): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM coverage_bundle_generations
+       WHERE status = 'completed'
+         AND completed_at < $1::timestamptz - interval '30 days'
+         AND id NOT IN (
+           SELECT generation_id
+           FROM coverage_bundles
+           WHERE state IN ('active', 'shadow') AND generation_id IS NOT NULL
+         )
+         AND id NOT IN (
+           SELECT generation_id FROM coverage_bundle_corrections
+         )`,
+      [now],
+    );
   }
 
   async upsertMorningBrief(brief: MorningBrief): Promise<void> {

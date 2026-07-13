@@ -8,7 +8,28 @@
     app_port: "8090"
     canary_port: "8092"
     public_origin: "https://nytt.reidar.tech"
+    coverage_projection_mode: "{{ lookup('env', 'NYTT_COVERAGE_PROJECTION_MODE') | default('legacy', true) }}"
+    coverage_corrections_enabled: "{{ lookup('env', 'NYTT_COVERAGE_CORRECTIONS_ENABLED') | default('false', true) }}"
+    coverage_matcher_version: "{{ lookup('env', 'NYTT_COVERAGE_MATCHER_VERSION') | default('v1', true) }}"
+    coverage_generation_mode: "{{ lookup('env', 'NYTT_COVERAGE_GENERATION_MODE') | default('shadow', true) }}"
+    coverage_active_min_articles: "{{ lookup('env', 'NYTT_COVERAGE_ACTIVE_MIN_ARTICLES') | default('20', true) }}"
+    coverage_active_min_previous_ratio: "{{ lookup('env', 'NYTT_COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO') | default('0.5', true) }}"
+    coverage_active_volume_guard_override: "{{ lookup('env', 'NYTT_COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE') | default('false', true) }}"
+    coverage_v2_owner_reviewed_generation_id: ""
   pre_tasks:
+    - name: Validate coverage rollout configuration
+      ansible.builtin.assert:
+        that:
+          - coverage_projection_mode in ['legacy', 'normalized-shadow', 'normalized-active']
+          - coverage_corrections_enabled in ['true', 'false']
+          - coverage_matcher_version in ['v1', 'v2']
+          - coverage_generation_mode in ['shadow', 'active']
+          - coverage_generation_mode != 'active' or coverage_matcher_version == 'v2'
+          - coverage_projection_mode != 'normalized-active' or coverage_corrections_enabled == 'true'
+          - coverage_projection_mode != 'normalized-active' or coverage_matcher_version == 'v2'
+          - coverage_projection_mode != 'normalized-active' or coverage_generation_mode == 'active'
+        fail_msg: "Coverage rollout flags are inconsistent."
+
     - name: Require production deployment values
       ansible.builtin.assert:
         that:
@@ -132,6 +153,13 @@
           DATEX_ENDPOINT={{ lookup('env', 'NYTT_DATEX_ENDPOINT') | default('', true) }}
           DATEX_USERNAME={{ lookup('env', 'NYTT_DATEX_USERNAME') | default('', true) }}
           DATEX_PASSWORD={{ lookup('env', 'NYTT_DATEX_PASSWORD') | default('', true) }}
+          COVERAGE_PROJECTION_MODE=legacy
+          COVERAGE_CORRECTIONS_ENABLED=false
+          COVERAGE_MATCHER_VERSION={{ coverage_matcher_version }}
+          COVERAGE_GENERATION_MODE=shadow
+          COVERAGE_ACTIVE_MIN_ARTICLES=20
+          COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO=0.5
+          COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE=false
           RUNTIME_STATUS_DIR=/data/runtime-status
       no_log: true
 
@@ -296,42 +324,129 @@
         chdir: "{{ app_dir }}"
       changed_when: true
 
-    - name: Remove stale canary
-      community.docker.docker_container:
-        name: nytt-trondheim-canary
-        state: absent
+    - name: Read current completed active v2 coverage generation
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker compose --env-file .env.production exec -T postgres \
+          psql -U nytt -d nytt -v ON_ERROR_STOP=1 -qAt <<'SQL'
+        SELECT id AS locked_generation_id
+        FROM coverage_bundle_generations
+        WHERE matcher_version='v2' AND mode='active' AND status='completed' AND is_current
+          AND health_outcome='healthy'
+        ORDER BY completed_at DESC, id DESC
+        LIMIT 1;
+        SQL
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      register: current_active_v2_generation
+      changed_when: false
 
-    - name: Ensure outbound application network exists for canary
-      community.docker.docker_network:
-        name: nytt_outbound
-        internal: false
-        state: present
+    - name: Determine whether exact reviewed v2 promotion is required
+      ansible.builtin.set_fact:
+        coverage_v2_promotion_required: >-
+          {{ coverage_projection_mode == 'normalized-active'
+             and (current_active_v2_generation.stdout | trim | length == 0) }}
 
-    - name: Start API canary with production database
-      community.docker.docker_container:
-        name: nytt-trondheim-canary
-        image: nytt-trondheim-api:latest
-        state: started
-        env_file: "{{ app_dir }}/.env.production"
-        env:
-          PORT: "8080"
-        networks:
-          - name: "nytt_database"
-          - name: "nytt_outbound"
-        published_ports:
-          - "127.0.0.1:{{ canary_port }}:8080"
+    - name: Require a valid reviewed generation UUID for first v2 promotion
+      ansible.builtin.assert:
+        that:
+          - coverage_v2_owner_reviewed_generation_id | length > 0
+          - coverage_v2_owner_reviewed_generation_id is match('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$')
+        fail_msg: "First normalized-active promotion requires the exact owner-reviewed generation UUID."
+      when: coverage_v2_promotion_required | bool
 
-    - name: Wait for canary health
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ canary_port }}/health/ready"
-        return_content: true
-      register: canary_health
-      until:
-        - canary_health.status | default(0) == 200
-        - (canary_health.json | default({})).get('status') == "ok"
-        - (canary_health.json | default({})).get('storage') == "postgres"
-      retries: 12
-      delay: 5
+    - name: Promote exactly the reviewed completed v2 shadow generation
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker compose --env-file .env.production exec -T postgres \
+          psql -U nytt -d nytt -v ON_ERROR_STOP=1 \
+          -v reviewed_generation_id="{{ coverage_v2_owner_reviewed_generation_id }}" \
+          < scripts/promote-coverage-generation.sql
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      changed_when: true
+      when: coverage_v2_promotion_required | bool
+
+    - name: Apply target coverage flags after promotion gate
+      ansible.builtin.lineinfile:
+        path: "{{ app_dir }}/.env.production"
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - { key: "COVERAGE_PROJECTION_MODE", value: "{{ coverage_projection_mode }}" }
+        - { key: "COVERAGE_CORRECTIONS_ENABLED", value: "{{ coverage_corrections_enabled }}" }
+        - { key: "COVERAGE_MATCHER_VERSION", value: "{{ coverage_matcher_version }}" }
+        - { key: "COVERAGE_GENERATION_MODE", value: "{{ coverage_generation_mode }}" }
+        - { key: "COVERAGE_ACTIVE_MIN_ARTICLES", value: "{{ coverage_active_min_articles }}" }
+        - {
+            key: "COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO",
+            value: "{{ coverage_active_min_previous_ratio }}",
+          }
+        - {
+            key: "COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE",
+            value: "{{ coverage_active_volume_guard_override }}",
+          }
+
+    - name: Start and validate API canary
+      block:
+        - name: Remove stale canary
+          community.docker.docker_container:
+            name: nytt-trondheim-canary
+            state: absent
+
+        - name: Ensure outbound application network exists for canary
+          community.docker.docker_network:
+            name: nytt_outbound
+            internal: false
+            state: present
+
+        - name: Start API canary with production database
+          community.docker.docker_container:
+            name: nytt-trondheim-canary
+            image: nytt-trondheim-api:latest
+            state: started
+            env_file: "{{ app_dir }}/.env.production"
+            env:
+              PORT: "8080"
+            networks:
+              - name: "nytt_database"
+              - name: "nytt_outbound"
+            published_ports:
+              - "127.0.0.1:{{ canary_port }}:8080"
+
+        - name: Wait for canary health
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ canary_port }}/health/ready"
+            return_content: true
+          register: canary_health
+          until:
+            - canary_health.status | default(0) == 200
+            - (canary_health.json | default({})).get('status') == "ok"
+            - (canary_health.json | default({})).get('storage') == "postgres"
+            - (canary_health.json | default({})).get('coverageProjectionMode') == coverage_projection_mode
+          retries: 12
+          delay: 5
+      rescue:
+        - name: Return coverage flags to legacy after failed canary
+          ansible.builtin.lineinfile:
+            path: "{{ app_dir }}/.env.production"
+            regexp: "^COVERAGE_PROJECTION_MODE="
+            line: "COVERAGE_PROJECTION_MODE=legacy"
+        - name: Disable corrections after failed canary
+          ansible.builtin.lineinfile:
+            path: "{{ app_dir }}/.env.production"
+            regexp: "^COVERAGE_CORRECTIONS_ENABLED="
+            line: "COVERAGE_CORRECTIONS_ENABLED=false"
+        - name: Return generation mode to shadow after failed canary
+          ansible.builtin.lineinfile:
+            path: "{{ app_dir }}/.env.production"
+            regexp: "^COVERAGE_GENERATION_MODE="
+            line: "COVERAGE_GENERATION_MODE=shadow"
+        - name: Fail deployment after canary rollback
+          ansible.builtin.fail:
+            msg: "Candidate canary failed; coverage flags were returned to legacy mode."
 
     - name: Promote candidate and validate production
       block:
@@ -437,6 +552,7 @@
           until:
             - (production_health.json | default({})).get('status') == "ok"
             - (production_health.json | default({})).get('storage') == "postgres"
+            - (production_health.json | default({})).get('coverageProjectionMode') == coverage_projection_mode
           retries: 6
           delay: 5
 
@@ -653,6 +769,24 @@
           changed_when: false
 
       rescue:
+        - name: Roll back coverage projection flags without deleting review history
+          ansible.builtin.lineinfile:
+            path: "{{ app_dir }}/.env.production"
+            regexp: "^COVERAGE_PROJECTION_MODE="
+            line: "COVERAGE_PROJECTION_MODE=legacy"
+
+        - name: Disable coverage corrections during rollback
+          ansible.builtin.lineinfile:
+            path: "{{ app_dir }}/.env.production"
+            regexp: "^COVERAGE_CORRECTIONS_ENABLED="
+            line: "COVERAGE_CORRECTIONS_ENABLED=false"
+
+        - name: Return coverage generation to shadow during rollback
+          ansible.builtin.lineinfile:
+            path: "{{ app_dir }}/.env.production"
+            regexp: "^COVERAGE_GENERATION_MODE="
+            line: "COVERAGE_GENERATION_MODE=shadow"
+
         - name: Restore previous API image after failed candidate validation
           ansible.builtin.shell: docker image tag nytt-trondheim-api:previous nytt-trondheim-api:latest
           changed_when: true
@@ -677,6 +811,7 @@
           until:
             - (rollback_health.json | default({})).get('status') == "ok"
             - (rollback_health.json | default({})).get('storage') == "postgres"
+            - (rollback_health.json | default({})).get('coverageProjectionMode') == "legacy"
           retries: 6
           delay: 5
 

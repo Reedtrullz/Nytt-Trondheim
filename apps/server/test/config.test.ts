@@ -21,6 +21,67 @@ afterEach(() => {
 });
 
 describe("loadConfig session secret policy", () => {
+  it("parses every supported coverage projection mode and defaults to legacy", () => {
+    withEnv({ COVERAGE_PROJECTION_MODE: undefined }, () => {
+      expect(loadConfig().coverageProjectionMode).toBe("legacy");
+    });
+    for (const mode of ["legacy", "normalized-shadow", "normalized-active"] as const) {
+      withEnv({ COVERAGE_PROJECTION_MODE: mode }, () => {
+        expect(loadConfig().coverageProjectionMode).toBe(mode);
+      });
+    }
+  });
+
+  it("rejects unsupported coverage projection modes", () => {
+    for (const mode of ["active", "shadow", "normalized"] as const) {
+      withEnv({ COVERAGE_PROJECTION_MODE: mode }, () => {
+        expect(() => loadConfig()).toThrow(
+          "COVERAGE_PROJECTION_MODE must be legacy, normalized-shadow or normalized-active",
+        );
+      });
+    }
+  });
+
+  it("parses coverage correction capability strictly and defaults off", () => {
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: undefined }, () => {
+      expect(loadConfig().coverageCorrectionsEnabled).toBe(false);
+    });
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: "true" }, () => {
+      expect(loadConfig().coverageCorrectionsEnabled).toBe(true);
+    });
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: "false" }, () => {
+      expect(loadConfig().coverageCorrectionsEnabled).toBe(false);
+    });
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: "yes" }, () => {
+      expect(() => loadConfig()).toThrow("COVERAGE_CORRECTIONS_ENABLED must be true or false");
+    });
+  });
+
+  it("keeps deterministic E2E coverage fixtures explicit and outside production", () => {
+    withEnv({ NODE_ENV: "development", E2E_COVERAGE_FIXTURES: undefined }, () => {
+      expect(loadConfig().e2eCoverageFixtures).toBe(false);
+    });
+    withEnv({ NODE_ENV: "development", E2E_COVERAGE_FIXTURES: "true" }, () => {
+      expect(loadConfig().e2eCoverageFixtures).toBe(true);
+    });
+    withEnv({ NODE_ENV: "development", E2E_COVERAGE_FIXTURES: "yes" }, () => {
+      expect(() => loadConfig()).toThrow("E2E_COVERAGE_FIXTURES must be true or false");
+    });
+    withEnv(
+      {
+        NODE_ENV: "production",
+        DATABASE_URL: "postgres://nytt:test@localhost:5432/nytt",
+        SESSION_SECRET: "x".repeat(32),
+        E2E_COVERAGE_FIXTURES: "true",
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(
+          "E2E_COVERAGE_FIXTURES must not be enabled in production",
+        );
+      },
+    );
+  });
+
   it("keeps a development-only fallback outside production", () => {
     withEnv({ NODE_ENV: "development", SESSION_SECRET: undefined }, () => {
       expect(loadConfig().sessionSecret).toBe("development-only-session-secret");

@@ -15,4 +15,5 @@ runtime-status/
 .DS_Store
 .hermes/
 .hcodex-swarm/
+/.worktrees/
 NPRA_DATEXII_3_1_Specification.pdf

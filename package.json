@@ -19,6 +19,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "check:coverage-matcher": "vitest run packages/shared/test/article-coverage-golden.test.ts packages/shared/test/article-coverage-invariance.test.ts packages/shared/test/article-coverage-evidence.test.ts packages/shared/test/article-coverage-clustering.test.ts packages/shared/test/article-coverage-corrections.test.ts packages/shared/test/public-verification.test.ts",
     "test:e2e": "playwright test",
     "audit:production": "npm audit --omit=dev --audit-level=high"
   },

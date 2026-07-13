@@ -14,8 +14,11 @@ import {
   publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
+  type CoverageBundleCorrectionResult,
+  type CoverageBundleSplitRequest,
   type CityPulseStory,
   type CityPulseStoryPage,
+  type CityPulseStoryProjection,
   type HomeSituationSummary,
   type MorningBrief,
   type PublicNotificationSignalHighlight,
@@ -23,8 +26,10 @@ import {
   type SourceConfidenceSummary,
   type SourceHealth,
 } from "@nytt/shared";
-import { api } from "../api.js";
+import { api, CoverageCorrectionConflictError } from "../api.js";
 import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
+import { CoverageCorrectionDialog } from "../components/news/CoverageCorrectionDialog.js";
+import { CoverageSourceCluster } from "../components/news/CoverageSourceCluster.js";
 import {
   articleCategories,
   articleCategoryDescriptions,
@@ -66,11 +71,11 @@ import {
 import {
   homeStoryCardsForGroups,
   homeStoryCardsForStories,
-  sourceClusterLabelForGroup,
   type HomeStoryCard,
   type HomeStoryVerification,
 } from "../homeStoryCards.js";
 import { publicSourceHealthSummary } from "../freshness.js";
+import { replaceCoverageStories } from "../coverageStoryUpdates.js";
 import { newsMapClusterSummary, type NewsMapClusterSummary } from "../newsMapClusters.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
@@ -78,7 +83,104 @@ import { situationTimeMeta } from "../situationTime.js";
 const NewsMap = lazy(() =>
   import("../components/NewsMap.js").then((module) => ({ default: module.NewsMap })),
 );
-const defaultHomeFeedKey = "trondheim\u0000Alle\u0000\u0000\u0000all";
+
+interface CoverageFeedIdentity {
+  scope: HomeFilters["scope"];
+  category: HomeFilters["category"];
+  topic?: HomeFilters["topic"];
+  q: string;
+  from?: string;
+  to?: string;
+}
+
+type CoverageProjectionIdentity = CityPulseStoryProjection & {
+  projectionRevision?: number;
+};
+
+interface CoverageUndoContext {
+  feedKey: string;
+  projectionKey: string;
+}
+
+export function coverageFeedKey(identity: CoverageFeedIdentity): string {
+  return JSON.stringify({
+    scope: identity.scope,
+    category: identity.category,
+    topic: identity.topic ?? null,
+    q: identity.q.trim(),
+    from: identity.from ?? null,
+    to: identity.to ?? null,
+  });
+}
+
+export function coverageProjectionKey(
+  projection: CoverageProjectionIdentity | undefined,
+  stories: CityPulseStory[],
+): string {
+  const revision = coverageProjectionRevision(projection, stories);
+  return JSON.stringify({
+    mode: projection?.mode ?? null,
+    generationId: projection?.generationId ?? null,
+    revision: revision ?? null,
+  });
+}
+
+function coverageProjectionRevision(
+  projection: CoverageProjectionIdentity | undefined,
+  stories: CityPulseStory[],
+): number | undefined {
+  if (projection?.projectionRevision !== undefined) return projection.projectionRevision;
+  const fallbackRevisions = stories.flatMap((story) => {
+    const revision = story.coverageBundle?.correctionTarget?.projectionRevision;
+    return revision === undefined ? [] : [revision];
+  });
+  return fallbackRevisions.length > 0 ? Math.max(...fallbackRevisions) : undefined;
+}
+
+function coverageProjectionAtRevision(
+  projection: CoverageProjectionIdentity | undefined,
+  projectionRevision: number | undefined,
+): CoverageProjectionIdentity | undefined {
+  if (projection?.mode !== "normalized" || projectionRevision === undefined) return projection;
+  return { ...projection, projectionRevision };
+}
+
+export function coverageSplitProjectionRevision(
+  expectedProjectionRevision: number | undefined,
+  replacementStories: CityPulseStory[],
+): number | undefined {
+  return (
+    coverageProjectionRevision(undefined, replacementStories) ??
+    (expectedProjectionRevision === undefined ? undefined : expectedProjectionRevision + 1)
+  );
+}
+
+export function coverageUndoContextMatches(
+  expected: CoverageUndoContext,
+  current: CoverageUndoContext,
+): boolean {
+  return coverageCorrectionContextMatches(expected, current);
+}
+
+export function coverageCorrectionContextMatches(
+  expected: CoverageUndoContext,
+  current: CoverageUndoContext,
+): boolean {
+  return expected.feedKey === current.feedKey && expected.projectionKey === current.projectionKey;
+}
+
+export function coverageCorrectionLiveAnnouncement(
+  hasRawUndoState: boolean,
+  announcement: string,
+): string {
+  return hasRawUndoState ? "" : announcement;
+}
+
+const defaultHomeFeedKey = coverageFeedKey({
+  scope: "trondheim",
+  category: "Alle",
+  q: "",
+});
 
 type LocalFocusState =
   | { status: "idle" }
@@ -529,61 +631,29 @@ export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
   return <SituationBanner situations={activeSituations} />;
 }
 
-function SourceCluster({ group }: { group: HomeArticleGroup }) {
-  if (group.articles.length < 2) return null;
-  const label = sourceClusterLabelForGroup(group);
-  if (!label) return null;
-  return (
-    <div className="source-cluster" aria-label={label}>
-      <span>{label}</span>
-      <div className="source-cluster-list">
-        {group.articles.map((article) => {
-          const articleUrl = safeExternalUrl(article.url);
-          const sourceLabel = `${article.sourceLabel} · ${formatTime(article.publishedAt)}`;
-          const title = article.id === group.primary.id ? "Hovedsak" : article.title;
-          const content = (
-            <>
-              <b>{sourceLabel}</b>
-              <small>{title}</small>
-            </>
-          );
-          return articleUrl ? (
-            <a
-              className="source-cluster-item"
-              href={articleUrl}
-              key={article.id}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              {content}
-            </a>
-          ) : (
-            <span className="source-cluster-item" key={article.id}>
-              {content}
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function LeadStory({
   card,
   saving,
   onSave,
   canSave,
+  canCorrect,
+  onCorrect,
 }: {
   card: HomeStoryCard;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
   canSave: boolean;
+  canCorrect: boolean;
+  onCorrect: (card: HomeStoryCard) => void;
 }) {
   const article = card.primary;
-  const group = card.group;
   const articleUrl = safeExternalUrl(article.url);
   return (
-    <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
+    <article
+      id={`story-${card.id}`}
+      className={`lead-story${article.imageUrl ? "" : " text-only"}`}
+      tabIndex={-1}
+    >
       {article.imageUrl ? <img src={article.imageUrl} alt="" /> : null}
       <div className="lead-copy">
         <div className="story-kicker">
@@ -621,7 +691,7 @@ function LeadStory({
           ))}
         </div>
         <StoryVerificationProof verification={card.verification} />
-        <SourceCluster group={group} />
+        <CoverageSourceCluster card={card} canCorrect={canCorrect} onCorrect={onCorrect} />
         <div className="lead-footer">
           <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
           {articleUrl ? (
@@ -863,18 +933,27 @@ function StoryCard({
   saving,
   onSave,
   canSave,
+  canCorrect,
+  onCorrect,
 }: {
   card: HomeStoryCard;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
   canSave: boolean;
+  canCorrect: boolean;
+  onCorrect: (card: HomeStoryCard) => void;
 }) {
   const article = card.primary;
   const articleUrl = safeExternalUrl(article.url);
   const count = card.sourceCount > 1 ? card.sourceCount : card.updateCount;
   const countLabel = card.sourceCount > 1 ? "kilder" : "oppdateringer";
   return (
-    <article className={`story-card story-card-${article.category.toLowerCase()}`}>
+    <article
+      id={`story-${card.id}`}
+      className={`story-card story-card-${article.category.toLowerCase()}`}
+      data-article-id={article.id}
+      tabIndex={-1}
+    >
       <div className="story-card-main">
         <div className="story-card-kicker">
           <p className="metadata compact">
@@ -921,7 +1000,7 @@ function StoryCard({
           ))}
         </div>
         <StoryVerificationProof verification={card.verification} />
-        <SourceCluster group={card.group} />
+        <CoverageSourceCluster card={card} canCorrect={canCorrect} onCorrect={onCorrect} />
       </div>
       <div className="story-card-side">
         {card.isClustered ? (
@@ -1514,6 +1593,94 @@ export function mergeCityPulseStoryLists(
   );
 }
 
+export function coverageSplitState(
+  current: CityPulseStory[],
+  result: CoverageBundleCorrectionResult,
+): CityPulseStory[] {
+  return replaceCoverageStories(current, result.removedStoryIds, result.replacementStories);
+}
+
+export function coverageConflictState(
+  current: CityPulseStory[],
+  removedStoryId: string,
+  replacementStories: CityPulseStory[],
+): CityPulseStory[] {
+  return replaceCoverageStories(current, [removedStoryId], replacementStories);
+}
+
+interface CoverageConflictRefreshInput {
+  currentStories: CityPulseStory[];
+  currentNextCursor?: string;
+  page: CityPulseStoryPage;
+  removedStoryId: string;
+  targetArticleIds: string[];
+  replacementStories: CityPulseStory[];
+  preserveCurrentCursor: boolean;
+}
+
+export function coverageConflictRefreshState({
+  currentStories,
+  currentNextCursor,
+  page,
+  removedStoryId,
+  targetArticleIds,
+  replacementStories,
+  preserveCurrentCursor,
+}: CoverageConflictRefreshInput) {
+  const refreshedPageArticleIds = new Set(page.items.flatMap((story) => story.articleIds));
+  const refreshedById = new Map(
+    currentStories
+      .filter(
+        (story) => !story.articleIds.some((articleId) => refreshedPageArticleIds.has(articleId)),
+      )
+      .map((story) => [story.id, story]),
+  );
+  refreshedById.delete(removedStoryId);
+  for (const story of page.items) refreshedById.set(story.id, story);
+  const targetArticles = new Set(targetArticleIds);
+  for (const story of replacementStories) {
+    if (!story.articleIds.some((articleId) => targetArticles.has(articleId))) continue;
+    if (story.articleIds.some((articleId) => refreshedPageArticleIds.has(articleId))) continue;
+    const replacementArticleIds = new Set(story.articleIds);
+    for (const [currentStoryId, currentStory] of refreshedById) {
+      if (currentStory.articleIds.some((articleId) => replacementArticleIds.has(articleId))) {
+        refreshedById.delete(currentStoryId);
+      }
+    }
+    refreshedById.set(story.id, story);
+  }
+  const stories = [...refreshedById.values()].sort(
+    (left, right) => right.latestAt.localeCompare(left.latestAt) || right.id.localeCompare(left.id),
+  );
+  return {
+    stories,
+    articles: articlesFromCityPulseStories(stories),
+    storyProjection: page.projection,
+    nextCursor: preserveCurrentCursor ? currentNextCursor : page.nextCursor,
+  };
+}
+
+export async function loadCoverageConflictRefreshState(
+  input: Omit<CoverageConflictRefreshInput, "page"> & {
+    loadPage: () => Promise<CityPulseStoryPage>;
+    applyStories?: (stories: CityPulseStory[]) => CityPulseStory[];
+  },
+) {
+  const page = await input.loadPage();
+  const applyStories = input.applyStories ?? ((stories: CityPulseStory[]) => stories);
+  return coverageConflictRefreshState({
+    ...input,
+    page: { ...page, items: applyStories(page.items) },
+    replacementStories: applyStories(input.replacementStories),
+  });
+}
+
+export function coverageSplitAnnouncement(replacementStoryCount: number): string {
+  return `Gruppen er splittet i ${replacementStoryCount} saker.`;
+}
+
+export const coverageUndoAnnouncement = "Grupperingen er gjenopprettet.";
+
 function cityPulseStoryWithArticle(
   story: CityPulseStory,
   articleId: string,
@@ -1618,14 +1785,25 @@ interface SavedOverride {
   saved: boolean;
 }
 
+interface CorrectionUndoState extends CoverageUndoContext {
+  correctionIds: string[];
+  message: string;
+}
+
+interface CoverageCorrectionDialogState extends CoverageUndoContext {
+  card: HomeStoryCard;
+}
+
 const savedOverrideTtlMs = 60_000;
 
 export function HomePage({
   initialData,
   canSave = true,
+  canCorrect = false,
 }: {
   initialData: BootstrapPayload;
   canSave?: boolean;
+  canCorrect?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
@@ -1641,6 +1819,9 @@ export function HomePage({
   const [nextCursor, setNextCursor] = useState<string | undefined>(() =>
     initialFeedIsDefault ? defaultStoryNextCursor(initialData) : undefined,
   );
+  const [storyProjection, setStoryProjection] = useState<CityPulseStoryProjection | undefined>(
+    () => (initialFeedIsDefault ? initialData.storyProjection : undefined),
+  );
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState<string>();
@@ -1650,15 +1831,42 @@ export function HomePage({
     cityPulseLatestTimestamp(initialData),
   );
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
+  const [correctionDialog, setCorrectionDialog] = useState<CoverageCorrectionDialogState>();
+  const [correctionPending, setCorrectionPending] = useState(false);
+  const [correctionError, setCorrectionError] = useState<string>();
+  const [correctionAnnouncement, setCorrectionAnnouncement] = useState("");
+  const [undoState, setUndoState] = useState<CorrectionUndoState>();
+  const [undoPending, setUndoPending] = useState(false);
+  const correctionOriginRef = useRef<HTMLElement | null>(null);
+  const correctionRequestIdRef = useRef(0);
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
   const articleSavedOverridesRef = useRef<Map<string, SavedOverride>>(new Map());
   const cityPulseRefreshRunningRef = useRef(false);
-  const feedKey = `${scope}\u0000${category}\u0000${topic ?? ""}\u0000${query}\u0000${timeWindow}`;
+  const timeWindowFrom = useMemo(() => homeTimeWindowFrom(timeWindow), [timeWindow]);
+  const timeWindowTo: string | undefined = undefined;
+  const feedKey = coverageFeedKey({
+    scope,
+    category,
+    topic,
+    q: query,
+    from: timeWindowFrom,
+    to: timeWindowTo,
+  });
+  const projectionKey = coverageProjectionKey(storyProjection, stories);
+  const coverageContext = useMemo(() => ({ feedKey, projectionKey }), [feedKey, projectionKey]);
+  const coverageContextRef = useRef(coverageContext);
   const feedKeyRef = useRef(feedKey);
   const loadMoreRequestIdRef = useRef(0);
+  const loadedAdditionalPagesRef = useRef(false);
   feedKeyRef.current = feedKey;
+  coverageContextRef.current = coverageContext;
+  const availableCorrectionDialog =
+    correctionDialog && coverageCorrectionContextMatches(correctionDialog, coverageContext)
+      ? correctionDialog
+      : undefined;
+  const availableUndoState =
+    undoState && coverageUndoContextMatches(undoState, coverageContext) ? undoState : undefined;
   const [saveError, setSaveError] = useState<string>();
-  const timeWindowFrom = useMemo(() => homeTimeWindowFrom(timeWindow), [timeWindow]);
   const [localFocus, setLocalFocus] = useState<LocalFocusState>({ status: "idle" });
   const [neighborhoodFocusId, setNeighborhoodFocusId] = useState("");
   const [neighborhoodFocusQuery, setNeighborhoodFocusQuery] = useState("");
@@ -1670,7 +1878,28 @@ export function HomePage({
   useEffect(() => {
     setLiveData(initialData);
     setCityPulseRefreshedAt(cityPulseLatestTimestamp(initialData));
+    if (feedKeyRef.current === defaultHomeFeedKey) {
+      setStoryProjection(initialData.storyProjection);
+    }
   }, [initialData]);
+
+  useEffect(() => {
+    if (!correctionDialog || coverageCorrectionContextMatches(correctionDialog, coverageContext)) {
+      return;
+    }
+    correctionRequestIdRef.current += 1;
+    setCorrectionDialog(undefined);
+    setCorrectionPending(false);
+    setCorrectionError(undefined);
+    setCorrectionAnnouncement("");
+    correctionOriginRef.current = null;
+  }, [correctionDialog, coverageContext]);
+
+  useEffect(() => {
+    if (!undoState || coverageUndoContextMatches(undoState, coverageContext)) return;
+    setUndoState(undefined);
+    setCorrectionAnnouncement("");
+  }, [coverageContext, undoState]);
 
   const applySavedOverrides = useCallback((items: Article[]) => {
     const savedOverrides = articleSavedOverridesRef.current;
@@ -1723,6 +1952,7 @@ export function HomePage({
         setCityPulseRefreshedAt(cityPulseLatestTimestamp(nextData) ?? new Date().toISOString());
         setCityPulseRefreshError(undefined);
         if (feedKeyRef.current === defaultHomeFeedKey) {
+          setStoryProjection(nextData.storyProjection);
           const nextStories = applySavedOverridesToStories(nextData.stories ?? []);
           setStories(nextStories);
           setArticles(
@@ -1922,6 +2152,7 @@ export function HomePage({
   }
 
   useEffect(() => {
+    loadedAdditionalPagesRef.current = false;
     if (feedKey === defaultHomeFeedKey) {
       setLoading(false);
       setLoadingMore(false);
@@ -1934,6 +2165,7 @@ export function HomePage({
           : applySavedOverrides(liveData.articles),
       );
       setNextCursor(defaultStoryNextCursor(liveData));
+      setStoryProjection(liveData.storyProjection);
       return;
     }
     let cancelled = false;
@@ -1941,6 +2173,7 @@ export function HomePage({
     setLoadingMore(false);
     loadMoreRequestIdRef.current += 1;
     setNextCursor(undefined);
+    setStoryProjection(undefined);
     setStories([]);
     setArticles([]);
     setFeedError(undefined);
@@ -1954,6 +2187,7 @@ export function HomePage({
               setStories(nextStories);
               setArticles(articlesFromCityPulseStories(nextStories));
               setNextCursor(page.nextCursor);
+              setStoryProjection(page.projection);
             }
           })
           .catch((reason: Error) => {
@@ -1977,6 +2211,7 @@ export function HomePage({
     liveData.articles,
     liveData.stories,
     liveData.storyNextCursor,
+    liveData.storyProjection,
     query,
     scope,
     timeWindowFrom,
@@ -2069,6 +2304,247 @@ export function HomePage({
     }
   }
 
+  function applyCoverageStories(nextStories: CityPulseStory[]) {
+    setStories(nextStories);
+    setArticles(articlesFromCityPulseStories(nextStories));
+  }
+
+  function focusCoverageStories(storyIds: string[], scrollY: number) {
+    const restore = (remainingFrames: number) => {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: scrollY, left: window.scrollX, behavior: "auto" });
+        for (const storyId of storyIds) {
+          const target = document.getElementById(`story-${storyId}`);
+          if (!target) continue;
+          target.focus({ preventScroll: true });
+          return;
+        }
+        if (remainingFrames > 0) restore(remainingFrames - 1);
+      });
+    };
+    restore(2);
+  }
+
+  function openCoverageCorrection(card: HomeStoryCard) {
+    if (!canCorrect || !card.group.bundle) return;
+    correctionOriginRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setCorrectionError(undefined);
+    setCorrectionDialog({ card, ...coverageContext });
+  }
+
+  function closeCoverageCorrection() {
+    if (correctionPending) return;
+    setCorrectionError(undefined);
+    setCorrectionDialog(undefined);
+    window.requestAnimationFrame(() => {
+      correctionOriginRef.current?.focus({ preventScroll: true });
+      correctionOriginRef.current = null;
+    });
+  }
+
+  async function handleCoverageSplit(input: CoverageBundleSplitRequest) {
+    const dialog = availableCorrectionDialog;
+    if (!dialog || correctionPending) return;
+    const card = dialog.card;
+    const bundle = card.group.bundle;
+    if (!bundle) return;
+    const expectedContext = {
+      feedKey: dialog.feedKey,
+      projectionKey: dialog.projectionKey,
+    };
+    const requestId = correctionRequestIdRef.current + 1;
+    correctionRequestIdRef.current = requestId;
+    const submissionIsCurrent = () =>
+      correctionRequestIdRef.current === requestId &&
+      coverageCorrectionContextMatches(expectedContext, coverageContextRef.current);
+    const discardStaleSubmission = () => {
+      if (correctionRequestIdRef.current !== requestId) return;
+      correctionRequestIdRef.current += 1;
+      setCorrectionDialog((current) =>
+        current && coverageCorrectionContextMatches(current, expectedContext) ? undefined : current,
+      );
+      setCorrectionPending(false);
+      setCorrectionError(undefined);
+      setCorrectionAnnouncement("");
+      correctionOriginRef.current = null;
+    };
+    if (!submissionIsCurrent()) {
+      discardStaleSubmission();
+      return;
+    }
+    const scrollY = window.scrollY;
+    setCorrectionAnnouncement("");
+    setCorrectionError(undefined);
+    setCorrectionPending(true);
+    try {
+      const result = await api.splitCoverageBundle(bundle.id, input);
+      if (!submissionIsCurrent()) {
+        discardStaleSubmission();
+        return;
+      }
+      const nextStories = coverageSplitState(stories, result);
+      const nextProjection = coverageProjectionAtRevision(
+        storyProjection,
+        coverageSplitProjectionRevision(
+          input.expectedProjectionRevision,
+          result.replacementStories,
+        ),
+      );
+      applyCoverageStories(nextStories);
+      setStoryProjection(nextProjection);
+      setCorrectionDialog(undefined);
+      correctionOriginRef.current = null;
+      const message = coverageSplitAnnouncement(result.replacementStories.length);
+      setCorrectionAnnouncement(message);
+      setUndoState({
+        correctionIds: result.corrections.map(({ id }) => id),
+        message,
+        feedKey,
+        projectionKey: coverageProjectionKey(nextProjection, nextStories),
+      });
+      focusCoverageStories(
+        result.replacementStories.map(({ id }) => id),
+        scrollY,
+      );
+    } catch (reason) {
+      if (!submissionIsCurrent()) {
+        discardStaleSubmission();
+        return;
+      }
+      if (reason instanceof CoverageCorrectionConflictError) {
+        try {
+          if (!submissionIsCurrent()) {
+            discardStaleSubmission();
+            return;
+          }
+          const refreshed = await loadCoverageConflictRefreshState({
+            loadPage: () =>
+              api.cityPulseStories({
+                scope,
+                category,
+                topic,
+                q: query,
+                from: timeWindowFrom,
+              }),
+            currentStories: stories,
+            currentNextCursor: nextCursor,
+            removedStoryId: card.id,
+            targetArticleIds: card.group.articles.map(({ id }) => id),
+            replacementStories: reason.replacementStories,
+            preserveCurrentCursor: loadedAdditionalPagesRef.current,
+            applyStories: applySavedOverridesToStories,
+          });
+          if (!submissionIsCurrent()) {
+            discardStaleSubmission();
+            return;
+          }
+          setStories(refreshed.stories);
+          setArticles(refreshed.articles);
+          setStoryProjection(refreshed.storyProjection);
+          setNextCursor(refreshed.nextCursor);
+          setCorrectionDialog(undefined);
+          correctionOriginRef.current = null;
+          setUndoState(undefined);
+          setCorrectionAnnouncement("Gruppen ble oppdatert før endringen kunne lagres.");
+          const targetArticleIds = new Set(card.group.articles.map(({ id }) => id));
+          focusCoverageStories(
+            reason.replacementStories
+              .filter((story) =>
+                story.articleIds.some((articleId) => targetArticleIds.has(articleId)),
+              )
+              .map(({ id }) => id),
+            scrollY,
+          );
+        } catch (refreshReason) {
+          if (!submissionIsCurrent()) {
+            discardStaleSubmission();
+            return;
+          }
+          setCorrectionError(
+            refreshReason instanceof Error
+              ? `Gruppen ble endret, men visningen kunne ikke lastes på nytt: ${refreshReason.message}`
+              : "Gruppen ble endret, men visningen kunne ikke lastes på nytt.",
+          );
+        }
+      } else {
+        setCorrectionError(
+          reason instanceof Error ? reason.message : "Kunne ikke splitte gruppen.",
+        );
+      }
+    } finally {
+      if (correctionRequestIdRef.current === requestId) {
+        setCorrectionPending(false);
+      }
+    }
+  }
+
+  async function handleCoverageUndo() {
+    const pendingUndo = availableUndoState;
+    if (!pendingUndo || undoPending) {
+      if (undoState && !pendingUndo) {
+        setUndoState(undefined);
+        setCorrectionAnnouncement("");
+      }
+      return;
+    }
+    const expectedContext = {
+      feedKey: pendingUndo.feedKey,
+      projectionKey: pendingUndo.projectionKey,
+    };
+    const invalidateChangedContext = () => {
+      setUndoState(undefined);
+      setCorrectionAnnouncement("");
+    };
+    if (!coverageUndoContextMatches(expectedContext, coverageContextRef.current)) {
+      invalidateChangedContext();
+      return;
+    }
+    const scrollY = window.scrollY;
+    setCorrectionAnnouncement("");
+    setUndoPending(true);
+    try {
+      let nextStories = stories;
+      let replacementStoryIds: string[] = [];
+      let postUndoRevision = coverageProjectionRevision(storyProjection, stories);
+      for (const correctionId of pendingUndo.correctionIds) {
+        if (!coverageUndoContextMatches(expectedContext, coverageContextRef.current)) {
+          invalidateChangedContext();
+          return;
+        }
+        const result = await api.undoCoverageCorrection(correctionId);
+        if (!coverageUndoContextMatches(expectedContext, coverageContextRef.current)) {
+          invalidateChangedContext();
+          return;
+        }
+        nextStories = coverageSplitState(nextStories, result);
+        replacementStoryIds = result.replacementStories.map(({ id }) => id);
+        postUndoRevision =
+          coverageProjectionRevision(undefined, result.replacementStories) ??
+          (postUndoRevision === undefined ? undefined : postUndoRevision + 1);
+      }
+      applyCoverageStories(nextStories);
+      setStoryProjection((current) => coverageProjectionAtRevision(current, postUndoRevision));
+      setUndoState(undefined);
+      setCorrectionAnnouncement(coverageUndoAnnouncement);
+      focusCoverageStories(replacementStoryIds, scrollY);
+    } catch {
+      if (!coverageUndoContextMatches(expectedContext, coverageContextRef.current)) {
+        invalidateChangedContext();
+        return;
+      }
+      setUndoState((current) =>
+        current
+          ? { ...current, message: "Kunne ikke angre hele endringen. Oppdater siden." }
+          : current,
+      );
+      setCorrectionAnnouncement("Kunne ikke angre hele endringen. Oppdater siden.");
+      void refreshCityPulse();
+    } finally {
+      setUndoPending(false);
+    }
+  }
+
   async function loadMore() {
     if (!nextCursor) return;
     const requestId = loadMoreRequestIdRef.current + 1;
@@ -2094,6 +2570,8 @@ export function HomePage({
       }
       const nextArticles = articlesFromCityPulseStories(pageStories);
       setStories((current) => mergeCityPulseStoryLists(current, pageStories));
+      loadedAdditionalPagesRef.current = true;
+      setStoryProjection(page.projection);
       setArticles((current) => [
         ...current,
         ...nextArticles.filter((item) => !current.some((existing) => existing.id === item.id)),
@@ -2111,7 +2589,18 @@ export function HomePage({
   }
 
   return (
-    <main className="home">
+    <main className="home" data-generation-id={storyProjection?.generationId}>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {coverageCorrectionLiveAnnouncement(Boolean(undoState), correctionAnnouncement)}
+      </p>
+      {availableUndoState ? (
+        <div className="coverage-correction-toast" role="status" aria-atomic="true">
+          <span>{availableUndoState.message}</span>
+          <button type="button" disabled={undoPending} onClick={() => void handleCoverageUndo()}>
+            {undoPending ? "Angrer…" : "Angre"}
+          </button>
+        </div>
+      ) : null}
       <div className="view-controls">
         <div className="scope-switch" aria-label="Geografisk visning">
           <button
@@ -2282,6 +2771,8 @@ export function HomePage({
               saving={savingArticleIds.has(leadCard.primary.id)}
               onSave={updateSaved}
               canSave={canSave}
+              canCorrect={canCorrect}
+              onCorrect={openCoverageCorrection}
             />
           ) : null}
           {!loading && !leadCard ? (
@@ -2295,6 +2786,8 @@ export function HomePage({
                 saving={savingArticleIds.has(card.primary.id)}
                 onSave={updateSaved}
                 canSave={canSave}
+                canCorrect={canCorrect}
+                onCorrect={openCoverageCorrection}
               />
             ))}
           </div>
@@ -2315,6 +2808,15 @@ export function HomePage({
           data={cityPulseData}
         />
       </div>
+      {availableCorrectionDialog ? (
+        <CoverageCorrectionDialog
+          card={availableCorrectionDialog.card}
+          pending={correctionPending}
+          error={correctionError}
+          onCancel={closeCoverageCorrection}
+          onConfirm={(input) => void handleCoverageSplit(input)}
+        />
+      ) : null}
     </main>
   );
 }

@@ -643,14 +643,62 @@ export const articleQuerySchema = z
   });
 
 export const coverageBundleQuerySchema = z.object({
+  projection: z.enum(["legacy", "shadow", "active", "superseded"]).default("shadow"),
   kind: z.enum(["incident", "topic", "update"]).optional(),
   confidence: z.enum(["high", "medium"]).optional(),
+  matchTier: z.enum(["strong", "moderate"]).optional(),
+  corrected: z
+    .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
+    .optional(),
+  integrity: z.enum(["ok", "error"]).optional(),
+  review: csvListSchema(
+    z.enum([
+      "reviewable",
+      "weak",
+      "missing_place",
+      "missing_entity",
+      "missing_official",
+      "correction_conflict",
+      "generation_change",
+    ]),
+  ),
+  generationId: z.string().uuid().optional(),
+  historyCursor: z.string().trim().max(250).optional(),
   q: z.string().trim().max(160).optional(),
   cursor: z.string().trim().max(250).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
 
 export type CoverageBundleQueryInput = z.infer<typeof coverageBundleQuerySchema>;
+
+export const coverageBundleSplitRequestSchema = z
+  .object({
+    expectedGeneratedAt: z.string().datetime({ offset: true }),
+    expectedProjectionRevision: z.number().int().nonnegative().optional(),
+    originalBundleId: z.string().trim().min(1).max(300).optional(),
+    anchorArticleId: z.string().trim().min(1).max(300),
+    rejectedArticleIds: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
+    reason: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!value.rejectedArticleIds.includes(value.anchorArticleId)) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rejectedArticleIds"],
+      message: "anchorArticleId cannot also be rejected",
+    });
+  })
+  .transform((value) => ({
+    ...value,
+    rejectedArticleIds: [...new Set(value.rejectedArticleIds)].sort(),
+  }));
+
+export const coverageCorrectionExportQuerySchema = z
+  .object({
+    sinceDays: z.coerce.number().int().min(1).max(365).default(30),
+  })
+  .strict();
 
 export const sourceItemQuerySchema = z.object({
   provider: sourceIdSchema.optional(),

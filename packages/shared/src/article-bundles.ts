@@ -4,8 +4,26 @@ import type {
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleKind,
   CityPulseStory,
+  CoverageMatchConfidence,
+  CoverageGenerationSummary,
+  CoverageProjectionState,
+  CoverageProjectionParity,
 } from "./types.js";
 import { isFootballClubBrannContext } from "./incident-text.js";
+import {
+  clusterArticlesByCoverageEdges,
+  type CoverageRejectedPair,
+} from "./article-coverage-clustering.js";
+import { articleCoverageEdge } from "./article-coverage-evidence.js";
+import type {
+  ArticleCoverageDecisionSignal,
+  ArticleCoverageEdge,
+} from "./article-coverage-evidence.js";
+
+export type {
+  ArticleCoverageDecisionSignal,
+  ArticleCoverageDecisionSignalKind,
+} from "./article-coverage-evidence.js";
 
 export interface HomeArticleGroup {
   id: string;
@@ -13,24 +31,7 @@ export interface HomeArticleGroup {
   articles: Article[];
   sourceLabels: string[];
   bundle?: ArticleCoverageBundle;
-}
-
-export type ArticleCoverageDecisionSignalKind =
-  | "persisted_bundle"
-  | "situation_id"
-  | "title_similarity"
-  | "near_duplicate"
-  | "generic_place_incident"
-  | "topical_thread"
-  | "cross_source_incident"
-  | "shared_place";
-
-export interface ArticleCoverageDecisionSignal {
-  kind: ArticleCoverageDecisionSignalKind;
-  articleIds: string[];
-  detail?: string;
-  overlap?: number;
-  score?: number;
+  acceptedEdges?: ArticleCoverageEdge[];
 }
 
 export type ArticleCoverageNearMissReason =
@@ -61,6 +62,7 @@ export interface ArticleCoverageAnalysis {
   articles: Article[];
   bundles: ArticleCoverageBundleDecision[];
   nearMisses: ArticleCoverageNearMiss[];
+  edges?: ArticleCoverageEdge[];
 }
 
 export interface CoverageBundleArticleSummary {
@@ -82,6 +84,24 @@ export interface CoverageBundleListItem extends ArticleCoverageBundleDecision {
   updatedAt: string;
   memberArticles: CoverageBundleArticleSummary[];
   nearMissArticles: CoverageBundleArticleSummary[];
+  generation?: CoverageGenerationSummary;
+  state: CoverageProjectionState;
+  edges: ArticleCoverageEdge[];
+  reviewCandidates: ArticleCoverageEdge[];
+  corrections: Array<{
+    id: string;
+    generationId?: string;
+    anchorArticleId: string;
+    rejectedArticleId: string;
+    status: "active" | "reverted";
+    applicability?: "active" | "history";
+    createdAt: string;
+    revertedAt?: string;
+  }>;
+  publicVerification?: Article["publicVerification"];
+  generationChanged?: boolean;
+  correctionTombstone?: boolean;
+  integrityErrors: string[];
 }
 
 export interface CoverageBundleSummary {
@@ -89,12 +109,84 @@ export interface CoverageBundleSummary {
   byKind: Record<ArticleCoverageBundleKind, number>;
   byConfidence: Record<ArticleCoverageBundleConfidence, number>;
   latestGeneratedAt?: string;
+  activeBundleCount: number;
+  byMatchTier: { strong: number; moderate: number };
+  reviewCandidateCount: number;
+  activeCorrectionCount: number;
+  integrityErrorCount: number;
+  matcherVersion: "v1" | "v2";
+  projectionState: CoverageProjectionState;
+  generation?: CoverageGenerationSummary;
 }
 
 export interface CoverageBundlePage {
   items: CoverageBundleListItem[];
   summary: CoverageBundleSummary;
+  selectedProjection?: CoverageProjectionState;
   nextCursor?: string;
+  historyNextCursor?: string;
+  selectedGenerationId?: string;
+  parity?: CoverageProjectionParity;
+  correctionsEnabled?: boolean;
+}
+
+type CoverageParityItem = {
+  id: string;
+  primaryArticleId: string;
+  memberArticleIds: string[];
+};
+
+export function coverageProjectionParity(
+  legacy: CoverageParityItem[],
+  normalized: CoverageParityItem[],
+): CoverageProjectionParity {
+  const canonical = (item: CoverageParityItem) =>
+    [...new Set(item.memberArticleIds)].sort().join("\0");
+  const groupByMembers = (items: CoverageParityItem[]) => {
+    const grouped = new Map<string, CoverageParityItem[]>();
+    for (const item of items) {
+      const key = canonical(item);
+      grouped.set(key, [...(grouped.get(key) ?? []), item]);
+    }
+    for (const values of grouped.values()) {
+      values.sort(
+        (left, right) =>
+          left.primaryArticleId.localeCompare(right.primaryArticleId) ||
+          left.id.localeCompare(right.id),
+      );
+    }
+    return grouped;
+  };
+  const legacyByMembers = groupByMembers(legacy);
+  const normalizedByMembers = groupByMembers(normalized);
+  const membershipKeys = new Set([...legacyByMembers.keys(), ...normalizedByMembers.keys()]);
+  const membershipMismatchCount = [...membershipKeys].reduce(
+    (count, key) =>
+      count +
+      Math.abs(
+        (legacyByMembers.get(key)?.length ?? 0) - (normalizedByMembers.get(key)?.length ?? 0),
+      ),
+    0,
+  );
+  const primaryMismatchCount = [...membershipKeys].reduce((count, key) => {
+    const legacyItems = legacyByMembers.get(key) ?? [];
+    const normalizedItems = normalizedByMembers.get(key) ?? [];
+    const pairedCount = Math.min(legacyItems.length, normalizedItems.length);
+    return (
+      count +
+      Array.from({ length: pairedCount }, (_, index) => index).filter(
+        (index) =>
+          legacyItems[index]?.primaryArticleId !== normalizedItems[index]?.primaryArticleId,
+      ).length
+    );
+  }, 0);
+  return {
+    legacyBundleCount: legacy.length,
+    normalizedBundleCount: normalized.length,
+    membershipMismatchCount,
+    primaryMismatchCount,
+    clean: membershipMismatchCount === 0 && primaryMismatchCount === 0,
+  };
 }
 
 const maxGroupAgeMs = 24 * 60 * 60 * 1000;
@@ -1213,6 +1305,203 @@ export function analyzeArticleCoverage(
     bundles,
     nearMisses,
   };
+}
+
+export interface AnalyzeArticleCoverageV2Options {
+  rejectedPairs?: CoverageRejectedPair[];
+}
+
+function v2GroupMatchConfidence(group: HomeArticleGroup): CoverageMatchConfidence {
+  const accepted = group.acceptedEdges ?? [];
+  const anchorId = group.primary.id;
+  const admissions = group.articles
+    .filter((article) => article.id !== anchorId)
+    .map((article) => {
+      const connecting = accepted
+        .filter((edge) => edge.articleIds.includes(article.id))
+        .sort((left, right) => right.score - left.score);
+      const anchorEdge = connecting.find((edge) => edge.articleIds.includes(anchorId));
+      return {
+        score: anchorEdge?.score ?? connecting[1]?.score ?? connecting[0]?.score ?? 0,
+        directStrong: anchorEdge?.tier === "strong",
+      };
+    });
+  const strong =
+    admissions.length === group.articles.length - 1 &&
+    admissions.every((admission) => admission.directStrong);
+  const minimum = Math.min(...admissions.map((admission) => admission.score));
+  const cohesionPenalty = strong ? 0 : 0.05;
+  return {
+    tier: strong ? "strong" : "moderate",
+    score: Math.max(0, Math.round((minimum - cohesionPenalty) * 1000) / 1000),
+    rationale: strong
+      ? "Alle støttesakene har et sterkt direkte treff med hovedsaken."
+      : "Støttesakene er tatt inn gjennom hovedsak eller flertallstreff.",
+  };
+}
+
+function coverageDecisionForV2Group(
+  group: HomeArticleGroup,
+  generatedAt: string,
+  allEdges: ArticleCoverageEdge[],
+): ArticleCoverageBundleDecision | undefined {
+  if (group.articles.length < 2) return undefined;
+  const memberIds = new Set(group.articles.map((article) => article.id));
+  const groupEdges = allEdges.filter((edge) => edge.articleIds.every((id) => memberIds.has(id)));
+  const accepted = groupEdges.filter(
+    (edge) => edge.tier !== "weak" && edge.conflicts.length === 0 && !edge.reviewable,
+  );
+  const matchConfidence = v2GroupMatchConfidence({
+    ...group,
+    acceptedEdges: accepted,
+  });
+  const kind = accepted.some((edge) => edge.kind === "incident")
+    ? "incident"
+    : accepted.some((edge) => edge.kind === "topic")
+      ? "topic"
+      : "update";
+  return {
+    id: group.id,
+    kind,
+    confidence: matchConfidence.tier === "strong" ? "high" : "medium",
+    reason:
+      kind === "incident"
+        ? "Samme hendelse"
+        : kind === "topic"
+          ? "Samme nyhetstema"
+          : "Samme publiserte sak",
+    generatedAt,
+    matcherVersion: "v2",
+    matchConfidence,
+    primaryArticleId: group.primary.id,
+    memberArticleIds: group.articles.map((article) => article.id),
+    sourceIds: [...new Set(group.articles.map((article) => article.source))],
+    sourceLabels: [...new Set(group.articles.map((article) => article.sourceLabel))],
+    signals: uniqueSignals(accepted.flatMap((edge) => edge.signals)),
+    nearMisses: groupEdges
+      .filter((edge) => edge.reviewable)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 20)
+      .map((edge) => ({
+        articleIds: edge.articleIds,
+        reason: edge.conflicts.some((conflict) => conflict.kind === "specific_place")
+          ? "conflicting_specific_places"
+          : "low_text_overlap",
+        score: edge.score,
+      })),
+  };
+}
+
+function coverageBundleMetadata(bundle: ArticleCoverageBundleDecision): ArticleCoverageBundle {
+  return {
+    id: bundle.id,
+    kind: bundle.kind,
+    confidence: bundle.confidence,
+    reason: bundle.reason,
+    generatedAt: bundle.generatedAt,
+    matcherVersion: "v2",
+    matchConfidence: bundle.matchConfidence,
+  };
+}
+
+export function analyzeArticleCoverageV2(
+  articles: Article[],
+  generatedAt = new Date().toISOString(),
+  options: AnalyzeArticleCoverageV2Options = {},
+): ArticleCoverageAnalysis {
+  const rejectedPairKeys = new Set(
+    (options.rejectedPairs ?? []).map(({ articleIds }) => [...articleIds].sort().join("\0")),
+  );
+  const evaluatedEdges = articles
+    .flatMap((left, index) =>
+      articles.slice(index + 1).flatMap((right) => articleCoverageEdge(left, right) ?? []),
+    )
+    .map((edge) =>
+      rejectedPairKeys.has([...edge.articleIds].sort().join("\0"))
+        ? {
+            ...edge,
+            reviewable: true,
+            correctionConflict: edge.tier === "strong" || edge.tier === "moderate",
+          }
+        : edge,
+    );
+  const acceptedEdges = evaluatedEdges.filter(
+    (edge) => edge.tier !== "weak" && edge.conflicts.length === 0 && !edge.reviewable,
+  );
+  const reviewCounts = new Map<string, number>();
+  const correctionConflicts = evaluatedEdges.filter((edge) => edge.correctionConflict);
+  const reviewableEdges = evaluatedEdges
+    .filter((edge) => edge.reviewable && !edge.correctionConflict)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")),
+    )
+    .filter((edge) => {
+      if (edge.articleIds.some((id) => (reviewCounts.get(id) ?? 0) >= 5)) return false;
+      for (const id of edge.articleIds) reviewCounts.set(id, (reviewCounts.get(id) ?? 0) + 1);
+      return true;
+    })
+    .slice(0, 500);
+  const edges = [...acceptedEdges, ...correctionConflicts, ...reviewableEdges].sort((left, right) =>
+    left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")),
+  );
+  const groups = clusterArticlesByCoverageEdges(articles, edges, {
+    rejectedPairs: options.rejectedPairs ?? [],
+  });
+  const bundles = groups.flatMap(
+    (group) => coverageDecisionForV2Group(group, generatedAt, edges) ?? [],
+  );
+  const bundleByArticleId = new Map(
+    bundles.flatMap((bundle) => bundle.memberArticleIds.map((id) => [id, bundle] as const)),
+  );
+  return {
+    articles: articles.map((article) => {
+      const bundle = bundleByArticleId.get(article.id);
+      return bundle ? { ...article, coverageBundle: coverageBundleMetadata(bundle) } : article;
+    }),
+    bundles,
+    nearMisses: [],
+    edges,
+  };
+}
+
+export function recomputeCoverageStories(
+  articles: Article[],
+  rejectedPairs: CoverageRejectedPair[],
+  generatedAt = new Date().toISOString(),
+): CityPulseStory[] {
+  const analysis = analyzeArticleCoverageV2(articles, generatedAt, { rejectedPairs });
+  const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
+  const groupedArticleIds = new Set(
+    analysis.bundles.flatMap(({ memberArticleIds }) => memberArticleIds),
+  );
+  const groupedStories = analysis.bundles.map((bundle) => {
+    const members = bundle.memberArticleIds
+      .map((id) => articlesById.get(id))
+      .filter((article): article is Article => Boolean(article));
+    const primary = articlesById.get(bundle.primaryArticleId) ?? members[0]!;
+    return cityPulseStoryFromGroup({
+      id: bundle.id,
+      primary,
+      articles: members,
+      sourceLabels: bundle.sourceLabels,
+      bundle,
+    });
+  });
+  const singletonStories = analysis.articles
+    .filter(({ id }) => !groupedArticleIds.has(id))
+    .map((article) =>
+      cityPulseStoryFromGroup({
+        id: article.id,
+        primary: article,
+        articles: [article],
+        sourceLabels: [article.sourceLabel],
+      }),
+    );
+  return [...groupedStories, ...singletonStories].sort(
+    (left, right) => right.latestAt.localeCompare(left.latestAt) || right.id.localeCompare(left.id),
+  );
 }
 
 export function annotateArticleCoverageBundles(

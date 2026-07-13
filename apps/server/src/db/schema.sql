@@ -28,6 +28,50 @@ CREATE INDEX IF NOT EXISTS articles_scope_published_idx
 CREATE INDEX IF NOT EXISTS articles_scope_category_published_idx
   ON articles (scope, category, published_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS coverage_bundle_generations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  matcher_version text NOT NULL CHECK (matcher_version IN ('v1', 'v2')),
+  mode text NOT NULL CHECK (mode IN ('active', 'shadow')),
+  status text NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+  started_at timestamptz NOT NULL,
+  completed_at timestamptz,
+  article_count integer NOT NULL CHECK (article_count >= 0),
+  bundle_count integer NOT NULL DEFAULT 0 CHECK (bundle_count >= 0),
+  edge_count integer NOT NULL DEFAULT 0 CHECK (edge_count >= 0),
+  correction_conflict_count integer NOT NULL DEFAULT 0 CHECK (correction_conflict_count >= 0),
+  correction_revision_snapshot bigint NOT NULL DEFAULT 0 CHECK (correction_revision_snapshot >= 0),
+  health_outcome text NOT NULL DEFAULT 'unchecked'
+    CHECK (health_outcome IN ('unchecked', 'healthy')),
+  is_current boolean NOT NULL DEFAULT false,
+  error_class text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (
+    (status = 'running' AND completed_at IS NULL)
+    OR (status <> 'running' AND completed_at IS NOT NULL)
+  )
+);
+ALTER TABLE coverage_bundle_generations
+  ADD COLUMN IF NOT EXISTS correction_revision_snapshot bigint NOT NULL DEFAULT 0
+  CHECK (correction_revision_snapshot >= 0);
+ALTER TABLE coverage_bundle_generations
+  ADD COLUMN IF NOT EXISTS health_outcome text NOT NULL DEFAULT 'unchecked'
+  CHECK (health_outcome IN ('unchecked', 'healthy'));
+CREATE INDEX IF NOT EXISTS coverage_bundle_generations_completed_idx
+  ON coverage_bundle_generations (completed_at DESC, id DESC)
+  WHERE status = 'completed';
+CREATE UNIQUE INDEX IF NOT EXISTS coverage_bundle_generations_one_current_idx
+  ON coverage_bundle_generations ((is_current))
+  WHERE is_current AND status = 'completed' AND mode = 'active';
+
+CREATE TABLE IF NOT EXISTS coverage_generation_articles (
+  generation_id uuid NOT NULL REFERENCES coverage_bundle_generations(id) ON DELETE CASCADE,
+  article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (generation_id, article_id)
+);
+CREATE INDEX IF NOT EXISTS coverage_generation_articles_article_idx
+  ON coverage_generation_articles (article_id, generation_id);
+
 CREATE TABLE IF NOT EXISTS coverage_bundles (
   id text PRIMARY KEY,
   kind text NOT NULL CHECK (kind IN ('incident', 'topic', 'update')),
@@ -55,6 +99,112 @@ CREATE INDEX IF NOT EXISTS coverage_bundles_kind_idx ON coverage_bundles (kind);
 CREATE INDEX IF NOT EXISTS coverage_bundles_confidence_idx ON coverage_bundles (confidence);
 CREATE INDEX IF NOT EXISTS coverage_bundles_member_article_ids_gin_idx
   ON coverage_bundles USING gin (member_article_ids);
+ALTER TABLE coverage_bundles
+  ADD COLUMN IF NOT EXISTS generation_id uuid REFERENCES coverage_bundle_generations(id) ON DELETE SET NULL;
+ALTER TABLE coverage_bundles
+  ADD COLUMN IF NOT EXISTS legacy_generation_id uuid REFERENCES coverage_bundle_generations(id) ON DELETE SET NULL;
+ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'legacy';
+ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS matcher_version text NOT NULL DEFAULT 'v1';
+ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS match_tier text;
+ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS match_score real;
+ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS match_rationale text;
+ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS first_seen_at timestamptz;
+ALTER TABLE coverage_bundles DROP CONSTRAINT IF EXISTS coverage_bundles_state_check;
+ALTER TABLE coverage_bundles ADD CONSTRAINT coverage_bundles_state_check
+  CHECK (state IN ('legacy', 'active', 'shadow', 'superseded'));
+ALTER TABLE coverage_bundles DROP CONSTRAINT IF EXISTS coverage_bundles_matcher_version_check;
+ALTER TABLE coverage_bundles ADD CONSTRAINT coverage_bundles_matcher_version_check
+  CHECK (matcher_version IN ('v1', 'v2'));
+ALTER TABLE coverage_bundles DROP CONSTRAINT IF EXISTS coverage_bundles_match_tier_check;
+ALTER TABLE coverage_bundles ADD CONSTRAINT coverage_bundles_match_tier_check
+  CHECK (match_tier IS NULL OR match_tier IN ('strong', 'moderate'));
+ALTER TABLE coverage_bundles DROP CONSTRAINT IF EXISTS coverage_bundles_match_score_check;
+ALTER TABLE coverage_bundles ADD CONSTRAINT coverage_bundles_match_score_check
+  CHECK (match_score IS NULL OR (match_score >= 0 AND match_score <= 1));
+CREATE INDEX IF NOT EXISTS coverage_bundles_state_generation_idx
+  ON coverage_bundles (state, generation_id, last_seen_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS coverage_bundles_legacy_generation_idx
+  ON coverage_bundles (legacy_generation_id, id)
+  WHERE legacy_generation_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS coverage_bundle_versions (
+  generation_id uuid NOT NULL REFERENCES coverage_bundle_generations(id) ON DELETE CASCADE,
+  bundle_id text NOT NULL REFERENCES coverage_bundles(id) ON DELETE CASCADE,
+  kind text NOT NULL CHECK (kind IN ('incident', 'topic', 'update')),
+  confidence text NOT NULL CHECK (confidence IN ('high', 'medium')),
+  reason text NOT NULL,
+  primary_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  match_tier text NOT NULL CHECK (match_tier IN ('strong', 'moderate')),
+  match_score real NOT NULL CHECK (match_score >= 0 AND match_score <= 1),
+  match_rationale text NOT NULL,
+  generated_at timestamptz NOT NULL,
+  last_seen_at timestamptz NOT NULL,
+  source_ids text[] NOT NULL,
+  source_labels text[] NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (generation_id, bundle_id)
+);
+ALTER TABLE coverage_bundle_versions ADD COLUMN IF NOT EXISTS confidence text;
+UPDATE coverage_bundle_versions cbv
+SET confidence = cb.confidence
+FROM coverage_bundles cb
+WHERE cb.id = cbv.bundle_id AND cbv.confidence IS NULL;
+ALTER TABLE coverage_bundle_versions ALTER COLUMN confidence SET NOT NULL;
+ALTER TABLE coverage_bundle_versions DROP CONSTRAINT IF EXISTS coverage_bundle_versions_confidence_check;
+ALTER TABLE coverage_bundle_versions ADD CONSTRAINT coverage_bundle_versions_confidence_check
+  CHECK (confidence IN ('high', 'medium'));
+CREATE INDEX IF NOT EXISTS coverage_bundle_versions_last_seen_idx
+  ON coverage_bundle_versions (generation_id, last_seen_at DESC, bundle_id DESC);
+
+CREATE TABLE IF NOT EXISTS coverage_bundle_members (
+  generation_id uuid NOT NULL,
+  bundle_id text NOT NULL,
+  article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  role text NOT NULL CHECK (role IN ('primary', 'supporting')),
+  admitted_by_article_ids text[] NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (generation_id, bundle_id, article_id),
+  FOREIGN KEY (generation_id, bundle_id)
+    REFERENCES coverage_bundle_versions(generation_id, bundle_id) ON DELETE CASCADE,
+  CHECK (
+    array_length(admitted_by_article_ids, 1) IS NULL
+    OR array_length(admitted_by_article_ids, 1) <= 2
+  )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS coverage_bundle_members_one_primary_idx
+  ON coverage_bundle_members (generation_id, bundle_id)
+  WHERE role = 'primary';
+CREATE INDEX IF NOT EXISTS coverage_bundle_members_article_idx
+  ON coverage_bundle_members (article_id, generation_id);
+
+CREATE TABLE IF NOT EXISTS coverage_bundle_edges (
+  generation_id uuid NOT NULL REFERENCES coverage_bundle_generations(id) ON DELETE CASCADE,
+  bundle_id text,
+  left_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  right_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  tier text NOT NULL CHECK (tier IN ('strong', 'moderate', 'weak')),
+  score real NOT NULL CHECK (score >= 0 AND score <= 1),
+  kind text NOT NULL CHECK (kind IN ('incident', 'topic', 'update')),
+  status text NOT NULL CHECK (status IN ('accepted', 'reviewable')),
+  signals jsonb NOT NULL DEFAULT '[]'::jsonb,
+  conflicts jsonb NOT NULL DEFAULT '[]'::jsonb,
+  evidence_fingerprint text NOT NULL,
+  correction_conflict boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (generation_id, left_article_id, right_article_id),
+  FOREIGN KEY (generation_id, bundle_id)
+    REFERENCES coverage_bundle_versions(generation_id, bundle_id) ON DELETE CASCADE,
+  CHECK (left_article_id < right_article_id),
+  CHECK (jsonb_typeof(signals) = 'array'),
+  CHECK (jsonb_typeof(conflicts) = 'array')
+);
+CREATE INDEX IF NOT EXISTS coverage_bundle_edges_bundle_idx
+  ON coverage_bundle_edges (generation_id, bundle_id, tier, score DESC);
+CREATE INDEX IF NOT EXISTS coverage_bundle_edges_review_idx
+  ON coverage_bundle_edges (generation_id, correction_conflict, tier, score DESC)
+  WHERE status = 'reviewable';
+ALTER TABLE coverage_bundle_edges
+  ADD COLUMN IF NOT EXISTS positive_incident_evidence text[] NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS situations (
   id text PRIMARY KEY,
@@ -1242,6 +1392,49 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_email_normalized_unique
 CREATE INDEX IF NOT EXISTS users_role_status_idx
   ON users (role, status);
 
+CREATE TABLE IF NOT EXISTS coverage_bundle_corrections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  generation_id uuid NOT NULL REFERENCES coverage_bundle_generations(id) ON DELETE RESTRICT,
+  original_bundle_id text NOT NULL,
+  anchor_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  rejected_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  matcher_version text NOT NULL CHECK (matcher_version IN ('v1', 'v2')),
+  evidence_fingerprint text NOT NULL,
+  reason text CHECK (reason IS NULL OR char_length(reason) <= 500),
+  status text NOT NULL CHECK (status IN ('active', 'reverted')),
+  created_by text NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  reverted_at timestamptz,
+  reverted_by text REFERENCES users(id) ON DELETE RESTRICT,
+  CHECK (anchor_article_id <> rejected_article_id),
+  CHECK (
+    (status = 'active' AND reverted_at IS NULL AND reverted_by IS NULL)
+    OR (status = 'reverted' AND reverted_at IS NOT NULL AND reverted_by IS NOT NULL)
+  )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS coverage_bundle_corrections_active_pair_idx
+  ON coverage_bundle_corrections (
+    LEAST(anchor_article_id, rejected_article_id),
+    GREATEST(anchor_article_id, rejected_article_id)
+  )
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS coverage_bundle_corrections_original_bundle_idx
+  ON coverage_bundle_corrections (original_bundle_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS coverage_bundle_corrections_generation_idx
+  ON coverage_bundle_corrections (generation_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS coverage_projection_revisions (
+  projection text PRIMARY KEY CHECK (projection = 'active'),
+  revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  legacy_revision bigint NOT NULL DEFAULT 0 CHECK (legacy_revision >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE coverage_projection_revisions
+  ADD COLUMN IF NOT EXISTS legacy_revision bigint NOT NULL DEFAULT 0 CHECK (legacy_revision >= 0);
+INSERT INTO coverage_projection_revisions (projection, revision)
+VALUES ('active', 0)
+ON CONFLICT (projection) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS user_identities (
   id text PRIMARY KEY,
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1364,3 +1557,7 @@ INSERT INTO schema_migrations (version) VALUES ('012_restricted_beta_auth') ON C
 INSERT INTO schema_migrations (version) VALUES ('013_morning_briefs') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('014_web_push_notifications') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('015_home_feed_read_indexes') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('016_coverage_bundle_lifecycle') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('017_coverage_legacy_snapshot') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('018_coverage_effective_projection') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('019_coverage_projection_integrity') ON CONFLICT DO NOTHING;

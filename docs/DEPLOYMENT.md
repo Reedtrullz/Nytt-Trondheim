@@ -304,7 +304,7 @@ Expected results:
 
 ## Coverage Bundle Production Verification
 
-Coverage bundles are derived article-analysis rows for the owner-only Command Center surface. After a CI-verified SHA deploys and the worker has completed at least one cycle, verify live health, authentication behavior, persisted decisions and the browser surface:
+Coverage bundles are derived article-analysis rows for the owner-only Command Center surface. The lifecycle migration is expand-only and CI applies it twice before Docker builds. During the shadow phase, v1 remains public while successful v2 candidates are stored as completed shadow generations; `COVERAGE_CORRECTIONS_ENABLED` stays `false`. After a CI-verified SHA deploys and the worker has completed at least one cycle, verify live health, authentication behavior, persisted decisions and the browser surface:
 
 ```bash
 HEAD_SHA=$(git rev-parse HEAD)
@@ -327,6 +327,38 @@ SELECT id, kind, confidence, reason, array_length(member_article_ids, 1) AS memb
 FROM coverage_bundles
 ORDER BY last_seen_at DESC
 LIMIT 10;
+SELECT id, matcher_version, mode, status, is_current, article_count, bundle_count,
+       edge_count, correction_conflict_count, completed_at, error_class
+FROM coverage_bundle_generations
+ORDER BY created_at DESC
+LIMIT 10;
+WITH latest_shadow AS (
+  SELECT id
+  FROM coverage_bundle_generations
+  WHERE matcher_version='v2' AND mode='shadow' AND status='completed'
+  ORDER BY completed_at DESC, id DESC
+  LIMIT 1
+)
+SELECT
+  (SELECT count(*) FROM coverage_generation_articles cga JOIN latest_shadow g ON g.id=cga.generation_id) AS articles,
+  (SELECT count(*) FROM coverage_bundle_versions cbv JOIN latest_shadow g ON g.id=cbv.generation_id) AS bundles,
+  (SELECT count(*) FROM coverage_bundle_members cbm JOIN latest_shadow g ON g.id=cbm.generation_id) AS members,
+  (SELECT count(*) FROM coverage_bundle_edges cbe JOIN latest_shadow g ON g.id=cbe.generation_id) AS edges;
+SELECT count(*) AS dangling_members
+FROM coverage_bundle_members cbm
+LEFT JOIN articles a ON a.id=cbm.article_id
+WHERE a.id IS NULL;
+SELECT count(*) AS invalid_primary_groups
+FROM (
+  SELECT cbv.generation_id, cbv.bundle_id
+  FROM coverage_bundle_versions cbv
+  LEFT JOIN coverage_bundle_members cbm
+    ON cbm.generation_id=cbv.generation_id
+   AND cbm.bundle_id=cbv.bundle_id
+   AND cbm.role='primary'
+  GROUP BY cbv.generation_id, cbv.bundle_id
+  HAVING count(cbm.article_id) <> 1
+) invalid;
 SELECT count(*) AS accidental_coverage_source_items
 FROM source_items
 WHERE provider='coverage_bundles'
@@ -340,8 +372,91 @@ Expected results:
 - `/health` returns `200` with Postgres-backed `status: ok`.
 - Anonymous `/api/bootstrap` returns `401`; the coverage endpoint is under the same authenticated `/api` boundary.
 - `recent_coverage_bundles` may be zero immediately after deploy if the worker has not yet ingested matching stories, but the query must succeed and `/command/dekning` must show either live rows or an honest empty state.
+- The latest v2 shadow generation must be `completed`; a failed generation must not replace the last successful projection. `dangling_members` and `invalid_primary_groups` must both be zero.
+- In an authenticated owner session, request `/api/operations/coverage-bundles?projection=shadow&limit=30` and require `parity.clean=true`, `summary.integrityErrorCount=0`, and a generation ID matching the latest completed shadow SQL row. Review candidate and correction counts are diagnostics, not promotion approval.
 - `accidental_coverage_source_items` must be zero. Coverage grouping explains feed bundling; it is not upstream provenance.
 - In an authenticated browser session, verify `/`, `/command`, and `/command/dekning`. The home feed should still show existing bundle labels, `/command` should link to `Dekningsgrupper`, and `/command/dekning` should show bundle rows with member stories, signals, near misses and timestamps, or the empty state.
+
+### Coverage matcher v2 lifecycle shadow phase
+
+`npm run check:coverage-matcher` is a mandatory deterministic quality gate. Passing it does not promote v2. Promotion is an explicit three-stage operator procedure:
+
+1. **Shadow:** deploy with `COVERAGE_PROJECTION_MODE=legacy`, `COVERAGE_CORRECTIONS_ENABLED=false`, `COVERAGE_MATCHER_VERSION=v2`, and `COVERAGE_GENERATION_MODE=shadow`. The server continues to publish the v1 legacy projection. Each worker cycle acquires advisory lock `(20260713, 7)` and commits the full v1 legacy bundle content, its exact v2 pairing marker, and the uncorrected normalized v2 base together. Correction conflicts and the observed correction revision are persisted as diagnostics only. If any normalized write fails, the v1 content and prior marker roll back as well; promotion cannot acquire the same lock and inspect a half-written cycle.
+2. **Review:** observe seven completed v2 shadow generations within 24 hours. Require clean base parity, zero integrity errors, a passing exact-SHA CI run (including `npm run check:coverage-matcher`), and review every changed bundle. Base parity compares only v1 rows whose `legacy_generation_id` identifies the exact v2 generation produced from the same worker-cycle snapshot; retained historical v1 rows are excluded. Active correction membership is intentionally excluded from base-parity comparison and is validated separately. Record only the UUID of the latest completed owner-reviewed shadow generation in the non-secret production environment variable `COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID`; do not store review notes there.
+3. **Promote:** set `COVERAGE_PROJECTION_MODE=normalized-active`, `COVERAGE_CORRECTIONS_ENABLED=true`, `COVERAGE_MATCHER_VERSION=v2`, and `COVERAGE_GENERATION_MODE=active`. Worker persistence and promotion serialize on the documented PostgreSQL transaction advisory-lock key `(20260713, 7)`. Ansible treats only a current active v2 generation with persisted `health_outcome='healthy'` as already promoted; an active row created before the health column remains `unchecked` after migration and cannot bypass review. In that upgrade case the deploy must promote the exact latest reviewed healthy shadow UUID or stop before changing target flags, leaving the legacy runtime available. Ansible executes the repository-owned `scripts/promote-coverage-generation.sql`; under the lock, that one transaction rechecks the latest reviewed UUID, seven persisted `health_outcome='healthy'` results, paired parity and integrity. The guarded generation update must affect exactly one row, supersede every other active v2 stable row, activate exactly the candidate `bundle_count`, and prove no foreign active v2 row remains before the previous current marker is cleared. Any mismatch rolls the whole transaction back and preserves the old current generation. Only then does the playbook start a normalized-active canary. Ordinary legacy deploys and later deploys with an already-current healthy active v2 generation do not require a new reviewed UUID.
+
+The normalized-active `/health/ready` gate returns `503` when a persisted-healthy current active v2 generation is absent, paired base parity is dirty, exact active stable-row generation/count/primary/membership integrity is dirty, or the bounded projection query fails. Public normalized feed reads apply the same shared health SQL and fail closed atomically to legacy. Effective feed/audit membership is cached only under `(current generation ID, correction revision, legacy revision)` inside a repeatable-read transaction with a final key recheck; concurrent cold requests coalesce to one materialization. A shared 1.5-second deadline covers both PostgreSQL pool checkout and transaction queries. Active worker writes reject snapshots below `COVERAGE_ACTIVE_MIN_ARTICLES` or `COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO`; `COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE=true` is an explicit emergency override that must be recorded in operator evidence. Active and shadow reads require the stable row to belong to the exact selected generation, while superseded audit reads use immutable generation-version tables with `generationId` or `historyCursor`. `/health/live` remains process-only. Deterministic E2E coverage fixtures are development-only and production configuration rejects them.
+
+After promotion, use an authenticated owner session at desktop width and 390 px to verify `/`, `/?scope=trondelag`, and `/command/dekning`; perform one exact-pair split and undo, then confirm feed/audit generation IDs and member sets still agree. Retain legacy reads and writes for one full release. Do not claim promotion from CI, SQL, or browser evidence alone: record exact PR-head and main CI run IDs, deployed Git SHA and image digest, the seven generation IDs, owner-reviewed UUID, canary/worker evidence, authenticated browser evidence, and the rollback readback before calling the rollout complete.
+
+Use these readbacks before promotion and after every active or rollback deploy:
+
+```sql
+SELECT id, matcher_version, mode, status, is_current, started_at, completed_at,
+       article_count, bundle_count, edge_count, correction_conflict_count
+FROM coverage_bundle_generations
+ORDER BY completed_at DESC NULLS LAST, id DESC
+LIMIT 7;
+
+WITH current_generation AS (
+  SELECT id
+  FROM coverage_bundle_generations
+  WHERE matcher_version='v2' AND mode='active' AND status='completed' AND is_current
+)
+SELECT
+  (SELECT id FROM current_generation) AS current_generation_id,
+  (SELECT count(*) FROM coverage_bundle_versions cbv JOIN current_generation g ON g.id=cbv.generation_id) AS active_bundles,
+  (SELECT count(*) FROM coverage_bundle_members cbm JOIN current_generation g ON g.id=cbm.generation_id) AS active_members,
+  (SELECT count(*) FROM coverage_bundle_edges cbe JOIN current_generation g ON g.id=cbe.generation_id WHERE cbe.correction_conflict) AS correction_conflicts,
+  (SELECT count(*) FROM coverage_bundle_members cbm JOIN current_generation g ON g.id=cbm.generation_id LEFT JOIN articles a ON a.id=cbm.article_id WHERE a.id IS NULL) AS dangling_members,
+  (SELECT count(*) FROM (
+     SELECT cbv.bundle_id
+     FROM coverage_bundle_versions cbv
+     JOIN current_generation g ON g.id=cbv.generation_id
+     LEFT JOIN coverage_bundle_members cbm
+       ON cbm.generation_id=cbv.generation_id
+      AND cbm.bundle_id=cbv.bundle_id AND cbm.role='primary'
+     GROUP BY cbv.bundle_id
+     HAVING count(cbm.article_id) <> 1
+   ) invalid) AS invalid_primary_groups;
+
+WITH current_generation AS (
+  SELECT id FROM coverage_bundle_generations
+  WHERE matcher_version='v2' AND mode='active' AND status='completed' AND is_current
+), legacy AS (
+  SELECT ARRAY(SELECT DISTINCT unnest(cb.member_article_ids) ORDER BY 1) AS members,
+         cb.primary_article_id
+  FROM coverage_bundles cb
+  JOIN current_generation g ON cb.legacy_generation_id=g.id
+  WHERE cb.state='legacy' AND cb.matcher_version='v1'
+), normalized AS (
+  SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) AS members,
+         cbv.primary_article_id
+  FROM coverage_bundle_versions cbv
+  JOIN current_generation g ON g.id=cbv.generation_id
+  JOIN coverage_bundle_members cbm
+    ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+  GROUP BY cbv.bundle_id, cbv.primary_article_id
+), mismatches AS (
+  (SELECT * FROM legacy EXCEPT ALL SELECT * FROM normalized)
+  UNION ALL
+  (SELECT * FROM normalized EXCEPT ALL SELECT * FROM legacy)
+)
+SELECT count(*) AS base_parity_mismatches FROM mismatches;
+```
+
+`base_parity_mismatches`, `dangling_members`, stable-row count/association/membership checks, and invalid-primary/integrity checks must be zero. A legacy row with another or null `legacy_generation_id` is historical/unpaired and is deliberately absent from this comparison. `correction_conflicts` is a separate review diagnostic and does not mean that an intentional active split made base parity dirty. Failed candidate transactions preserve both the previous paired legacy snapshot and normalized projection. CI applies the schema twice, executes older-review/zero-row/historical-drop/paired-mismatch/stable-count controls, then executes the same production promotion SQL Ansible uses. Its actual `WorkerRepository`/`PgStore` lifecycle proves rollback of paired legacy mutation, advisory-lock exclusion, stable-row readiness, split/effective feed/effective audit/undo, and legacy readability against PostgreSQL. Superseded completed generations older than 30 days are pruned after successful generation writes; current active/shadow generations, correction rows, and generations referenced by corrections are preserved.
+
+To disable the shadow lane without deleting review history, first return runtime flags to the legacy/disabled settings, then run:
+
+```sql
+UPDATE coverage_bundles SET state='superseded' WHERE state='shadow';
+UPDATE coverage_bundle_generations
+SET status='failed', completed_at=COALESCE(completed_at, now()), error_class='manual_shadow_disable'
+WHERE mode='shadow' AND status='running';
+```
+
+For a normalized-active rollback, change flags only: set `COVERAGE_PROJECTION_MODE=legacy`, `COVERAGE_CORRECTIONS_ENABLED=false`, and `COVERAGE_GENERATION_MODE=shadow`, then restart API and worker and require `/health/ready` to report `coverageProjectionMode=legacy`. Do not delete or rewrite generation or correction rows. Completed and promoted rows remain available for diagnosis, and active exact-pair corrections continue to constrain later v2 analyses unless explicitly undone by the owner.
 
 ## Rollback
 

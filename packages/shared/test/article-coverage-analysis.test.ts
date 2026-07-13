@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { analyzeArticleCoverage, buildCityPulseStories, type Article } from "../src/index.js";
+import {
+  analyzeArticleCoverage,
+  analyzeArticleCoverageV2,
+  buildCityPulseStories,
+  type Article,
+} from "../src/index.js";
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -19,6 +24,35 @@ function article(overrides: Partial<Article> = {}): Article {
 }
 
 describe("article coverage analysis", () => {
+  it("keeps multi-source moderate groups distinct from strong match confidence", () => {
+    const analysis = analyzeArticleCoverageV2([
+      article({
+        id: "left",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        url: "https://example.test/nrk-construction-fire",
+        places: ["Nærøysund"],
+        title: "Brann i anleggsbrakke",
+        excerpt: "Byggeplass i Nærøysund",
+      }),
+      article({
+        id: "right",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        url: "https://example.test/adressa-construction-fire",
+        places: ["Nærøysund"],
+        title: "Brakkebrann på byggeplass",
+        excerpt: "Nødetatene rykket ut",
+      }),
+    ]);
+    expect(analysis.bundles[0]?.matchConfidence).toMatchObject({ tier: "moderate" });
+    expect(analysis.bundles[0]?.confidence).toBe("medium");
+    expect(analysis.bundles[0]?.matchConfidence?.score).toBeCloseTo(
+      (analysis.edges?.[0]?.score ?? 0) - 0.05,
+      3,
+    );
+  });
+
   it("builds first-class City Pulse stories from grouped article coverage", () => {
     const bundle = {
       id: "coverage:incident:saupstad",

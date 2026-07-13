@@ -22,8 +22,15 @@ import {
   buildWorkerNotificationTriggerPage,
   buildWorkerSpatialNotificationItems,
   collectorRunFromMetric,
+  coverageActiveVolumeGuard,
+  coverageGenerationMetrics,
+  coverageGenerationMode,
+  coverageMatcherVersion,
+  coverageShadowMetrics,
   normalizeDatexSituationEndpoint,
   prepareArticleCoverageAnalysis,
+  prepareArticleCoverageAnalyses,
+  persistPreparedCoverage,
   runWithConcurrency,
   sourceHealthFromDeepSeekAnalysis,
   sourceHealthFromPushDelivery,
@@ -145,6 +152,243 @@ function okXmlResponse(xml: string): Response {
 }
 
 describe("worker lifecycle helpers", () => {
+  it("defaults coverage generations to shadow mode", () => {
+    expect(coverageGenerationMode({})).toBe("shadow");
+  });
+
+  it("rejects unsupported coverage generation modes", () => {
+    expect(() => coverageGenerationMode({ COVERAGE_GENERATION_MODE: "preview" })).toThrow(
+      "COVERAGE_GENERATION_MODE must be shadow or active",
+    );
+  });
+
+  it("requires matcher v2 for active coverage generations", () => {
+    expect(() =>
+      coverageGenerationMode({
+        COVERAGE_GENERATION_MODE: "active",
+        COVERAGE_MATCHER_VERSION: "v1",
+      }),
+    ).toThrow("active coverage generations require COVERAGE_MATCHER_VERSION=v2");
+    expect(
+      coverageGenerationMode({
+        COVERAGE_GENERATION_MODE: "active",
+        COVERAGE_MATCHER_VERSION: "v2",
+      }),
+    ).toBe("active");
+  });
+
+  it("rejects unsupported coverage matcher versions", () => {
+    expect(coverageMatcherVersion(undefined)).toBe("v1");
+    expect(coverageMatcherVersion("v2")).toBe("v2");
+    expect(() => coverageMatcherVersion("v3")).toThrow("Ugyldig COVERAGE_MATCHER_VERSION");
+  });
+
+  it("parses bounded active coverage volume guard settings", () => {
+    expect(coverageActiveVolumeGuard({})).toEqual({
+      minimumArticleCount: 20,
+      minimumPreviousRatio: 0.5,
+      allowUnsafeOverride: false,
+    });
+    expect(
+      coverageActiveVolumeGuard({
+        COVERAGE_ACTIVE_MIN_ARTICLES: "12",
+        COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO: "0.75",
+        COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE: "true",
+      }),
+    ).toEqual({
+      minimumArticleCount: 12,
+      minimumPreviousRatio: 0.75,
+      allowUnsafeOverride: true,
+    });
+    expect(() => coverageActiveVolumeGuard({ COVERAGE_ACTIVE_MIN_ARTICLES: "0" })).toThrow(
+      "COVERAGE_ACTIVE_MIN_ARTICLES",
+    );
+    expect(() => coverageActiveVolumeGuard({ COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO: "1.1" })).toThrow(
+      "COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO",
+    );
+  });
+
+  it("hands paired v1 decisions to the locked v2 persistence transaction", async () => {
+    const articles = [
+      newsArticle({
+        id: "coverage-a",
+        title: "Brann i anleggsbrakke",
+        excerpt: "Byggeplass i Nærøysund",
+        places: ["Nærøysund"],
+        url: "https://example.test/coverage-a",
+      }),
+      newsArticle({
+        id: "coverage-b",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Brakkebrann på byggeplass",
+        excerpt: "Nødetatene rykket ut",
+        places: ["Nærøysund"],
+        url: "https://example.test/coverage-b",
+      }),
+    ];
+    const analyses = await prepareArticleCoverageAnalyses(
+      articles,
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v2",
+    );
+    expect(analyses.active.matcherVersion).toBe("v1");
+    expect(analyses.shadow?.matcherVersion).toBe("v2");
+    expect(analyses.shadow).toBeDefined();
+    const shadow = analyses.shadow!;
+    expect(analyses.active.analysis.bundles).not.toBe(shadow.analysis.bundles);
+    const equivalentMemberships = {
+      active: analyses.active,
+      shadow: {
+        matcherVersion: "v2" as const,
+        analysis: {
+          ...analyses.active.analysis,
+          bundles: analyses.active.analysis.bundles.map((bundle) => ({
+            ...bundle,
+            id: `coverage:v2:${bundle.id}`,
+          })),
+        },
+      },
+    };
+    expect(coverageShadowMetrics(equivalentMemberships)?.changedMembershipCount).toBe(0);
+
+    const repository = {
+      upsertArticles: vi.fn(async () => undefined),
+      upsertCoverageBundles: vi.fn(async () => undefined),
+      persistCoverageGeneration: vi.fn(async () => "generation-v2"),
+    };
+    await expect(
+      persistPreparedCoverage(
+        repository,
+        analyses,
+        "2026-07-12T21:00:00.000Z",
+        "2026-07-12T20:59:59.000Z",
+      ),
+    ).resolves.toBe("generation-v2");
+    expect(repository.upsertArticles).toHaveBeenCalledWith(analyses.active.analysis.articles);
+    expect(repository.upsertCoverageBundles).not.toHaveBeenCalled();
+    expect(repository.persistCoverageGeneration).toHaveBeenCalledWith({
+      matcherVersion: "v2",
+      mode: "shadow",
+      startedAt: "2026-07-12T20:59:59.000Z",
+      completedAt: "2026-07-12T21:00:00.000Z",
+      analysis: shadow.analysis,
+      legacyBundles: analyses.active.analysis.bundles,
+      correctionRevisionSnapshot: 0,
+      correctionConflictCount: 0,
+    });
+  });
+
+  it("preserves the direct legacy persistence path when no v2 analysis exists", async () => {
+    const analyses = await prepareArticleCoverageAnalyses(
+      [newsArticle({ id: "legacy-only" })],
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v1",
+    );
+    const repository = {
+      upsertArticles: vi.fn(async () => undefined),
+      upsertCoverageBundles: vi.fn(async () => undefined),
+      persistCoverageGeneration: vi.fn(async () => "unexpected-v2"),
+    };
+
+    await expect(
+      persistPreparedCoverage(repository, analyses, "2026-07-12T21:00:00.000Z"),
+    ).resolves.toBeUndefined();
+
+    expect(repository.upsertCoverageBundles).toHaveBeenCalledWith(
+      analyses.active.analysis.bundles,
+      "2026-07-12T21:00:00.000Z",
+    );
+    expect(repository.persistCoverageGeneration).not.toHaveBeenCalled();
+  });
+
+  it("keeps the persisted v2 base uncorrected and computes correction diagnostics separately", async () => {
+    const articles = [
+      newsArticle({ id: "corrected-a", situationId: "same-synthetic-case" }),
+      newsArticle({
+        id: "corrected-b",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        situationId: "same-synthetic-case",
+      }),
+    ];
+    const analyses = await prepareArticleCoverageAnalyses(
+      articles,
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v2",
+      {
+        revision: 7,
+        pairs: [{ articleIds: ["corrected-a", "corrected-b"], correctionId: "correction-1" }],
+      },
+    );
+
+    expect(
+      analyses.shadow?.analysis.bundles.some(
+        ({ memberArticleIds }) =>
+          memberArticleIds.includes("corrected-a") && memberArticleIds.includes("corrected-b"),
+      ),
+    ).toBe(true);
+    expect(analyses.shadow?.analysis.edges?.[0]).toMatchObject({
+      reviewable: false,
+      correctionConflict: false,
+    });
+    expect(analyses.shadow?.correctionDiagnostics).toMatchObject({
+      revision: 7,
+      conflictCount: 1,
+    });
+    expect(analyses.shadow?.correctionDiagnostics.edges[0]).toMatchObject({
+      reviewable: true,
+      correctionConflict: true,
+    });
+  });
+
+  it("emits bounded numeric metrics for a persisted v2 generation", async () => {
+    const articles = [
+      newsArticle({ id: "coverage-a", places: ["Nærøysund"] }),
+      newsArticle({
+        id: "coverage-b",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        places: ["Nærøysund"],
+      }),
+    ];
+    const analyses = await prepareArticleCoverageAnalyses(
+      articles,
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v2",
+    );
+    const metrics = coverageGenerationMetrics({
+      generationId: "generation-v2",
+      analysis: analyses.shadow!.analysis,
+      startedAt: "2026-07-12T20:59:59.750Z",
+      completedAt: "2026-07-12T21:00:00.000Z",
+    });
+
+    expect(metrics).toEqual({
+      matcherVersion: "v2",
+      generationId: "generation-v2",
+      mode: "shadow",
+      analysisDurationMs: 250,
+      articleCount: 2,
+      bundleCountByTier: {
+        strong: 1,
+        moderate: 0,
+      },
+      edgeCountByTier: {
+        strong: 1,
+        moderate: 0,
+        weak: 0,
+      },
+      reviewCandidateCount: 0,
+      correctionConflictCount: 0,
+    });
+    expect(JSON.stringify(metrics)).not.toMatch(/title|excerpt|url|articleIds/);
+  });
+
   it("bounds concurrent persistence work without dropping queued items", async () => {
     let active = 0;
     let peak = 0;

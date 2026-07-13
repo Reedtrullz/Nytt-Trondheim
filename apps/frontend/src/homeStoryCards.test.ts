@@ -1,7 +1,8 @@
-import type { Article, CityPulseStory } from "@nytt/shared";
+import type { Article, ArticleCoverageEdge, CityPulseStory } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
 import { groupHomeArticles } from "./homeArticleGroups.js";
 import {
+  coverageMatchExplanation,
   homeArticleGroupForStory,
   homeStoryCardForGroup,
   homeStoryCardForStory,
@@ -26,7 +27,91 @@ function article(overrides: Partial<Article> = {}): Article {
   };
 }
 
+function directStrongIncidentEdge(left: string, right: string): ArticleCoverageEdge {
+  return {
+    articleIds: [left, right].sort() as [string, string],
+    tier: "strong",
+    score: 0.95,
+    kind: "incident",
+    positiveIncidentEvidence: [],
+    signals: [],
+    conflicts: [],
+    evidenceFingerprint: `v2:${left}:${right}`,
+    reviewable: false,
+    correctionConflict: false,
+  };
+}
+
 describe("home story cards", () => {
+  it("keeps article count, unique source count, and match rationale distinct", () => {
+    const coverageBundle = {
+      id: "coverage:v2:counted-group",
+      kind: "incident",
+      confidence: "medium",
+      reason: "Samme hendelse",
+      generatedAt: "2026-07-12T21:00:00.000Z",
+      matcherVersion: "v2",
+      matchConfidence: {
+        tier: "moderate",
+        score: 0.76,
+        rationale: "Felles sted og hendelsestype",
+      },
+    } as const;
+    const group = groupHomeArticles([
+      article({ id: "nrk-a", coverageBundle }),
+      article({ id: "nrk-b", url: "https://example.test/nrk-b", coverageBundle }),
+      article({
+        id: "adressa-a",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        url: "https://example.test/adressa-a",
+        coverageBundle,
+      }),
+    ])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.articleCount).toBe(3);
+    expect(card.sourceCount).toBe(2);
+    expect(card.matchRationale).toBe("Felles sted og hendelsestype");
+    expect(coverageMatchExplanation(card)).toBe("Felles sted og hendelsestype");
+  });
+
+  it("keeps moderate match confidence separate from newsroom source trust", () => {
+    const coverageBundle = {
+      id: "coverage:v2:construction-fire",
+      kind: "incident",
+      confidence: "medium",
+      reason: "Samme hendelse",
+      generatedAt: "2026-07-12T21:00:00.000Z",
+      matcherVersion: "v2",
+      matchConfidence: {
+        tier: "moderate",
+        score: 0.72,
+        rationale: "Støttesaken er tatt inn gjennom hovedsak eller flertallstreff.",
+      },
+    } as const;
+    const group = groupHomeArticles([
+      article({
+        id: "nrk-fire",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        coverageBundle,
+      }),
+      article({
+        id: "adressa-fire",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        url: "https://example.test/adressa-fire",
+        coverageBundle,
+      }),
+    ])[0]!;
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.matchConfidence).toMatchObject({ tier: "moderate", score: 0.72 });
+    expect(card.sourceConfidence.level).toBe("likely");
+  });
+
   it("summarizes clustered cross-source coverage as one public story card", () => {
     const coverageBundle = {
       id: "coverage:incident:torvet-antibac",
@@ -48,6 +133,7 @@ describe("home story cards", () => {
         coverageBundle,
       }),
     ])[0]!;
+    group.acceptedEdges = [directStrongIncidentEdge("nrk-antibac", "politiloggen-antibac")];
 
     const card = homeStoryCardForGroup(group);
 
@@ -93,7 +179,6 @@ describe("home story cards", () => {
         },
       }),
     ])[0]!;
-
     const card = homeStoryCardForGroup(group);
 
     expect(card.verification).toEqual({
@@ -174,6 +259,7 @@ describe("home story cards", () => {
         coverageBundle,
       }),
     ])[0]!;
+    group.acceptedEdges = [directStrongIncidentEdge("adressa-lade-vold", "politiloggen-lade-vold")];
 
     const card = homeStoryCardForGroup(group);
 

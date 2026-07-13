@@ -142,6 +142,85 @@ export interface ArticlePublicVerification {
 
 export type ArticleCoverageBundleKind = "incident" | "topic" | "update";
 export type ArticleCoverageBundleConfidence = "high" | "medium";
+export type CoverageProjectionState = "legacy" | "shadow" | "active" | "superseded";
+
+export interface CoverageGenerationSummary {
+  id: string;
+  matcherVersion: "v1" | "v2";
+  mode: "active" | "shadow";
+  status: "completed";
+  startedAt: string;
+  completedAt: string;
+  articleCount: number;
+  bundleCount: number;
+  edgeCount: number;
+  correctionConflictCount: number;
+}
+
+export interface CoverageProjectionParity {
+  legacyBundleCount: number;
+  normalizedBundleCount: number;
+  membershipMismatchCount: number;
+  primaryMismatchCount: number;
+  clean: boolean;
+}
+
+export interface CoverageBundleSplitRequest {
+  expectedGeneratedAt: string;
+  expectedProjectionRevision?: number;
+  originalBundleId?: string;
+  anchorArticleId: string;
+  rejectedArticleIds: string[];
+  reason?: string;
+}
+
+export interface CoverageBundleCorrection {
+  id: string;
+  originalBundleId: string;
+  anchorArticleId: string;
+  rejectedArticleId: string;
+  matcherVersion: "v1" | "v2";
+  evidenceFingerprint: string;
+  status: "active" | "reverted";
+  createdAt: string;
+  revertedAt?: string;
+}
+
+export interface CoverageBundleCorrectionResult {
+  corrections: CoverageBundleCorrection[];
+  removedStoryIds: string[];
+  replacementStories: CityPulseStory[];
+}
+
+export interface CoverageCorrectionExportRow {
+  correctionId: string;
+  label: "separate";
+  articleIds: [string, string];
+  sources: [SourceId, SourceId];
+  normalizedTitles: [string, string];
+  normalizedExcerpts: [string, string];
+  matcherVersion: "v1" | "v2";
+  evidenceFingerprint: string;
+  createdAt: string;
+}
+
+export interface CoverageCorrectionExport {
+  schemaVersion: 1;
+  generatedAt: string;
+  rows: CoverageCorrectionExportRow[];
+}
+
+export interface CoverageMatchConfidence {
+  tier: "strong" | "moderate";
+  score: number;
+  rationale: string;
+}
+
+export interface CoverageTrustSummary {
+  match: CoverageMatchConfidence;
+  source: SourceConfidenceSummary;
+  verification?: ArticlePublicVerification;
+}
 
 export interface ArticleCoverageBundle {
   id: string;
@@ -149,6 +228,12 @@ export interface ArticleCoverageBundle {
   confidence: ArticleCoverageBundleConfidence;
   reason: string;
   generatedAt: string;
+  matchConfidence?: CoverageMatchConfidence;
+  matcherVersion?: "v1" | "v2";
+  correctionTarget?: {
+    originalBundleId: string;
+    projectionRevision: number;
+  };
 }
 
 export interface EvidenceItem {
@@ -1281,6 +1366,7 @@ export interface BootstrapPayload {
   articles: Article[];
   stories?: CityPulseStory[];
   storyNextCursor?: string;
+  storyProjection?: CityPulseStoryProjection;
   situations: HomeSituationSummary[];
   sourceHealth: SourceHealth[];
   morningBrief?: MorningBrief;
@@ -1309,6 +1395,20 @@ export interface CityPulseStory {
 export interface CityPulseStoryPage {
   items: CityPulseStory[];
   nextCursor?: string;
+  projection?: CityPulseStoryProjection;
+}
+
+export interface CityPulseStoryProjection {
+  mode: "legacy" | "normalized";
+  generationId?: string;
+  matcherVersion: "v1" | "v2";
+  parityClean: boolean;
+  projectionRevision?: number;
+  fallbackReason?:
+    | "disabled"
+    | "no_completed_active_generation"
+    | "integrity_error"
+    | "parity_error";
 }
 
 export interface SituationPage {
@@ -1323,6 +1423,17 @@ export interface WorkerCycleMetrics {
   sourceDurationsMs: Record<string, number>;
   sourceItemCounts: Record<string, number>;
   parseFailures: Record<string, number>;
+  coverage?: {
+    matcherVersion: "v2";
+    generationId: string;
+    mode: "shadow" | "active";
+    analysisDurationMs: number;
+    articleCount: number;
+    bundleCountByTier: { strong: number; moderate: number };
+    edgeCountByTier: { strong: number; moderate: number; weak: number };
+    reviewCandidateCount: number;
+    correctionConflictCount: number;
+  };
 }
 
 export type RuntimeFreshnessStatus = "ok" | "stale" | "missing";
@@ -1405,6 +1516,9 @@ export interface SessionUser {
 export interface SessionPayload {
   user: SessionUser;
   csrfToken: string;
+  capabilities?: {
+    coverageCorrections: boolean;
+  };
 }
 
 export type AccessRequestStatus = "unverified" | "pending" | "approved" | "rejected";

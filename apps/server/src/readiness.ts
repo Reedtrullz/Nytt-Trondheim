@@ -19,6 +19,22 @@ export interface DatabaseReadinessClient {
 
 export type DatabaseReadinessClientFactory = (config: ClientConfig) => DatabaseReadinessClient;
 
+interface CoverageProjectionReadiness {
+  generationValid: boolean;
+  integrityErrorCount: number;
+  parityClean: boolean;
+}
+
+export function assertCoverageProjectionReady(projection: CoverageProjectionReadiness): void {
+  if (
+    !projection.generationValid ||
+    projection.integrityErrorCount !== 0 ||
+    !projection.parityClean
+  ) {
+    throw new Error("Normalized coverage projection is not ready");
+  }
+}
+
 function positiveMilliseconds(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value) || value <= 0) return fallback;
   return Math.max(1, Math.floor(value));

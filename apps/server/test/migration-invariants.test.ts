@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const invariantsPath = fileURLToPath(
   new URL("../../../scripts/migration-invariants.sql", import.meta.url),
 );
+const schemaPath = fileURLToPath(new URL("../src/db/schema.sql", import.meta.url));
 
 describe("migration invariants", () => {
   it("proves Web Push is source-health only", async () => {
@@ -18,5 +19,67 @@ describe("migration invariants", () => {
       "INSERT INTO source_health (source, label, state, last_checked_at, detail)",
     );
     expect(sql).toContain("'web_push'");
+  });
+
+  it("defines the normalized coverage lifecycle schema", async () => {
+    const sql = await readFile(schemaPath, "utf8");
+    const normalizedSql = sql.replace(/\s+/g, " ");
+
+    for (const table of [
+      "coverage_bundle_generations",
+      "coverage_generation_articles",
+      "coverage_bundle_versions",
+      "coverage_bundle_members",
+      "coverage_bundle_edges",
+      "coverage_bundle_corrections",
+      "coverage_projection_revisions",
+    ]) {
+      expect(normalizedSql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
+    }
+
+    for (const column of [
+      "generation_id",
+      "state",
+      "matcher_version",
+      "match_tier",
+      "match_score",
+      "match_rationale",
+      "first_seen_at",
+      "legacy_generation_id",
+    ]) {
+      expect(normalizedSql).toContain(
+        `ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS ${column}`,
+      );
+    }
+
+    expect(normalizedSql).toContain(
+      "WHERE is_current AND status = 'completed' AND mode = 'active'",
+    );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_versions ADD COLUMN IF NOT EXISTS confidence text",
+    );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_versions ALTER COLUMN confidence SET NOT NULL",
+    );
+    expect(normalizedSql).toContain("VALUES ('016_coverage_bundle_lifecycle')");
+    expect(normalizedSql).toContain("coverage_bundles_legacy_generation_idx");
+    expect(normalizedSql).toContain("VALUES ('017_coverage_legacy_snapshot')");
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_edges ADD COLUMN IF NOT EXISTS positive_incident_evidence",
+    );
+    expect(normalizedSql).toContain("VALUES ('018_coverage_effective_projection')");
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_generations ADD COLUMN IF NOT EXISTS correction_revision_snapshot",
+    );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_generations ADD COLUMN IF NOT EXISTS health_outcome",
+    );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_projection_revisions ADD COLUMN IF NOT EXISTS legacy_revision",
+    );
+    expect(normalizedSql).toContain("VALUES ('019_coverage_projection_integrity')");
+    expect(normalizedSql).not.toMatch(
+      /UPDATE coverage_bundle_generations SET health_outcome\s*=\s*'healthy'/,
+    );
   });
 });

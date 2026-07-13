@@ -200,6 +200,7 @@ describe("WorkerRepository", () => {
 
     const sql = String(query.mock.calls[0]?.[0]);
     expect(sql).toContain("INSERT INTO coverage_bundles");
+    expect(sql).toContain("legacy_generation_id=EXCLUDED.legacy_generation_id");
     expect(sql).not.toContain("source_items");
     expect(query.mock.calls[0]?.[1]).toEqual([
       bundle.id,
@@ -215,6 +216,7 @@ describe("WorkerRepository", () => {
       JSON.stringify(bundle.signals),
       JSON.stringify(bundle.nearMisses),
       JSON.stringify(bundle),
+      null,
     ]);
   });
 

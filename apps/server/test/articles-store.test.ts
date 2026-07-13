@@ -4,6 +4,466 @@ import { sampleSituation, type Article, type OfficialEvent, type Situation } fro
 import { MemoryStore, PgStore } from "../src/store.js";
 
 describe("article store", () => {
+  function normalizedProjectionStore(pool: pg.Pool): PgStore {
+    return new PgStore(pool, "normalized-active");
+  }
+
+  function normalizedActiveProjectionPool(options?: {
+    noGeneration?: boolean;
+    corrected?: boolean;
+    integrityError?: boolean;
+    matcherVersion?: "v1" | "v2";
+    parityError?: boolean;
+    directOfficialEdge?: boolean;
+    emptyPositiveEvidence?: boolean;
+    correctionRejectedArticleId?: "regional-b" | "regional-c";
+    corruptAfterBuild?: "integrity" | "parity";
+  }): pg.Pool {
+    let healthReadCount = 0;
+    const primary: Article = {
+      id: "regional-a",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Regional hovedsak",
+      excerpt: "Sanitert innhold.",
+      url: "https://example.test/regional-a",
+      publishedAt: "2026-07-12T21:00:00.000Z",
+      scope: "trondelag",
+      category: "Hendelser",
+      places: ["Nærøysund"],
+    };
+    const articles: Article[] = [
+      primary,
+      {
+        ...primary,
+        id: "regional-b",
+        source: options?.directOfficialEdge ? "politiloggen" : "adressa",
+        sourceLabel: options?.directOfficialEdge ? "Politiloggen" : "Adresseavisen",
+        url: "https://example.test/regional-b",
+        publishedAt: "2026-07-12T20:59:00.000Z",
+      },
+      {
+        ...primary,
+        id: "regional-c",
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        url: "https://example.test/regional-c",
+        publishedAt: "2026-07-12T20:58:00.000Z",
+      },
+    ];
+    const correctionRejectedArticleId = options?.correctionRejectedArticleId ?? "regional-c";
+    const query = vi.fn(async (input: string | { text: string }) => {
+      const sql = typeof input === "string" ? input : input.text;
+      const normalized = sql.replace(/\s+/g, " ").trim();
+      if (
+        normalized === "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" ||
+        normalized.startsWith("SET LOCAL statement_timeout") ||
+        normalized === "COMMIT" ||
+        normalized === "ROLLBACK"
+      ) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith("WITH current_generation AS")) {
+        healthReadCount += 1;
+        const generationValid = !options?.noGeneration && options?.matcherVersion !== "v1";
+        const corrupted = healthReadCount > 2 ? options?.corruptAfterBuild : undefined;
+        return {
+          rows: [
+            {
+              generation_id: generationValid ? "11111111-1111-4111-8111-111111111111" : null,
+              matcher_version: generationValid ? "v2" : null,
+              mode: generationValid ? "active" : null,
+              started_at: generationValid ? "2026-07-12T20:59:59.000Z" : null,
+              completed_at: generationValid ? "2026-07-12T21:01:00.000Z" : null,
+              article_count: generationValid ? 3 : 0,
+              bundle_count: generationValid ? 1 : 0,
+              edge_count: generationValid ? 2 : 0,
+              correction_conflict_count: 0,
+              correction_revision: options?.corrected ? 1 : 0,
+              legacy_revision: 1,
+              revision_updated_at: "2026-07-12T21:02:00.000Z",
+              generation_valid: generationValid,
+              parity_clean: generationValid && !options?.parityError && corrupted !== "parity",
+              integrity_error_count: options?.integrityError || corrupted === "integrity" ? 1 : 0,
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (normalized.includes("FROM coverage_bundle_generations")) {
+        expect(normalized).toContain("is_current");
+        expect(normalized).toContain("matcher_version='v2'");
+        if (options?.noGeneration || options?.matcherVersion === "v1") {
+          return { rows: [], rowCount: 0 };
+        }
+        return {
+          rows: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              matcher_version: "v2",
+              mode: "active",
+              started_at: "2026-07-12T20:59:59.000Z",
+              completed_at: "2026-07-12T21:01:00.000Z",
+              article_count: 3,
+              bundle_count: 1,
+              edge_count: 2,
+              correction_conflict_count: 0,
+              correction_revision: options?.corrected ? 1 : 0,
+              legacy_revision: 1,
+              correction_revision_at: "2026-07-12T21:02:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (normalized.includes("FROM coverage_bundle_versions cbv")) {
+        expect(normalized).toContain(
+          "cb.id = cbv.bundle_id AND cb.generation_id = cbv.generation_id",
+        );
+        expect(normalized).toContain("cb.state = $1");
+        return {
+          rows: [
+            {
+              id: "coverage:v2:regional",
+              kind: "incident",
+              confidence: "high",
+              reason: "Samme hendelse",
+              generated_at: "2026-07-12T21:00:00.000Z",
+              last_seen_at: "2026-07-12T21:00:00.000Z",
+              last_seen_at_cursor: "2026-07-12T21:00:00.000000Z",
+              primary_article_id: "regional-a",
+              member_article_ids: articles.map(({ id }) => id),
+              member_articles: articles,
+              source_ids: articles.map(({ source }) => source),
+              source_labels: articles.map(({ sourceLabel }) => sourceLabel),
+              match_tier: "strong",
+              match_score: 0.9,
+              match_rationale: "Sterkt direkte treff.",
+              edges: options?.directOfficialEdge
+                ? [
+                    {
+                      articleIds: ["regional-a", "regional-b"],
+                      tier: "strong",
+                      score: 0.95,
+                      kind: "incident",
+                      positiveIncidentEvidence: options?.emptyPositiveEvidence
+                        ? []
+                        : ["shared_named_entity"],
+                      signals: [],
+                      conflicts: [],
+                      evidenceFingerprint: "v2:direct-official",
+                      reviewable: false,
+                      correctionConflict: false,
+                    },
+                  ]
+                : [],
+              corrections: options?.corrected
+                ? [
+                    {
+                      id: "correction-1",
+                      anchorArticleId: "regional-a",
+                      rejectedArticleId: correctionRejectedArticleId,
+                      status: "active",
+                      createdAt: "2026-07-12T21:02:00.000Z",
+                    },
+                  ]
+                : [],
+              missing_article_ids: [],
+              primary_count: options?.integrityError ? 0 : 1,
+              updated_at: "2026-07-12T21:02:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (normalized.includes("FROM coverage_generation_articles cga")) {
+        return { rows: articles.map((payload) => ({ payload })), rowCount: articles.length };
+      }
+      if (normalized.includes("FROM coverage_bundle_corrections cbc")) {
+        return {
+          rows: options?.corrected
+            ? [
+                {
+                  id: "correction-1",
+                  generation_id: "11111111-1111-4111-8111-111111111111",
+                  original_bundle_id: "coverage:v2:regional",
+                  anchor_article_id: "regional-a",
+                  rejected_article_id: correctionRejectedArticleId,
+                  matcher_version: "v2",
+                  evidence_fingerprint: "v2:regional",
+                  status: "active",
+                  created_at: "2026-07-12T21:02:00.000Z",
+                  reverted_at: null,
+                },
+              ]
+            : [],
+          rowCount: options?.corrected ? 1 : 0,
+        };
+      }
+      if (normalized.startsWith("SELECT id, primary_article_id, member_article_ids")) {
+        return {
+          rows: [
+            {
+              id: "coverage:v1:regional",
+              primary_article_id: "regional-a",
+              member_article_ids: options?.parityError
+                ? articles.slice(0, 2).map(({ id }) => id)
+                : articles.map(({ id }) => id),
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (normalized.startsWith("SELECT article_id FROM saved_articles")) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (normalized.includes("FROM articles a LEFT JOIN saved_articles")) {
+        return {
+          rows: articles.map((payload) => ({ payload, saved: false })),
+          rowCount: articles.length,
+        };
+      }
+      if (normalized.includes("FROM situations")) return { rows: [], rowCount: 0 };
+      throw new Error(`Unexpected query: ${normalized}`);
+    });
+    const client = { query, release: vi.fn() };
+    return { query, connect: vi.fn(async () => client) } as unknown as pg.Pool;
+  }
+
+  it("builds city pulse stories from the completed current active normalized generation", async () => {
+    const store = normalizedProjectionStore(normalizedActiveProjectionPool());
+    const page = await store.listCityPulseStories(
+      { scope: "trondelag", limit: 40, sourceLimit: 1 },
+      "Reedtrullz",
+    );
+
+    expect(page.projection).toMatchObject({
+      mode: "normalized",
+      generationId: "11111111-1111-4111-8111-111111111111",
+      matcherVersion: "v2",
+      parityClean: true,
+      projectionRevision: 0,
+    });
+    expect(page.items.find((story) => story.id === "coverage:v2:regional")?.articles).toHaveLength(
+      3,
+    );
+  });
+
+  it("falls back atomically to legacy stories when no completed current active generation exists", async () => {
+    const store = normalizedProjectionStore(normalizedActiveProjectionPool({ noGeneration: true }));
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.projection).toMatchObject({
+      mode: "legacy",
+      matcherVersion: "v1",
+      parityClean: false,
+      fallbackReason: "no_completed_active_generation",
+    });
+    expect(page.items).toEqual(expect.any(Array));
+  });
+
+  it("treats a completed current active v1 generation as absent from feed and audit", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({ matcherVersion: "v1" }),
+    );
+    const [stories, coverage] = await Promise.all([
+      store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz"),
+      store.listCoverageBundles({ projection: "active", limit: 30 }, "Reedtrullz"),
+    ]);
+
+    expect(stories.projection).toMatchObject({
+      mode: "legacy",
+      fallbackReason: "no_completed_active_generation",
+    });
+    expect(coverage.items).toEqual([]);
+    expect(coverage.summary.generation).toBeUndefined();
+  });
+
+  it("falls back atomically to legacy stories when normalized integrity validation fails", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({ integrityError: true }),
+    );
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.projection).toMatchObject({
+      mode: "legacy",
+      matcherVersion: "v1",
+      parityClean: false,
+      fallbackReason: "integrity_error",
+    });
+    expect(page.items.every((story) => story.articles.every(({ saved }) => saved === false))).toBe(
+      true,
+    );
+  });
+
+  it("falls back atomically when paired legacy parity is dirty", async () => {
+    const store = normalizedProjectionStore(normalizedActiveProjectionPool({ parityError: true }));
+
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.projection).toMatchObject({
+      mode: "legacy",
+      parityClean: false,
+      fallbackReason: "parity_error",
+    });
+  });
+
+  it("derives normalized verification only from an accepted strong incident edge", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({ directOfficialEdge: true }),
+    );
+
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.items[0]?.publicVerification).toMatchObject({
+      officialSources: ["politiloggen"],
+      reportingSources: ["nrk"],
+    });
+  });
+
+  it("does not derive verification when the persisted direct edge has no positive evidence", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({
+        directOfficialEdge: true,
+        emptyPositiveEvidence: true,
+      }),
+    );
+
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.items[0]?.publicVerification).toBeUndefined();
+  });
+
+  it("uses identical effective corrected membership for city pulse and active coverage", async () => {
+    const store = normalizedProjectionStore(normalizedActiveProjectionPool({ corrected: true }));
+    const [stories, coverage] = await Promise.all([
+      store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz"),
+      store.listCoverageBundles({ projection: "active", limit: 30 }, "Reedtrullz"),
+    ]);
+    const storyMembership = stories.items
+      .map(({ articleIds }) => [...articleIds].sort())
+      .filter((ids) => ids.length > 1);
+    const coverageMembership = coverage.items
+      .map(({ memberArticleIds }) => [...memberArticleIds].sort())
+      .filter((ids) => ids.length > 1);
+
+    expect(stories.projection?.generationId).toBe(coverage.summary.generation?.id);
+    expect(storyMembership).toEqual(coverageMembership);
+    expect(storyMembership).not.toContainEqual(["regional-a", "regional-b", "regional-c"]);
+    expect(coverage.summary.activeCorrectionCount).toBe(1);
+    const correctedAudit = coverage.items.find(({ memberArticleIds }) =>
+      memberArticleIds.includes("regional-a"),
+    );
+    const correctedFeed = stories.items.find(({ articleIds }) => articleIds.includes("regional-a"));
+    expect(correctedAudit?.matchConfidence).toMatchObject({ tier: "strong", score: 1 });
+    expect(correctedFeed?.coverageBundle?.matchConfidence).toEqual(correctedAudit?.matchConfidence);
+  });
+
+  it("recomputes identical verification for a corrected active feed and audit group", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({ corrected: true, directOfficialEdge: true }),
+    );
+    const [stories, coverage] = await Promise.all([
+      store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz"),
+      store.listCoverageBundles({ projection: "active", limit: 30 }, "Reedtrullz"),
+    ]);
+    const correctedAudit = coverage.items.find(({ memberArticleIds }) =>
+      memberArticleIds.includes("regional-a"),
+    );
+    const correctedFeed = stories.items.find(({ articleIds }) => articleIds.includes("regional-a"));
+
+    expect(correctedAudit?.memberArticleIds).toEqual(["regional-a", "regional-b"]);
+    expect(correctedAudit?.publicVerification).toMatchObject({
+      officialSources: ["politiloggen"],
+      reportingSources: ["nrk"],
+    });
+    expect(correctedFeed?.publicVerification).toEqual(correctedAudit?.publicVerification);
+  });
+
+  it("removes stale verification after correcting the official member out of the active group", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({
+        corrected: true,
+        directOfficialEdge: true,
+        correctionRejectedArticleId: "regional-b",
+      }),
+    );
+    const [stories, missingOfficialCoverage] = await Promise.all([
+      store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz"),
+      store.listCoverageBundles({
+        projection: "active",
+        review: ["missing_official"],
+        limit: 30,
+      }),
+    ]);
+    const correctedAudit = missingOfficialCoverage.items.find(({ memberArticleIds }) =>
+      memberArticleIds.includes("regional-a"),
+    );
+    const correctedFeed = stories.items.find(({ articleIds }) => articleIds.includes("regional-a"));
+
+    expect(correctedAudit?.memberArticleIds).toEqual(["regional-a", "regional-c"]);
+    expect(correctedAudit?.publicVerification).toBeUndefined();
+    expect(correctedFeed?.publicVerification).toBeUndefined();
+  });
+
+  it("reuses one bounded effective projection snapshot until generation or revision changes", async () => {
+    const pool = normalizedActiveProjectionPool({ corrected: true });
+    const store = normalizedProjectionStore(pool);
+
+    await store.listCoverageBundles({ projection: "active", limit: 30 });
+    await store.listCoverageBundles({ projection: "active", limit: 30 });
+
+    const sqlCalls = (pool.query as ReturnType<typeof vi.fn>).mock.calls.map(([query]) =>
+      (typeof query === "string" ? query : query.text).replace(/\s+/g, " ").trim(),
+    );
+    expect(
+      sqlCalls.filter(
+        (sql) =>
+          sql.startsWith("SELECT cb.id") && sql.includes("FROM coverage_bundle_versions cbv"),
+      ),
+    ).toHaveLength(1);
+    expect(sqlCalls.filter((sql) => sql.startsWith("SELECT a.payload"))).toHaveLength(1);
+    expect(sqlCalls.filter((sql) => sql.startsWith("SELECT cbc.*"))).toHaveLength(1);
+    expect(sqlCalls.filter((sql) => sql.startsWith("WITH current_generation AS"))).toHaveLength(3);
+    expect(sqlCalls.filter((sql) => sql.startsWith("SELECT id, matcher_version"))).toHaveLength(1);
+  });
+
+  it("coalesces concurrent cold active projection materialization", async () => {
+    const pool = normalizedActiveProjectionPool({ corrected: true });
+    const store = normalizedProjectionStore(pool);
+
+    await Promise.all([
+      store.listCoverageBundles({ projection: "active", limit: 30 }),
+      store.listCoverageBundles({ projection: "active", limit: 10 }),
+      store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz"),
+    ]);
+
+    const sqlCalls = (pool.query as ReturnType<typeof vi.fn>).mock.calls.map(([query]) =>
+      (typeof query === "string" ? query : query.text).replace(/\s+/g, " ").trim(),
+    );
+    expect(
+      sqlCalls.filter(
+        (sql) =>
+          sql.startsWith("SELECT cb.id") && sql.includes("FROM coverage_bundle_versions cbv"),
+      ),
+    ).toHaveLength(1);
+    expect(sqlCalls.filter((sql) => sql.startsWith("SELECT a.payload"))).toHaveLength(1);
+  });
+
+  it.each([
+    ["stable-row corruption", "integrity", "integrity_error"],
+    ["paired legacy marker mutation", "parity", "parity_error"],
+  ] as const)("invalidates a warm cache immediately on %s", async (_label, corruption, reason) => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({ corruptAfterBuild: corruption }),
+    );
+    await store.listCoverageBundles({ projection: "active", limit: 30 });
+
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.projection).toMatchObject({ mode: "legacy", fallbackReason: reason });
+  });
+
   it("filters in-memory articles by published time window like production", async () => {
     const store = new MemoryStore();
 
@@ -587,7 +1047,7 @@ describe("article store", () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
-  it("derives public verification for bundled official-plus-news incident articles", async () => {
+  it("does not derive verification from legacy bundle co-membership without direct edges", async () => {
     const coverageBundle = {
       id: "coverage:incident:lade-vold",
       kind: "incident",
@@ -641,14 +1101,7 @@ describe("article store", () => {
 
     expect(page.items).toHaveLength(2);
     for (const article of page.items) {
-      expect(article.publicVerification).toMatchObject({
-        status: "verified",
-        label: "Verifisert",
-        detail: "Bekreftet av Politiloggen og Adresseavisen.",
-        officialSources: ["politiloggen"],
-        reportingSources: ["adressa"],
-        situationId: "politiloggen-lade-vold",
-      });
+      expect(article.publicVerification).toBeUndefined();
     }
     expect(query).toHaveBeenCalledTimes(2);
   });

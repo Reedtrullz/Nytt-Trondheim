@@ -15,10 +15,12 @@ import type {
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleDecision,
   ArticleCoverageBundleKind,
+  ArticleCoverageEdge,
   ArticlePage,
   ArticleTopic,
   Attachment,
   BootstrapPayload,
+  CityPulseStory,
   CityPulseStoryPage,
   CommandCenterBriefingArticleSummary,
   CommandCenterBriefingPayload,
@@ -30,6 +32,12 @@ import type {
   CoverageBundlePage,
   CoverageBundleQueryInput,
   CoverageBundleSummary,
+  CoverageBundleCorrection,
+  CoverageBundleCorrectionResult,
+  CoverageBundleSplitRequest,
+  CoverageCorrectionExport,
+  CoverageGenerationSummary,
+  CoverageProjectionParity,
   EvidenceItem,
   MapFeature,
   MorningBrief,
@@ -105,16 +113,19 @@ import type {
 } from "@nytt/shared";
 import {
   analyzeArticleCoverage,
+  analyzeArticleCoverageV2,
   activationPolicyForSource,
   bootstrapWithMorningBrief,
   buildNotificationTriggerPage,
   cityPulseStoryFromGroup,
   comparePublicHomeSituations,
+  coverageProjectionParity,
   derivePublicVerificationForArticleGroup,
   groupHomeArticles,
   isLocalSportsCoverageText,
   isNewsroomPublicVerificationSource,
   publicLeadLongRunningSituationAgeMs,
+  recomputeCoverageStories,
   isPublicSituation,
   sampleArticles,
   sampleBootstrap,
@@ -130,6 +141,10 @@ import pg from "pg";
 import type { Profile } from "passport-github2";
 import type { Point as GeoJsonPoint } from "geojson";
 import type { AuthUser } from "./auth.js";
+import {
+  e2eCoverageFixtureArticles,
+  e2eCoverageFixtureGeneration,
+} from "./e2e-coverage-fixtures.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
 import { findRelatedTrafficArticles } from "./traffic/related-articles.js";
 import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
@@ -149,6 +164,189 @@ export interface ArticleFilters {
   cursor?: string;
   limit?: number;
   sourceLimit?: number;
+}
+
+type CoverageProjectionMode = "legacy" | "normalized-shadow" | "normalized-active";
+
+const coverageReadinessDeadlineMs = 1_500;
+const coverageReadinessStatementTimeoutMs = 1_000;
+const coverageReadinessRollbackGraceMs = 250;
+const coverageProjectionMaxArticleCount = 5_000;
+const coverageProjectionMaxBundleCount = 2_000;
+
+interface CoverageProjectionHealthRow {
+  generation_id: string | null;
+  matcher_version: "v2" | null;
+  mode: "active" | null;
+  started_at: Date | string | null;
+  completed_at: Date | string | null;
+  article_count: number | string;
+  bundle_count: number | string;
+  edge_count: number | string;
+  correction_conflict_count: number | string;
+  correction_revision: number | string;
+  legacy_revision: number | string;
+  revision_updated_at: Date | string;
+  generation_valid: boolean;
+  parity_clean: boolean;
+  integrity_error_count: number | string;
+}
+
+const coverageProjectionHealthQueryText = `WITH current_generation AS (
+  SELECT cg.*
+  FROM coverage_bundle_generations cg
+  WHERE cg.is_current AND cg.status='completed'
+    AND cg.mode='active' AND cg.matcher_version='v2' AND cg.health_outcome='healthy'
+  ORDER BY cg.completed_at DESC, cg.id DESC
+  LIMIT 1
+), legacy AS (
+  SELECT ARRAY(SELECT DISTINCT unnest(cb.member_article_ids) ORDER BY 1) AS members,
+         cb.primary_article_id
+  FROM current_generation cg
+  JOIN coverage_bundles cb ON cb.legacy_generation_id = cg.id
+  WHERE cb.state='legacy' AND cb.matcher_version='v1'
+), normalized AS (
+  SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) AS members,
+         cbv.primary_article_id
+  FROM current_generation cg
+  JOIN coverage_bundle_versions cbv ON cbv.generation_id=cg.id
+  JOIN coverage_bundle_members cbm
+    ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+  GROUP BY cbv.bundle_id, cbv.primary_article_id
+), stable_rows AS (
+  SELECT stable.id, stable.primary_article_id, stable.member_article_ids
+  FROM current_generation cg
+  JOIN coverage_bundle_versions cbv ON cbv.generation_id=cg.id
+  JOIN coverage_bundles stable ON stable.id=cbv.bundle_id AND stable.generation_id=cg.id
+  WHERE stable.state='active' AND stable.matcher_version='v2'
+), parity_mismatches AS (
+  (SELECT * FROM legacy EXCEPT ALL SELECT * FROM normalized)
+  UNION ALL
+  (SELECT * FROM normalized EXCEPT ALL SELECT * FROM legacy)
+), integrity AS (
+  SELECT
+    (SELECT count(*) FROM coverage_bundle_members cbm
+     JOIN current_generation cg ON cg.id=cbm.generation_id
+     LEFT JOIN articles a ON a.id=cbm.article_id WHERE a.id IS NULL)
+    +
+    (SELECT count(*) FROM (
+       SELECT cbv.bundle_id
+       FROM current_generation cg
+       JOIN coverage_bundle_versions cbv ON cbv.generation_id=cg.id
+       LEFT JOIN coverage_bundle_members cbm
+         ON cbm.generation_id=cbv.generation_id
+        AND cbm.bundle_id=cbv.bundle_id AND cbm.role='primary'
+       GROUP BY cbv.bundle_id
+       HAVING count(cbm.article_id) <> 1
+     ) invalid_primary)
+    +
+    COALESCE((SELECT CASE WHEN
+      cg.article_count = (SELECT count(*) FROM coverage_generation_articles cga
+                          WHERE cga.generation_id=cg.id)
+      AND cg.bundle_count = (SELECT count(*) FROM coverage_bundle_versions cbv
+                             WHERE cbv.generation_id=cg.id)
+      AND cg.bundle_count = (SELECT count(*) FROM stable_rows)
+    THEN 0 ELSE 1 END FROM current_generation cg), 0)
+    +
+    (SELECT count(*)
+     FROM current_generation cg
+     JOIN coverage_bundle_versions cbv ON cbv.generation_id=cg.id
+     LEFT JOIN stable_rows stable ON stable.id=cbv.bundle_id
+     WHERE stable.id IS NULL
+        OR stable.primary_article_id IS DISTINCT FROM cbv.primary_article_id
+        OR ARRAY(SELECT DISTINCT unnest(stable.member_article_ids) ORDER BY 1)
+           IS DISTINCT FROM ARRAY(
+             SELECT DISTINCT cbm.article_id
+             FROM coverage_bundle_members cbm
+             WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+             ORDER BY cbm.article_id
+           )) AS error_count
+)
+SELECT cg.id AS generation_id, cg.matcher_version, cg.mode, cg.started_at, cg.completed_at,
+       COALESCE(cg.article_count, 0) AS article_count,
+       COALESCE(cg.bundle_count, 0) AS bundle_count,
+       COALESCE(cg.edge_count, 0) AS edge_count,
+       COALESCE(cg.correction_conflict_count, 0) AS correction_conflict_count,
+       revision.revision AS correction_revision,
+       revision.legacy_revision,
+       revision.updated_at AS revision_updated_at,
+       cg.id IS NOT NULL AS generation_valid,
+       cg.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM parity_mismatches) AS parity_clean,
+       COALESCE((SELECT error_count FROM integrity), 0) AS integrity_error_count
+FROM coverage_projection_revisions revision
+LEFT JOIN current_generation cg ON true
+WHERE revision.projection='active'`;
+
+function coverageReadinessQuery(
+  text: string,
+  deadlineAt: number,
+  values: unknown[] = [],
+): pg.QueryConfig & { query_timeout: number } {
+  return {
+    text,
+    values,
+    query_timeout: Math.max(1, deadlineAt - Date.now()),
+  };
+}
+
+async function acquireCoverageReadinessClient(
+  pool: pg.Pool,
+  deadlineAt: number,
+): Promise<pg.PoolClient> {
+  const connectPromise = pool.connect();
+  let checkoutTimedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(
+      () => {
+        checkoutTimedOut = true;
+        reject(new Error("Coverage readiness pool checkout timed out"));
+      },
+      Math.max(1, deadlineAt - Date.now()),
+    );
+  });
+
+  try {
+    return await Promise.race([connectPromise, timeoutPromise]);
+  } catch (error) {
+    if (checkoutTimedOut) {
+      void connectPromise.then(
+        (lateClient) => lateClient.release(),
+        () => undefined,
+      );
+    }
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function rollbackCoverageReadinessClient(client: pg.PoolClient): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let rollback: Promise<boolean>;
+  try {
+    rollback = client
+      .query(coverageReadinessQuery("ROLLBACK", Date.now() + coverageReadinessRollbackGraceMs))
+      .then(
+        () => true,
+        () => false,
+      );
+  } catch {
+    return false;
+  }
+  const graceExpired = new Promise<boolean>((resolve) => {
+    timeout = setTimeout(() => resolve(false), coverageReadinessRollbackGraceMs);
+  });
+
+  try {
+    return await Promise.race([rollback, graceExpired]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export interface MemoryStoreOptions {
+  e2eCoverageFixtures?: boolean;
 }
 
 export interface SituationFilters {
@@ -333,6 +531,17 @@ export interface Store {
     filters: CoverageBundleQueryInput,
     login: string,
   ): Promise<CoverageBundlePage>;
+  coverageProjectionReadiness(): Promise<CoverageProjectionReadinessState>;
+  splitCoverageBundle(
+    bundleId: string,
+    input: CoverageBundleSplitRequest,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult>;
+  undoCoverageCorrection(
+    correctionId: string,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult>;
+  exportCoverageCorrections(sinceDays: number): Promise<CoverageCorrectionExport>;
   listNotificationTriggers(
     filters: NotificationTriggerQueryInput,
     login: string,
@@ -448,8 +657,43 @@ export interface Store {
   getCommandCenterBriefing(login: string): Promise<CommandCenterBriefingPayload>;
 }
 
+export interface CoverageProjectionReadinessState {
+  generationValid: boolean;
+  parityClean: boolean;
+  integrityErrorCount: number;
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+export class CoverageBundleConflictError extends Error {
+  readonly statusCode = 409;
+
+  constructor(
+    message: string,
+    readonly replacementStories: CityPulseStory[],
+  ) {
+    super(message);
+  }
+}
+
+async function withPgTransaction<T>(
+  pool: pg.Pool,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function encodeCursor(timestamp: string, id: string): string {
@@ -1315,6 +1559,44 @@ function cityPulseStoryPageFromArticles(
   };
 }
 
+function cityPulseStoryPageFromStories(
+  stories: CityPulseStory[],
+  filters: ArticleFilters,
+): CityPulseStoryPage {
+  const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+  const limit = filters.limit ?? 40;
+  const cursorFiltered = stories
+    .filter((story) => beforeCursor(story.latestAt, story.id, cursor))
+    .sort(
+      (left, right) =>
+        right.latestAt.localeCompare(left.latestAt) || right.id.localeCompare(left.id),
+    );
+  const items = cursorFiltered.slice(0, limit);
+  const last = items.at(-1);
+  return {
+    items,
+    nextCursor:
+      cursorFiltered.length > limit && last ? encodeCursor(last.latestAt, last.id) : undefined,
+  };
+}
+
+function articleMatchesCityPulseFilters(article: Article, filters: ArticleFilters): boolean {
+  const search = filters.q?.toLocaleLowerCase("nb");
+  return (
+    (!filters.scope || article.scope === filters.scope) &&
+    (!filters.category ||
+      filters.category === "Alle" ||
+      articleMatchesCategory(article, filters.category)) &&
+    (!filters.topic || articleMatchesTopic(article, filters.topic)) &&
+    (!filters.from || article.publishedAt >= filters.from) &&
+    (!filters.to || article.publishedAt <= filters.to) &&
+    (!search ||
+      `${article.title} ${article.excerpt} ${article.sourceLabel} ${article.category} ${article.places.join(" ")}`
+        .toLocaleLowerCase("nb")
+        .includes(search))
+  );
+}
+
 function articlesFromCityPulseStoryPage(page: CityPulseStoryPage): Article[] {
   const seenArticleIds = new Set<string>();
   return page.items
@@ -1558,6 +1840,122 @@ interface CoverageBundleRow {
   signals: CoverageBundleListItem["signals"];
   near_misses: CoverageBundleListItem["nearMisses"];
   updated_at: Date | string;
+}
+
+interface NormalizedCoverageBundleRow {
+  id: string;
+  kind: ArticleCoverageBundleKind;
+  confidence: ArticleCoverageBundleConfidence;
+  reason: string;
+  generated_at: Date | string;
+  last_seen_at: Date | string;
+  last_seen_at_cursor: string;
+  primary_article_id: string;
+  member_article_ids: string[];
+  member_articles: Article[];
+  source_ids: SourceId[];
+  source_labels: string[];
+  match_tier: "strong" | "moderate";
+  match_score: number;
+  match_rationale: string;
+  edges: ArticleCoverageEdge[];
+  corrections: Array<{
+    id: string;
+    generationId?: string;
+    anchorArticleId: string;
+    rejectedArticleId: string;
+    status: "active" | "reverted";
+    applicability?: "active" | "history";
+    createdAt: string;
+    revertedAt?: string;
+  }>;
+  generation_changed: boolean;
+  missing_article_ids: string[];
+  primary_count: number | string;
+  updated_at: Date | string;
+}
+
+interface CoverageCorrectionRow {
+  id: string;
+  generation_id: string;
+  original_bundle_id: string;
+  anchor_article_id: string;
+  rejected_article_id: string;
+  matcher_version: "v1" | "v2";
+  evidence_fingerprint: string;
+  status: "active" | "reverted";
+  created_at: Date | string;
+  reverted_at: Date | string | null;
+}
+
+interface ActiveCoverageProjectionCache {
+  generationId: string;
+  projectionRevision: number;
+  legacyRevision: number;
+  projectionRevisionAt: string;
+  storedItems: CoverageBundleListItem[];
+  effectiveItems: CoverageBundleListItem[];
+  articles: Article[];
+  parity: CoverageProjectionParity;
+  integrityErrorCount: number;
+  activeCorrectionCount: number;
+}
+
+interface CurrentCoverageMutationProjection {
+  generationId: string;
+  matcherVersion: "v2";
+  completedAt: string;
+  revision: number;
+  revisionAt: string;
+  articles: Article[];
+  corrections: CoverageCorrectionRow[];
+  baseMemberships: Array<{ id: string; memberArticleIds: string[] }>;
+  stories: CityPulseStory[];
+}
+
+function coverageStoriesWithCorrectionTargets(
+  stories: CityPulseStory[],
+  baseMemberships: Array<{ id: string; memberArticleIds: string[] }>,
+  projectionRevision: number,
+): CityPulseStory[] {
+  return stories.map((story) => {
+    if (!story.coverageBundle) return story;
+    const memberIds = new Set(story.articleIds);
+    const original = [...baseMemberships]
+      .map((candidate) => ({
+        ...candidate,
+        overlap: candidate.memberArticleIds.filter((id) => memberIds.has(id)).length,
+      }))
+      .sort((left, right) => right.overlap - left.overlap || left.id.localeCompare(right.id))[0];
+    return {
+      ...story,
+      coverageBundle: {
+        ...story.coverageBundle,
+        correctionTarget: {
+          originalBundleId: original?.id ?? story.id,
+          projectionRevision,
+        },
+      },
+    };
+  });
+}
+
+function coverageCorrectionFromRow(row: CoverageCorrectionRow): CoverageBundleCorrection {
+  return {
+    id: row.id,
+    originalBundleId: row.original_bundle_id,
+    anchorArticleId: row.anchor_article_id,
+    rejectedArticleId: row.rejected_article_id,
+    matcherVersion: row.matcher_version,
+    evidenceFingerprint: row.evidence_fingerprint,
+    status: row.status,
+    createdAt: new Date(row.created_at).toISOString(),
+    ...(row.reverted_at ? { revertedAt: new Date(row.reverted_at).toISOString() } : {}),
+  };
+}
+
+function normalizedCorrectionText(value: string, maxLength: number): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
 
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
@@ -2018,12 +2416,20 @@ function emptyCoverageBundleSummary(): CoverageBundleSummary {
     recentBundleCount: 0,
     byKind: { incident: 0, topic: 0, update: 0 },
     byConfidence: { high: 0, medium: 0 },
+    activeBundleCount: 0,
+    byMatchTier: { strong: 0, moderate: 0 },
+    reviewCandidateCount: 0,
+    activeCorrectionCount: 0,
+    integrityErrorCount: 0,
+    matcherVersion: "v1",
+    projectionState: "legacy",
   };
 }
 
 function summarizeCoverageBundleItems(items: CoverageBundleListItem[]): CoverageBundleSummary {
   const summary = emptyCoverageBundleSummary();
   summary.recentBundleCount = items.length;
+  summary.activeBundleCount = items.length;
   for (const item of items) {
     summary.byKind[item.kind] += 1;
     summary.byConfidence[item.confidence] += 1;
@@ -2059,6 +2465,41 @@ function coverageBundleMatchesQuery(item: CoverageBundleListItem, query: string)
   return haystack.includes(query.toLocaleLowerCase("nb"));
 }
 
+function coverageBundleMatchesReview(
+  item: CoverageBundleListItem,
+  reviews: NonNullable<CoverageBundleQueryInput["review"]>,
+): boolean {
+  const reviewableEdges = item.edges.filter(({ reviewable }) => reviewable);
+  const acceptedEdges = item.edges.filter(
+    ({ reviewable, tier, conflicts }) => !reviewable && tier !== "weak" && conflicts.length === 0,
+  );
+  return reviews.every((review) => {
+    if (review === "reviewable") return reviewableEdges.length > 0;
+    if (review === "weak") return item.edges.some(({ tier }) => tier === "weak");
+    if (review === "correction_conflict") {
+      return item.edges.some(({ correctionConflict }) => correctionConflict);
+    }
+    if (review === "generation_change") {
+      return item.generationChanged === true;
+    }
+    if (
+      review === "missing_place" ||
+      review === "missing_entity" ||
+      review === "missing_official"
+    ) {
+      if (item.kind !== "incident") return false;
+    }
+    if (review === "missing_official") return item.publicVerification === undefined;
+    const requiredEvidence =
+      review === "missing_place"
+        ? (["shared_specific_place", "mentioned_specific_place"] as const)
+        : (["shared_named_entity"] as const);
+    return !acceptedEdges.some(({ positiveIncidentEvidence = [] }) =>
+      requiredEvidence.some((evidence) => positiveIncidentEvidence.includes(evidence)),
+    );
+  });
+}
+
 function filterCoverageBundleItems(
   items: CoverageBundleListItem[],
   filters: CoverageBundleQueryInput,
@@ -2068,6 +2509,7 @@ function filterCoverageBundleItems(
     (item) =>
       (!filters.kind || item.kind === filters.kind) &&
       (!filters.confidence || item.confidence === filters.confidence) &&
+      (!filters.review?.length || coverageBundleMatchesReview(item, filters.review)) &&
       (!query || coverageBundleMatchesQuery(item, query)),
   );
 }
@@ -2087,6 +2529,11 @@ function coverageBundleItemFromDecision(
       return article ? [coverageBundleArticleSummary(article)] : [];
     }),
     nearMissArticles: coverageBundleNearMissArticleSummaries(decision.nearMisses, articlesById),
+    state: "legacy",
+    edges: [],
+    reviewCandidates: [],
+    corrections: [],
+    integrityErrors: [],
   };
 }
 
@@ -2114,7 +2561,234 @@ function coverageBundleItemFromRow(
       return article ? [coverageBundleArticleSummary(article)] : [];
     }),
     nearMissArticles: coverageBundleNearMissArticleSummaries(row.near_misses, articlesById),
+    state: "legacy",
+    edges: [],
+    reviewCandidates: [],
+    corrections: [],
+    integrityErrors: [],
   };
+}
+
+function boundedCoverageReviewCandidates(edges: ArticleCoverageEdge[]): ArticleCoverageEdge[] {
+  const counts = new Map<string, number>();
+  return edges
+    .filter(({ reviewable }) => reviewable)
+    .sort((left, right) => right.score - left.score)
+    .filter((edge) => {
+      const reason = edge.correctionConflict
+        ? "correction_conflict"
+        : (edge.conflicts[0]?.kind ?? edge.tier);
+      const key = `${reason}:${edge.tier}`;
+      const count = counts.get(key) ?? 0;
+      if (count >= 5) return false;
+      counts.set(key, count + 1);
+      return true;
+    });
+}
+
+function normalizedCoverageBundleItemFromRow(
+  row: NormalizedCoverageBundleRow,
+  generation: CoverageGenerationSummary,
+  state: "shadow" | "active" | "superseded",
+): CoverageBundleListItem {
+  const integrityErrors = [
+    ...(row.member_article_ids.length < 2 ? ["fewer_than_two_members"] : []),
+    ...(Number(row.primary_count) !== 1 ? ["invalid_primary_count"] : []),
+    ...row.missing_article_ids.map((id) => `missing_article:${id}`),
+  ];
+  const memberArticles = row.member_articles.map(coverageBundleArticleSummary);
+  const acceptedEdges = row.edges.filter(
+    ({ reviewable, tier, conflicts, positiveIncidentEvidence = [] }) =>
+      !reviewable &&
+      tier === "strong" &&
+      conflicts.length === 0 &&
+      positiveIncidentEvidence.length > 0,
+  );
+  const publicVerification = derivePublicVerificationForArticleGroup({
+    id: row.id,
+    primary:
+      row.member_articles.find(({ id }) => id === row.primary_article_id) ??
+      row.member_articles[0]!,
+    articles: row.member_articles,
+    sourceLabels: row.source_labels,
+    bundle: {
+      id: row.id,
+      kind: row.kind,
+      confidence: row.confidence,
+      reason: row.reason,
+      generatedAt: new Date(row.generated_at).toISOString(),
+      matcherVersion: generation.matcherVersion,
+    },
+    acceptedEdges,
+  });
+  return {
+    id: row.id,
+    kind: row.kind,
+    confidence: row.confidence,
+    reason: row.reason,
+    generatedAt: new Date(row.generated_at).toISOString(),
+    matcherVersion: generation.matcherVersion,
+    matchConfidence: {
+      tier: row.match_tier,
+      score: row.match_score,
+      rationale: row.match_rationale,
+    },
+    primaryArticleId: row.primary_article_id,
+    memberArticleIds: row.member_article_ids,
+    sourceIds: row.source_ids,
+    sourceLabels: row.source_labels,
+    signals: row.edges.flatMap(({ signals }) => signals),
+    nearMisses: [],
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+    memberArticles,
+    nearMissArticles: [],
+    generation,
+    state,
+    edges: row.edges,
+    reviewCandidates: boundedCoverageReviewCandidates(row.edges),
+    corrections: row.corrections,
+    ...(publicVerification ? { publicVerification } : {}),
+    generationChanged: row.generation_changed,
+    integrityErrors,
+  };
+}
+
+function effectiveCorrectedCoverageBundleItems(
+  storedItems: CoverageBundleListItem[],
+  articles: Article[],
+  corrections: CoverageCorrectionRow[],
+  generation: CoverageGenerationSummary,
+  projectionRevision: number,
+): CoverageBundleListItem[] {
+  if (corrections.length === 0) {
+    return storedItems.map((item) => ({
+      ...item,
+      correctionTarget: { originalBundleId: item.id, projectionRevision },
+    }));
+  }
+  const rejectedPairs = corrections.map((row) => ({
+    articleIds: [row.anchor_article_id, row.rejected_article_id] as [string, string],
+    correctionId: row.id,
+  }));
+  const effectiveStories = recomputeCoverageStories(
+    articles,
+    rejectedPairs,
+    generation.completedAt,
+  ).filter(({ articleIds }) => articleIds.length > 1);
+  const canonicalMembership = (ids: string[]) => [...new Set(ids)].sort().join("\0");
+  const storedByMembership = new Map(
+    storedItems.map((item) => [canonicalMembership(item.memberArticleIds), item]),
+  );
+  const effectiveItems: CoverageBundleListItem[] = effectiveStories.map((story) => {
+    const stored = storedByMembership.get(canonicalMembership(story.articleIds));
+    const memberIds = new Set(story.articleIds);
+    const related = storedItems.filter((item) =>
+      item.memberArticleIds.some((articleId) => memberIds.has(articleId)),
+    );
+    const base = [...related].sort((left, right) => {
+      const leftOverlap = left.memberArticleIds.filter((id) => memberIds.has(id)).length;
+      const rightOverlap = right.memberArticleIds.filter((id) => memberIds.has(id)).length;
+      return rightOverlap - leftOverlap || left.id.localeCompare(right.id);
+    })[0];
+    const activeCorrections = related
+      .flatMap(({ corrections: itemCorrections }) => itemCorrections)
+      .filter(
+        (correction, index, all) =>
+          all.findIndex(({ id }) => id === correction.id) === index &&
+          correction.status === "active" &&
+          correction.applicability !== "history",
+      );
+    const edges = related
+      .flatMap(({ edges: itemEdges }) => itemEdges)
+      .filter(({ articleIds }) => articleIds.every((id) => memberIds.has(id)));
+    const recomputed = story.coverageBundle;
+    const kind = recomputed?.kind ?? base?.kind ?? "topic";
+    const confidence = recomputed?.confidence ?? base?.confidence ?? "medium";
+    const reason = recomputed?.reason ?? base?.reason ?? "Korrigert dekningsgruppe";
+    const generatedAt = recomputed?.generatedAt ?? base?.generatedAt ?? generation.completedAt;
+    const acceptedEdges = edges.filter(
+      ({ reviewable, kind: edgeKind, tier, conflicts, positiveIncidentEvidence = [] }) =>
+        !reviewable &&
+        edgeKind === "incident" &&
+        tier === "strong" &&
+        conflicts.length === 0 &&
+        positiveIncidentEvidence.length > 0,
+    );
+    const publicVerification = derivePublicVerificationForArticleGroup({
+      id: story.id,
+      primary: story.primary,
+      articles: story.articles,
+      sourceLabels: story.sourceLabels,
+      bundle: {
+        id: story.id,
+        kind,
+        confidence,
+        reason,
+        generatedAt,
+        matcherVersion: generation.matcherVersion,
+      },
+      acceptedEdges,
+    });
+    const inherited: Partial<CoverageBundleListItem> = stored ? { ...stored } : {};
+    delete inherited.publicVerification;
+    return {
+      ...inherited,
+      id: story.id,
+      kind,
+      confidence,
+      reason,
+      generatedAt,
+      matcherVersion: generation.matcherVersion,
+      ...((recomputed?.matchConfidence ?? base?.matchConfidence)
+        ? { matchConfidence: recomputed?.matchConfidence ?? base?.matchConfidence }
+        : {}),
+      primaryArticleId: story.primaryArticleId,
+      memberArticleIds: story.articleIds,
+      sourceIds: [...new Set(story.articles.map(({ source }) => source))],
+      sourceLabels: story.sourceLabels,
+      signals: edges.flatMap(({ signals }) => signals),
+      nearMisses: [],
+      lastSeenAt: story.latestAt,
+      updatedAt: generation.completedAt,
+      memberArticles: story.articles.map(coverageBundleArticleSummary),
+      nearMissArticles: [],
+      generation,
+      state: "active",
+      edges,
+      reviewCandidates: boundedCoverageReviewCandidates(edges),
+      corrections: activeCorrections,
+      integrityErrors: [],
+      ...(publicVerification ? { publicVerification } : {}),
+      correctionTarget: {
+        originalBundleId: base?.id ?? story.id,
+        projectionRevision,
+      },
+    };
+  });
+  const representedArticleIds = new Set(
+    effectiveItems.flatMap(({ memberArticleIds }) => memberArticleIds),
+  );
+  const tombstones = storedItems.flatMap((base) => {
+    const activeCorrections = base.corrections.filter(
+      ({ status, applicability }) => status === "active" && applicability !== "history",
+    );
+    if (
+      activeCorrections.length === 0 ||
+      base.memberArticleIds.some((id) => representedArticleIds.has(id))
+    ) {
+      return [];
+    }
+    return [
+      {
+        ...base,
+        corrections: activeCorrections,
+        correctionTombstone: true,
+        correctionTarget: { originalBundleId: base.id, projectionRevision },
+      },
+    ];
+  });
+  return [...effectiveItems, ...tombstones];
 }
 
 const sourceAuditRequiredSources: SourceId[] = [
@@ -3429,7 +4103,29 @@ function withTrafficPulseStaleOverlay(
 }
 
 export class MemoryStore implements Store {
-  private articles = clone(sampleArticles);
+  private articles: Article[];
+  private coverageShadowGeneratedAt: string;
+  private coverageProjectionRevision = 0;
+  private e2eCoverageGenerationSequence = 1;
+  private readonly e2eCoverageFixtures: boolean;
+  private e2eCoverageFixtureActive = false;
+
+  constructor(
+    private readonly coverageProjectionMode: CoverageProjectionMode = "legacy",
+    options: MemoryStoreOptions = {},
+  ) {
+    this.e2eCoverageFixtures = options.e2eCoverageFixtures === true;
+    this.articles = clone(sampleArticles);
+    this.coverageShadowGeneratedAt = new Date().toISOString();
+  }
+  private coverageCorrections: Array<
+    CoverageBundleCorrection & {
+      generationId: string;
+      createdBy: string;
+      reason?: string;
+      revertedBy?: string;
+    }
+  > = [];
   private situations = new Map([[sampleSituation.id, clone(sampleSituation)]]);
   private tasks = clone(sampleTasks);
   private notes = clone(sampleNotes);
@@ -3820,7 +4516,7 @@ export class MemoryStore implements Store {
 
   async getBootstrap(): Promise<BootstrapPayload> {
     const storyPage = await this.listCityPulseStories({
-      scope: "trondheim",
+      scope: this.e2eCoverageFixtureActive ? "trondelag" : "trondheim",
       limit: homeBootstrapStoryLimit,
       sourceLimit: homeBootstrapSourceArticleLimit,
     });
@@ -3839,6 +4535,7 @@ export class MemoryStore implements Store {
       articles: articlesFromCityPulseStoryPage(storyPage),
       stories: storyPage.items,
       ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
+      ...(storyPage.projection ? { storyProjection: storyPage.projection } : {}),
       situations,
       sourceHealth: clone(sampleBootstrap.sourceHealth),
     };
@@ -3891,17 +4588,108 @@ export class MemoryStore implements Store {
   }
 
   async listCityPulseStories(filters: ArticleFilters): Promise<CityPulseStoryPage> {
+    if (this.e2eCoverageFixtureActive && this.coverageProjectionMode === "normalized-active") {
+      const coverage = await this.e2eActiveCoveragePage({
+        projection: "active",
+        limit: Number.MAX_SAFE_INTEGER,
+      });
+      const generation = coverage.summary.generation!;
+      const matchingArticles = this.articles.filter((article) =>
+        articleMatchesCityPulseFilters(article, filters),
+      );
+      const matchingArticleIds = new Set(matchingArticles.map(({ id }) => id));
+      const groupedArticleIds = new Set<string>();
+      const stories = coverage.items.flatMap((item) => {
+        if (item.correctionTombstone) return [];
+        const articles = item.memberArticleIds.flatMap((id) => {
+          const article = this.articles.find((candidate) => candidate.id === id);
+          return article ? [article] : [];
+        });
+        if (!articles.some(({ id }) => matchingArticleIds.has(id))) return [];
+        for (const article of articles) groupedArticleIds.add(article.id);
+        const primary = articles.find(({ id }) => id === item.primaryArticleId) ?? articles[0]!;
+        return [
+          cityPulseStoryFromGroup({
+            id: item.id,
+            primary,
+            articles,
+            sourceLabels: item.sourceLabels,
+            bundle: {
+              id: item.id,
+              kind: item.kind,
+              confidence: item.confidence,
+              reason: item.reason,
+              generatedAt: item.generatedAt,
+              ...(item.matchConfidence ? { matchConfidence: item.matchConfidence } : {}),
+              matcherVersion: "v2",
+              ...(item.correctionTarget ? { correctionTarget: item.correctionTarget } : {}),
+            },
+          }),
+        ];
+      });
+      for (const article of matchingArticles) {
+        if (groupedArticleIds.has(article.id)) continue;
+        stories.push(
+          cityPulseStoryFromGroup({
+            id: `article:${article.id}`,
+            primary: article,
+            articles: [article],
+            sourceLabels: [article.sourceLabel],
+          }),
+        );
+      }
+      return {
+        ...cityPulseStoryPageFromStories(stories, filters),
+        projection: {
+          mode: "normalized",
+          generationId: generation.id,
+          matcherVersion: "v2",
+          parityClean: true,
+          projectionRevision: this.coverageProjectionRevision,
+        },
+      };
+    }
     const articles = await this.listArticles({
       ...filters,
       cursor: undefined,
       limit: cityPulseStorySourceLimit(filters),
     });
-    return cityPulseStoryPageFromArticles(articles.items, filters);
+    return {
+      ...cityPulseStoryPageFromArticles(articles.items, filters),
+      projection:
+        this.coverageProjectionMode === "normalized-active"
+          ? {
+              mode: "legacy",
+              matcherVersion: "v1",
+              parityClean: false,
+              fallbackReason: "no_completed_active_generation",
+            }
+          : {
+              mode: "legacy",
+              matcherVersion: "v1",
+              parityClean: true,
+              fallbackReason: "disabled",
+            },
+    };
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
-    const generatedAt = new Date().toISOString();
-    const analysis = analyzeArticleCoverage(this.articles, generatedAt);
+    if (this.e2eCoverageFixtureActive && filters.projection === "active") {
+      return this.e2eActiveCoveragePage(filters);
+    }
+    const projection = filters.projection ?? "legacy";
+    const generatedAt =
+      projection === "shadow" ? this.coverageShadowGeneratedAt : new Date().toISOString();
+    if (projection === "active" || projection === "superseded") {
+      const summary = emptyCoverageBundleSummary();
+      summary.projectionState = projection;
+      summary.matcherVersion = "v2";
+      return { items: [], summary };
+    }
+    const analysis =
+      projection === "shadow"
+        ? analyzeArticleCoverageV2(this.articles, generatedAt)
+        : analyzeArticleCoverage(this.articles, generatedAt);
     const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
     const limit = filters.limit ?? 30;
@@ -3912,7 +4700,18 @@ export class MemoryStore implements Store {
             .flatMap((articleId) => articlesById.get(articleId)?.publishedAt ?? [])
             .sort()
             .at(-1) ?? generatedAt;
-        return coverageBundleItemFromDecision(bundle, articlesById, lastSeenAt, generatedAt);
+        const item = coverageBundleItemFromDecision(bundle, articlesById, lastSeenAt, generatedAt);
+        if (projection === "shadow") {
+          const memberIds = new Set(bundle.memberArticleIds);
+          item.state = "shadow";
+          item.edges = (analysis.edges ?? []).filter(({ articleIds, reviewable }) =>
+            reviewable
+              ? articleIds.some((id) => memberIds.has(id))
+              : articleIds.every((id) => memberIds.has(id)),
+          );
+          item.reviewCandidates = boundedCoverageReviewCandidates(item.edges);
+        }
+        return item;
       })
       .sort(
         (left, right) =>
@@ -3924,12 +4723,400 @@ export class MemoryStore implements Store {
     );
     const page = cursorFiltered.slice(0, limit);
     const last = page.at(-1);
+    const summary = summarizeCoverageBundleItems(filtered);
+    let parity;
+    if (projection === "shadow") {
+      const legacy = analyzeArticleCoverage(this.articles, generatedAt).bundles;
+      parity = coverageProjectionParity(legacy, analysis.bundles);
+      summary.matcherVersion = "v2";
+      summary.projectionState = "shadow";
+      summary.byMatchTier = {
+        strong: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "strong").length,
+        moderate: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "moderate")
+          .length,
+      };
+      summary.reviewCandidateCount = filtered.reduce(
+        (count, item) => count + item.reviewCandidates.length,
+        0,
+      );
+    }
     return {
       items: clone(page),
-      summary: summarizeCoverageBundleItems(filtered),
+      summary,
+      ...(parity ? { parity } : {}),
       nextCursor:
         cursorFiltered.length > limit && last ? encodeCursor(last.lastSeenAt, last.id) : undefined,
     };
+  }
+
+  async coverageProjectionReadiness(): Promise<CoverageProjectionReadinessState> {
+    return {
+      generationValid:
+        this.e2eCoverageFixtureActive && this.coverageProjectionMode === "normalized-active",
+      parityClean: this.e2eCoverageFixtureActive,
+      integrityErrorCount: 0,
+    };
+  }
+
+  private async e2eActiveCoveragePage(
+    filters: CoverageBundleQueryInput,
+  ): Promise<CoverageBundlePage> {
+    const rejectedPairs = this.coverageCorrections
+      .filter(({ status }) => status === "active")
+      .map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId] as [string, string],
+        correctionId: id,
+      }));
+    const diagnosticAnalysis = analyzeArticleCoverageV2(
+      this.articles,
+      this.coverageShadowGeneratedAt,
+      {
+        rejectedPairs,
+      },
+    );
+    const baseAnalysis = analyzeArticleCoverageV2(this.articles, this.coverageShadowGeneratedAt);
+    const baseGeneration = e2eCoverageFixtureGeneration(this.e2eCoverageGenerationSequence);
+    const generation: CoverageGenerationSummary = {
+      ...baseGeneration,
+      bundleCount: baseAnalysis.bundles.length,
+      edgeCount: baseAnalysis.edges?.length ?? 0,
+      correctionConflictCount:
+        diagnosticAnalysis.edges?.filter(({ correctionConflict }) => correctionConflict).length ??
+        0,
+    };
+    const articlesById = new Map(baseAnalysis.articles.map((article) => [article.id, article]));
+    const storedItems = baseAnalysis.bundles.map((bundle) => {
+      const memberIds = new Set(bundle.memberArticleIds);
+      const edges = (baseAnalysis.edges ?? []).filter(({ articleIds, reviewable }) =>
+        reviewable
+          ? articleIds.some((id) => memberIds.has(id))
+          : articleIds.every((id) => memberIds.has(id)),
+      );
+      const item = coverageBundleItemFromDecision(
+        bundle,
+        articlesById,
+        bundle.memberArticleIds
+          .flatMap((id) => articlesById.get(id)?.publishedAt ?? [])
+          .sort()
+          .at(-1) ?? generation.completedAt,
+        generation.completedAt,
+      );
+      return {
+        ...item,
+        matcherVersion: "v2" as const,
+        generation,
+        state: "active" as const,
+        edges,
+        reviewCandidates: boundedCoverageReviewCandidates(edges),
+        corrections: this.coverageCorrections
+          .filter(
+            (correction) =>
+              memberIds.has(correction.anchorArticleId) ||
+              memberIds.has(correction.rejectedArticleId),
+          )
+          .map(
+            ({
+              id,
+              generationId,
+              anchorArticleId,
+              rejectedArticleId,
+              status,
+              createdAt,
+              revertedAt,
+            }) => ({
+              id,
+              generationId,
+              anchorArticleId,
+              rejectedArticleId,
+              status,
+              applicability:
+                this.articles.some(({ id: articleId }) => articleId === anchorArticleId) &&
+                this.articles.some(({ id: articleId }) => articleId === rejectedArticleId)
+                  ? ("active" as const)
+                  : ("history" as const),
+              createdAt,
+              ...(revertedAt ? { revertedAt } : {}),
+            }),
+          ),
+        correctionTarget: {
+          originalBundleId: bundle.id,
+          projectionRevision: this.coverageProjectionRevision,
+        },
+      };
+    });
+    const currentArticleIds = new Set(baseAnalysis.articles.map(({ id }) => id));
+    const activeCorrectionRows: CoverageCorrectionRow[] = this.coverageCorrections
+      .filter(
+        ({ status, anchorArticleId, rejectedArticleId }) =>
+          status === "active" &&
+          currentArticleIds.has(anchorArticleId) &&
+          currentArticleIds.has(rejectedArticleId),
+      )
+      .map((correction) => ({
+        id: correction.id,
+        generation_id: correction.generationId,
+        original_bundle_id: correction.originalBundleId,
+        anchor_article_id: correction.anchorArticleId,
+        rejected_article_id: correction.rejectedArticleId,
+        matcher_version: correction.matcherVersion,
+        evidence_fingerprint: correction.evidenceFingerprint,
+        status: correction.status,
+        created_at: correction.createdAt,
+        reverted_at: correction.revertedAt ?? null,
+      }));
+    const allItems = effectiveCorrectedCoverageBundleItems(
+      storedItems,
+      baseAnalysis.articles,
+      activeCorrectionRows,
+      generation,
+      this.coverageProjectionRevision,
+    );
+    const filtered = filterCoverageBundleItems(allItems, filters);
+    const summary = summarizeCoverageBundleItems(filtered);
+    summary.matcherVersion = "v2";
+    summary.projectionState = "active";
+    summary.generation = generation;
+    summary.byMatchTier = {
+      strong: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "strong").length,
+      moderate: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "moderate")
+        .length,
+    };
+    summary.reviewCandidateCount = filtered.reduce(
+      (count, item) => count + item.reviewCandidates.length,
+      0,
+    );
+    summary.activeCorrectionCount = activeCorrectionRows.length;
+    return {
+      items: clone(filtered.slice(0, filters.limit ?? 30)),
+      summary,
+      parity: {
+        legacyBundleCount: filtered.length,
+        normalizedBundleCount: filtered.length,
+        membershipMismatchCount: 0,
+        primaryMismatchCount: 0,
+        clean: true,
+      },
+    };
+  }
+
+  async advanceE2ECoverageFixtureGeneration(): Promise<{ generationId: string }> {
+    if (!this.e2eCoverageFixtures) throw new Error("E2E coverage fixtures are not enabled");
+    if (!this.e2eCoverageFixtureActive) throw new Error("E2E coverage fixtures are not active");
+    this.e2eCoverageGenerationSequence += 1;
+    const generation = e2eCoverageFixtureGeneration(this.e2eCoverageGenerationSequence);
+    this.coverageShadowGeneratedAt = generation.completedAt;
+    this.articles = e2eCoverageFixtureArticles(true);
+    return { generationId: generation.id };
+  }
+
+  async resetE2ECoverageFixtures(): Promise<{ generationId: string }> {
+    if (!this.e2eCoverageFixtures) throw new Error("E2E coverage fixtures are not enabled");
+    this.e2eCoverageFixtureActive = true;
+    this.e2eCoverageGenerationSequence = 1;
+    const generation = e2eCoverageFixtureGeneration(1);
+    this.coverageShadowGeneratedAt = generation.completedAt;
+    this.articles = e2eCoverageFixtureArticles();
+    this.coverageCorrections = [];
+    this.coverageProjectionRevision = 0;
+    return { generationId: generation.id };
+  }
+
+  async restoreE2EDefaultFixtures(): Promise<{ restored: true }> {
+    if (!this.e2eCoverageFixtures) throw new Error("E2E coverage fixtures are not enabled");
+    this.e2eCoverageFixtureActive = false;
+    this.e2eCoverageGenerationSequence = 1;
+    this.coverageShadowGeneratedAt = new Date().toISOString();
+    this.articles = clone(sampleArticles);
+    this.coverageCorrections = [];
+    this.coverageProjectionRevision = 0;
+    return { restored: true };
+  }
+
+  async splitCoverageBundle(
+    bundleId: string,
+    input: CoverageBundleSplitRequest,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    const activePairs = this.coverageCorrections.filter(({ status }) => status === "active");
+    const analysis = analyzeArticleCoverageV2(this.articles, this.coverageShadowGeneratedAt, {
+      rejectedPairs: activePairs.map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId],
+        correctionId: id,
+      })),
+    });
+    const bundle = analysis.bundles.find(({ id }) => id === bundleId);
+    const currentStories = recomputeCoverageStories(
+      this.articles,
+      activePairs.map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId],
+        correctionId: id,
+      })),
+      this.coverageShadowGeneratedAt,
+    );
+    const duplicateCorrections = input.rejectedArticleIds.flatMap((rejectedArticleId) => {
+      const orderedPair = [input.anchorArticleId, rejectedArticleId].sort().join("\0");
+      const existing = activePairs.find(
+        (correction) =>
+          (input.originalBundleId === undefined ||
+            correction.originalBundleId === input.originalBundleId) &&
+          [correction.anchorArticleId, correction.rejectedArticleId].sort().join("\0") ===
+            orderedPair,
+      );
+      return existing ? [existing] : [];
+    });
+    const duplicateIds = new Set(
+      duplicateCorrections.map(({ rejectedArticleId }) => rejectedArticleId),
+    );
+    const newRejectedArticleIds = input.rejectedArticleIds.filter((id) => !duplicateIds.has(id));
+    if (duplicateCorrections.length === input.rejectedArticleIds.length) {
+      const affectedIds = new Set([input.anchorArticleId, ...input.rejectedArticleIds]);
+      return {
+        corrections: clone(duplicateCorrections),
+        removedStoryIds: [bundleId],
+        replacementStories: currentStories.filter(({ articleIds }) =>
+          articleIds.some((id) => affectedIds.has(id)),
+        ),
+      };
+    }
+    if (
+      !bundle ||
+      bundle.generatedAt !== input.expectedGeneratedAt ||
+      (input.expectedProjectionRevision !== undefined &&
+        input.expectedProjectionRevision !== this.coverageProjectionRevision) ||
+      (input.originalBundleId !== undefined &&
+        !analyzeArticleCoverageV2(this.articles, this.coverageShadowGeneratedAt).bundles.some(
+          (candidate) =>
+            candidate.id === input.originalBundleId &&
+            candidate.memberArticleIds.some((id) => bundle.memberArticleIds.includes(id)),
+        )) ||
+      !bundle.memberArticleIds.includes(input.anchorArticleId) ||
+      newRejectedArticleIds.some((id) => !bundle.memberArticleIds.includes(id))
+    ) {
+      const affected = new Set([input.anchorArticleId, ...input.rejectedArticleIds]);
+      throw new CoverageBundleConflictError(
+        "Dekningsgruppen er endret. Last inn den oppdaterte gruppen.",
+        currentStories
+          .filter(({ articleIds }) => articleIds.some((id) => affected.has(id)))
+          .slice(0, 10),
+      );
+    }
+    const created: CoverageBundleCorrection[] = [];
+    for (const rejectedArticleId of newRejectedArticleIds) {
+      const edge = analysis.edges?.find((candidate) =>
+        candidate.articleIds.every((id) => [input.anchorArticleId, rejectedArticleId].includes(id)),
+      );
+      const correction: (typeof this.coverageCorrections)[number] = {
+        id: randomUUID(),
+        generationId: "memory-shadow",
+        originalBundleId: input.originalBundleId ?? bundleId,
+        anchorArticleId: input.anchorArticleId,
+        rejectedArticleId,
+        matcherVersion: "v2",
+        evidenceFingerprint:
+          edge?.evidenceFingerprint ??
+          `v2:no-edge:${[input.anchorArticleId, rejectedArticleId].sort().join(":")}`,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        createdBy: actorId,
+        ...(input.reason ? { reason: input.reason } : {}),
+      };
+      this.coverageCorrections.push(correction);
+      created.push(correction);
+    }
+    if (created.length > 0) this.coverageProjectionRevision += 1;
+    const resultCorrections = [...duplicateCorrections, ...created];
+    const rejectedPairs = this.coverageCorrections
+      .filter(({ status }) => status === "active")
+      .map(({ id, anchorArticleId, rejectedArticleId }) => ({
+        articleIds: [anchorArticleId, rejectedArticleId] as [string, string],
+        correctionId: id,
+      }));
+    const originalMembers = new Set(bundle.memberArticleIds);
+    return {
+      corrections: clone(resultCorrections),
+      removedStoryIds: [bundleId],
+      replacementStories: recomputeCoverageStories(
+        this.articles,
+        rejectedPairs,
+        this.coverageShadowGeneratedAt,
+      ).filter(({ articleIds }) => articleIds.some((id) => originalMembers.has(id))),
+    };
+  }
+
+  async undoCoverageCorrection(
+    correctionId: string,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    const correction = this.coverageCorrections.find(({ id }) => id === correctionId);
+    if (!correction) {
+      throw Object.assign(new Error("Korrigeringen finnes ikke."), { status: 404 });
+    }
+    const rejectedPairs = () =>
+      this.coverageCorrections
+        .filter(({ status }) => status === "active")
+        .map(({ id, anchorArticleId, rejectedArticleId }) => ({
+          articleIds: [anchorArticleId, rejectedArticleId] as [string, string],
+          correctionId: id,
+        }));
+    const affected = new Set([correction.anchorArticleId, correction.rejectedArticleId]);
+    const removedStoryIds = recomputeCoverageStories(
+      this.articles,
+      rejectedPairs(),
+      this.coverageShadowGeneratedAt,
+    )
+      .filter(({ articleIds }) => articleIds.some((id) => affected.has(id)))
+      .map(({ id }) => id);
+    if (correction.status === "active") {
+      correction.status = "reverted";
+      correction.revertedAt = new Date().toISOString();
+      correction.revertedBy = actorId;
+      this.coverageProjectionRevision += 1;
+    }
+    return {
+      corrections: [clone(correction)],
+      removedStoryIds,
+      replacementStories: recomputeCoverageStories(
+        this.articles,
+        rejectedPairs(),
+        this.coverageShadowGeneratedAt,
+      ).filter(({ articleIds }) => articleIds.some((id) => affected.has(id))),
+    };
+  }
+
+  async exportCoverageCorrections(sinceDays: number): Promise<CoverageCorrectionExport> {
+    const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
+    const rows = this.coverageCorrections
+      .filter(({ createdAt }) => Date.parse(createdAt) >= cutoff)
+      .flatMap((correction) => {
+        const anchor = this.articles.find(({ id }) => id === correction.anchorArticleId);
+        const rejected = this.articles.find(({ id }) => id === correction.rejectedArticleId);
+        if (!anchor || !rejected) return [];
+        return [
+          {
+            correctionId: correction.id,
+            label: "separate" as const,
+            articleIds: [anchor.id, rejected.id] as [string, string],
+            sources: [anchor.source, rejected.source] as [SourceId, SourceId],
+            normalizedTitles: [
+              normalizedCorrectionText(anchor.title, 160),
+              normalizedCorrectionText(rejected.title, 160),
+            ] as [string, string],
+            normalizedExcerpts: [
+              normalizedCorrectionText(anchor.excerpt, 280),
+              normalizedCorrectionText(rejected.excerpt, 280),
+            ] as [string, string],
+            matcherVersion: correction.matcherVersion,
+            evidenceFingerprint: correction.evidenceFingerprint,
+            createdAt: correction.createdAt,
+          },
+        ];
+      })
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.correctionId.localeCompare(right.correctionId),
+      );
+    return { schemaVersion: 1, generatedAt: new Date().toISOString(), rows };
   }
 
   async listNotificationTriggers(
@@ -4673,7 +5860,50 @@ export class MemoryStore implements Store {
 }
 
 export class PgStore implements Store {
-  constructor(private readonly pool: pg.Pool) {}
+  private activeCoverageProjectionCache: ActiveCoverageProjectionCache | undefined;
+  private activeCoverageProjectionBuild: Promise<CoverageBundlePage> | undefined;
+
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly coverageProjectionMode: CoverageProjectionMode = "legacy",
+  ) {}
+
+  async coverageProjectionReadiness(): Promise<CoverageProjectionReadinessState> {
+    const deadlineAt = Date.now() + coverageReadinessDeadlineMs;
+    const client = await acquireCoverageReadinessClient(this.pool, deadlineAt);
+    let destroyClient = false;
+    try {
+      await client.query(
+        coverageReadinessQuery("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", deadlineAt),
+      );
+      const statementTimeoutMs = Math.max(
+        1,
+        Math.min(coverageReadinessStatementTimeoutMs, deadlineAt - Date.now()),
+      );
+      await client.query(
+        coverageReadinessQuery(
+          `SET LOCAL statement_timeout = '${statementTimeoutMs}ms'`,
+          deadlineAt,
+        ),
+      );
+      const result = await client.query<CoverageProjectionHealthRow>(
+        coverageReadinessQuery(coverageProjectionHealthQueryText, deadlineAt),
+      );
+      await client.query(coverageReadinessQuery("COMMIT", deadlineAt));
+      const row = result.rows[0];
+      return {
+        generationValid: row?.generation_valid === true,
+        parityClean: row?.parity_clean === true,
+        integrityErrorCount: Number(row?.integrity_error_count ?? 1),
+      };
+    } catch (error) {
+      destroyClient = !(await rollbackCoverageReadinessClient(client));
+      throw error;
+    } finally {
+      if (destroyClient) client.release(true);
+      else client.release();
+    }
+  }
 
   private async listSituationsForArticleIds(articleIds: string[]): Promise<Situation[]> {
     if (articleIds.length === 0) return [];
@@ -5347,6 +6577,7 @@ export class PgStore implements Store {
       articles: articlesFromCityPulseStoryPage(storyPage),
       stories: storyPage.items,
       ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
+      ...(storyPage.projection ? { storyProjection: storyPage.projection } : {}),
       situations,
       sourceHealth,
     };
@@ -5516,6 +6747,171 @@ export class PgStore implements Store {
   }
 
   async listCityPulseStories(filters: ArticleFilters, login: string): Promise<CityPulseStoryPage> {
+    if (this.coverageProjectionMode !== "normalized-active") {
+      return this.listLegacyCityPulseStories(filters, login, "disabled", true);
+    }
+    let generationId: string | undefined;
+    try {
+      const coverage = await this.listNormalizedCoverageBundles(
+        { projection: "active", limit: Number.MAX_SAFE_INTEGER },
+        "active",
+      );
+      const generation = coverage.summary.generation;
+      generationId = generation?.id;
+      if (!generation) {
+        return this.listLegacyCityPulseStories(
+          filters,
+          login,
+          "no_completed_active_generation",
+          false,
+        );
+      }
+      if (coverage.summary.integrityErrorCount > 0) {
+        console.error({
+          event: "coverage_projection_fallback",
+          reason: "integrity_error",
+          generationId: generation.id,
+          integrityErrorCount: coverage.summary.integrityErrorCount,
+          bundleCount: coverage.summary.activeBundleCount,
+        });
+        return this.listLegacyCityPulseStories(filters, login, "integrity_error", false);
+      }
+      if (coverage.parity?.clean !== true) {
+        console.error({
+          event: "coverage_projection_fallback",
+          reason: "parity_error",
+          generationId: generation.id,
+        });
+        return this.listLegacyCityPulseStories(filters, login, "parity_error", false);
+      }
+      const projectionArticles =
+        this.activeCoverageProjectionCache?.generationId === generation.id
+          ? this.activeCoverageProjectionCache.articles
+          : [];
+      if (projectionArticles.length !== generation.articleCount) {
+        return this.listLegacyCityPulseStories(filters, login, "integrity_error", false);
+      }
+      const savedResult = await this.pool.query<{ article_id: string }>(
+        `SELECT article_id FROM saved_articles
+         WHERE github_login=$1 AND article_id=ANY($2::text[])`,
+        [login, projectionArticles.map(({ id }) => id)],
+      );
+      const savedIds = new Set(savedResult.rows.map(({ article_id }) => article_id));
+      const allArticles = projectionArticles.map((article) => ({
+        ...article,
+        saved: savedIds.has(article.id),
+      }));
+      const filteredArticles = allArticles.filter((article) =>
+        articleMatchesCityPulseFilters(article, filters),
+      );
+      const sourceArticleIds = new Set(
+        filteredArticles.slice(0, cityPulseStorySourceLimit(filters)).map(({ id }) => id),
+      );
+      const relatedSituations = await this.listSituationsForArticleIds(
+        allArticles.map(({ id }) => id),
+      );
+      const officialEvents = allArticles.some(
+        (article) =>
+          article.category === "Transport" &&
+          article.location &&
+          isNewsroomPublicVerificationSource(article.source),
+      )
+        ? await this.listOfficialEvents({ source: "datex", limit: 500 })
+        : [];
+      const enrichedArticles = enrichArticlesWithTrafficOfficialVerification(
+        enrichArticlesWithSituations(allArticles, relatedSituations),
+        officialEvents,
+      );
+      const articlesById = new Map(enrichedArticles.map((article) => [article.id, article]));
+      const groupedArticleIds = new Set<string>();
+      const stories = coverage.items.flatMap((item) => {
+        if (item.correctionTombstone) return [];
+        const articles = item.memberArticleIds.flatMap((id) => {
+          const article = articlesById.get(id);
+          return article ? [article] : [];
+        });
+        if (articles.length === 0 || !articles.some(({ id }) => sourceArticleIds.has(id)))
+          return [];
+        articles.sort(
+          (left, right) =>
+            right.publishedAt.localeCompare(left.publishedAt) || right.id.localeCompare(left.id),
+        );
+        for (const article of articles) groupedArticleIds.add(article.id);
+        const primary = articlesById.get(item.primaryArticleId) ?? articles[0]!;
+        const group = {
+          id: item.id,
+          primary,
+          articles,
+          sourceLabels: [...new Set(articles.map(({ sourceLabel }) => sourceLabel))],
+          acceptedEdges: item.edges.filter(
+            (edge) =>
+              !edge.reviewable &&
+              edge.kind === "incident" &&
+              edge.tier === "strong" &&
+              edge.conflicts.length === 0 &&
+              edge.positiveIncidentEvidence.length > 0 &&
+              edge.articleIds.every((id) => item.memberArticleIds.includes(id)),
+          ),
+          bundle: {
+            id: item.id,
+            kind: item.kind,
+            confidence: item.confidence,
+            reason: item.reason,
+            generatedAt: item.generatedAt,
+            ...(item.matchConfidence ? { matchConfidence: item.matchConfidence } : {}),
+            matcherVersion: generation.matcherVersion,
+            ...(item.correctionTarget ? { correctionTarget: item.correctionTarget } : {}),
+          },
+        };
+        const story = cityPulseStoryFromGroup(group);
+        const publicVerification =
+          primary.publicVerification ??
+          articles.find((article) => article.publicVerification)?.publicVerification ??
+          derivePublicVerificationForArticleGroup(group);
+        return [publicVerification ? { ...story, publicVerification } : story];
+      });
+      for (const article of enrichedArticles) {
+        if (!sourceArticleIds.has(article.id) || groupedArticleIds.has(article.id)) continue;
+        stories.push(
+          cityPulseStoryFromGroup({
+            id: article.id,
+            primary: article,
+            articles: [article],
+            sourceLabels: [article.sourceLabel],
+          }),
+        );
+      }
+      return {
+        ...cityPulseStoryPageFromStories(stories, filters),
+        projection: {
+          mode: "normalized",
+          generationId: generation.id,
+          matcherVersion: generation.matcherVersion,
+          parityClean: coverage.parity?.clean === true,
+          projectionRevision: this.activeCoverageProjectionCache?.projectionRevision ?? 0,
+        },
+      };
+    } catch (error) {
+      console.error({
+        event: "coverage_projection_fallback",
+        reason: "integrity_error",
+        ...(generationId ? { generationId } : {}),
+        errorClass: error instanceof Error ? error.constructor.name : "UnknownError",
+      });
+      return this.listLegacyCityPulseStories(filters, login, "integrity_error", false);
+    }
+  }
+
+  private async listLegacyCityPulseStories(
+    filters: ArticleFilters,
+    login: string,
+    fallbackReason:
+      | "disabled"
+      | "no_completed_active_generation"
+      | "integrity_error"
+      | "parity_error",
+    parityClean: boolean,
+  ): Promise<CityPulseStoryPage> {
     const articles = await this.listArticles(
       {
         ...filters,
@@ -5524,12 +6920,24 @@ export class PgStore implements Store {
       },
       login,
     );
-    return cityPulseStoryPageFromArticles(articles.items, filters);
+    return {
+      ...cityPulseStoryPageFromArticles(articles.items, filters),
+      projection: {
+        mode: "legacy",
+        matcherVersion: "v1",
+        parityClean,
+        fallbackReason,
+      },
+    };
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
+    const projection = filters.projection ?? "legacy";
+    if (projection !== "legacy") {
+      return this.listNormalizedCoverageBundles(filters, projection);
+    }
     const params: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = ["cb.state='legacy'", "cb.matcher_version='v1'"];
     if (filters.kind) {
       params.push(filters.kind);
       where.push(`cb.kind = $${params.length}`);
@@ -5638,7 +7046,9 @@ export class PgStore implements Store {
     const summaryRow = summaryResult.rows[0];
     const summary: CoverageBundleSummary = summaryRow
       ? {
+          ...emptyCoverageBundleSummary(),
           recentBundleCount: Number(summaryRow.total),
+          activeBundleCount: Number(summaryRow.total),
           byKind: {
             incident: Number(summaryRow.incident),
             topic: Number(summaryRow.topic),
@@ -5661,6 +7071,976 @@ export class PgStore implements Store {
         result.rows.length > limit && lastRow
           ? encodeCursor(lastRow.last_seen_at_cursor, lastRow.id)
           : undefined,
+    };
+  }
+
+  private coverageGenerationFromHealth(
+    row: CoverageProjectionHealthRow,
+  ): CoverageGenerationSummary | undefined {
+    if (
+      !row.generation_valid ||
+      !row.generation_id ||
+      !row.matcher_version ||
+      !row.mode ||
+      !row.started_at ||
+      !row.completed_at
+    ) {
+      return undefined;
+    }
+    return {
+      id: row.generation_id,
+      matcherVersion: row.matcher_version,
+      mode: row.mode,
+      status: "completed",
+      startedAt: new Date(row.started_at).toISOString(),
+      completedAt: new Date(row.completed_at).toISOString(),
+      articleCount: Number(row.article_count),
+      bundleCount: Number(row.bundle_count),
+      edgeCount: Number(row.edge_count),
+      correctionConflictCount: Number(row.correction_conflict_count),
+    };
+  }
+
+  private activeCoverageHealthKey(row: CoverageProjectionHealthRow): string {
+    return [row.generation_id ?? "none", row.correction_revision, row.legacy_revision].join(":");
+  }
+
+  private async listActiveCoverageBundlesSnapshot(
+    filters: CoverageBundleQueryInput,
+  ): Promise<CoverageBundlePage> {
+    const deadlineAt = Date.now() + coverageReadinessDeadlineMs;
+    const client = await acquireCoverageReadinessClient(this.pool, deadlineAt);
+    let destroyClient = false;
+    try {
+      await client.query(
+        coverageReadinessQuery("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", deadlineAt),
+      );
+      const statementTimeoutMs = Math.max(
+        1,
+        Math.min(coverageReadinessStatementTimeoutMs, deadlineAt - Date.now()),
+      );
+      await client.query(
+        coverageReadinessQuery(
+          `SET LOCAL statement_timeout = '${statementTimeoutMs}ms'`,
+          deadlineAt,
+        ),
+      );
+      const firstHealthResult = await client.query<CoverageProjectionHealthRow>(
+        coverageReadinessQuery(coverageProjectionHealthQueryText, deadlineAt),
+      );
+      const firstHealth = firstHealthResult.rows[0];
+      if (!firstHealth) throw new Error("Coverage projection health row is missing");
+      const generation = this.coverageGenerationFromHealth(firstHealth);
+      if (!generation) {
+        await client.query(coverageReadinessQuery("COMMIT", deadlineAt));
+        const summary = emptyCoverageBundleSummary();
+        summary.projectionState = "active";
+        summary.matcherVersion = "v2";
+        return { items: [], summary };
+      }
+      const resourceError =
+        generation.articleCount > coverageProjectionMaxArticleCount ||
+        generation.bundleCount > coverageProjectionMaxBundleCount;
+      if (
+        firstHealth.parity_clean !== true ||
+        Number(firstHealth.integrity_error_count) !== 0 ||
+        resourceError
+      ) {
+        await client.query(coverageReadinessQuery("COMMIT", deadlineAt));
+        const summary = emptyCoverageBundleSummary();
+        summary.projectionState = "active";
+        summary.matcherVersion = "v2";
+        summary.generation = generation;
+        summary.integrityErrorCount =
+          Number(firstHealth.integrity_error_count) + Number(resourceError);
+        return {
+          items: [],
+          summary,
+          parity: {
+            legacyBundleCount: 0,
+            normalizedBundleCount: generation.bundleCount,
+            membershipMismatchCount: firstHealth.parity_clean ? 0 : 1,
+            primaryMismatchCount: 0,
+            clean: firstHealth.parity_clean === true,
+          },
+        };
+      }
+      const projectionRevision = Number(firstHealth.correction_revision);
+      const legacyRevision = Number(firstHealth.legacy_revision);
+      const cache = this.activeCoverageProjectionCache;
+      if (
+        cache?.generationId === generation.id &&
+        cache.projectionRevision === projectionRevision &&
+        cache.legacyRevision === legacyRevision
+      ) {
+        await client.query(coverageReadinessQuery("COMMIT", deadlineAt));
+        return this.activeCoveragePageFromCache(filters, generation, cache);
+      }
+
+      const page = await this.listNormalizedCoverageBundlesUncoalesced(filters, "active", client);
+      const finalHealthResult = await client.query<CoverageProjectionHealthRow>(
+        coverageReadinessQuery(coverageProjectionHealthQueryText, deadlineAt),
+      );
+      const finalHealth = finalHealthResult.rows[0];
+      if (
+        !finalHealth ||
+        this.activeCoverageHealthKey(finalHealth) !== this.activeCoverageHealthKey(firstHealth) ||
+        finalHealth.parity_clean !== true ||
+        Number(finalHealth.integrity_error_count) !== 0
+      ) {
+        this.activeCoverageProjectionCache = undefined;
+        throw new Error("Coverage projection changed while the cache was materialized");
+      }
+      if (this.activeCoverageProjectionCache) {
+        this.activeCoverageProjectionCache.legacyRevision = legacyRevision;
+        this.activeCoverageProjectionCache.parity = {
+          ...this.activeCoverageProjectionCache.parity,
+          clean: true,
+        };
+        this.activeCoverageProjectionCache.integrityErrorCount = 0;
+      }
+      await client.query(coverageReadinessQuery("COMMIT", deadlineAt));
+      return page;
+    } catch (error) {
+      destroyClient = !(await rollbackCoverageReadinessClient(client));
+      throw error;
+    } finally {
+      if (destroyClient) client.release(true);
+      else client.release();
+    }
+  }
+
+  private async listNormalizedCoverageBundles(
+    filters: CoverageBundleQueryInput,
+    projection: "shadow" | "active" | "superseded",
+  ): Promise<CoverageBundlePage> {
+    if (projection !== "active") {
+      return this.listNormalizedCoverageBundlesUncoalesced(filters, projection);
+    }
+    if (this.activeCoverageProjectionBuild) {
+      await this.activeCoverageProjectionBuild;
+      return this.listActiveCoverageBundlesSnapshot(filters);
+    }
+    const build = this.listActiveCoverageBundlesSnapshot(filters);
+    this.activeCoverageProjectionBuild = build;
+    try {
+      return await build;
+    } finally {
+      if (this.activeCoverageProjectionBuild === build) {
+        this.activeCoverageProjectionBuild = undefined;
+      }
+    }
+  }
+
+  private async listNormalizedCoverageBundlesUncoalesced(
+    filters: CoverageBundleQueryInput,
+    projection: "shadow" | "active" | "superseded",
+    queryable: Pick<pg.Pool | pg.PoolClient, "query"> = this.pool,
+  ): Promise<CoverageBundlePage> {
+    const generationParams: unknown[] = [];
+    let generationPredicate: string;
+    if (projection === "active") {
+      generationParams.push("active");
+      generationPredicate =
+        "mode=$1 AND status='completed' AND is_current=true AND matcher_version='v2'";
+    } else if (projection === "shadow") {
+      generationParams.push("shadow");
+      generationPredicate = "mode=$1 AND status='completed' AND matcher_version='v2'";
+    } else {
+      generationPredicate = "status='completed' AND matcher_version='v2' AND NOT is_current";
+    }
+    if (filters.generationId) {
+      generationParams.push(filters.generationId);
+      generationPredicate += ` AND id=$${generationParams.length}`;
+    } else if (projection === "superseded" && filters.historyCursor) {
+      const historyCursor = decodeCursor(filters.historyCursor);
+      generationParams.push(historyCursor.timestamp, historyCursor.id);
+      generationPredicate += ` AND (completed_at, id) < ($${generationParams.length - 1}::timestamptz, $${generationParams.length})`;
+    }
+    const generationLimit = projection === "superseded" && !filters.generationId ? 2 : 1;
+    const generationResult = await queryable.query<{
+      id: string;
+      matcher_version: "v1" | "v2";
+      mode: "active" | "shadow";
+      started_at: Date | string;
+      completed_at: Date | string;
+      article_count: number;
+      bundle_count: number;
+      edge_count: number;
+      correction_conflict_count: number;
+      correction_revision: number | string;
+      legacy_revision: number | string;
+      correction_revision_at: Date | string;
+    }>(
+      `SELECT id, matcher_version, mode, started_at, completed_at, article_count,
+              bundle_count, edge_count, correction_conflict_count,
+              COALESCE((SELECT revision FROM coverage_projection_revisions
+                        WHERE projection='active'), 0) AS correction_revision,
+              COALESCE((SELECT legacy_revision FROM coverage_projection_revisions
+                        WHERE projection='active'), 0) AS legacy_revision,
+              COALESCE((SELECT updated_at FROM coverage_projection_revisions
+                        WHERE projection='active'), completed_at) AS correction_revision_at
+       FROM coverage_bundle_generations
+       WHERE ${generationPredicate}
+       ORDER BY completed_at DESC, id DESC
+       LIMIT ${generationLimit}`,
+      generationParams,
+    );
+    const generationRow = generationResult.rows[0];
+    if (!generationRow) {
+      const summary = emptyCoverageBundleSummary();
+      summary.projectionState = projection;
+      summary.matcherVersion = "v2";
+      return { items: [], summary, selectedProjection: projection };
+    }
+    const olderGenerationRow = generationResult.rows[1];
+    const historyNextCursor = olderGenerationRow
+      ? encodeCursor(new Date(generationRow.completed_at).toISOString(), generationRow.id)
+      : undefined;
+    const generation: CoverageGenerationSummary = {
+      id: generationRow.id,
+      matcherVersion: generationRow.matcher_version,
+      mode: generationRow.mode,
+      status: "completed",
+      startedAt: new Date(generationRow.started_at).toISOString(),
+      completedAt: new Date(generationRow.completed_at).toISOString(),
+      articleCount: Number(generationRow.article_count),
+      bundleCount: Number(generationRow.bundle_count),
+      edgeCount: Number(generationRow.edge_count),
+      correctionConflictCount: Number(generationRow.correction_conflict_count),
+    };
+    const projectionRevision = Number(generationRow.correction_revision ?? 0);
+    const legacyRevision = Number(generationRow.legacy_revision ?? 0);
+    const projectionRevisionAt = new Date(
+      generationRow.correction_revision_at ?? generationRow.completed_at,
+    ).toISOString();
+    if (
+      projection === "active" &&
+      this.activeCoverageProjectionCache?.generationId === generation.id &&
+      this.activeCoverageProjectionCache.projectionRevision === projectionRevision &&
+      this.activeCoverageProjectionCache.legacyRevision === legacyRevision
+    ) {
+      return this.activeCoveragePageFromCache(
+        filters,
+        generation,
+        this.activeCoverageProjectionCache,
+      );
+    }
+    const stableIdentitySelect =
+      projection === "superseded"
+        ? `cbv.bundle_id AS id,
+           COALESCE(cbv.last_seen_at, cbv.generated_at) AS updated_at`
+        : `cb.id, cb.updated_at`;
+    const stableIdentityJoin =
+      projection === "superseded"
+        ? ""
+        : `JOIN coverage_bundles cb
+             ON cb.id = cbv.bundle_id AND cb.generation_id = cbv.generation_id`;
+    const stableStatePredicate =
+      projection === "superseded" ? "$1 = 'superseded'" : "cb.state = $1";
+    const stableOrderId = projection === "superseded" ? "cbv.bundle_id" : "cb.id";
+    const result = await queryable.query<NormalizedCoverageBundleRow>(
+      `SELECT ${stableIdentitySelect}, cbv.kind, cbv.confidence, cbv.reason, cbv.generated_at,
+              cbv.last_seen_at,
+              to_char(cbv.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS last_seen_at_cursor,
+              cbv.primary_article_id, cbv.source_ids, cbv.source_labels,
+              cbv.match_tier, cbv.match_score, cbv.match_rationale,
+              COALESCE((
+                SELECT array_agg(cbm.article_id ORDER BY cbm.article_id)
+                FROM coverage_bundle_members cbm
+                WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+              ), '{}') AS member_article_ids,
+              COALESCE((
+                SELECT jsonb_agg(a.payload ORDER BY cbm.article_id)
+                FROM coverage_bundle_members cbm
+                JOIN articles a ON a.id=cbm.article_id
+                WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+              ), '[]'::jsonb) AS member_articles,
+              COALESCE((
+                SELECT array_agg(cbm.article_id ORDER BY cbm.article_id)
+                FROM coverage_bundle_members cbm
+                LEFT JOIN articles a ON a.id=cbm.article_id
+                WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+                  AND a.id IS NULL
+              ), '{}') AS missing_article_ids,
+              (SELECT count(*) FROM coverage_bundle_members cbm
+               WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+                 AND cbm.role='primary') AS primary_count,
+              CASE
+                WHEN adjacent_generation.id IS NULL THEN false
+                WHEN previous_version.primary_article_id IS NULL THEN true
+                ELSE previous_version.primary_article_id IS DISTINCT FROM cbv.primary_article_id
+                  OR previous_version.member_article_ids IS DISTINCT FROM ARRAY(
+                    SELECT DISTINCT current_member.article_id
+                    FROM coverage_bundle_members current_member
+                    WHERE current_member.generation_id=cbv.generation_id
+                      AND current_member.bundle_id=cbv.bundle_id
+                    ORDER BY current_member.article_id
+                  )
+              END AS generation_changed,
+              COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'articleIds', jsonb_build_array(cbe.left_article_id, cbe.right_article_id),
+                  'tier', cbe.tier, 'score', cbe.score, 'kind', cbe.kind,
+                  'signals', cbe.signals, 'conflicts', cbe.conflicts,
+                  'evidenceFingerprint', cbe.evidence_fingerprint,
+                  'positiveIncidentEvidence', cbe.positive_incident_evidence,
+                  'reviewable', cbe.status='reviewable',
+                  'correctionConflict', cbe.correction_conflict
+                ) ORDER BY cbe.score DESC, cbe.left_article_id, cbe.right_article_id)
+                FROM coverage_bundle_edges cbe
+                WHERE cbe.generation_id=cbv.generation_id
+                  AND (cbe.bundle_id=cbv.bundle_id OR (
+                    cbe.status='reviewable' AND EXISTS (
+                      SELECT 1 FROM coverage_bundle_members cbm
+                      WHERE cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+                        AND cbm.article_id IN (cbe.left_article_id, cbe.right_article_id)
+                    )
+                  ))
+              ), '[]'::jsonb) AS edges,
+              COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'id', cbc.id, 'generationId', cbc.generation_id,
+                  'anchorArticleId', cbc.anchor_article_id,
+                  'rejectedArticleId', cbc.rejected_article_id, 'status', cbc.status,
+                  'applicability', CASE WHEN $1='active' AND
+                    EXISTS (
+                      SELECT 1 FROM coverage_generation_articles active_anchor
+                      WHERE active_anchor.generation_id=cbv.generation_id
+                        AND active_anchor.article_id=cbc.anchor_article_id
+                    ) AND EXISTS (
+                      SELECT 1 FROM coverage_generation_articles active_rejected
+                      WHERE active_rejected.generation_id=cbv.generation_id
+                        AND active_rejected.article_id=cbc.rejected_article_id
+                    ) THEN 'active' ELSE 'history' END,
+                  'createdAt', cbc.created_at, 'revertedAt', cbc.reverted_at
+                ) ORDER BY cbc.created_at DESC, cbc.id DESC)
+                FROM coverage_bundle_corrections cbc
+                WHERE cbc.original_bundle_id=cbv.bundle_id
+                   OR EXISTS (
+                     SELECT 1 FROM coverage_bundle_members correction_member
+                     WHERE correction_member.generation_id=cbv.generation_id
+                       AND correction_member.bundle_id=cbv.bundle_id
+                       AND correction_member.article_id IN (
+                         cbc.anchor_article_id, cbc.rejected_article_id
+                       )
+                   )
+              ), '[]'::jsonb) AS corrections
+       FROM coverage_bundle_versions cbv
+       JOIN coverage_bundle_generations cg ON cg.id = cbv.generation_id
+       LEFT JOIN LATERAL (
+         SELECT older.id
+                FROM public.coverage_bundle_generations AS older
+         WHERE older.matcher_version='v2' AND older.status='completed'
+           AND (older.completed_at, older.id) < (cg.completed_at, cg.id)
+         ORDER BY older.completed_at DESC, older.id DESC
+         LIMIT 1
+       ) adjacent_generation ON true
+       LEFT JOIN LATERAL (
+         SELECT previous.primary_article_id,
+                array_agg(DISTINCT previous_member.article_id ORDER BY previous_member.article_id)
+                  AS member_article_ids
+         FROM coverage_bundle_versions previous
+         JOIN coverage_bundle_members previous_member
+           ON previous_member.generation_id=previous.generation_id
+          AND previous_member.bundle_id=previous.bundle_id
+         WHERE previous.generation_id=adjacent_generation.id
+           AND previous.bundle_id=cbv.bundle_id
+         GROUP BY previous.primary_article_id
+       ) previous_version ON true
+       ${stableIdentityJoin}
+       WHERE ${stableStatePredicate}
+         AND cg.id=$2 AND cg.status = 'completed'
+       ORDER BY cbv.last_seen_at DESC, ${stableOrderId} DESC`,
+      [projection, generation.id],
+    );
+    const storedItems = result.rows.map((row) =>
+      normalizedCoverageBundleItemFromRow(row, generation, projection),
+    );
+    let allItems = storedItems;
+    let projectionIntegrityErrorCount = 0;
+    let selectedGenerationActiveCorrectionCount = 0;
+    let activeArticles: Article[] = [];
+    if (projection === "active") {
+      const [articleResult, correctionResult] = await Promise.all([
+        queryable.query<{ payload: Article }>(
+          `SELECT a.payload
+           FROM coverage_generation_articles cga
+           JOIN articles a ON a.id=cga.article_id
+           WHERE cga.generation_id=$1
+           ORDER BY a.published_at DESC, a.id DESC`,
+          [generation.id],
+        ),
+        queryable.query<CoverageCorrectionRow>(
+          `SELECT cbc.*
+           FROM coverage_bundle_corrections cbc
+           JOIN coverage_generation_articles left_article
+             ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+           JOIN coverage_generation_articles right_article
+             ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+           WHERE cbc.status='active'
+           ORDER BY cbc.created_at, cbc.id`,
+          [generation.id],
+        ),
+      ]);
+      const articles = articleResult.rows.map(({ payload }) => payload);
+      activeArticles = articles;
+      selectedGenerationActiveCorrectionCount = new Set(correctionResult.rows.map(({ id }) => id))
+        .size;
+      allItems = effectiveCorrectedCoverageBundleItems(
+        storedItems,
+        activeArticles,
+        correctionResult.rows,
+        generation,
+        projectionRevision,
+      );
+      projectionIntegrityErrorCount +=
+        Number(storedItems.length !== generation.bundleCount) +
+        Number(articles.length !== generation.articleCount) +
+        Number(generation.matcherVersion !== "v2");
+    }
+    const filtered = filterCoverageBundleItems(allItems, filters).filter(
+      (item) =>
+        (!filters.matchTier || item.matchConfidence?.tier === filters.matchTier) &&
+        (filters.corrected === undefined ||
+          item.corrections.some(
+            ({ status, applicability }) => status === "active" && applicability !== "history",
+          ) === filters.corrected) &&
+        (!filters.integrity ||
+          (filters.integrity === "ok"
+            ? item.integrityErrors.length === 0
+            : item.integrityErrors.length > 0)),
+    );
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const cursorFiltered = filtered.filter((item) =>
+      beforeCursor(item.lastSeenAt, item.id, cursor),
+    );
+    const limit = filters.limit ?? 30;
+    const pageItems = cursorFiltered.slice(0, limit);
+    const legacyResult = await queryable.query<{
+      id: string;
+      primary_article_id: string;
+      member_article_ids: string[];
+    }>(
+      `SELECT id, primary_article_id, member_article_ids
+       FROM coverage_bundles
+       WHERE legacy_generation_id=$1 AND state='legacy' AND matcher_version='v1'
+       ORDER BY id`,
+      [generation.id],
+    );
+    const parity = coverageProjectionParity(
+      legacyResult.rows.map((row) => ({
+        id: row.id,
+        primaryArticleId: row.primary_article_id,
+        memberArticleIds: row.member_article_ids,
+      })),
+      storedItems.map((item) => ({
+        id: item.id,
+        primaryArticleId: item.primaryArticleId,
+        memberArticleIds: item.memberArticleIds,
+      })),
+    );
+    if (projection === "active") {
+      const cache: ActiveCoverageProjectionCache = {
+        generationId: generation.id,
+        projectionRevision,
+        legacyRevision,
+        projectionRevisionAt,
+        storedItems,
+        effectiveItems: allItems,
+        articles: activeArticles,
+        parity,
+        integrityErrorCount:
+          storedItems.reduce((count, item) => count + item.integrityErrors.length, 0) +
+          projectionIntegrityErrorCount,
+        activeCorrectionCount: selectedGenerationActiveCorrectionCount,
+      };
+      this.activeCoverageProjectionCache = cache;
+      return this.activeCoveragePageFromCache(filters, generation, cache);
+    }
+    const summary = summarizeCoverageBundleItems(filtered);
+    summary.activeBundleCount = filtered.length;
+    summary.byMatchTier = {
+      strong: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "strong").length,
+      moderate: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "moderate")
+        .length,
+    };
+    summary.reviewCandidateCount = filtered.reduce(
+      (count, item) => count + item.reviewCandidates.length,
+      0,
+    );
+    summary.activeCorrectionCount = new Set(
+      filtered.flatMap(({ corrections }) =>
+        corrections
+          .filter(({ status, applicability }) => status === "active" && applicability !== "history")
+          .map(({ id }) => id),
+      ),
+    ).size;
+    summary.integrityErrorCount =
+      storedItems.reduce((count, item) => count + item.integrityErrors.length, 0) +
+      projectionIntegrityErrorCount;
+    summary.matcherVersion = generation.matcherVersion;
+    summary.projectionState = projection;
+    summary.generation = generation;
+    return {
+      items: clone(pageItems),
+      summary,
+      parity,
+      selectedProjection: projection,
+      selectedGenerationId: generation.id,
+      ...(historyNextCursor ? { historyNextCursor } : {}),
+      nextCursor:
+        cursorFiltered.length > limit && pageItems.at(-1)
+          ? encodeCursor(pageItems.at(-1)!.lastSeenAt, pageItems.at(-1)!.id)
+          : undefined,
+    };
+  }
+
+  private activeCoveragePageFromCache(
+    filters: CoverageBundleQueryInput,
+    generation: CoverageGenerationSummary,
+    cache: ActiveCoverageProjectionCache,
+  ): CoverageBundlePage {
+    const filtered = filterCoverageBundleItems(cache.effectiveItems, filters).filter(
+      (item) =>
+        (!filters.matchTier || item.matchConfidence?.tier === filters.matchTier) &&
+        (filters.corrected === undefined ||
+          item.corrections.some(
+            ({ status, applicability }) => status === "active" && applicability !== "history",
+          ) === filters.corrected) &&
+        (!filters.integrity ||
+          (filters.integrity === "ok"
+            ? item.integrityErrors.length === 0
+            : item.integrityErrors.length > 0)),
+    );
+    const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+    const cursorFiltered = filtered.filter((item) =>
+      beforeCursor(item.lastSeenAt, item.id, cursor),
+    );
+    const limit = filters.limit ?? 30;
+    const pageItems = cursorFiltered.slice(0, limit);
+    const summary = summarizeCoverageBundleItems(filtered);
+    summary.activeBundleCount = filtered.length;
+    summary.byMatchTier = {
+      strong: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "strong").length,
+      moderate: filtered.filter(({ matchConfidence }) => matchConfidence?.tier === "moderate")
+        .length,
+    };
+    summary.reviewCandidateCount = filtered.reduce(
+      (count, item) => count + item.reviewCandidates.length,
+      0,
+    );
+    summary.activeCorrectionCount = cache.activeCorrectionCount;
+    summary.integrityErrorCount = cache.integrityErrorCount;
+    summary.matcherVersion = generation.matcherVersion;
+    summary.projectionState = "active";
+    summary.generation = generation;
+    return {
+      items: clone(pageItems),
+      summary,
+      parity: cache.parity,
+      nextCursor:
+        cursorFiltered.length > limit && pageItems.at(-1)
+          ? encodeCursor(pageItems.at(-1)!.lastSeenAt, pageItems.at(-1)!.id)
+          : undefined,
+    };
+  }
+
+  private async loadCurrentCoverageMutationProjection(
+    client: pg.PoolClient,
+  ): Promise<CurrentCoverageMutationProjection> {
+    const generationResult = await client.query<{
+      id: string;
+      matcher_version: "v2";
+      completed_at: Date | string;
+      revision: number | string;
+      revision_at: Date | string;
+    }>(
+      `SELECT cg.id, cg.matcher_version, cg.completed_at,
+              revision.revision, revision.updated_at AS revision_at
+       FROM coverage_projection_revisions revision
+       JOIN coverage_bundle_generations cg
+         ON cg.is_current AND cg.mode='active' AND cg.status='completed'
+        AND cg.matcher_version='v2'
+       WHERE revision.projection='active'
+       FOR UPDATE OF revision, cg`,
+    );
+    const generation = generationResult.rows[0];
+    if (!generation) {
+      throw Object.assign(new Error("Ingen aktiv dekningsgenerasjon finnes."), { status: 409 });
+    }
+    const articleResult = await client.query<{ payload: Article }>(
+      `SELECT a.payload
+         FROM coverage_generation_articles cga
+         JOIN articles a ON a.id=cga.article_id
+         WHERE cga.generation_id=$1
+         ORDER BY a.published_at DESC, a.id DESC`,
+      [generation.id],
+    );
+    const correctionResult = await client.query<CoverageCorrectionRow>(
+      `SELECT cbc.*
+         FROM coverage_bundle_corrections cbc
+         JOIN coverage_generation_articles left_article
+           ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+         JOIN coverage_generation_articles right_article
+           ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+         WHERE cbc.status='active'
+         ORDER BY cbc.created_at, cbc.id`,
+      [generation.id],
+    );
+    const membershipResult = await client.query<{
+      id: string;
+      member_article_ids: string[];
+    }>(
+      `SELECT cbv.bundle_id AS id,
+                array_agg(cbm.article_id ORDER BY cbm.article_id) AS member_article_ids
+         FROM coverage_bundle_versions cbv
+         JOIN coverage_bundle_members cbm
+           ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+         WHERE cbv.generation_id=$1
+         GROUP BY cbv.bundle_id
+         ORDER BY cbv.bundle_id`,
+      [generation.id],
+    );
+    const articles = articleResult.rows.map(({ payload }) => payload);
+    const corrections = correctionResult.rows;
+    const completedAt = new Date(generation.completed_at).toISOString();
+    const revision = Number(generation.revision);
+    const baseMemberships = membershipResult.rows.map((row) => ({
+      id: row.id,
+      memberArticleIds: row.member_article_ids,
+    }));
+    const stories = coverageStoriesWithCorrectionTargets(
+      recomputeCoverageStories(
+        articles,
+        corrections.map((row) => ({
+          articleIds: [row.anchor_article_id, row.rejected_article_id],
+          correctionId: row.id,
+        })),
+        completedAt,
+      ),
+      baseMemberships,
+      revision,
+    );
+    return {
+      generationId: generation.id,
+      matcherVersion: generation.matcher_version,
+      completedAt,
+      revision,
+      revisionAt: new Date(generation.revision_at).toISOString(),
+      articles,
+      corrections,
+      baseMemberships,
+      stories,
+    };
+  }
+
+  private coverageMutationConflict(
+    projection: CurrentCoverageMutationProjection,
+    affectedArticleIds: Iterable<string>,
+  ): CoverageBundleConflictError {
+    const affected = new Set(affectedArticleIds);
+    return new CoverageBundleConflictError(
+      "Dekningsgruppen er endret. Last inn den oppdaterte gruppen.",
+      projection.stories
+        .filter(({ articleIds }) => articleIds.some((id) => affected.has(id)))
+        .slice(0, 10),
+    );
+  }
+
+  private async splitCurrentCoverageBundle(
+    bundleId: string,
+    input: CoverageBundleSplitRequest,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    return withPgTransaction(this.pool, async (client) => {
+      const projection = await this.loadCurrentCoverageMutationProjection(client);
+      const pairKey = (left: string, right: string) => [left, right].sort().join("\0");
+      const activeByPair = new Map(
+        projection.corrections.map((correction) => [
+          pairKey(correction.anchor_article_id, correction.rejected_article_id),
+          correction,
+        ]),
+      );
+      const duplicateRows = input.rejectedArticleIds.flatMap((rejectedArticleId) => {
+        const row = activeByPair.get(pairKey(input.anchorArticleId, rejectedArticleId));
+        return row ? [row] : [];
+      });
+      const newRejectedArticleIds = input.rejectedArticleIds.filter(
+        (rejectedArticleId) => !activeByPair.has(pairKey(input.anchorArticleId, rejectedArticleId)),
+      );
+      const requestedIds = new Set([input.anchorArticleId, ...newRejectedArticleIds]);
+      if (
+        duplicateRows.length === input.rejectedArticleIds.length &&
+        duplicateRows.every(
+          ({ original_bundle_id }) =>
+            input.originalBundleId === undefined || input.originalBundleId === original_bundle_id,
+        )
+      ) {
+        const affected = new Set([input.anchorArticleId, ...input.rejectedArticleIds]);
+        return {
+          corrections: duplicateRows.map(coverageCorrectionFromRow),
+          removedStoryIds: [],
+          replacementStories: projection.stories
+            .filter(({ articleIds }) => articleIds.some((id) => affected.has(id)))
+            .slice(0, 10),
+        };
+      }
+      const target =
+        projection.stories.find(({ id }) => id === bundleId) ??
+        projection.stories.find(
+          (story) =>
+            story.coverageBundle?.correctionTarget?.originalBundleId === input.originalBundleId &&
+            [...requestedIds].every((id) => story.articleIds.includes(id)),
+        ) ??
+        projection.stories.find((story) =>
+          [...requestedIds].every((id) => story.articleIds.includes(id)),
+        );
+      const targetRevision = target?.coverageBundle?.correctionTarget?.projectionRevision;
+      const targetOriginalBundleId =
+        target?.coverageBundle?.correctionTarget?.originalBundleId ?? input.originalBundleId;
+      if (
+        !target?.coverageBundle ||
+        ![...requestedIds].every((id) => target.articleIds.includes(id)) ||
+        target.coverageBundle.generatedAt !== new Date(input.expectedGeneratedAt).toISOString() ||
+        (input.expectedProjectionRevision !== undefined &&
+          input.expectedProjectionRevision !== projection.revision) ||
+        (targetRevision !== undefined && targetRevision !== projection.revision) ||
+        (input.originalBundleId !== undefined && input.originalBundleId !== targetOriginalBundleId)
+      ) {
+        throw this.coverageMutationConflict(projection, requestedIds);
+      }
+      const originalBundleId = targetOriginalBundleId ?? bundleId;
+      const edgeResult = await client.query<{
+        left_article_id: string;
+        right_article_id: string;
+        evidence_fingerprint: string;
+      }>(
+        `SELECT left_article_id, right_article_id, evidence_fingerprint
+         FROM coverage_bundle_edges
+         WHERE generation_id=$1
+           AND (left_article_id=$2 OR right_article_id=$2)
+           AND (left_article_id=ANY($3::text[]) OR right_article_id=ANY($3::text[]))`,
+        [projection.generationId, input.anchorArticleId, input.rejectedArticleIds],
+      );
+      const fingerprintByPair = new Map(
+        edgeResult.rows.map((row) => [
+          [row.left_article_id, row.right_article_id].sort().join("\0"),
+          row.evidence_fingerprint,
+        ]),
+      );
+      const correctionRows: CoverageCorrectionRow[] = [...duplicateRows];
+      let insertedAny = false;
+      for (const rejectedArticleId of newRejectedArticleIds) {
+        const orderedIds = [input.anchorArticleId, rejectedArticleId].sort();
+        const inserted = await client.query<CoverageCorrectionRow>(
+          `INSERT INTO coverage_bundle_corrections
+            (generation_id, original_bundle_id, anchor_article_id, rejected_article_id,
+             matcher_version, evidence_fingerprint, reason, status, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8)
+           ON CONFLICT (
+             LEAST(anchor_article_id, rejected_article_id),
+             GREATEST(anchor_article_id, rejected_article_id)
+           ) WHERE status='active' DO NOTHING
+           RETURNING *`,
+          [
+            projection.generationId,
+            originalBundleId,
+            input.anchorArticleId,
+            rejectedArticleId,
+            projection.matcherVersion,
+            fingerprintByPair.get(orderedIds.join("\0")) ?? `v2:no-edge:${orderedIds.join(":")}`,
+            input.reason ?? null,
+            actorId,
+          ],
+        );
+        let row = inserted.rows[0];
+        if (row) insertedAny = true;
+        if (!row) {
+          const existing = await client.query<CoverageCorrectionRow>(
+            `SELECT * FROM coverage_bundle_corrections
+             WHERE status='active'
+               AND LEAST(anchor_article_id, rejected_article_id)=LEAST($1,$2)
+               AND GREATEST(anchor_article_id, rejected_article_id)=GREATEST($1,$2)
+             FOR UPDATE`,
+            [input.anchorArticleId, rejectedArticleId],
+          );
+          row = existing.rows[0];
+        }
+        if (!row) throw new Error("Active coverage correction could not be loaded");
+        correctionRows.push(row);
+      }
+      let revision = projection.revision;
+      if (insertedAny) {
+        const revisionResult = await client.query<{ revision: number | string }>(
+          `UPDATE coverage_projection_revisions
+           SET revision=revision+1, updated_at=now()
+           WHERE projection='active'
+           RETURNING revision`,
+        );
+        revision = Number(revisionResult.rows[0]?.revision ?? projection.revision + 1);
+        this.activeCoverageProjectionCache = undefined;
+      }
+      const activeAfterResult = await client.query<CoverageCorrectionRow>(
+        `SELECT cbc.*
+         FROM coverage_bundle_corrections cbc
+         JOIN coverage_generation_articles left_article
+           ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+         JOIN coverage_generation_articles right_article
+           ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+         WHERE cbc.status='active'
+         ORDER BY cbc.created_at, cbc.id`,
+        [projection.generationId],
+      );
+      const replacements = coverageStoriesWithCorrectionTargets(
+        recomputeCoverageStories(
+          projection.articles,
+          activeAfterResult.rows.map((row) => ({
+            articleIds: [row.anchor_article_id, row.rejected_article_id],
+            correctionId: row.id,
+          })),
+          projection.completedAt,
+        ),
+        projection.baseMemberships,
+        revision,
+      ).filter((story) => story.articleIds.some((id) => target.articleIds.includes(id)));
+      return {
+        corrections: correctionRows.map(coverageCorrectionFromRow),
+        removedStoryIds: [target.id],
+        replacementStories: replacements,
+      };
+    });
+  }
+
+  private async undoCurrentCoverageCorrection(
+    correctionId: string,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    return withPgTransaction(this.pool, async (client) => {
+      const projection = await this.loadCurrentCoverageMutationProjection(client);
+      const existingResult = await client.query<CoverageCorrectionRow>(
+        `SELECT * FROM coverage_bundle_corrections WHERE id=$1 FOR UPDATE`,
+        [correctionId],
+      );
+      const existing = existingResult.rows[0];
+      if (!existing) {
+        throw Object.assign(new Error("Korrigeringen finnes ikke."), { status: 404 });
+      }
+      if (
+        existing.status !== "active" ||
+        !projection.corrections.some(({ id }) => id === correctionId)
+      ) {
+        throw this.coverageMutationConflict(projection, [
+          existing.anchor_article_id,
+          existing.rejected_article_id,
+        ]);
+      }
+      const affectedIds = new Set([existing.anchor_article_id, existing.rejected_article_id]);
+      const removedStoryIds = projection.stories
+        .filter(({ articleIds }) => articleIds.some((id) => affectedIds.has(id)))
+        .map(({ id }) => id);
+      const updated = await client.query<CoverageCorrectionRow>(
+        `UPDATE coverage_bundle_corrections
+         SET status='reverted', reverted_at=now(), reverted_by=$2
+         WHERE id=$1 AND status='active'
+         RETURNING *`,
+        [correctionId, actorId],
+      );
+      const correction = updated.rows[0];
+      if (!correction) {
+        throw this.coverageMutationConflict(projection, [
+          existing.anchor_article_id,
+          existing.rejected_article_id,
+        ]);
+      }
+      const revisionResult = await client.query<{ revision: number | string }>(
+        `UPDATE coverage_projection_revisions
+         SET revision=revision+1, updated_at=now()
+         WHERE projection='active'
+         RETURNING revision`,
+      );
+      const revision = Number(revisionResult.rows[0]?.revision ?? projection.revision + 1);
+      const activeAfterResult = await client.query<CoverageCorrectionRow>(
+        `SELECT cbc.*
+         FROM coverage_bundle_corrections cbc
+         JOIN coverage_generation_articles left_article
+           ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+         JOIN coverage_generation_articles right_article
+           ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+         WHERE cbc.status='active'
+         ORDER BY cbc.created_at, cbc.id`,
+        [projection.generationId],
+      );
+      this.activeCoverageProjectionCache = undefined;
+      const replacementStories = coverageStoriesWithCorrectionTargets(
+        recomputeCoverageStories(
+          projection.articles,
+          activeAfterResult.rows.map((row) => ({
+            articleIds: [row.anchor_article_id, row.rejected_article_id],
+            correctionId: row.id,
+          })),
+          projection.completedAt,
+        ),
+        projection.baseMemberships,
+        revision,
+      ).filter(({ articleIds }) => articleIds.some((id) => affectedIds.has(id)));
+      return {
+        corrections: [coverageCorrectionFromRow(correction)],
+        removedStoryIds,
+        replacementStories,
+      };
+    });
+  }
+
+  async splitCoverageBundle(
+    bundleId: string,
+    input: CoverageBundleSplitRequest,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    return this.splitCurrentCoverageBundle(bundleId, input, actorId);
+  }
+
+  async undoCoverageCorrection(
+    correctionId: string,
+    actorId: string,
+  ): Promise<CoverageBundleCorrectionResult> {
+    return this.undoCurrentCoverageCorrection(correctionId, actorId);
+  }
+
+  async exportCoverageCorrections(sinceDays: number): Promise<CoverageCorrectionExport> {
+    const result = await this.pool.query<{
+      correction: CoverageCorrectionRow;
+      anchor: Article;
+      rejected: Article;
+    }>(
+      `SELECT to_jsonb(cbc) AS correction, anchor.payload AS anchor, rejected.payload AS rejected
+       FROM coverage_bundle_corrections cbc
+       JOIN articles anchor ON anchor.id=cbc.anchor_article_id
+       JOIN articles rejected ON rejected.id=cbc.rejected_article_id
+       WHERE cbc.created_at >= now() - make_interval(days => $1::int)
+       ORDER BY cbc.created_at, cbc.id`,
+      [sinceDays],
+    );
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      rows: result.rows.map(({ correction, anchor, rejected }) => ({
+        correctionId: correction.id,
+        label: "separate",
+        articleIds: [anchor.id, rejected.id],
+        sources: [anchor.source, rejected.source],
+        normalizedTitles: [
+          normalizedCorrectionText(anchor.title, 160),
+          normalizedCorrectionText(rejected.title, 160),
+        ],
+        normalizedExcerpts: [
+          normalizedCorrectionText(anchor.excerpt, 280),
+          normalizedCorrectionText(rejected.excerpt, 280),
+        ],
+        matcherVersion: correction.matcher_version,
+        evidenceFingerprint: correction.evidence_fingerprint,
+        createdAt: new Date(correction.created_at).toISOString(),
+      })),
     };
   }
 
