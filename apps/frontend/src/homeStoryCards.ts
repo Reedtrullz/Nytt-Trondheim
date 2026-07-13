@@ -5,6 +5,7 @@ import {
   type Article,
   type ArticleTopic,
   type CityPulseStory,
+  type CoverageMatchConfidence,
   type SourceConfidenceSummary,
 } from "@nytt/shared";
 import { articleCategoryLabels, articleTopicLabels } from "./homeFilters.js";
@@ -29,6 +30,7 @@ export interface HomeStoryCard {
   isClustered: boolean;
   cardKind: "situasjon" | "hendelse" | "tema" | "oppdatering" | "sak";
   sourceConfidence: SourceConfidenceSummary;
+  matchConfidence?: CoverageMatchConfidence;
   verification?: HomeStoryVerification;
 }
 
@@ -198,6 +200,7 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     isClustered: group.articles.length > 1,
     cardKind: cardKindFor(group),
     sourceConfidence: storySourceConfidence(group),
+    matchConfidence: group.bundle?.matchConfidence,
     verification: storyVerification(group),
   };
 }

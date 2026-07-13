@@ -149,6 +149,12 @@ export interface CoverageMatchConfidence {
   rationale: string;
 }
 
+export interface CoverageTrustSummary {
+  match: CoverageMatchConfidence;
+  source: SourceConfidenceSummary;
+  verification?: ArticlePublicVerification;
+}
+
 export interface ArticleCoverageBundle {
   id: string;
   kind: ArticleCoverageBundleKind;

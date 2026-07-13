@@ -1219,7 +1219,7 @@ export interface AnalyzeArticleCoverageV2Options {
   rejectedPairs?: CoverageRejectedPair[];
 }
 
-function preliminaryV2MatchConfidence(group: HomeArticleGroup): CoverageMatchConfidence {
+function v2GroupMatchConfidence(group: HomeArticleGroup): CoverageMatchConfidence {
   const accepted = group.acceptedEdges ?? [];
   const anchorId = group.primary.id;
   const admissions = group.articles
@@ -1237,9 +1237,11 @@ function preliminaryV2MatchConfidence(group: HomeArticleGroup): CoverageMatchCon
   const strong =
     admissions.length === group.articles.length - 1 &&
     admissions.every((admission) => admission.directStrong);
+  const minimum = Math.min(...admissions.map((admission) => admission.score));
+  const cohesionPenalty = strong ? 0 : 0.05;
   return {
     tier: strong ? "strong" : "moderate",
-    score: Math.min(...admissions.map((admission) => admission.score)),
+    score: Math.max(0, Math.round((minimum - cohesionPenalty) * 1000) / 1000),
     rationale: strong
       ? "Alle støttesakene har et sterkt direkte treff med hovedsaken."
       : "Støttesakene er tatt inn gjennom hovedsak eller flertallstreff.",
@@ -1255,7 +1257,7 @@ function coverageDecisionForV2Group(
   const memberIds = new Set(group.articles.map((article) => article.id));
   const groupEdges = allEdges.filter((edge) => edge.articleIds.every((id) => memberIds.has(id)));
   const accepted = groupEdges.filter((edge) => edge.tier !== "weak" && edge.conflicts.length === 0);
-  const matchConfidence = preliminaryV2MatchConfidence({
+  const matchConfidence = v2GroupMatchConfidence({
     ...group,
     acceptedEdges: accepted,
   });

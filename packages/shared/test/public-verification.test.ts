@@ -39,28 +39,58 @@ function group(articles: Article[], bundleKind: "incident" | "topic" | "update" 
 }
 
 describe("public verification", () => {
-  it("derives verification for official-plus-news incident groups", () => {
-    const verification = derivePublicVerificationForArticleGroup(
-      group([
-        article({ id: "adressa-lade", source: "adressa", sourceLabel: "Adresseavisen" }),
-        article({
-          id: "politiloggen-lade",
-          source: "politiloggen",
-          sourceLabel: "Politiloggen",
-          title: "Voldshendelse: Trondheim, Lade",
-          situationId: "politiloggen-lade-vold",
-        }),
-      ]),
-    );
-
-    expect(verification).toEqual({
-      status: "verified",
-      label: "Verifisert",
-      detail: "Bekreftet av Politiloggen og Adresseavisen.",
-      officialSources: ["politiloggen"],
-      reportingSources: ["adressa"],
-      situationId: "politiloggen-lade-vold",
+  it("derives verification only from a direct strong official-to-newsroom incident edge", () => {
+    const articles = [
+      article({ id: "news", source: "adressa", sourceLabel: "Adresseavisen" }),
+      article({
+        id: "official",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        situationId: "incident-1",
+      }),
+    ];
+    const verification = derivePublicVerificationForArticleGroup({
+      ...group(articles),
+      acceptedEdges: [
+        {
+          articleIds: ["news", "official"],
+          tier: "strong",
+          score: 0.95,
+          kind: "incident",
+          signals: [],
+          conflicts: [],
+          evidenceFingerprint: "v2:direct",
+          reviewable: false,
+          correctionConflict: false,
+        },
+      ],
     });
+    expect(verification?.label).toBe("Verifisert");
+  });
+
+  it("does not verify official and newsroom co-members connected only through another article", () => {
+    const articles = [
+      article({ id: "news", source: "adressa", sourceLabel: "Adresseavisen" }),
+      article({ id: "bridge", source: "nrk", sourceLabel: "NRK Trøndelag" }),
+      article({ id: "official", source: "politiloggen", sourceLabel: "Politiloggen" }),
+    ];
+    const verification = derivePublicVerificationForArticleGroup({
+      ...group(articles),
+      acceptedEdges: [
+        {
+          articleIds: ["news", "bridge"],
+          tier: "strong",
+          score: 0.9,
+          kind: "incident",
+          signals: [],
+          conflicts: [],
+          evidenceFingerprint: "v2:bridge",
+          reviewable: false,
+          correctionConflict: false,
+        },
+      ],
+    });
+    expect(verification).toBeUndefined();
   });
 
   it("does not treat topical official-plus-news bundles as verified incidents", () => {

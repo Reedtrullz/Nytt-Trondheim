@@ -1,5 +1,6 @@
-import type { Article, ArticlePublicVerification } from "./types.js";
+import type { Article } from "./types.js";
 import type { ArticleCoverageAnalysis } from "./article-bundles.js";
+import { derivePublicVerificationForArticleGroup } from "./public-verification.js";
 
 export interface ArticleCoverageGoldenCase {
   id: string;
@@ -40,16 +41,28 @@ function safeRatio(numerator: number, denominator: number): number {
 }
 
 function verifiedGroupKeys(analysis: ArticleCoverageAnalysis): Set<string> {
-  const verificationByBundle = new Map<string, ArticlePublicVerification>();
-  for (const article of analysis.articles) {
-    if (article.coverageBundle && article.publicVerification) {
-      verificationByBundle.set(article.coverageBundle.id, article.publicVerification);
-    }
-  }
+  const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
   return new Set(
-    analysis.bundles
-      .filter((bundle) => verificationByBundle.has(bundle.id))
-      .map((bundle) => groupKey(bundle.memberArticleIds)),
+    analysis.bundles.flatMap((bundle) => {
+      const articles = bundle.memberArticleIds.flatMap((id) => articlesById.get(id) ?? []);
+      if (articles.length !== bundle.memberArticleIds.length) return [];
+      const primary = articlesById.get(bundle.primaryArticleId);
+      if (!primary) return [];
+      const memberIds = new Set(bundle.memberArticleIds);
+      const group = {
+        id: bundle.id,
+        primary,
+        articles,
+        sourceLabels: bundle.sourceLabels,
+        bundle,
+        acceptedEdges: (analysis.edges ?? []).filter(
+          (edge) => edge.tier !== "weak" && edge.articleIds.every((id) => memberIds.has(id)),
+        ),
+      };
+      return derivePublicVerificationForArticleGroup(group)
+        ? [groupKey(bundle.memberArticleIds)]
+        : [];
+    }),
   );
 }
 
@@ -105,9 +118,8 @@ export function evaluateArticleCoverageCorpus(
     }
 
     expectedGroupedArticles += new Set(fixture.expectedGroups.flat()).size;
-    observedGroupedArticles += new Set(
-      first.bundles.flatMap((bundle) => bundle.memberArticleIds),
-    ).size;
+    observedGroupedArticles += new Set(first.bundles.flatMap((bundle) => bundle.memberArticleIds))
+      .size;
 
     const observedVerified = verifiedGroupKeys(first);
     const expectedVerified = new Set(fixture.expectedVerifiedGroups.map(groupKey));

@@ -75,4 +75,49 @@ describe("article coverage evaluator", () => {
     });
     expect(result.groupingCoverage).toBe(1);
   });
+
+  it("does not trust pre-attached verification without a direct strong edge", () => {
+    const [fixture] = cases;
+    const result = evaluateArticleCoverageCorpus(
+      [{ ...fixture!, expectedVerifiedGroups: [] }],
+      (articles) => ({
+        articles: articles.map((item) => ({
+          ...item,
+          coverageBundle: {
+            id: "coverage:test",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme hendelse",
+            generatedAt: "2026-07-12T21:00:00.000Z",
+          },
+          publicVerification: {
+            status: "verified",
+            label: "Verifisert",
+            detail: "Legacy metadata",
+            officialSources: ["politiloggen"],
+            reportingSources: ["nrk"],
+          },
+        })),
+        bundles: [
+          {
+            id: "coverage:test",
+            kind: "incident",
+            confidence: "high",
+            reason: "Samme hendelse",
+            generatedAt: "2026-07-12T21:00:00.000Z",
+            primaryArticleId: "news-b",
+            memberArticleIds: ["news-b", "news-a"],
+            sourceIds: ["adressa", "nrk"],
+            sourceLabels: ["Adresseavisen", "NRK Trøndelag"],
+            signals: [],
+            nearMisses: [],
+          },
+        ],
+        nearMisses: [],
+        edges: [],
+      }),
+    );
+
+    expect(result.criticalFailures).toEqual([]);
+  });
 });

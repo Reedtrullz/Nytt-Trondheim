@@ -469,7 +469,11 @@ function articlePairSignalsForV2(
       articleIds: evidence.articleIds,
       score: evidence.titleScore,
     });
-  } else if (body.overlap >= 4 && body.score >= 0.4) {
+  } else if (
+    (normalizeText(left.excerpt).length > 0 &&
+      normalizeText(left.excerpt) === normalizeText(right.excerpt)) ||
+    (body.overlap >= 6 && body.score >= 0.6)
+  ) {
     signals.push({
       kind: "near_duplicate",
       articleIds: evidence.articleIds,
