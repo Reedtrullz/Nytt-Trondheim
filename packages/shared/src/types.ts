@@ -1360,6 +1360,7 @@ export interface BootstrapPayload {
   articles: Article[];
   stories?: CityPulseStory[];
   storyNextCursor?: string;
+  storyProjection?: CityPulseStoryProjection;
   situations: HomeSituationSummary[];
   sourceHealth: SourceHealth[];
   morningBrief?: MorningBrief;
@@ -1388,6 +1389,15 @@ export interface CityPulseStory {
 export interface CityPulseStoryPage {
   items: CityPulseStory[];
   nextCursor?: string;
+  projection?: CityPulseStoryProjection;
+}
+
+export interface CityPulseStoryProjection {
+  mode: "legacy" | "normalized";
+  generationId?: string;
+  matcherVersion: "v1" | "v2";
+  parityClean: boolean;
+  fallbackReason?: "disabled" | "no_completed_active_generation" | "integrity_error";
 }
 
 export interface SituationPage {

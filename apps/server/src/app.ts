@@ -999,7 +999,10 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         ...buildDatabasePoolOptions("server"),
       })
     : undefined;
-  const store: Store = pool ? new PgStore(pool) : new MemoryStore();
+  const coverageProjectionMode = config.coverageProjectionMode ?? "legacy";
+  const store: Store = pool
+    ? new PgStore(pool, coverageProjectionMode)
+    : new MemoryStore(coverageProjectionMode);
   if (pool && config.seedDemo) await (store as PgStore).seedDevelopmentData();
 
   await mkdir(config.uploadDir, { recursive: true });

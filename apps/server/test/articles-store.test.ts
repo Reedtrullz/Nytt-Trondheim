@@ -4,6 +4,222 @@ import { sampleSituation, type Article, type OfficialEvent, type Situation } fro
 import { MemoryStore, PgStore } from "../src/store.js";
 
 describe("article store", () => {
+  function normalizedProjectionStore(pool: pg.Pool): PgStore {
+    return new PgStore(pool, "normalized-active");
+  }
+
+  function normalizedActiveProjectionPool(options?: {
+    noGeneration?: boolean;
+    corrected?: boolean;
+    integrityError?: boolean;
+  }): pg.Pool {
+    const primary: Article = {
+      id: "regional-a",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Regional hovedsak",
+      excerpt: "Sanitert innhold.",
+      url: "https://example.test/regional-a",
+      publishedAt: "2026-07-12T21:00:00.000Z",
+      scope: "trondelag",
+      category: "Hendelser",
+      places: ["Nærøysund"],
+    };
+    const articles: Article[] = [
+      primary,
+      {
+        ...primary,
+        id: "regional-b",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        url: "https://example.test/regional-b",
+        publishedAt: "2026-07-12T20:59:00.000Z",
+      },
+      {
+        ...primary,
+        id: "regional-c",
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        url: "https://example.test/regional-c",
+        publishedAt: "2026-07-12T20:58:00.000Z",
+      },
+    ];
+    return {
+      query: vi.fn(async (sql: string) => {
+        const normalized = sql.replace(/\s+/g, " ").trim();
+        if (normalized.includes("FROM coverage_bundle_generations")) {
+          expect(normalized).toContain("is_current");
+          if (options?.noGeneration) return { rows: [], rowCount: 0 };
+          return {
+            rows: [
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                matcher_version: "v2",
+                mode: "active",
+                started_at: "2026-07-12T20:59:59.000Z",
+                completed_at: "2026-07-12T21:01:00.000Z",
+                article_count: 3,
+                bundle_count: 1,
+                edge_count: 2,
+                correction_conflict_count: 0,
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (normalized.includes("FROM coverage_bundle_versions cbv")) {
+          return {
+            rows: [
+              {
+                id: "coverage:v2:regional",
+                kind: "incident",
+                confidence: "high",
+                reason: "Samme hendelse",
+                generated_at: "2026-07-12T21:00:00.000Z",
+                last_seen_at: "2026-07-12T21:00:00.000Z",
+                last_seen_at_cursor: "2026-07-12T21:00:00.000000Z",
+                primary_article_id: "regional-a",
+                member_article_ids: articles.map(({ id }) => id),
+                member_articles: articles,
+                source_ids: articles.map(({ source }) => source),
+                source_labels: articles.map(({ sourceLabel }) => sourceLabel),
+                match_tier: "strong",
+                match_score: 0.9,
+                match_rationale: "Sterkt direkte treff.",
+                edges: [],
+                corrections: options?.corrected
+                  ? [
+                      {
+                        id: "correction-1",
+                        anchorArticleId: "regional-a",
+                        rejectedArticleId: "regional-c",
+                        status: "active",
+                        createdAt: "2026-07-12T21:02:00.000Z",
+                      },
+                    ]
+                  : [],
+                missing_article_ids: [],
+                primary_count: options?.integrityError ? 0 : 1,
+                updated_at: "2026-07-12T21:02:00.000Z",
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (normalized.includes("FROM coverage_generation_articles cga")) {
+          return { rows: articles.map((payload) => ({ payload })), rowCount: articles.length };
+        }
+        if (normalized.includes("FROM coverage_bundle_corrections cbc")) {
+          return {
+            rows: options?.corrected
+              ? [
+                  {
+                    id: "correction-1",
+                    generation_id: "11111111-1111-4111-8111-111111111111",
+                    original_bundle_id: "coverage:v2:regional",
+                    anchor_article_id: "regional-a",
+                    rejected_article_id: "regional-c",
+                    matcher_version: "v2",
+                    evidence_fingerprint: "v2:regional",
+                    status: "active",
+                    created_at: "2026-07-12T21:02:00.000Z",
+                    reverted_at: null,
+                  },
+                ]
+              : [],
+            rowCount: options?.corrected ? 1 : 0,
+          };
+        }
+        if (normalized.startsWith("SELECT id, primary_article_id, member_article_ids")) {
+          return {
+            rows: [
+              {
+                id: "coverage:v1:regional",
+                primary_article_id: "regional-a",
+                member_article_ids: articles.map(({ id }) => id),
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (normalized.includes("FROM articles a LEFT JOIN saved_articles")) {
+          return {
+            rows: articles.map((payload) => ({ payload, saved: false })),
+            rowCount: articles.length,
+          };
+        }
+        if (normalized.includes("FROM situations")) return { rows: [], rowCount: 0 };
+        throw new Error(`Unexpected query: ${normalized}`);
+      }),
+    } as unknown as pg.Pool;
+  }
+
+  it("builds city pulse stories from the completed current active normalized generation", async () => {
+    const store = normalizedProjectionStore(normalizedActiveProjectionPool());
+    const page = await store.listCityPulseStories(
+      { scope: "trondelag", limit: 40, sourceLimit: 1 },
+      "Reedtrullz",
+    );
+
+    expect(page.projection).toMatchObject({
+      mode: "normalized",
+      generationId: "11111111-1111-4111-8111-111111111111",
+      matcherVersion: "v2",
+      parityClean: true,
+    });
+    expect(page.items.find((story) => story.id === "coverage:v2:regional")?.articles).toHaveLength(
+      3,
+    );
+  });
+
+  it("falls back atomically to legacy stories when no completed current active generation exists", async () => {
+    const store = normalizedProjectionStore(normalizedActiveProjectionPool({ noGeneration: true }));
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.projection).toMatchObject({
+      mode: "legacy",
+      matcherVersion: "v1",
+      parityClean: false,
+      fallbackReason: "no_completed_active_generation",
+    });
+    expect(page.items).toEqual(expect.any(Array));
+  });
+
+  it("falls back atomically to legacy stories when normalized integrity validation fails", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({ integrityError: true }),
+    );
+    const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
+
+    expect(page.projection).toMatchObject({
+      mode: "legacy",
+      matcherVersion: "v1",
+      parityClean: false,
+      fallbackReason: "integrity_error",
+    });
+    expect(page.items.every((story) => story.articles.every(({ saved }) => saved === false))).toBe(
+      true,
+    );
+  });
+
+  it("uses identical effective corrected membership for city pulse and active coverage", async () => {
+    const store = normalizedProjectionStore(normalizedActiveProjectionPool({ corrected: true }));
+    const [stories, coverage] = await Promise.all([
+      store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz"),
+      store.listCoverageBundles({ projection: "active", limit: 30 }, "Reedtrullz"),
+    ]);
+    const storyMembership = stories.items
+      .map(({ articleIds }) => [...articleIds].sort())
+      .filter((ids) => ids.length > 1);
+    const coverageMembership = coverage.items
+      .map(({ memberArticleIds }) => [...memberArticleIds].sort())
+      .filter((ids) => ids.length > 1);
+
+    expect(stories.projection?.generationId).toBe(coverage.summary.generation?.id);
+    expect(storyMembership).toEqual(coverageMembership);
+    expect(storyMembership).not.toContainEqual(["regional-a", "regional-b", "regional-c"]);
+  });
+
   it("filters in-memory articles by published time window like production", async () => {
     const store = new MemoryStore();
 

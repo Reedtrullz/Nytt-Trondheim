@@ -21,6 +21,27 @@ afterEach(() => {
 });
 
 describe("loadConfig session secret policy", () => {
+  it("parses every supported coverage projection mode and defaults to legacy", () => {
+    withEnv({ COVERAGE_PROJECTION_MODE: undefined }, () => {
+      expect(loadConfig().coverageProjectionMode).toBe("legacy");
+    });
+    for (const mode of ["legacy", "normalized-shadow", "normalized-active"] as const) {
+      withEnv({ COVERAGE_PROJECTION_MODE: mode }, () => {
+        expect(loadConfig().coverageProjectionMode).toBe(mode);
+      });
+    }
+  });
+
+  it("rejects unsupported coverage projection modes", () => {
+    for (const mode of ["active", "shadow", "normalized"] as const) {
+      withEnv({ COVERAGE_PROJECTION_MODE: mode }, () => {
+        expect(() => loadConfig()).toThrow(
+          "COVERAGE_PROJECTION_MODE must be legacy, normalized-shadow or normalized-active",
+        );
+      });
+    }
+  });
+
   it("parses coverage correction capability strictly and defaults off", () => {
     withEnv({ COVERAGE_CORRECTIONS_ENABLED: undefined }, () => {
       expect(loadConfig().coverageCorrectionsEnabled).toBe(false);

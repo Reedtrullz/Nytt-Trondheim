@@ -161,6 +161,8 @@ export interface ArticleFilters {
   sourceLimit?: number;
 }
 
+type CoverageProjectionMode = "legacy" | "normalized-shadow" | "normalized-active";
+
 export interface SituationFilters {
   status?: Situation["status"];
   saved?: boolean;
@@ -1364,6 +1366,44 @@ function cityPulseStoryPageFromArticles(
   };
 }
 
+function cityPulseStoryPageFromStories(
+  stories: CityPulseStory[],
+  filters: ArticleFilters,
+): CityPulseStoryPage {
+  const cursor = filters.cursor ? decodeCursor(filters.cursor) : undefined;
+  const limit = filters.limit ?? 40;
+  const cursorFiltered = stories
+    .filter((story) => beforeCursor(story.latestAt, story.id, cursor))
+    .sort(
+      (left, right) =>
+        right.latestAt.localeCompare(left.latestAt) || right.id.localeCompare(left.id),
+    );
+  const items = cursorFiltered.slice(0, limit);
+  const last = items.at(-1);
+  return {
+    items,
+    nextCursor:
+      cursorFiltered.length > limit && last ? encodeCursor(last.latestAt, last.id) : undefined,
+  };
+}
+
+function articleMatchesCityPulseFilters(article: Article, filters: ArticleFilters): boolean {
+  const search = filters.q?.toLocaleLowerCase("nb");
+  return (
+    (!filters.scope || article.scope === filters.scope) &&
+    (!filters.category ||
+      filters.category === "Alle" ||
+      articleMatchesCategory(article, filters.category)) &&
+    (!filters.topic || articleMatchesTopic(article, filters.topic)) &&
+    (!filters.from || article.publishedAt >= filters.from) &&
+    (!filters.to || article.publishedAt <= filters.to) &&
+    (!search ||
+      `${article.title} ${article.excerpt} ${article.sourceLabel} ${article.category} ${article.places.join(" ")}`
+        .toLocaleLowerCase("nb")
+        .includes(search))
+  );
+}
+
 function articlesFromCityPulseStoryPage(page: CityPulseStoryPage): Article[] {
   const seenArticleIds = new Set<string>();
   return page.items
@@ -2302,6 +2342,72 @@ function normalizedCoverageBundleItemFromRow(
     corrections: row.corrections,
     integrityErrors,
   };
+}
+
+function effectiveCorrectedCoverageBundleItems(
+  storedItems: CoverageBundleListItem[],
+  articles: Article[],
+  corrections: CoverageCorrectionRow[],
+  generation: CoverageGenerationSummary,
+): CoverageBundleListItem[] {
+  if (corrections.length === 0) return storedItems;
+  const rejectedPairs = corrections.map((row) => ({
+    articleIds: [row.anchor_article_id, row.rejected_article_id] as [string, string],
+    correctionId: row.id,
+  }));
+  const effectiveStories = recomputeCoverageStories(
+    articles,
+    rejectedPairs,
+    generation.completedAt,
+  ).filter(({ articleIds }) => articleIds.length > 1);
+  const canonicalMembership = (ids: string[]) => [...new Set(ids)].sort().join("\0");
+  const storedByMembership = new Map(
+    storedItems.map((item) => [canonicalMembership(item.memberArticleIds), item]),
+  );
+  return effectiveStories.map((story) => {
+    const stored = storedByMembership.get(canonicalMembership(story.articleIds));
+    if (stored) return stored;
+    const memberIds = new Set(story.articleIds);
+    const related = storedItems.filter((item) =>
+      item.memberArticleIds.some((articleId) => memberIds.has(articleId)),
+    );
+    const base = related[0];
+    const activeCorrections = related
+      .flatMap(({ corrections: itemCorrections }) => itemCorrections)
+      .filter(
+        (correction, index, all) =>
+          all.findIndex(({ id }) => id === correction.id) === index &&
+          correction.status === "active",
+      );
+    const edges = related
+      .flatMap(({ edges: itemEdges }) => itemEdges)
+      .filter(({ articleIds }) => articleIds.every((id) => memberIds.has(id)));
+    return {
+      id: story.id,
+      kind: story.coverageBundle?.kind ?? base?.kind ?? "topic",
+      confidence: story.coverageBundle?.confidence ?? base?.confidence ?? "medium",
+      reason: story.coverageBundle?.reason ?? base?.reason ?? "Korrigert dekningsgruppe",
+      generatedAt: story.coverageBundle?.generatedAt ?? base?.generatedAt ?? generation.completedAt,
+      matcherVersion: generation.matcherVersion,
+      ...(base?.matchConfidence ? { matchConfidence: base.matchConfidence } : {}),
+      primaryArticleId: story.primaryArticleId,
+      memberArticleIds: story.articleIds,
+      sourceIds: [...new Set(story.articles.map(({ source }) => source))],
+      sourceLabels: story.sourceLabels,
+      signals: edges.flatMap(({ signals }) => signals),
+      nearMisses: [],
+      lastSeenAt: story.latestAt,
+      updatedAt: generation.completedAt,
+      memberArticles: story.articles.map(coverageBundleArticleSummary),
+      nearMissArticles: [],
+      generation,
+      state: "active",
+      edges,
+      reviewCandidates: boundedCoverageReviewCandidates(edges),
+      corrections: activeCorrections,
+      integrityErrors: [],
+    };
+  });
 }
 
 const sourceAuditRequiredSources: SourceId[] = [
@@ -3616,6 +3722,8 @@ function withTrafficPulseStaleOverlay(
 }
 
 export class MemoryStore implements Store {
+  constructor(private readonly coverageProjectionMode: CoverageProjectionMode = "legacy") {}
+
   private articles = clone(sampleArticles);
   private readonly coverageShadowGeneratedAt = new Date().toISOString();
   private coverageCorrections: Array<
@@ -4035,6 +4143,7 @@ export class MemoryStore implements Store {
       articles: articlesFromCityPulseStoryPage(storyPage),
       stories: storyPage.items,
       ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
+      ...(storyPage.projection ? { storyProjection: storyPage.projection } : {}),
       situations,
       sourceHealth: clone(sampleBootstrap.sourceHealth),
     };
@@ -4092,7 +4201,23 @@ export class MemoryStore implements Store {
       cursor: undefined,
       limit: cityPulseStorySourceLimit(filters),
     });
-    return cityPulseStoryPageFromArticles(articles.items, filters);
+    return {
+      ...cityPulseStoryPageFromArticles(articles.items, filters),
+      projection:
+        this.coverageProjectionMode === "normalized-active"
+          ? {
+              mode: "legacy",
+              matcherVersion: "v1",
+              parityClean: false,
+              fallbackReason: "no_completed_active_generation",
+            }
+          : {
+              mode: "legacy",
+              matcherVersion: "v1",
+              parityClean: true,
+              fallbackReason: "disabled",
+            },
+    };
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
@@ -5097,7 +5222,10 @@ export class MemoryStore implements Store {
 }
 
 export class PgStore implements Store {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly coverageProjectionMode: CoverageProjectionMode = "legacy",
+  ) {}
 
   private async listSituationsForArticleIds(articleIds: string[]): Promise<Situation[]> {
     if (articleIds.length === 0) return [];
@@ -5771,6 +5899,7 @@ export class PgStore implements Store {
       articles: articlesFromCityPulseStoryPage(storyPage),
       stories: storyPage.items,
       ...(storyPage.nextCursor ? { storyNextCursor: storyPage.nextCursor } : {}),
+      ...(storyPage.projection ? { storyProjection: storyPage.projection } : {}),
       situations,
       sourceHealth,
     };
@@ -5940,6 +6069,139 @@ export class PgStore implements Store {
   }
 
   async listCityPulseStories(filters: ArticleFilters, login: string): Promise<CityPulseStoryPage> {
+    if (this.coverageProjectionMode !== "normalized-active") {
+      return this.listLegacyCityPulseStories(filters, login, "disabled", true);
+    }
+    let generationId: string | undefined;
+    try {
+      const coverage = await this.listNormalizedCoverageBundles(
+        { projection: "active", limit: Number.MAX_SAFE_INTEGER },
+        "active",
+      );
+      const generation = coverage.summary.generation;
+      generationId = generation?.id;
+      if (!generation) {
+        return this.listLegacyCityPulseStories(
+          filters,
+          login,
+          "no_completed_active_generation",
+          false,
+        );
+      }
+      if (coverage.summary.integrityErrorCount > 0) {
+        console.error({
+          event: "coverage_projection_fallback",
+          reason: "integrity_error",
+          generationId: generation.id,
+          integrityErrorCount: coverage.summary.integrityErrorCount,
+          bundleCount: coverage.summary.activeBundleCount,
+        });
+        return this.listLegacyCityPulseStories(filters, login, "integrity_error", false);
+      }
+      const articleResult = await this.pool.query<{ payload: Article; saved: boolean }>(
+        `SELECT a.payload, (s.article_id IS NOT NULL) AS saved
+         FROM coverage_generation_articles cga
+         JOIN articles a ON a.id=cga.article_id
+         LEFT JOIN saved_articles s ON s.article_id=a.id AND s.github_login=$2
+         WHERE cga.generation_id=$1
+         ORDER BY a.published_at DESC, a.id DESC`,
+        [generation.id, login],
+      );
+      const filteredArticles = articleResult.rows
+        .map(({ payload, saved }) => ({ ...payload, saved }))
+        .filter((article) => articleMatchesCityPulseFilters(article, filters));
+      const sourceArticleIds = new Set(
+        filteredArticles.slice(0, cityPulseStorySourceLimit(filters)).map(({ id }) => id),
+      );
+      const relatedSituations = await this.listSituationsForArticleIds(
+        filteredArticles.map(({ id }) => id),
+      );
+      const officialEvents = filteredArticles.some(
+        (article) =>
+          article.category === "Transport" &&
+          article.location &&
+          isNewsroomPublicVerificationSource(article.source),
+      )
+        ? await this.listOfficialEvents({ source: "datex", limit: 500 })
+        : [];
+      const enrichedArticles = enrichArticlesWithTrafficOfficialVerification(
+        enrichArticlesWithSituations(filteredArticles, relatedSituations),
+        officialEvents,
+      );
+      const articlesById = new Map(enrichedArticles.map((article) => [article.id, article]));
+      const groupedArticleIds = new Set<string>();
+      const stories = coverage.items.flatMap((item) => {
+        const articles = item.memberArticleIds.flatMap((id) => {
+          const article = articlesById.get(id);
+          return article ? [article] : [];
+        });
+        if (articles.length === 0 || !articles.some(({ id }) => sourceArticleIds.has(id)))
+          return [];
+        articles.sort(
+          (left, right) =>
+            right.publishedAt.localeCompare(left.publishedAt) || right.id.localeCompare(left.id),
+        );
+        for (const article of articles) groupedArticleIds.add(article.id);
+        const primary = articlesById.get(item.primaryArticleId) ?? articles[0]!;
+        const group = {
+          id: item.id,
+          primary,
+          articles,
+          sourceLabels: [...new Set(articles.map(({ sourceLabel }) => sourceLabel))],
+          bundle: {
+            id: item.id,
+            kind: item.kind,
+            confidence: item.confidence,
+            reason: item.reason,
+            generatedAt: item.generatedAt,
+            ...(item.matchConfidence ? { matchConfidence: item.matchConfidence } : {}),
+            matcherVersion: generation.matcherVersion,
+          },
+        };
+        const story = cityPulseStoryFromGroup(group);
+        const publicVerification =
+          primary.publicVerification ??
+          articles.find((article) => article.publicVerification)?.publicVerification ??
+          derivePublicVerificationForArticleGroup(group);
+        return [publicVerification ? { ...story, publicVerification } : story];
+      });
+      for (const article of enrichedArticles) {
+        if (!sourceArticleIds.has(article.id) || groupedArticleIds.has(article.id)) continue;
+        stories.push(
+          cityPulseStoryFromGroup({
+            id: article.id,
+            primary: article,
+            articles: [article],
+            sourceLabels: [article.sourceLabel],
+          }),
+        );
+      }
+      return {
+        ...cityPulseStoryPageFromStories(stories, filters),
+        projection: {
+          mode: "normalized",
+          generationId: generation.id,
+          matcherVersion: generation.matcherVersion,
+          parityClean: coverage.parity?.clean === true,
+        },
+      };
+    } catch (error) {
+      console.error({
+        event: "coverage_projection_fallback",
+        reason: "integrity_error",
+        ...(generationId ? { generationId } : {}),
+        errorClass: error instanceof Error ? error.constructor.name : "UnknownError",
+      });
+      return this.listLegacyCityPulseStories(filters, login, "integrity_error", false);
+    }
+  }
+
+  private async listLegacyCityPulseStories(
+    filters: ArticleFilters,
+    login: string,
+    fallbackReason: "disabled" | "no_completed_active_generation" | "integrity_error",
+    parityClean: boolean,
+  ): Promise<CityPulseStoryPage> {
     const articles = await this.listArticles(
       {
         ...filters,
@@ -5948,7 +6210,15 @@ export class PgStore implements Store {
       },
       login,
     );
-    return cityPulseStoryPageFromArticles(articles.items, filters);
+    return {
+      ...cityPulseStoryPageFromArticles(articles.items, filters),
+      projection: {
+        mode: "legacy",
+        matcherVersion: "v1",
+        parityClean,
+        fallbackReason,
+      },
+    };
   }
 
   async listCoverageBundles(filters: CoverageBundleQueryInput): Promise<CoverageBundlePage> {
@@ -6113,7 +6383,7 @@ export class PgStore implements Store {
       `SELECT id, matcher_version, mode, started_at, completed_at, article_count,
               bundle_count, edge_count, correction_conflict_count
        FROM coverage_bundle_generations
-       WHERE mode=$1 AND status='completed'
+       WHERE mode=$1 AND status='completed'${projection === "active" ? " AND is_current=true" : ""}
        ORDER BY completed_at DESC, id DESC
        LIMIT 1 OFFSET $2`,
       [mode, projection === "superseded" ? 1 : 0],
@@ -6200,9 +6470,45 @@ export class PgStore implements Store {
        ORDER BY cbv.last_seen_at DESC, cb.id DESC`,
       [projection, generation.id],
     );
-    const allItems = result.rows.map((row) =>
+    const storedItems = result.rows.map((row) =>
       normalizedCoverageBundleItemFromRow(row, generation, projection),
     );
+    let allItems = storedItems;
+    let projectionIntegrityErrorCount = 0;
+    if (projection === "active") {
+      const [articleResult, correctionResult] = await Promise.all([
+        this.pool.query<{ payload: Article }>(
+          `SELECT a.payload
+           FROM coverage_generation_articles cga
+           JOIN articles a ON a.id=cga.article_id
+           WHERE cga.generation_id=$1
+           ORDER BY a.published_at DESC, a.id DESC`,
+          [generation.id],
+        ),
+        this.pool.query<CoverageCorrectionRow>(
+          `SELECT cbc.*
+           FROM coverage_bundle_corrections cbc
+           JOIN coverage_generation_articles left_article
+             ON left_article.generation_id=$1 AND left_article.article_id=cbc.anchor_article_id
+           JOIN coverage_generation_articles right_article
+             ON right_article.generation_id=$1 AND right_article.article_id=cbc.rejected_article_id
+           WHERE cbc.status='active'
+           ORDER BY cbc.created_at, cbc.id`,
+          [generation.id],
+        ),
+      ]);
+      const articles = articleResult.rows.map(({ payload }) => payload);
+      allItems = effectiveCorrectedCoverageBundleItems(
+        storedItems,
+        articles,
+        correctionResult.rows,
+        generation,
+      );
+      projectionIntegrityErrorCount +=
+        Number(storedItems.length !== generation.bundleCount) +
+        Number(articles.length !== generation.articleCount) +
+        Number(generation.matcherVersion !== "v2");
+    }
     const filtered = filterCoverageBundleItems(allItems, filters).filter(
       (item) =>
         (!filters.matchTier || item.matchConfidence?.tier === filters.matchTier) &&
@@ -6236,7 +6542,7 @@ export class PgStore implements Store {
         primaryArticleId: row.primary_article_id,
         memberArticleIds: row.member_article_ids,
       })),
-      allItems.map((item) => ({
+      storedItems.map((item) => ({
         id: item.id,
         primaryArticleId: item.primaryArticleId,
         memberArticleIds: item.memberArticleIds,
@@ -6253,14 +6559,14 @@ export class PgStore implements Store {
       (count, item) => count + item.reviewCandidates.length,
       0,
     );
-    summary.activeCorrectionCount = filtered.reduce(
-      (count, item) => count + item.corrections.filter(({ status }) => status === "active").length,
-      0,
-    );
-    summary.integrityErrorCount = filtered.reduce(
-      (count, item) => count + item.integrityErrors.length,
-      0,
-    );
+    summary.activeCorrectionCount = new Set(
+      filtered.flatMap(({ corrections }) =>
+        corrections.filter(({ status }) => status === "active").map(({ id }) => id),
+      ),
+    ).size;
+    summary.integrityErrorCount =
+      storedItems.reduce((count, item) => count + item.integrityErrors.length, 0) +
+      projectionIntegrityErrorCount;
     summary.matcherVersion = generation.matcherVersion;
     summary.projectionState = projection;
     summary.generation = generation;

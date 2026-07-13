@@ -329,6 +329,12 @@ describe("private situation API", () => {
     expect(response.body.situations.length).toBeGreaterThan(0);
     expect(response.body.morningBrief).toBeUndefined();
     expect(response.body.stories.length).toBeLessThanOrEqual(20);
+    expect(response.body.storyProjection).toEqual({
+      mode: "legacy",
+      matcherVersion: "v1",
+      parityClean: true,
+      fallbackReason: "disabled",
+    });
     expect(response.body.situations.length).toBeLessThanOrEqual(3);
     for (const situation of response.body.situations as Array<Record<string, unknown>>) {
       expect(["preliminary", "active"]).toContain(situation.status);
@@ -414,6 +420,12 @@ describe("private situation API", () => {
     const bootstrap = await store.getBootstrap("Reedtrullz");
 
     expect(bootstrap.articles).toEqual([{ ...article, saved: false }]);
+    expect(bootstrap.storyProjection).toEqual({
+      mode: "legacy",
+      matcherVersion: "v1",
+      parityClean: true,
+      fallbackReason: "disabled",
+    });
     expect(bootstrap.situations).toEqual([
       expect.objectContaining({
         id: sampleSituation.id,
@@ -3212,6 +3224,12 @@ describe("private situation API", () => {
       coverageBundle: { reason: "Samme hendelse på tvers av kilder" },
     });
     expect(first.body.items[0].publicVerification).toBeUndefined();
+    expect(first.body.projection).toEqual({
+      mode: "legacy",
+      matcherVersion: "v1",
+      parityClean: true,
+      fallbackReason: "disabled",
+    });
     expect(first.body.nextCursor).toBeTruthy();
 
     const second = await agent

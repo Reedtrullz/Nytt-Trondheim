@@ -14,6 +14,7 @@ export interface AppConfig {
   uploadDir: string;
   runtimeStatusDir: string;
   rateLimitEnabled: boolean;
+  coverageProjectionMode?: "legacy" | "normalized-shadow" | "normalized-active";
   coverageCorrectionsEnabled?: boolean;
   webPushPublicKey?: string;
   webPushConfigured?: boolean;
@@ -57,6 +58,19 @@ function booleanEnvironmentValue(name: string, fallback: boolean): boolean {
   if (value === "true") return true;
   if (value === "false") return false;
   throw new Error(`${name} must be true or false`);
+}
+
+function coverageProjectionModeFromEnvironment():
+  | "legacy"
+  | "normalized-shadow"
+  | "normalized-active" {
+  const value = process.env.COVERAGE_PROJECTION_MODE?.trim() ?? "legacy";
+  if (value === "legacy" || value === "normalized-shadow" || value === "normalized-active") {
+    return value;
+  }
+  throw new Error(
+    "COVERAGE_PROJECTION_MODE must be legacy, normalized-shadow or normalized-active",
+  );
 }
 
 function smtpConfigForEnvironment(nodeEnv: string): SmtpConfig | undefined {
@@ -112,6 +126,7 @@ export function loadConfig(): AppConfig {
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
+    coverageProjectionMode: coverageProjectionModeFromEnvironment(),
     coverageCorrectionsEnabled: booleanEnvironmentValue("COVERAGE_CORRECTIONS_ENABLED", false),
     webPushPublicKey,
     webPushConfigured: Boolean(webPushPublicKey && webPushPrivateKeyConfigured),
