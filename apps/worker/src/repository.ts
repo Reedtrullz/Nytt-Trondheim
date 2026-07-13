@@ -54,6 +54,13 @@ export interface PersistCoverageGenerationInput {
   };
 }
 
+interface StoredArticleIdentity {
+  incomingId: string;
+  storedId: string;
+  canonicalUrl: string;
+  situationId?: string;
+}
+
 // Shared with the deployment promotion transaction. Both paths serialize changes to the current
 // coverage generation with PostgreSQL transaction-scoped advisory lock (20260713, 7).
 export const coverageGenerationAdvisoryLockKey = [20260713, 7] as const;
@@ -238,8 +245,7 @@ export class WorkerRepository {
     return withTransaction(this.pool, work);
   }
 
-  async upsertArticles(articles: Article[]): Promise<void> {
-    const fetchedAt = new Date().toISOString();
+  async upsertCoverageArticles(articles: Article[]): Promise<void> {
     for (const article of articles) {
       const values = [
         article.id,
@@ -274,8 +280,89 @@ export class WorkerRepository {
           values,
         );
       }
+    }
+  }
+
+  async recordArticleSourceItems(articles: Article[]): Promise<void> {
+    const fetchedAt = new Date().toISOString();
+    for (const article of articles) {
       await this.upsertSourceItem(articleSourceItemInput(article, fetchedAt));
     }
+  }
+
+  async upsertArticles(articles: Article[]): Promise<void> {
+    await this.upsertCoverageArticles(articles);
+    await this.recordArticleSourceItems(articles);
+  }
+
+  async canonicalizeCoverageArticles(articles: Article[]): Promise<Article[]> {
+    if (articles.length === 0) return [];
+    const dedupeKeys = articles.map(articleDedupeKey);
+    const result = await this.pool.query<StoredArticleIdentity>(
+      `WITH incoming AS (
+         SELECT *
+         FROM unnest($1::text[], $2::text[], $3::text[])
+           AS item(id, canonical_url, dedupe_key)
+       )
+       SELECT incoming.id AS "incomingId",
+              stored.id AS "storedId",
+              stored.canonical_url AS "canonicalUrl",
+              stored.payload->>'situationId' AS "situationId"
+       FROM incoming
+       JOIN LATERAL (
+         SELECT article.id, article.canonical_url, article.payload
+         FROM articles article
+         WHERE article.id=incoming.id
+            OR article.canonical_url=incoming.canonical_url
+            OR article.dedupe_key=incoming.dedupe_key
+         ORDER BY (article.id=incoming.id) DESC,
+                  (article.canonical_url=incoming.canonical_url) DESC,
+                  article.id
+         LIMIT 1
+       ) stored ON true`,
+      [articles.map(({ id }) => id), articles.map(({ url }) => url), dedupeKeys],
+    );
+    const storedByIncomingId = new Map(result.rows.map((row) => [row.incomingId, row]));
+    const ranked = articles
+      .map((article, index) => {
+        const stored = storedByIncomingId.get(article.id);
+        return {
+          article,
+          index,
+          dedupeKey: dedupeKeys[index]!,
+          stored,
+          resolved: stored
+            ? {
+                ...article,
+                id: stored.storedId,
+                url: stored.storedId === article.id ? article.url : stored.canonicalUrl,
+                situationId: article.situationId ?? stored.situationId,
+              }
+            : article,
+        };
+      })
+      .sort(
+        (left, right) =>
+          Number(Boolean(right.stored)) - Number(Boolean(left.stored)) ||
+          Number(right.stored?.storedId === right.article.id) -
+            Number(left.stored?.storedId === left.article.id) ||
+          left.resolved.id.localeCompare(right.resolved.id) ||
+          left.article.id.localeCompare(right.article.id),
+      );
+    const claimed = new Set<string>();
+    const canonical = ranked.flatMap((candidate) => {
+      const keys = [
+        `id:${candidate.resolved.id}`,
+        `url:${candidate.resolved.url}`,
+        `dedupe:${candidate.dedupeKey}`,
+      ];
+      if (keys.some((key) => claimed.has(key))) return [];
+      keys.forEach((key) => claimed.add(key));
+      return [candidate];
+    });
+    return canonical
+      .sort((left, right) => left.index - right.index)
+      .map(({ resolved }) => resolved);
   }
 
   async upsertCoverageBundles(

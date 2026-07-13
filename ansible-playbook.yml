@@ -622,7 +622,9 @@
             executable: /bin/bash
           register: promoted_worker_cycle
           until: promoted_worker_cycle.rc == 0
-          retries: 6
+          # A production-sized v2 shadow analysis is CPU-bound and can take more than three
+          # minutes. Keep this bounded, but allow the promoted worker to finish one real cycle.
+          retries: 18
           delay: 10
           changed_when: false
 
@@ -780,6 +782,12 @@
             path: "{{ app_dir }}/.env.production"
             regexp: "^COVERAGE_CORRECTIONS_ENABLED="
             line: "COVERAGE_CORRECTIONS_ENABLED=false"
+
+        - name: Return coverage matcher to v1 during rollback
+          ansible.builtin.lineinfile:
+            path: "{{ app_dir }}/.env.production"
+            regexp: "^COVERAGE_MATCHER_VERSION="
+            line: "COVERAGE_MATCHER_VERSION=v1"
 
         - name: Return coverage generation to shadow during rollback
           ansible.builtin.lineinfile:

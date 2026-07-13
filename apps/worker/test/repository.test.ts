@@ -67,6 +67,81 @@ describe("WorkerRepository", () => {
     expect(String(sourceItemRefreshCall?.[0])).toContain("provider=$2 AND kind=$3");
   });
 
+  it("canonicalizes changed feed ids onto stored article identities before coverage analysis", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          incomingId: "adressa-new-b",
+          storedId: "adressa-stored",
+          canonicalUrl: "https://example.test/stored",
+          situationId: "situation-existing",
+        },
+        {
+          incomingId: "adressa-new-a",
+          storedId: "adressa-stored",
+          canonicalUrl: "https://example.test/stored",
+          situationId: "situation-existing",
+        },
+      ],
+    });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const article = (id: string, url: string, title = "Samme publiserte sak"): Article => ({
+      id,
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title,
+      excerpt: "En oppdatering fra Trondheim.",
+      url,
+      publishedAt: "2026-07-13T10:36:15.000Z",
+      scope: "trondheim",
+      category: "Trondheim",
+      places: ["Trondheim"],
+    });
+
+    const canonical = await repository.canonicalizeCoverageArticles([
+      article("adressa-new-b", "https://example.test/new-b"),
+      article("adressa-new-a", "https://example.test/new-a"),
+      article("adressa-unique", "https://example.test/unique", "En annen sak"),
+    ]);
+
+    expect(canonical.map(({ id }) => id)).toEqual(["adressa-stored", "adressa-unique"]);
+    expect(canonical[0]?.url).toBe("https://example.test/stored");
+    expect(canonical[0]?.situationId).toBe("situation-existing");
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("FROM unnest($1::text[], $2::text[], $3::text[])"),
+      [
+        ["adressa-new-b", "adressa-new-a", "adressa-unique"],
+        ["https://example.test/new-b", "https://example.test/new-a", "https://example.test/unique"],
+        expect.arrayContaining([expect.any(String), expect.any(String), expect.any(String)]),
+      ],
+    );
+  });
+
+  it("collapses duplicate identities introduced within the same collection snapshot", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+    const duplicate = (id: string, url: string): Article => ({
+      id,
+      source: "t_a",
+      sourceLabel: "Trønder-Avisa",
+      title: "Historisk arkivsak",
+      excerpt: "Samme arkivsak med flere lenker.",
+      url,
+      publishedAt: "2020-10-21T12:59:37.000Z",
+      scope: "trondelag",
+      category: "Trøndelag",
+      places: ["Trøndelag"],
+    });
+
+    const canonical = await repository.canonicalizeCoverageArticles([
+      duplicate("t_a-z", "https://example.test/z"),
+      duplicate("t_a-a", "https://example.test/a"),
+    ]);
+
+    expect(canonical).toHaveLength(1);
+    expect(canonical[0]?.id).toBe("t_a-a");
+  });
+
   it("serializes AI processing arrays and results for jsonb columns", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);

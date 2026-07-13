@@ -22,6 +22,7 @@ import type {
 import {
   analyzeArticleCoverage,
   analyzeArticleCoverageV2,
+  articleCoverageEdge,
   buildDatabasePoolOptions,
   buildMorningBrief,
   buildNotificationTriggerPage,
@@ -132,6 +133,7 @@ export interface PreparedCoverageAnalyses {
 
 export interface CoverageLegacyWriter {
   upsertArticles(articles: Article[]): Promise<void>;
+  upsertCoverageArticles?(articles: Article[]): Promise<void>;
   upsertCoverageBundles(bundles: ArticleCoverageBundleDecision[], seenAt: string): Promise<void>;
   persistCoverageGeneration(input: {
     matcherVersion: "v2";
@@ -202,18 +204,31 @@ export async function prepareArticleCoverageAnalyses(
 ): Promise<PreparedCoverageAnalyses> {
   const geocoded = await geocoder(articles.map(stripArticleCoverageBundle));
   const clean = geocoded.map(stripArticleCoverageBundle);
+  const shadowAnalysis =
+    matcherVersion === "v2" ? analyzeArticleCoverageV2(clean, generatedAt) : undefined;
   return {
     active: { matcherVersion: "v1", analysis: analyzeArticleCoverage(clean, generatedAt) },
-    ...(matcherVersion === "v2"
+    ...(shadowAnalysis
       ? {
           shadow: {
             matcherVersion: "v2" as const,
-            analysis: analyzeArticleCoverageV2(clean, generatedAt),
+            analysis: shadowAnalysis,
             correctionDiagnostics: (() => {
-              const diagnostic = analyzeArticleCoverageV2(clean, generatedAt, {
-                rejectedPairs: correctionSnapshot.pairs,
+              const articleById = new Map(clean.map((article) => [article.id, article]));
+              const edges = correctionSnapshot.pairs.flatMap(({ articleIds }) => {
+                const left = articleById.get(articleIds[0]);
+                const right = articleById.get(articleIds[1]);
+                if (!left || !right) return [];
+                const edge = articleCoverageEdge(left, right);
+                if (!edge) return [];
+                return [
+                  {
+                    ...edge,
+                    reviewable: true,
+                    correctionConflict: edge.tier === "strong" || edge.tier === "moderate",
+                  },
+                ];
               });
-              const edges = diagnostic.edges ?? [];
               return {
                 revision: correctionSnapshot.revision,
                 conflictCount: edges.filter(({ correctionConflict }) => correctionConflict).length,
@@ -234,7 +249,11 @@ export async function persistPreparedCoverage(
   mode: "shadow" | "active" = "shadow",
   activeVolumeGuard?: CoverageActiveVolumeGuard,
 ): Promise<string | undefined> {
-  await repository.upsertArticles(analyses.active.analysis.articles);
+  if (repository.upsertCoverageArticles) {
+    await repository.upsertCoverageArticles(analyses.active.analysis.articles);
+  } else {
+    await repository.upsertArticles(analyses.active.analysis.articles);
+  }
   if (!analyses.shadow) {
     await repository.upsertCoverageBundles(analyses.active.analysis.bundles, seenAt);
     return undefined;
@@ -330,6 +349,7 @@ async function prepareCollectedArticleCoverageAnalyses({
   geocoder = geocodeArticles,
   matcherVersion = "v1",
   correctionSnapshot = { revision: 0, pairs: [] },
+  canonicalize = async (items) => items,
 }: {
   articlesForGeocoding: Article[];
   articlesWithoutGeocoding?: Article[];
@@ -337,6 +357,7 @@ async function prepareCollectedArticleCoverageAnalyses({
   geocoder?: typeof geocodeArticles;
   matcherVersion?: "v1" | "v2";
   correctionSnapshot?: CoverageCorrectionSnapshot;
+  canonicalize?: (articles: Article[]) => Promise<Article[]>;
 }): Promise<PreparedCoverageAnalyses> {
   const articlesForAnalysis = articlesForGeocoding.map(stripArticleCoverageBundle);
   const fixedArticlesForAnalysis = articlesWithoutGeocoding.map(stripArticleCoverageBundle);
@@ -344,8 +365,9 @@ async function prepareCollectedArticleCoverageAnalyses({
     ...(await geocoder(articlesForAnalysis)).map(stripArticleCoverageBundle),
     ...fixedArticlesForAnalysis,
   ];
+  const canonical = await canonicalize(clean);
   return prepareArticleCoverageAnalyses(
-    clean,
+    canonical,
     async (items) => items,
     generatedAt,
     matcherVersion,
@@ -1528,6 +1550,12 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     generatedAt: coverageGeneratedAt,
     matcherVersion: coverageMatcherVersion(),
     correctionSnapshot: coverageCorrectionSnapshot,
+    canonicalize: async (articles) => {
+      // Keep the raw upstream IDs in the source ledger; only the FK-backed coverage snapshot
+      // should adopt the canonical identity already stored under URL/title-hour dedupe rules.
+      await repository.recordArticleSourceItems(articles);
+      return repository.canonicalizeCoverageArticles(articles);
+    },
   });
   const coverageCompletedAt = new Date().toISOString();
   const coverageGenerationId = await persistPreparedCoverage(

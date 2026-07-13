@@ -456,7 +456,7 @@ SET status='failed', completed_at=COALESCE(completed_at, now()), error_class='ma
 WHERE mode='shadow' AND status='running';
 ```
 
-For a normalized-active rollback, change flags only: set `COVERAGE_PROJECTION_MODE=legacy`, `COVERAGE_CORRECTIONS_ENABLED=false`, and `COVERAGE_GENERATION_MODE=shadow`, then restart API and worker and require `/health/ready` to report `coverageProjectionMode=legacy`. Do not delete or rewrite generation or correction rows. Completed and promoted rows remain available for diagnosis, and active exact-pair corrections continue to constrain later v2 analyses unless explicitly undone by the owner.
+For a normalized-active rollback, change flags only: set `COVERAGE_PROJECTION_MODE=legacy`, `COVERAGE_CORRECTIONS_ENABLED=false`, and `COVERAGE_GENERATION_MODE=shadow`, then restart API and worker and require `/health/ready` to report `coverageProjectionMode=legacy`. Do not delete or rewrite generation or correction rows. Completed and promoted rows remain available for diagnosis, and active exact-pair corrections continue to constrain later v2 analyses unless explicitly undone by the owner. The automated candidate-validation rescue is stricter: it also returns `COVERAGE_MATCHER_VERSION=v1` so a worker cycle that caused the failed validation cannot immediately repeat after the previous image is restored. Re-enable v2 shadow explicitly after the failure has been diagnosed and fixed.
 
 ## Rollback
 
