@@ -4,7 +4,9 @@ import {
   analyzeArticleCoverageV2,
   articleCoverageEvidence,
   evaluateArticleCoverageCorpus,
+  fatalTrafficFollowUpPolicy,
   highDetailNearDuplicatePolicy,
+  isFatalTrafficIncidentFollowUp,
   isHighDetailCrossSourceNearDuplicate,
 } from "../src/index.js";
 import { articleCoverageGoldenCases } from "./fixtures/article-coverage-golden.js";
@@ -110,5 +112,45 @@ describe("coverage matcher golden corpus", () => {
         ),
       ).toBe(false);
     }
+  });
+
+  it("groups a fatal traffic follow-up despite victim-home and crash-place angles", () => {
+    const fixture = articleCoverageGoldenCases.find(
+      ({ id }) => id === "fatal-traffic-follow-up-across-place-angles",
+    );
+    expect(fixture).toBeDefined();
+    const expectedMembers = ["grong-follow-up", "grong-primary"];
+
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      const analysis = analyze(fixture!.articles, "2026-07-13T12:30:00.000Z");
+      expect(
+        analysis.bundles.map(({ memberArticleIds }) => [...memberArticleIds].sort()),
+      ).toContainEqual(expectedMembers);
+      expect(
+        analysis.bundles.some(({ memberArticleIds }) =>
+          memberArticleIds.includes("other-e6-fatality"),
+        ),
+      ).toBe(false);
+    }
+
+    const primary = fixture!.articles.find(({ id }) => id === "grong-primary")!;
+    const followUp = fixture!.articles.find(({ id }) => id === "grong-follow-up")!;
+    const unrelated = fixture!.articles.find(({ id }) => id === "other-e6-fatality")!;
+    expect(isFatalTrafficIncidentFollowUp(primary, followUp)).toBe(true);
+    expect(isFatalTrafficIncidentFollowUp(primary, unrelated)).toBe(false);
+    expect(
+      isFatalTrafficIncidentFollowUp(primary, {
+        ...followUp,
+        source: "t_a",
+      }),
+    ).toBe(false);
+    expect(
+      isFatalTrafficIncidentFollowUp(primary, {
+        ...followUp,
+        publishedAt: new Date(
+          Date.parse(primary.publishedAt) + fatalTrafficFollowUpPolicy.windowMs + 1,
+        ).toISOString(),
+      }),
+    ).toBe(false);
   });
 });
