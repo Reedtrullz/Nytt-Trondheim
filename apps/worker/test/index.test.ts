@@ -22,6 +22,7 @@ import {
   buildWorkerNotificationTriggerPage,
   buildWorkerSpatialNotificationItems,
   collectorRunFromMetric,
+  coverageGenerationMetrics,
   coverageMatcherVersion,
   coverageShadowMetrics,
   normalizeDatexSituationEndpoint,
@@ -203,8 +204,16 @@ describe("worker lifecycle helpers", () => {
     const repository = {
       upsertArticles: vi.fn(async () => undefined),
       upsertCoverageBundles: vi.fn(async () => undefined),
+      persistCoverageGeneration: vi.fn(async () => "generation-v2"),
     };
-    await persistPreparedCoverage(repository, analyses, "2026-07-12T21:00:00.000Z");
+    await expect(
+      persistPreparedCoverage(
+        repository,
+        analyses,
+        "2026-07-12T21:00:00.000Z",
+        "2026-07-12T20:59:59.000Z",
+      ),
+    ).resolves.toBe("generation-v2");
     expect(repository.upsertArticles).toHaveBeenCalledWith(analyses.active.analysis.articles);
     expect(repository.upsertCoverageBundles).toHaveBeenCalledWith(
       analyses.active.analysis.bundles,
@@ -214,6 +223,57 @@ describe("worker lifecycle helpers", () => {
       shadow.analysis.bundles,
       expect.any(String),
     );
+    expect(repository.persistCoverageGeneration).toHaveBeenCalledWith({
+      matcherVersion: "v2",
+      mode: "shadow",
+      startedAt: "2026-07-12T20:59:59.000Z",
+      completedAt: "2026-07-12T21:00:00.000Z",
+      analysis: shadow.analysis,
+    });
+  });
+
+  it("emits bounded numeric metrics for a persisted v2 generation", async () => {
+    const articles = [
+      newsArticle({ id: "coverage-a", places: ["Nærøysund"] }),
+      newsArticle({
+        id: "coverage-b",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        places: ["Nærøysund"],
+      }),
+    ];
+    const analyses = await prepareArticleCoverageAnalyses(
+      articles,
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v2",
+    );
+    const metrics = coverageGenerationMetrics({
+      generationId: "generation-v2",
+      analysis: analyses.shadow!.analysis,
+      startedAt: "2026-07-12T20:59:59.750Z",
+      completedAt: "2026-07-12T21:00:00.000Z",
+    });
+
+    expect(metrics).toEqual({
+      matcherVersion: "v2",
+      generationId: "generation-v2",
+      mode: "shadow",
+      analysisDurationMs: 250,
+      articleCount: 2,
+      bundleCountByTier: {
+        strong: 1,
+        moderate: 0,
+      },
+      edgeCountByTier: {
+        strong: 1,
+        moderate: 0,
+        weak: 0,
+      },
+      reviewCandidateCount: 0,
+      correctionConflictCount: 0,
+    });
+    expect(JSON.stringify(metrics)).not.toMatch(/title|excerpt|url|articleIds/);
   });
 
   it("bounds concurrent persistence work without dropping queued items", async () => {

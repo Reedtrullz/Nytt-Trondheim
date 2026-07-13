@@ -8,7 +8,9 @@ import {
 import type {
   AiProcessingRun,
   Article,
+  ArticleCoverageAnalysis,
   ArticleCoverageBundleDecision,
+  ArticleCoverageBundleKind,
   HomeSituationSummary,
   MorningBrief,
   NotificationTriggerCandidate,
@@ -33,6 +35,87 @@ import type {
 } from "@nytt/shared";
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
+
+export interface PersistCoverageGenerationInput {
+  matcherVersion: "v2";
+  mode: "shadow" | "active";
+  startedAt: string;
+  completedAt: string;
+  analysis: ArticleCoverageAnalysis;
+}
+
+export async function withTransaction<T>(
+  pool: pg.Pool,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+type CoverageBundleIdentity = {
+  id: string;
+  kind: ArticleCoverageBundleKind;
+  memberArticleIds: string[];
+};
+
+export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
+  candidates: T[],
+  previous: CoverageBundleIdentity[],
+): T[];
+export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
+  candidates: T[],
+  previous: T[],
+): T[];
+export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
+  candidates: T[],
+  previous: CoverageBundleIdentity[],
+): T[] {
+  const availablePrevious = new Set(previous.map(({ id }) => id));
+  const assignments = new Map<number, string>();
+  const options = candidates
+    .flatMap((candidate, candidateIndex) =>
+      previous.flatMap((prior) => {
+        if (candidate.kind !== prior.kind) return [];
+        const priorMembers = new Set(prior.memberArticleIds);
+        const sharedCount = candidate.memberArticleIds.filter((id) => priorMembers.has(id)).length;
+        const threshold = Math.ceil(
+          Math.min(candidate.memberArticleIds.length, prior.memberArticleIds.length) / 2,
+        );
+        return sharedCount >= threshold
+          ? [{ candidateIndex, previousId: prior.id, sharedCount }]
+          : [];
+      }),
+    )
+    .sort(
+      (left, right) =>
+        right.sharedCount - left.sharedCount ||
+        left.previousId.localeCompare(right.previousId) ||
+        left.candidateIndex - right.candidateIndex,
+    );
+
+  for (const option of options) {
+    if (assignments.has(option.candidateIndex) || !availablePrevious.has(option.previousId))
+      continue;
+    assignments.set(option.candidateIndex, option.previousId);
+    availablePrevious.delete(option.previousId);
+  }
+
+  return candidates.map((candidate, index) => ({
+    ...candidate,
+    memberArticleIds: [...candidate.memberArticleIds],
+    id: assignments.get(index) ?? candidate.id,
+  }));
+}
 
 function morningBriefStorageId(generatedAt: string): string {
   const osloDate = new Intl.DateTimeFormat("sv-SE", {
@@ -82,18 +165,7 @@ export class WorkerRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   private async withTransaction<T>(work: (client: pg.PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const result = await work(client);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    return withTransaction(this.pool, work);
   }
 
   async upsertArticles(articles: Article[]): Promise<void> {
@@ -176,6 +248,270 @@ export class WorkerRepository {
           JSON.stringify(bundle),
         ],
       );
+    }
+  }
+
+  async persistCoverageGeneration(input: PersistCoverageGenerationInput): Promise<string> {
+    try {
+      return await withTransaction(this.pool, async (client) => {
+        const generation = await client.query<{ id: string }>(
+          `INSERT INTO coverage_bundle_generations
+            (matcher_version, mode, status, started_at, article_count)
+           VALUES ($1,$2,'running',$3,$4)
+           RETURNING id`,
+          [input.matcherVersion, input.mode, input.startedAt, input.analysis.articles.length],
+        );
+        const generationId = generation.rows[0]?.id;
+        if (!generationId) throw new Error("Coverage generation insert returned no id");
+
+        const articleIds = [...new Set(input.analysis.articles.map(({ id }) => id))];
+        const storedArticles = await client.query<{ id: string }>(
+          "SELECT id FROM articles WHERE id = ANY($1::text[])",
+          [articleIds],
+        );
+        const storedIds = new Set(storedArticles.rows.map(({ id }) => id));
+        if (articleIds.some((id) => !storedIds.has(id))) {
+          throw new Error("Coverage generation references articles that are not stored");
+        }
+        for (const bundle of input.analysis.bundles) {
+          if (bundle.memberArticleIds.length < 2) {
+            throw new Error(`Coverage bundle ${bundle.id} has fewer than two members`);
+          }
+          if (!bundle.memberArticleIds.includes(bundle.primaryArticleId)) {
+            throw new Error(`Coverage bundle ${bundle.id} has no primary member`);
+          }
+          if (!bundle.matchConfidence) {
+            throw new Error(`Coverage bundle ${bundle.id} has no match confidence`);
+          }
+          if (bundle.memberArticleIds.some((id) => !storedIds.has(id))) {
+            throw new Error(`Coverage bundle ${bundle.id} references an unstored article`);
+          }
+        }
+
+        const previousRows = await client.query<{
+          id: string;
+          kind: ArticleCoverageBundleKind;
+          memberArticleIds: string[];
+          generationId: string;
+        }>(
+          `WITH previous_generation AS (
+             SELECT id
+             FROM coverage_bundle_generations
+             WHERE mode=$1 AND status='completed'
+             ORDER BY completed_at DESC, id DESC
+             LIMIT 1
+           )
+           SELECT cbv.bundle_id AS id, cbv.kind,
+                  array_agg(cbm.article_id ORDER BY cbm.article_id) AS "memberArticleIds",
+                  cbv.generation_id AS "generationId"
+           FROM previous_generation pg
+           JOIN coverage_bundle_versions cbv ON cbv.generation_id=pg.id
+           JOIN coverage_bundle_members cbm
+             ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+           GROUP BY cbv.generation_id, cbv.bundle_id, cbv.kind
+           ORDER BY cbv.bundle_id`,
+          [input.mode],
+        );
+        const previousGenerationId = previousRows.rows[0]?.generationId;
+        const bundles = reuseCoverageBundleIds(
+          input.analysis.bundles,
+          previousRows.rows.map(({ id, kind, memberArticleIds }) => ({
+            id,
+            kind,
+            memberArticleIds,
+          })),
+        );
+
+        if (input.mode === "active") {
+          await client.query(
+            `SELECT id FROM coverage_bundle_generations
+             WHERE is_current AND status='completed' AND mode='active'
+             FOR UPDATE`,
+          );
+        }
+        if (previousGenerationId) {
+          await client.query(
+            `UPDATE coverage_bundles
+             SET state = 'superseded', updated_at=now()
+             WHERE generation_id=$1`,
+            [previousGenerationId],
+          );
+        }
+
+        const bundleByArticle = new Map<string, string>();
+        for (const bundle of bundles) {
+          for (const articleId of bundle.memberArticleIds)
+            bundleByArticle.set(articleId, bundle.id);
+          const match = bundle.matchConfidence;
+          if (!match) throw new Error(`Coverage bundle ${bundle.id} has no match confidence`);
+          const state = input.mode === "active" ? "active" : "shadow";
+          await client.query(
+            `INSERT INTO coverage_bundles
+              (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
+               member_article_ids, source_ids, source_labels, signals, near_misses, payload,
+               generation_id, state, matcher_version, match_tier, match_score, match_rationale,
+               first_seen_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$5)
+             ON CONFLICT (id) DO UPDATE SET
+               kind=EXCLUDED.kind, confidence=EXCLUDED.confidence, reason=EXCLUDED.reason,
+               generated_at=EXCLUDED.generated_at, last_seen_at=EXCLUDED.last_seen_at,
+               primary_article_id=EXCLUDED.primary_article_id,
+               member_article_ids=EXCLUDED.member_article_ids, source_ids=EXCLUDED.source_ids,
+               source_labels=EXCLUDED.source_labels, signals=EXCLUDED.signals,
+               near_misses=EXCLUDED.near_misses, payload=EXCLUDED.payload,
+               generation_id=EXCLUDED.generation_id, state=EXCLUDED.state,
+               matcher_version=EXCLUDED.matcher_version, match_tier=EXCLUDED.match_tier,
+               match_score=EXCLUDED.match_score, match_rationale=EXCLUDED.match_rationale,
+               first_seen_at=COALESCE(coverage_bundles.first_seen_at, EXCLUDED.first_seen_at),
+               updated_at=now()`,
+            [
+              bundle.id,
+              bundle.kind,
+              bundle.confidence,
+              bundle.reason,
+              bundle.generatedAt,
+              input.completedAt,
+              bundle.primaryArticleId,
+              bundle.memberArticleIds,
+              bundle.sourceIds,
+              bundle.sourceLabels,
+              JSON.stringify(bundle.signals),
+              JSON.stringify(bundle.nearMisses),
+              JSON.stringify(bundle),
+              generationId,
+              state,
+              input.matcherVersion,
+              match.tier,
+              match.score,
+              match.rationale,
+            ],
+          );
+          await client.query(
+            `INSERT INTO coverage_bundle_versions
+              (generation_id, bundle_id, kind, reason, primary_article_id, match_tier,
+               match_score, match_rationale, generated_at, last_seen_at, source_ids, source_labels)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [
+              generationId,
+              bundle.id,
+              bundle.kind,
+              bundle.reason,
+              bundle.primaryArticleId,
+              match.tier,
+              match.score,
+              match.rationale,
+              bundle.generatedAt,
+              input.completedAt,
+              bundle.sourceIds,
+              bundle.sourceLabels,
+            ],
+          );
+          for (const articleId of bundle.memberArticleIds) {
+            const admittedByArticleIds = (input.analysis.edges ?? [])
+              .filter(
+                (edge) =>
+                  !edge.reviewable &&
+                  edge.tier !== "weak" &&
+                  edge.articleIds.includes(articleId) &&
+                  edge.articleIds.every((id) => bundle.memberArticleIds.includes(id)),
+              )
+              .map((edge) => edge.articleIds.find((id) => id !== articleId))
+              .filter((id): id is string => Boolean(id))
+              .sort()
+              .slice(0, 2);
+            await client.query(
+              `INSERT INTO coverage_bundle_members
+                (generation_id, bundle_id, article_id, role, admitted_by_article_ids)
+               VALUES ($1,$2,$3,$4,$5)`,
+              [
+                generationId,
+                bundle.id,
+                articleId,
+                articleId === bundle.primaryArticleId ? "primary" : "supporting",
+                admittedByArticleIds,
+              ],
+            );
+          }
+        }
+
+        for (const edge of input.analysis.edges ?? []) {
+          const [leftArticleId, rightArticleId] = [...edge.articleIds].sort() as [string, string];
+          const leftBundleId = bundleByArticle.get(leftArticleId);
+          const accepted = !edge.reviewable && edge.tier !== "weak";
+          const bundleId =
+            accepted && leftBundleId === bundleByArticle.get(rightArticleId)
+              ? (leftBundleId ?? null)
+              : null;
+          await client.query(
+            `INSERT INTO coverage_bundle_edges
+              (generation_id, bundle_id, left_article_id, right_article_id, tier, score, kind,
+               status, signals, conflicts, evidence_fingerprint, correction_conflict)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [
+              generationId,
+              bundleId,
+              leftArticleId,
+              rightArticleId,
+              edge.tier,
+              edge.score,
+              edge.kind,
+              accepted ? "accepted" : "reviewable",
+              JSON.stringify(edge.signals),
+              JSON.stringify(edge.conflicts),
+              edge.evidenceFingerprint,
+              edge.correctionConflict,
+            ],
+          );
+        }
+
+        const correctionConflictCount = (input.analysis.edges ?? []).filter(
+          ({ correctionConflict }) => correctionConflict,
+        ).length;
+        await client.query(
+          `UPDATE coverage_bundle_generations
+           SET status='completed', completed_at=$2, bundle_count=$3, edge_count=$4,
+               correction_conflict_count=$5
+           WHERE id=$1 AND status='running'`,
+          [
+            generationId,
+            input.completedAt,
+            bundles.length,
+            input.analysis.edges?.length ?? 0,
+            correctionConflictCount,
+          ],
+        );
+        if (input.mode === "active") {
+          await client.query(
+            `UPDATE coverage_bundle_generations
+             SET is_current=false
+             WHERE is_current AND mode='active' AND id<>$1`,
+            [generationId],
+          );
+          await client.query(`UPDATE coverage_bundle_generations SET is_current=true WHERE id=$1`, [
+            generationId,
+          ]);
+        }
+        return generationId;
+      });
+    } catch (error) {
+      const errorClass =
+        typeof error === "object" && error !== null && "constructor" in error
+          ? error.constructor.name
+          : "Error";
+      await this.pool.query(
+        `INSERT INTO coverage_bundle_generations
+          (matcher_version, mode, status, started_at, completed_at, article_count, error_class)
+         VALUES ($1,$2,'failed',$3,$4,$5,$6)`,
+        [
+          input.matcherVersion,
+          input.mode,
+          input.startedAt,
+          input.completedAt,
+          input.analysis.articles.length,
+          errorClass || "Error",
+        ],
+      );
+      throw error;
     }
   }
 

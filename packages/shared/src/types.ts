@@ -1337,6 +1337,17 @@ export interface WorkerCycleMetrics {
   sourceDurationsMs: Record<string, number>;
   sourceItemCounts: Record<string, number>;
   parseFailures: Record<string, number>;
+  coverage?: {
+    matcherVersion: "v2";
+    generationId: string;
+    mode: "shadow" | "active";
+    analysisDurationMs: number;
+    articleCount: number;
+    bundleCountByTier: { strong: number; moderate: number };
+    edgeCountByTier: { strong: number; moderate: number; weak: number };
+    reviewCandidateCount: number;
+    correctionConflictCount: number;
+  };
 }
 
 export type RuntimeFreshnessStatus = "ok" | "stale" | "missing";

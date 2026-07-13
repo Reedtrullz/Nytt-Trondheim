@@ -127,6 +127,13 @@ export interface PreparedCoverageAnalyses {
 export interface CoverageLegacyWriter {
   upsertArticles(articles: Article[]): Promise<void>;
   upsertCoverageBundles(bundles: ArticleCoverageBundleDecision[], seenAt: string): Promise<void>;
+  persistCoverageGeneration(input: {
+    matcherVersion: "v2";
+    mode: "shadow";
+    startedAt: string;
+    completedAt: string;
+    analysis: ArticleCoverageAnalysis;
+  }): Promise<string>;
 }
 
 export function coverageMatcherVersion(value = process.env.COVERAGE_MATCHER_VERSION): "v1" | "v2" {
@@ -160,9 +167,53 @@ export async function persistPreparedCoverage(
   repository: CoverageLegacyWriter,
   analyses: PreparedCoverageAnalyses,
   seenAt = new Date().toISOString(),
-): Promise<void> {
+  startedAt = seenAt,
+): Promise<string | undefined> {
   await repository.upsertArticles(analyses.active.analysis.articles);
   await repository.upsertCoverageBundles(analyses.active.analysis.bundles, seenAt);
+  if (!analyses.shadow) return undefined;
+  return repository.persistCoverageGeneration({
+    matcherVersion: "v2",
+    mode: "shadow",
+    startedAt,
+    completedAt: seenAt,
+    analysis: analyses.shadow.analysis,
+  });
+}
+
+export function coverageGenerationMetrics({
+  generationId,
+  analysis,
+  startedAt,
+  completedAt,
+}: {
+  generationId: string;
+  analysis: ArticleCoverageAnalysis;
+  startedAt: string;
+  completedAt: string;
+}): NonNullable<WorkerCycleMetrics["coverage"]> {
+  const edges = analysis.edges ?? [];
+  return {
+    matcherVersion: "v2",
+    generationId,
+    mode: "shadow",
+    analysisDurationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)),
+    articleCount: analysis.articles.length,
+    bundleCountByTier: {
+      strong: analysis.bundles.filter(({ matchConfidence }) => matchConfidence?.tier === "strong")
+        .length,
+      moderate: analysis.bundles.filter(
+        ({ matchConfidence }) => matchConfidence?.tier === "moderate",
+      ).length,
+    },
+    edgeCountByTier: {
+      strong: edges.filter(({ tier }) => tier === "strong").length,
+      moderate: edges.filter(({ tier }) => tier === "moderate").length,
+      weak: edges.filter(({ tier }) => tier === "weak").length,
+    },
+    reviewCandidateCount: edges.filter(({ reviewable }) => reviewable).length,
+    correctionConflictCount: edges.filter(({ correctionConflict }) => correctionConflict).length,
+  };
 }
 
 export function coverageShadowMetrics(analyses: PreparedCoverageAnalyses) {
@@ -274,10 +325,12 @@ export function buildWorkerCycleMetrics({
   cycleStartedAt,
   cycleCompletedAt,
   sources,
+  coverage,
 }: {
   cycleStartedAt: Date;
   cycleCompletedAt: Date;
   sources: WorkerSourceMetricInput[];
+  coverage?: WorkerCycleMetrics["coverage"];
 }): WorkerCycleMetrics {
   const sourceDurationsMs: Record<string, number> = {};
   const sourceItemCounts: Record<string, number> = {};
@@ -303,6 +356,7 @@ export function buildWorkerCycleMetrics({
     sourceDurationsMs,
     sourceItemCounts,
     parseFailures,
+    ...(coverage ? { coverage } : {}),
   };
 }
 
@@ -1383,6 +1437,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
       detail: "Politiloggen-adapter er slått av med POLITILOGGEN_ENABLED=false",
     });
   }
+  const coverageStartedAt = new Date().toISOString();
   const coverageGeneratedAt = new Date().toISOString();
   const coverageAnalyses = await prepareCollectedArticleCoverageAnalyses({
     articlesForGeocoding: articleSets.flat(),
@@ -1390,7 +1445,22 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     generatedAt: coverageGeneratedAt,
     matcherVersion: coverageMatcherVersion(),
   });
-  await persistPreparedCoverage(repository, coverageAnalyses, coverageGeneratedAt);
+  const coverageCompletedAt = new Date().toISOString();
+  const coverageGenerationId = await persistPreparedCoverage(
+    repository,
+    coverageAnalyses,
+    coverageCompletedAt,
+    coverageStartedAt,
+  );
+  const coverageMetrics =
+    coverageGenerationId && coverageAnalyses.shadow
+      ? coverageGenerationMetrics({
+          generationId: coverageGenerationId,
+          analysis: coverageAnalyses.shadow.analysis,
+          startedAt: coverageStartedAt,
+          completedAt: coverageCompletedAt,
+        })
+      : undefined;
   const shadowMetrics = coverageShadowMetrics(coverageAnalyses);
   if (shadowMetrics) {
     console.log(`[worker] coverage shadow ${JSON.stringify(shadowMetrics)}`);
@@ -1677,6 +1747,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     cycleStartedAt,
     cycleCompletedAt: new Date(),
     sources: sourceMetrics,
+    coverage: coverageMetrics,
   });
   try {
     await runWithConcurrency(sourceMetrics, 4, (metric) =>
