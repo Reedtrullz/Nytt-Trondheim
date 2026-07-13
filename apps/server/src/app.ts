@@ -7,6 +7,7 @@ import helmet from "helmet";
 import multer from "multer";
 import pg from "pg";
 import { ZodError } from "zod";
+import { createDatabaseReadinessProbe } from "./readiness.js";
 import {
   accessRequestInputSchema,
   accessRequestDecisionSchema,
@@ -1036,8 +1037,12 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     }),
   );
 
+  const databaseReadinessProbe = config.databaseUrl
+    ? createDatabaseReadinessProbe(config.databaseUrl)
+    : undefined;
+
   const readinessPayload = async () => {
-    if (pool) await pool.query("SELECT 1");
+    await databaseReadinessProbe?.();
     return {
       status: "ok" as const,
       storage: pool ? "postgres" : "development-memory",
