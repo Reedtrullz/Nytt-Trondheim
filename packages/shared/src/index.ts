@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./schemas.js";
 export * from "./sample-data.js";
 export * from "./article-bundles.js";
+export * from "./article-coverage-evaluator.js";
 export * from "./incident-text.js";
 export * from "./sports-context.js";
 export * from "./source-confidence.js";
