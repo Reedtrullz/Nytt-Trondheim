@@ -24,10 +24,15 @@ export function CoverageSourceCluster({
   const supporting = card.group.articles.filter((article) => article.id !== card.primary.id);
   if (supporting.length === 0) return null;
   const visible = expanded ? supporting : supporting.slice(0, 2);
-  const countLabel = `${card.articleCount} saker fra ${card.sourceCount} kilder`;
+  const supportingSourceCount = new Set(supporting.map((article) => article.source)).size;
+  const countLabel = `${supporting.length} ${supporting.length === 1 ? "annen sak" : "andre saker"} fra ${supportingSourceCount} ${supportingSourceCount === 1 ? "kilde" : "kilder"}`;
+  const bundleLabel = `${card.articleCount} saker fra ${card.sourceCount} kilder`;
 
   return (
-    <section className="coverage-source-cluster" aria-label={countLabel}>
+    <section
+      className="coverage-source-cluster"
+      aria-label={`Samlet dekning: ${bundleLabel}. ${countLabel}`}
+    >
       <div className="coverage-source-heading">
         <strong>{countLabel}</strong>
         <span>{coverageMatchExplanation(card)}</span>

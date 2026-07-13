@@ -4,14 +4,14 @@ import { CoverageSourceCluster } from "./CoverageSourceCluster.js";
 import { clusteredHomeStoryCard } from "../../test-fixtures/homeStoryCards.js";
 
 describe("CoverageSourceCluster", () => {
-  it("shows explicit article/source counts and only two supporting rows by default", () => {
+  it("labels the supporting rows explicitly and only shows two by default", () => {
     const card = clusteredHomeStoryCard({ articleCount: 7, sourceCount: 5 });
     const html = renderToStaticMarkup(
       <CoverageSourceCluster card={card} canCorrect onCorrect={vi.fn()} />,
     );
 
-    expect(html).toContain("7 saker fra 5 kilder");
-    expect(html).toContain("Vis alle 7 saker fra 5 kilder");
+    expect(html).toContain("6 andre saker fra 5 kilder");
+    expect(html).toContain("Vis alle 6 andre saker fra 5 kilder");
     expect((html.match(/class="coverage-source-row/g) ?? []).length).toBe(2);
     expect(html).toContain('data-article-id="cluster-article-2"');
     expect(html).toContain('data-article-id="cluster-article-3"');
@@ -28,6 +28,7 @@ describe("CoverageSourceCluster", () => {
       />,
     );
 
+    expect(html).toContain("2 andre saker fra 2 kilder");
     expect(html).not.toContain("Feil gruppering?");
   });
 

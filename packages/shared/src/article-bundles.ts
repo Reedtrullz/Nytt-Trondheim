@@ -16,6 +16,7 @@ import {
 } from "./article-coverage-clustering.js";
 import {
   articleCoverageEdge,
+  isFatalTrafficIncidentFollowUp,
   isHighDetailCrossSourceNearDuplicate,
 } from "./article-coverage-evidence.js";
 import type {
@@ -738,6 +739,7 @@ function compatibleDifferentSituationSignal(
 }
 
 function articlesConflict(left: Article, right: Article): boolean {
+  if (isFatalTrafficIncidentFollowUp(left, right)) return false;
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
     if (compatibleDifferentSituationSignal(left, right)) return false;
     return !coverageBundlesCompatible(left, right);
@@ -837,6 +839,17 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
       return signals;
     }
     return [];
+  }
+  if (isFatalTrafficIncidentFollowUp(left, right)) {
+    const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: [left.id, right.id],
+      detail: "fatal_traffic_follow_up",
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
   }
   const topics = sharedTopicSignals(left, right);
   const hasSportsResultTopic = [...topics].some(isSportsResultTopic);

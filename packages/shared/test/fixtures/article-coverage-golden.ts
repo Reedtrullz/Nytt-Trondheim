@@ -534,6 +534,52 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
     provenance: "sanitized-production-shape",
   },
   {
+    id: "fatal-traffic-follow-up-across-place-angles",
+    articles: [
+      article("grong-primary", {
+        source: "t_a",
+        sourceLabel: "Trønder-Avisa",
+        title: "Mann i 80-årene siktet etter dødsulykke i Grong",
+        excerpt:
+          "En mann i 80-årene er siktet etter dødsulykken på E6 i Grong, der en mann i 40-årene fra Trondheim omkom.",
+        url: "https://example.test/grong-primary",
+        category: "Transport",
+        places: ["Grong", "Namdalen"],
+        publishedAt: "2026-07-13T10:25:00.000Z",
+      }),
+      article("grong-follow-up", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Mann fra Trondheim døde. Eldre mann siktet etter ulykke",
+        excerpt: "En mann i 40-årene fra Trondheim døde i ulykken på E6 lørdag.",
+        url: "https://example.test/grong-follow-up",
+        category: "Transport",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-13T12:11:00.000Z",
+      }),
+      article("other-e6-fatality", {
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Kvinne omkom i en annen ulykke på E6",
+        excerpt:
+          "En kvinne i 50-årene omkom etter en ulykke på E6 sør i Trøndelag. Politiet etterforsker hendelsen.",
+        url: "https://example.test/other-e6-fatality",
+        category: "Transport",
+        places: ["Trøndelag"],
+        publishedAt: "2026-07-13T12:20:00.000Z",
+      }),
+    ],
+    expectedSamePairs: [["grong-primary", "grong-follow-up"]],
+    expectedSeparatePairs: [
+      ["grong-primary", "other-e6-fatality"],
+      ["grong-follow-up", "other-e6-fatality"],
+    ],
+    expectedGroups: [["grong-primary", "grong-follow-up"]],
+    expectedVerifiedGroups: [],
+    critical: true,
+    provenance: "sanitized-production-shape",
+  },
+  {
     id: "generic-boilerplate-is-not-high-detail",
     articles: [
       article("generic-boilerplate-nrk", {
