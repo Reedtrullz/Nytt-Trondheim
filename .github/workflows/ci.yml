@@ -83,6 +83,38 @@ jobs:
           SELECT count(*) AS schema_migration_count FROM schema_migrations;
           SELECT count(*) AS source_item_count FROM source_items;
           SQL
+      - name: Verify normalized coverage schema
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT 'public.coverage_bundle_generations'::regclass;
+          SELECT 'public.coverage_bundle_versions'::regclass;
+          SELECT 'public.coverage_bundle_members'::regclass;
+          SELECT 'public.coverage_bundle_edges'::regclass;
+          SELECT 'public.coverage_bundle_corrections'::regclass;
+          DO $$
+          DECLARE
+            actual_count integer;
+          BEGIN
+            SELECT count(*)
+            INTO actual_count
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'coverage_bundles'
+              AND column_name IN (
+                'generation_id',
+                'state',
+                'matcher_version',
+                'match_tier',
+                'match_score',
+                'match_rationale',
+                'first_seen_at'
+              );
+            IF actual_count <> 7 THEN
+              RAISE EXCEPTION 'expected 7 normalized coverage columns, found %', actual_count;
+            END IF;
+          END
+          $$;
+          SQL
       - name: Run migration guardrail invariants
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration-invariants.sql
 
