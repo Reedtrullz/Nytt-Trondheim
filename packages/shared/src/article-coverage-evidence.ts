@@ -222,6 +222,13 @@ const namedEntityWindowMs = 8 * 60 * 60 * 1000;
 const nearDuplicateWindowMs = 24 * 60 * 60 * 1000;
 const topicalThreadWindowMs = 12 * 60 * 60 * 1000;
 
+export const highDetailNearDuplicatePolicy = {
+  windowMs: 15 * 60 * 1000,
+  minBodyOverlap: 12,
+  minBodyScore: 0.38,
+  minDistinctiveOverlap: 8,
+} as const;
+
 interface CityIncidentFingerprintRule {
   windowMs: number;
   minBodyOverlap: number;
@@ -781,6 +788,33 @@ function sameBroadCategory(left: Article, right: Article): boolean {
   return eventLike.has(left.category) && eventLike.has(right.category);
 }
 
+export function isHighDetailCrossSourceNearDuplicate(left: Article, right: Article): boolean {
+  if (left.source === right.source || !sameBroadCategory(left, right)) return false;
+  const timeDistanceMs = Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt));
+  if (!Number.isFinite(timeDistanceMs) || timeDistanceMs > highDetailNearDuplicatePolicy.windowMs) {
+    return false;
+  }
+  const leftSubtype = articleIncidentSubtype(left);
+  const rightSubtype = articleIncidentSubtype(right);
+  if (
+    hasConflictingSpecificPlaces(left, right) ||
+    subtypesConflict(leftSubtype, rightSubtype) ||
+    (left.situationId && right.situationId && left.situationId !== right.situationId)
+  ) {
+    return false;
+  }
+  const body = tokenSimilarity(articleBodyTokens(left), articleBodyTokens(right));
+  const distinctive = tokenSimilarity(
+    articleDistinctiveIncidentTokens(left),
+    articleDistinctiveIncidentTokens(right),
+  );
+  return (
+    body.overlap >= highDetailNearDuplicatePolicy.minBodyOverlap &&
+    body.score >= highDetailNearDuplicatePolicy.minBodyScore &&
+    distinctive.overlap >= highDetailNearDuplicatePolicy.minDistinctiveOverlap
+  );
+}
+
 function hasGenericIncidentOverlap(left: Article, right: Article): boolean {
   const incidentPattern =
     /\b(?:brann\w*|kollisj\w*|kontroll|nødetat\w*|politiet|trussel\w*|ulykke\w*|ungdom\w*|vold\w*)\b/giu;
@@ -830,6 +864,7 @@ function articlePairSignalsForV2(
       score: evidence.titleScore,
     });
   } else if (
+    isHighDetailCrossSourceNearDuplicate(left, right) ||
     (normalizeText(left.excerpt).length > 0 &&
       normalizeText(left.excerpt) === normalizeText(right.excerpt)) ||
     (body.overlap >= 6 && body.score >= 0.6)
@@ -945,7 +980,11 @@ function automaticEvidenceEligible(
   if (kind === "topic") {
     return hasSignal(signals, "topical_thread") && evidence.timeDistanceMs <= topicalThreadWindowMs;
   }
-  if (kind === "incident") return false;
+  if (kind === "incident") {
+    return (
+      hasSignal(signals, "near_duplicate") && isHighDetailCrossSourceNearDuplicate(left, right)
+    );
+  }
   if (
     left.url.length > 0 &&
     left.url === right.url &&
@@ -967,6 +1006,7 @@ export function articleCoverageEdge(
   const signals = articlePairSignalsForV2(left, right, evidence);
   const kind = coverageKindForPair(signals, evidence);
   const automaticEvidence = automaticEvidenceEligible(left, right, evidence, signals, kind);
+  const highDetailNearDuplicate = isHighDetailCrossSourceNearDuplicate(left, right);
   const positiveCount = evidence.positiveIncidentEvidence.length;
   const hasBlockingConflict = evidence.conflicts.length > 0;
   const textScore = Math.min(
@@ -1019,7 +1059,7 @@ export function articleCoverageEdge(
     !hasBlockingConflict &&
     automaticEvidence &&
     score >= 0.6 &&
-    (kind !== "incident" || positiveCount > 0)
+    (kind !== "incident" || positiveCount > 0 || highDetailNearDuplicate)
   ) {
     tier = "moderate";
   }

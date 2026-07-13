@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { analyzeArticleCoverageV2, evaluateArticleCoverageCorpus } from "../src/index.js";
+import {
+  analyzeArticleCoverage,
+  analyzeArticleCoverageV2,
+  evaluateArticleCoverageCorpus,
+  isHighDetailCrossSourceNearDuplicate,
+} from "../src/index.js";
 import { articleCoverageGoldenCases } from "./fixtures/article-coverage-golden.js";
 
 describe("coverage matcher golden corpus", () => {
@@ -21,5 +26,58 @@ describe("coverage matcher golden corpus", () => {
       expect(result.pairRecall).toBeGreaterThanOrEqual(0.9);
       expect(result.groupingCoverage).toBeGreaterThanOrEqual(0.9);
     }
+  });
+
+  it("groups the Dora reporting in both the live legacy and v2 matchers", () => {
+    const fixture = articleCoverageGoldenCases.find(
+      ({ id }) => id === "dora-boat-high-detail-near-duplicate",
+    );
+    expect(fixture).toBeDefined();
+    const expectedMembers = ["dora-adressa", "dora-nrk", "dora-police"];
+
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      const analysis = analyze(fixture!.articles, "2026-07-13T20:00:00.000Z");
+      expect(
+        analysis.bundles.map(({ memberArticleIds }) => [...memberArticleIds].sort()),
+      ).toContainEqual(expectedMembers);
+      expect(
+        analysis.bundles.some(({ memberArticleIds }) =>
+          memberArticleIds.includes("other-boat-control"),
+        ),
+      ).toBe(false);
+    }
+
+    const police = fixture!.articles.find(({ id }) => id === "dora-police")!;
+    const newsroom = fixture!.articles.find(({ id }) => id === "dora-nrk")!;
+    const unrelated = fixture!.articles.find(({ id }) => id === "other-boat-control")!;
+    expect(isHighDetailCrossSourceNearDuplicate(police, newsroom)).toBe(true);
+    expect(isHighDetailCrossSourceNearDuplicate(police, unrelated)).toBe(false);
+    expect(
+      isHighDetailCrossSourceNearDuplicate(police, {
+        ...newsroom,
+        source: "politiloggen",
+      }),
+    ).toBe(false);
+    expect(
+      isHighDetailCrossSourceNearDuplicate(police, {
+        ...newsroom,
+        publishedAt: "2026-07-13T19:35:00.000Z",
+      }),
+    ).toBe(false);
+
+    const corrected = analyzeArticleCoverageV2(fixture!.articles, "2026-07-13T20:00:00.000Z", {
+      rejectedPairs: [
+        {
+          articleIds: ["dora-police", "dora-nrk"],
+          correctionId: "sanitized-dora-split",
+        },
+      ],
+    });
+    expect(
+      corrected.bundles.some(
+        ({ memberArticleIds }) =>
+          memberArticleIds.includes("dora-police") && memberArticleIds.includes("dora-nrk"),
+      ),
+    ).toBe(false);
   });
 });
