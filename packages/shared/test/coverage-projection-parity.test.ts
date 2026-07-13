@@ -3,9 +3,8 @@ import { coverageProjectionParity } from "../src/article-bundles.js";
 import { coverageBundleQuerySchema } from "../src/schemas.js";
 
 describe("coverage projection parity", () => {
-  it("defaults to shadow and parses corrected=false without truthiness coercion", () => {
-    expect(coverageBundleQuerySchema.parse({ corrected: "false" })).toMatchObject({
-      projection: "shadow",
+  it("preserves an omitted projection and parses corrected=false without truthiness coercion", () => {
+    expect(coverageBundleQuerySchema.parse({ corrected: "false" })).toEqual({
       corrected: false,
       limit: 30,
     });

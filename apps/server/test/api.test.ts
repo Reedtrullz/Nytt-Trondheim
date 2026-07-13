@@ -73,7 +73,10 @@ function coverageSplitInput(): CoverageBundleSplitRequest {
   };
 }
 
-async function ownerAgentWithCoverageCorrections(enabled: boolean) {
+async function ownerAgentWithCoverageCorrections(
+  enabled: boolean,
+  coverageProjectionMode?: "legacy" | "normalized-shadow" | "normalized-active",
+) {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-coverage-corrections-"));
   const runtime = await createApp({
     port: 0,
@@ -87,6 +90,7 @@ async function ownerAgentWithCoverageCorrections(enabled: boolean) {
     runtimeStatusDir: uploadDir,
     rateLimitEnabled: false,
     coverageCorrectionsEnabled: enabled,
+    coverageProjectionMode,
   });
   const agent = request.agent(runtime.app);
   const session = await agent.get("/api/session").expect(200);
@@ -3454,6 +3458,36 @@ describe("private situation API", () => {
   });
 
   describe("coverage bundle corrections API", () => {
+    it("selects the promotion-aware default projection while respecting explicit queries", async () => {
+      for (const mode of ["legacy", "normalized-shadow"] as const) {
+        const prePromotion = await ownerAgentWithCoverageCorrections(false, mode);
+        const prePromotionDefault = await prePromotion.agent
+          .get("/api/operations/coverage-bundles")
+          .expect(200);
+        expect(prePromotionDefault.body).toMatchObject({
+          selectedProjection: "shadow",
+          summary: { projectionState: "shadow" },
+        });
+      }
+
+      const promoted = await ownerAgentWithCoverageCorrections(false, "normalized-active");
+      const promotedDefault = await promoted.agent
+        .get("/api/operations/coverage-bundles")
+        .expect(200);
+      expect(promotedDefault.body).toMatchObject({
+        selectedProjection: "active",
+        summary: { projectionState: "active" },
+      });
+
+      const explicitShadow = await promoted.agent
+        .get("/api/operations/coverage-bundles?projection=shadow")
+        .expect(200);
+      expect(explicitShadow.body).toMatchObject({
+        selectedProjection: "shadow",
+        summary: { projectionState: "shadow" },
+      });
+    });
+
     it("exposes the corrections capability on coverage workspace responses", async () => {
       const enabled = await ownerAgentWithCoverageCorrections(true);
       const enabledResponse = await enabled.agent

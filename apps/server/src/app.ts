@@ -2415,10 +2415,17 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.get("/api/operations/coverage-bundles", async (req, res, next) => {
     try {
-      const filters = coverageBundleQuerySchema.parse(req.query);
+      const requestedFilters = coverageBundleQuerySchema.parse(req.query);
+      const defaultProjection =
+        config.coverageProjectionMode === "normalized-active" ? "active" : "shadow";
+      const filters = {
+        ...requestedFilters,
+        projection: requestedFilters.projection ?? defaultProjection,
+      };
       const page = await store.listCoverageBundles(filters, currentLogin(req));
       res.json({
         ...page,
+        selectedProjection: filters.projection,
         correctionsEnabled: config.coverageCorrectionsEnabled === true,
       });
     } catch (error) {

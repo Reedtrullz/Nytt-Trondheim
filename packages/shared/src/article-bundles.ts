@@ -117,6 +117,7 @@ export interface CoverageBundleSummary {
 export interface CoverageBundlePage {
   items: CoverageBundleListItem[];
   summary: CoverageBundleSummary;
+  selectedProjection?: CoverageProjectionState;
   nextCursor?: string;
   parity?: CoverageProjectionParity;
   correctionsEnabled?: boolean;

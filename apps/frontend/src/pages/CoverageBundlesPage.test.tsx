@@ -5,6 +5,7 @@ import type { CoverageBundlePage } from "@nytt/shared";
 import { CoverageCorrectionConflictError } from "../api.js";
 import {
   CoverageBundlesDashboard,
+  coverageQueryFromFilters,
   coverageWorkspaceFilters,
   coverageWorkspaceSearch,
   groupedCoverageReviewCandidates,
@@ -190,6 +191,26 @@ const page: CoverageBundlePage = {
 };
 
 describe("CoverageBundlesDashboard", () => {
+  it("reflects the server-selected projection when the route omitted it", () => {
+    const activePage = {
+      ...page,
+      selectedProjection: "active" as const,
+      summary: { ...page.summary, projectionState: "active" as const },
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={activePage}
+          filters={{ projection: "shadow", projectionDefaulted: true }}
+          onFiltersChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain('<option value="active" selected="">Aktiv v2-visning</option>');
+    expect(html).toContain('<p class="label">Aktiv v2-visning</p>');
+  });
+
   it("renders bundle summary, rows and detail drawer", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
@@ -381,6 +402,21 @@ describe("CoverageBundlesDashboard", () => {
 });
 
 describe("coverage workspace helpers", () => {
+  it("marks an omitted projection for server-side default selection", () => {
+    const filters = coverageWorkspaceFilters("");
+    expect(filters).toEqual({
+      projection: "shadow",
+      projectionDefaulted: true,
+    });
+    expect(coverageQueryFromFilters(filters)).toEqual({ limit: 30 });
+    expect(coverageWorkspaceSearch(filters)).toBe("");
+  });
+
+  it("keeps an explicit projection in the operations request", () => {
+    const filters = coverageWorkspaceFilters("?projection=active");
+    expect(coverageQueryFromFilters(filters)).toEqual({ projection: "active", limit: 30 });
+  });
+
   it("round-trips all filters while changing one value", () => {
     const filters = coverageWorkspaceFilters(
       "?projection=active&matchTier=strong&corrected=yes&integrity=error&q=Flat%C3%A5sen&cursor=next&bundle=coverage%3Aone",

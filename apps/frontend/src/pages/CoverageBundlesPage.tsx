@@ -15,6 +15,7 @@ import { safeExternalUrl } from "../safeExternalUrl.js";
 
 export type CoverageWorkspaceFilters = {
   projection: "legacy" | "shadow" | "active";
+  projectionDefaulted?: boolean;
   matchTier?: "strong" | "moderate";
   corrected?: "yes" | "no";
   integrity?: "clean" | "error";
@@ -107,6 +108,7 @@ export function coverageWorkspaceFilters(search: string): CoverageWorkspaceFilte
   const bundleId = parameters.get("bundle") || undefined;
   return {
     projection,
+    ...(requestedProjection === null ? { projectionDefaulted: true } : {}),
     ...(projection !== "legacy" && (matchTier === "strong" || matchTier === "moderate")
       ? { matchTier }
       : {}),
@@ -123,7 +125,7 @@ export function coverageWorkspaceFilters(search: string): CoverageWorkspaceFilte
 
 export function coverageWorkspaceSearch(filters: CoverageWorkspaceFilters): string {
   const parameters = new URLSearchParams();
-  parameters.set("projection", filters.projection);
+  if (!filters.projectionDefaulted) parameters.set("projection", filters.projection);
   if (filters.projection === "legacy") {
     if (filters.confidence) parameters.set("confidence", filters.confidence);
   } else if (filters.matchTier) {
@@ -137,9 +139,11 @@ export function coverageWorkspaceSearch(filters: CoverageWorkspaceFilters): stri
   return parameters.toString();
 }
 
-function queryFromFilters(filters: CoverageWorkspaceFilters): CoverageBundleQueryInput {
+export function coverageQueryFromFilters(
+  filters: CoverageWorkspaceFilters,
+): CoverageBundleQueryInput {
   return {
-    projection: filters.projection,
+    ...(!filters.projectionDefaulted ? { projection: filters.projection } : {}),
     limit: 30,
     ...(filters.projection === "legacy" && filters.confidence
       ? { confidence: filters.confidence }
@@ -610,16 +614,23 @@ export function CoverageBundlesDashboard({
   onSplit?: (bundle: CoverageBundleListItem) => void;
   onUndo?: (correctionId: string) => void;
 }) {
+  const selectedProjection =
+    page.selectedProjection === "legacy" ||
+    page.selectedProjection === "shadow" ||
+    page.selectedProjection === "active"
+      ? page.selectedProjection
+      : filters.projection;
+  const displayedFilters = { ...filters, projection: selectedProjection };
   const selectedBundle = page.items.find((item) => item.id === filters.bundleId) ?? page.items[0];
   const parityClean = page.parity?.clean !== false;
   const integrityClean = page.summary.integrityErrorCount === 0;
   const correctionsEnabled =
     page.correctionsEnabled === true &&
-    (filters.projection === "shadow" || filters.projection === "active") &&
+    (selectedProjection === "shadow" || selectedProjection === "active") &&
     (selectedBundle?.state === "shadow" || selectedBundle?.state === "active");
 
   function update(next: Partial<CoverageWorkspaceFilters>) {
-    onFiltersChange({ ...filters, cursor: undefined, bundleId: undefined, ...next });
+    onFiltersChange({ ...displayedFilters, cursor: undefined, bundleId: undefined, ...next });
   }
 
   return (
@@ -706,10 +717,11 @@ export function CoverageBundlesDashboard({
           <label>
             Projeksjon
             <select
-              value={filters.projection}
+              value={selectedProjection}
               onChange={(event) =>
                 update({
                   projection: event.target.value as CoverageWorkspaceFilters["projection"],
+                  projectionDefaulted: undefined,
                   matchTier: undefined,
                   confidence: undefined,
                 })
@@ -720,7 +732,7 @@ export function CoverageBundlesDashboard({
               <option value="legacy">Dagens publiserte</option>
             </select>
           </label>
-          {filters.projection === "legacy" ? (
+          {selectedProjection === "legacy" ? (
             <label>
               Eldre tillit
               <select
@@ -791,13 +803,13 @@ export function CoverageBundlesDashboard({
         <section className="coverage-bundle-list" aria-labelledby="coverage-bundle-list-heading">
           <div className="coverage-bundle-list-heading">
             <div>
-              <p className="label">{projectionLabels[filters.projection]}</p>
+              <p className="label">{projectionLabels[selectedProjection]}</p>
               <h2 id="coverage-bundle-list-heading">Grupper til gjennomgang</h2>
             </div>
             {page.nextCursor ? (
               <button
                 type="button"
-                onClick={() => onFiltersChange({ ...filters, cursor: page.nextCursor })}
+                onClick={() => onFiltersChange({ ...displayedFilters, cursor: page.nextCursor })}
               >
                 Neste side
               </button>
@@ -811,7 +823,7 @@ export function CoverageBundlesDashboard({
                   className={`coverage-bundle-row ${selected ? "selected" : ""}`}
                   data-coverage-bundle-row
                   key={bundle.id}
-                  onClick={() => onFiltersChange({ ...filters, bundleId: bundle.id })}
+                  onClick={() => onFiltersChange({ ...displayedFilters, bundleId: bundle.id })}
                   type="button"
                 >
                   <span className="coverage-bundle-row-main">
@@ -867,7 +879,7 @@ export function CoverageBundlesPage() {
     requestIdRef.current = requestId;
     setVisibleError(undefined);
     try {
-      const response = await api.coverageBundles(queryFromFilters(filters));
+      const response = await api.coverageBundles(coverageQueryFromFilters(filters));
       if (requestId === requestIdRef.current) setPage(response);
       return true;
     } catch (reason) {

@@ -12,6 +12,7 @@ describe("article store", () => {
     noGeneration?: boolean;
     corrected?: boolean;
     integrityError?: boolean;
+    matcherVersion?: "v1" | "v2";
   }): pg.Pool {
     const primary: Article = {
       id: "regional-a",
@@ -49,7 +50,10 @@ describe("article store", () => {
         const normalized = sql.replace(/\s+/g, " ").trim();
         if (normalized.includes("FROM coverage_bundle_generations")) {
           expect(normalized).toContain("is_current");
-          if (options?.noGeneration) return { rows: [], rowCount: 0 };
+          expect(normalized).toContain("matcher_version='v2'");
+          if (options?.noGeneration || options?.matcherVersion === "v1") {
+            return { rows: [], rowCount: 0 };
+          }
           return {
             rows: [
               {
@@ -183,6 +187,23 @@ describe("article store", () => {
       fallbackReason: "no_completed_active_generation",
     });
     expect(page.items).toEqual(expect.any(Array));
+  });
+
+  it("treats a completed current active v1 generation as absent from feed and audit", async () => {
+    const store = normalizedProjectionStore(
+      normalizedActiveProjectionPool({ matcherVersion: "v1" }),
+    );
+    const [stories, coverage] = await Promise.all([
+      store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz"),
+      store.listCoverageBundles({ projection: "active", limit: 30 }, "Reedtrullz"),
+    ]);
+
+    expect(stories.projection).toMatchObject({
+      mode: "legacy",
+      fallbackReason: "no_completed_active_generation",
+    });
+    expect(coverage.items).toEqual([]);
+    expect(coverage.summary.generation).toBeUndefined();
   });
 
   it("falls back atomically to legacy stories when normalized integrity validation fails", async () => {

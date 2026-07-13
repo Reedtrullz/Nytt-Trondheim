@@ -6383,7 +6383,7 @@ export class PgStore implements Store {
       `SELECT id, matcher_version, mode, started_at, completed_at, article_count,
               bundle_count, edge_count, correction_conflict_count
        FROM coverage_bundle_generations
-       WHERE mode=$1 AND status='completed'${projection === "active" ? " AND is_current=true" : ""}
+       WHERE mode=$1 AND status='completed'${projection === "active" ? " AND is_current=true AND matcher_version='v2'" : ""}
        ORDER BY completed_at DESC, id DESC
        LIMIT 1 OFFSET $2`,
       [mode, projection === "superseded" ? 1 : 0],

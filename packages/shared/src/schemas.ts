@@ -643,7 +643,7 @@ export const articleQuerySchema = z
   });
 
 export const coverageBundleQuerySchema = z.object({
-  projection: z.enum(["legacy", "shadow", "active", "superseded"]).default("shadow"),
+  projection: z.enum(["legacy", "shadow", "active", "superseded"]).optional(),
   kind: z.enum(["incident", "topic", "update"]).optional(),
   confidence: z.enum(["high", "medium"]).optional(),
   matchTier: z.enum(["strong", "moderate"]).optional(),
