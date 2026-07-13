@@ -32,6 +32,7 @@ describe("migration invariants", () => {
       "coverage_bundle_members",
       "coverage_bundle_edges",
       "coverage_bundle_corrections",
+      "coverage_projection_revisions",
     ]) {
       expect(normalizedSql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
@@ -44,6 +45,7 @@ describe("migration invariants", () => {
       "match_score",
       "match_rationale",
       "first_seen_at",
+      "legacy_generation_id",
     ]) {
       expect(normalizedSql).toContain(
         `ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS ${column}`,
@@ -60,5 +62,24 @@ describe("migration invariants", () => {
       "ALTER TABLE coverage_bundle_versions ALTER COLUMN confidence SET NOT NULL",
     );
     expect(normalizedSql).toContain("VALUES ('016_coverage_bundle_lifecycle')");
+    expect(normalizedSql).toContain("coverage_bundles_legacy_generation_idx");
+    expect(normalizedSql).toContain("VALUES ('017_coverage_legacy_snapshot')");
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_edges ADD COLUMN IF NOT EXISTS positive_incident_evidence",
+    );
+    expect(normalizedSql).toContain("VALUES ('018_coverage_effective_projection')");
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_generations ADD COLUMN IF NOT EXISTS correction_revision_snapshot",
+    );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_generations ADD COLUMN IF NOT EXISTS health_outcome",
+    );
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_projection_revisions ADD COLUMN IF NOT EXISTS legacy_revision",
+    );
+    expect(normalizedSql).toContain("VALUES ('019_coverage_projection_integrity')");
+    expect(normalizedSql).not.toMatch(
+      /UPDATE coverage_bundle_generations SET health_outcome\s*=\s*'healthy'/,
+    );
   });
 });

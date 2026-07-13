@@ -29,10 +29,18 @@ import {
   channelStoryCountsForCards,
   cityPulseDataForCurrentFeed,
   cityPulseLatestTimestamp,
+  coverageConflictRefreshState,
   coverageConflictState,
+  coverageCorrectionContextMatches,
+  coverageCorrectionLiveAnnouncement,
+  coverageFeedKey,
+  coverageProjectionKey,
   coverageSplitAnnouncement,
+  coverageSplitProjectionRevision,
   coverageSplitState,
+  coverageUndoContextMatches,
   coverageUndoAnnouncement,
+  loadCoverageConflictRefreshState,
   mergeCityPulseStoryLists,
   morningBriefFreshness,
   rankHomeStoryCardsForPublicFeed,
@@ -461,9 +469,374 @@ describe("articlesFromCityPulseStoryPage", () => {
     ).toEqual(["story-split", "story-untouched"]);
   });
 
+  it("reconciles a stale later-page card without dropping loaded older cards or its cursor", async () => {
+    const storyWithArticle = (id: string, articleId: string, latestAt: string) => ({
+      ...bootstrapStory,
+      id,
+      primaryArticleId: articleId,
+      articleIds: [articleId],
+      primary: { ...bootstrapStory.primary, id: articleId },
+      articles: [{ ...bootstrapStory.primary, id: articleId }],
+      latestAt,
+    });
+    const replacement = storyWithArticle(
+      "story-refreshed",
+      "later-target-article",
+      "2026-07-02T07:07:00.000Z",
+    ) satisfies CityPulseStory;
+    const refreshedFirstPage = storyWithArticle(
+      "story-first-refreshed",
+      "first-page-article",
+      "2026-07-02T08:07:00.000Z",
+    ) satisfies CityPulseStory;
+    const laterTarget = storyWithArticle(
+      "story-later-target",
+      "later-target-article",
+      "2026-07-02T06:07:00.000Z",
+    ) satisfies CityPulseStory;
+    const unaffectedOlder = storyWithArticle(
+      "story-unaffected-older",
+      "unaffected-older-article",
+      "2026-07-02T05:07:00.000Z",
+    ) satisfies CityPulseStory;
+    const unrelatedConflictPayload = {
+      ...bootstrapStory,
+      id: "story-unrelated-conflict-payload",
+      latestAt: "2026-07-02T04:07:00.000Z",
+      primaryArticleId: "unrelated-conflict-article",
+      articleIds: ["unrelated-conflict-article"],
+      primary: { ...bootstrapStory.primary, id: "unrelated-conflict-article" },
+      articles: [{ ...bootstrapStory.primary, id: "unrelated-conflict-article" }],
+    } satisfies CityPulseStory;
+    const page = {
+      items: [refreshedFirstPage],
+      nextCursor: "page-one-cursor",
+      projection: {
+        mode: "normalized",
+        generationId: "coverage-generation-2",
+        matcherVersion: "v2",
+        parityClean: true,
+      },
+    } satisfies CityPulseStoryPage;
+    const reconciled = coverageConflictRefreshState({
+      currentStories: [bootstrapStory, laterTarget, unaffectedOlder],
+      currentNextCursor: "later-page-cursor",
+      page,
+      removedStoryId: laterTarget.id,
+      targetArticleIds: laterTarget.articleIds,
+      replacementStories: [replacement, unrelatedConflictPayload],
+      preserveCurrentCursor: true,
+    });
+    expect(reconciled).toMatchObject({
+      storyProjection: { generationId: "coverage-generation-2" },
+      nextCursor: "later-page-cursor",
+    });
+    expect(reconciled.stories.map(({ id }) => id)).toEqual([
+      "story-first-refreshed",
+      "story-refreshed",
+      bootstrapStory.id,
+      "story-unaffected-older",
+    ]);
+    expect(reconciled.articles.map(({ id }) => id)).toContain(unaffectedOlder.primary.id);
+    await expect(
+      loadCoverageConflictRefreshState({
+        loadPage: async () => {
+          throw new Error("refresh unavailable");
+        },
+        currentStories: [bootstrapStory, laterTarget, unaffectedOlder],
+        currentNextCursor: "later-page-cursor",
+        removedStoryId: laterTarget.id,
+        targetArticleIds: laterTarget.articleIds,
+        replacementStories: [replacement],
+        preserveCurrentCursor: true,
+      }),
+    ).rejects.toThrow("refresh unavailable");
+  });
+
+  it("keeps refreshed page membership authoritative over duplicate conflict replacements", () => {
+    const articleId = "already-refreshed-article";
+    const refreshedStory = {
+      ...bootstrapStory,
+      id: "story-from-refreshed-page",
+      primaryArticleId: articleId,
+      articleIds: [articleId],
+      primary: { ...bootstrapStory.primary, id: articleId },
+      articles: [{ ...bootstrapStory.primary, id: articleId }],
+    } satisfies CityPulseStory;
+    const staleTarget = {
+      ...refreshedStory,
+      id: "story-stale-target",
+    } satisfies CityPulseStory;
+    const duplicateReplacement = {
+      ...refreshedStory,
+      id: "story-duplicate-conflict-payload",
+    } satisfies CityPulseStory;
+
+    const refreshed = coverageConflictRefreshState({
+      currentStories: [staleTarget],
+      page: { items: [refreshedStory] },
+      removedStoryId: staleTarget.id,
+      targetArticleIds: [articleId],
+      replacementStories: [duplicateReplacement],
+      preserveCurrentCursor: false,
+    });
+
+    expect(refreshed.stories.map(({ id }) => id)).toEqual([refreshedStory.id]);
+    expect(refreshed.articles.map(({ id }) => id)).toEqual([articleId]);
+  });
+
+  it("preserves a canonical same-ID story after its stale membership is removed", () => {
+    const stableStoryId = "coverage:stable-story";
+    const anchor = { ...bootstrapStory.primary, id: "same-id-anchor" };
+    const rejected = { ...bootstrapStory.primary, id: "same-id-rejected" };
+    const staleTarget = {
+      ...bootstrapStory,
+      id: stableStoryId,
+      primaryArticleId: anchor.id,
+      articleIds: [anchor.id, rejected.id],
+      primary: anchor,
+      articles: [anchor, rejected],
+      sourceCount: 2,
+      updateCount: 2,
+    } satisfies CityPulseStory;
+    const canonicalTarget = {
+      ...staleTarget,
+      articleIds: [anchor.id],
+      articles: [anchor],
+      sourceCount: 1,
+      updateCount: 1,
+    } satisfies CityPulseStory;
+    const rejectedReplacement = {
+      ...bootstrapStory,
+      id: `article:${rejected.id}`,
+      primaryArticleId: rejected.id,
+      articleIds: [rejected.id],
+      primary: rejected,
+      articles: [rejected],
+      latestAt: "2026-07-02T07:04:00.000Z",
+    } satisfies CityPulseStory;
+
+    const refreshed = coverageConflictRefreshState({
+      currentStories: [staleTarget],
+      page: { items: [canonicalTarget] },
+      removedStoryId: stableStoryId,
+      targetArticleIds: staleTarget.articleIds,
+      replacementStories: [rejectedReplacement],
+      preserveCurrentCursor: false,
+    });
+
+    expect(refreshed.stories.map(({ id }) => id)).toEqual([
+      canonicalTarget.id,
+      rejectedReplacement.id,
+    ]);
+    expect(refreshed.stories.find(({ id }) => id === stableStoryId)?.articleIds).toEqual([
+      anchor.id,
+    ]);
+  });
+
   it("uses concise live-region announcements for split and undo", () => {
     expect(coverageSplitAnnouncement(2)).toBe("Gruppen er splittet i 2 saker.");
     expect(coverageUndoAnnouncement).toBe("Grupperingen er gjenopprettet.");
+  });
+
+  it("keeps replayed split projection identity aligned with the unchanged canonical revision", () => {
+    const replayReplacement = {
+      ...bootstrapStory,
+      id: "story-replayed-split",
+      coverageBundle: {
+        id: "coverage:replayed-split",
+        kind: "incident" as const,
+        confidence: "high" as const,
+        reason: "Eksakt replay",
+        generatedAt: "2026-07-13T10:00:00.000Z",
+        correctionTarget: {
+          originalBundleId: "coverage:stable-replayed-split",
+          projectionRevision: 7,
+        },
+      },
+    } satisfies CityPulseStory;
+    const projection = {
+      mode: "normalized" as const,
+      generationId: "coverage-generation-1",
+      matcherVersion: "v2" as const,
+      parityClean: true,
+    };
+    const replayRevision = coverageSplitProjectionRevision(7, [replayReplacement]);
+    const replayContext = {
+      feedKey: "same-feed",
+      projectionKey: coverageProjectionKey({ ...projection, projectionRevision: replayRevision }, [
+        replayReplacement,
+      ]),
+    };
+    const canonicalContext = {
+      feedKey: "same-feed",
+      projectionKey: coverageProjectionKey({ ...projection, projectionRevision: 7 }, [
+        replayReplacement,
+      ]),
+    };
+
+    expect(replayRevision).toBe(7);
+    expect(coverageUndoContextMatches(replayContext, canonicalContext)).toBe(true);
+    expect(coverageSplitProjectionRevision(7, [bootstrapStory])).toBe(8);
+  });
+
+  it("keeps split-dialog work bound to the feed and projection captured on open", () => {
+    const captured = {
+      feedKey: coverageFeedKey({
+        scope: "trondheim",
+        category: "Alle",
+        q: "",
+        from: "2026-07-13T08:00:00.000Z",
+      }),
+      projectionKey: coverageProjectionKey(
+        {
+          mode: "normalized",
+          generationId: "coverage-generation-1",
+          matcherVersion: "v2",
+          parityClean: true,
+          projectionRevision: 7,
+        },
+        [],
+      ),
+    };
+
+    expect(coverageCorrectionContextMatches(captured, captured)).toBe(true);
+    expect(
+      coverageCorrectionContextMatches(captured, {
+        ...captured,
+        feedKey: coverageFeedKey({
+          scope: "trondelag",
+          category: "Krim",
+          q: "",
+          from: "2026-07-13T08:00:00.000Z",
+        }),
+      }),
+    ).toBe(false);
+    expect(
+      coverageCorrectionContextMatches(captured, {
+        ...captured,
+        projectionKey: coverageProjectionKey(
+          {
+            mode: "normalized",
+            generationId: "coverage-generation-2",
+            matcherVersion: "v2",
+            parityClean: true,
+            projectionRevision: 8,
+          },
+          [],
+        ),
+      }),
+    ).toBe(false);
+  });
+
+  it("suppresses the prior split success from the live region while raw undo state exists", () => {
+    const previousSplitSuccess = "Gruppen er splittet i 2 saker.";
+
+    expect(coverageCorrectionLiveAnnouncement(true, previousSplitSuccess)).toBe("");
+    expect(coverageCorrectionLiveAnnouncement(false, previousSplitSuccess)).toBe(
+      previousSplitSuccess,
+    );
+  });
+
+  it("invalidates undo across every feed and projection identity boundary", () => {
+    const baseFeed = {
+      scope: "trondheim",
+      category: "Alle",
+      topic: undefined,
+      q: "",
+      from: "2026-07-13T08:00:00.000Z",
+      to: "2026-07-13T10:00:00.000Z",
+    } as const;
+    const feedKey = coverageFeedKey(baseFeed);
+    const projectionKey = coverageProjectionKey(
+      {
+        mode: "normalized",
+        generationId: "coverage-generation-1",
+        matcherVersion: "v2",
+        parityClean: true,
+        projectionRevision: 7,
+      },
+      [],
+    );
+    const undoContext = { feedKey, projectionKey };
+
+    expect(coverageUndoContextMatches(undoContext, undoContext)).toBe(true);
+    for (const changedFeed of [
+      { ...baseFeed, scope: "trondelag" as const },
+      { ...baseFeed, category: "Sport" as const },
+      { ...baseFeed, topic: "rosenborg" as const },
+      { ...baseFeed, q: "Byåsen" },
+      { ...baseFeed, from: "2026-07-13T07:00:00.000Z" },
+      { ...baseFeed, to: "2026-07-13T11:00:00.000Z" },
+    ]) {
+      expect(
+        coverageUndoContextMatches(undoContext, {
+          feedKey: coverageFeedKey(changedFeed),
+          projectionKey,
+        }),
+      ).toBe(false);
+    }
+    expect(
+      coverageUndoContextMatches(undoContext, {
+        feedKey,
+        projectionKey: coverageProjectionKey(
+          {
+            mode: "normalized",
+            generationId: "coverage-generation-2",
+            matcherVersion: "v2",
+            parityClean: true,
+            projectionRevision: 7,
+          },
+          [],
+        ),
+      }),
+    ).toBe(false);
+    expect(
+      coverageUndoContextMatches(undoContext, {
+        feedKey,
+        projectionKey: coverageProjectionKey(
+          {
+            mode: "normalized",
+            generationId: "coverage-generation-1",
+            matcherVersion: "v2",
+            parityClean: true,
+            projectionRevision: 8,
+          },
+          [],
+        ),
+      }),
+    ).toBe(false);
+  });
+
+  it("uses bundle correction revisions only as a projection-key fallback", () => {
+    const storyAtRevision = (revision: number) => ({
+      ...bootstrapStory,
+      id: `story-revision-${revision}`,
+      coverageBundle: {
+        id: `coverage:revision-${revision}`,
+        kind: "incident" as const,
+        confidence: "high" as const,
+        reason: "Revisjonsbevis",
+        generatedAt: "2026-07-13T10:00:00.000Z",
+        correctionTarget: {
+          originalBundleId: `coverage:stable-${revision}`,
+          projectionRevision: revision,
+        },
+      },
+    });
+    const projection = {
+      mode: "normalized" as const,
+      generationId: "coverage-generation-1",
+      matcherVersion: "v2" as const,
+      parityClean: true,
+    };
+
+    expect(coverageProjectionKey(projection, [storyAtRevision(7), storyAtRevision(8)])).toContain(
+      '"revision":8',
+    );
+    expect(
+      coverageProjectionKey({ ...projection, projectionRevision: 9 }, [storyAtRevision(8)]),
+    ).toContain('"revision":9');
   });
 });
 

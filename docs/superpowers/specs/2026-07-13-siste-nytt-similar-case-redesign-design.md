@@ -128,6 +128,55 @@ An incident edge requires at least one of:
 
 `street_order` terms such as `ungdom`, `kontroll på`, `har kontroll`, and `ruset` are supporting tokens only. They cannot satisfy the positive-evidence requirement. Fire matching distinguishes building, vehicle, vegetation, construction-site and cooking/appliance subtypes when the text provides them.
 
+Compatible broad subtype is diagnostic evidence, not an automatic-admission class. In particular,
+`public_order`, `traffic_collision`, `threat_or_violence`, and a classified fire subtype cannot
+combine with generic/title similarity to admit a city-only pair. Every accepted edge has one of
+these maximum temporal windows:
+
+| Evidence class                                | Maximum window | Additional admission rule                                           |
+| --------------------------------------------- | -------------: | ------------------------------------------------------------------- |
+| Same official situation ID                    |       72 hours | Exact situation ID on both articles                                 |
+| Shared or explicitly mentioned specific place |       12 hours | No specific-place or subtype conflict                               |
+| Shared named entity                           |        8 hours | No conflict; generic incident/publisher terms are not entities      |
+| Same exact URL or non-incident near duplicate |       24 hours | Duplicate evidence cannot override an incident-evidence gate        |
+| Topic thread                                  |       12 hours | Topic-specific evidence, separate from incident matching            |
+| Explicit city-level incident fingerprint      | 30–120 minutes | Different sources plus the rule's body and distinctive-token minima |
+
+The city-level allowlist is deliberately narrow: classified building, vehicle, vegetation,
+construction and cooking fires; fight, removal and disturbance order fingerprints; threat and
+assault fingerprints; and vulnerable-road-user, single-vehicle and multiple-vehicle collision
+fingerprints. A generic `kollisjon`, `ordensforstyrrelse`, `brann` or violence label has no
+fingerprint by itself. Fire fingerprints allow at most 60–120 minutes, order fingerprints 30
+minutes, violence fingerprints 60 minutes, and classified collision fingerprints 60–90 minutes.
+Each rule also requires at least four shared body tokens and two shared distinctive tokens. No
+accepted edge may span weeks, even when titles, excerpts, broad subtypes or persisted wording are
+identical.
+
+The shared tokens must include a subtype-specific incident family on both sides, such as the same
+vehicle, vegetation, building or construction object. Generic sentence-opening words and broad
+incident vocabulary are excluded from named entities and distinctive overlap. Exact URLs and
+duplicate wording never bypass this incident-evidence gate. A shared city fingerprint is exposed
+as positive evidence only after the source, time, overlap and required-token checks all pass; raw
+fingerprint classification remains diagnostic only.
+
+For an incident edge, a shared named entity is automatic evidence only when both articles have the
+same non-unknown incident subtype. A safely recognized locality such as sentence-initial
+`Solsiden` may remain diagnostic when one article is unclassified, but it cannot promote that pair;
+arbitrary capitalized sentence starters such as `Flere` remain excluded.
+
+Specific central places remain granular: named streets such as Prinsens gate and Elgeseter gate
+are not collapsed into Midtbyen or sentrum, while those broad district words are generic. Free-text
+place mentions use token boundaries, so a place such as Lade does not match a word such as
+`sjokolade`. Localities and municipalities are not interchangeable: Fanrem/Fannrem is treated as
+one spelling alias, while Fannrem, Orkdal and Orkland remain distinct specific-place tokens.
+
+Fire classification requires actual fire or smoke context. Explicit incident objects take
+priority over the surrounding scene (for example, a vehicle fire on a construction site remains a
+vehicle fire), and bare words such as `anlegg`, `middag` or `plast` do not classify an article as a
+fire. Smoke-only object phrases such as `røykutvikling i bil`, `røykutvikling i bygning` and
+`røykutvikling i vegetasjon` classify to the corresponding explicit object subtype; a stated
+cooking cause retains cooking-smoke precedence over a containing building.
+
 Topic grouping remains separate from incident grouping. Rosenborg topic coverage may group across different article angles around one match or announcement, but ordinary unrelated club coverage does not group merely because it mentions RBK.
 
 ### Deterministic constrained clustering
@@ -220,6 +269,18 @@ A versioned fixture corpus stores articles, expected pair labels, expected group
 - existing downtown order, fire subtype, collision, specific-place conflict, official-situation and stale-bundle fixtures;
 - sanitized owner corrections promoted through code review.
 
+The sanitized corpus concretely covers downtown order, every pair of classified fire subtypes,
+specific-place and city-only collision, conflicting specific places, official-situation expiry,
+identical recurring public-order wording across hours and days, and an active owner-correction
+shape. Corpus evaluation passes the correction fixture into the matcher rather than weakening its
+expected labels.
+
+It also contains a cross-source official/newsroom generic-fight pair that must remain separate and
+must never receive public verification, plus a six-article fixture used to exercise the fixed
+32-ordering sample above the exhaustive five-article limit. The invariance assertion compares the
+matcher's emitted group and edge ordering directly; the test canonicalizes member identity but does
+not sort emitted groups into a passing shape.
+
 The evaluator reports pair precision, pair recall, group precision, grouping coverage, bridge-error count, critical verification errors, and differences from the current matcher. CI fails when any critical false-positive fixture groups, any critical true-positive fixture splits, any false verification appears, or deterministic output changes between two identical runs.
 
 Once the corpus contains at least 100 independently labelled pairs, the promotion threshold is at least 98% pair precision, at least 90% pair recall, zero critical verification errors, and grouping coverage of at least 90% of the current production matcher. Before 100 pairs, all curated expectations are hard gates and metrics are informational.
@@ -273,7 +334,9 @@ Rollback disables v2 promotion and correction mutation, keeps correction records
 ## Testing Strategy
 
 - Shared unit tests cover signal extraction, incident subtypes, edge tiers, evidence fingerprints, corrections, constrained clustering, deterministic grouping, group confidence and verification edges.
-- Property tests generate article order permutations and assert identical groups and IDs.
+- Property tests exhaust every article ordering through five articles, then use at most 32
+  deterministic seeded orderings for larger inputs. They assert identical ordered edge output,
+  groups, primary articles, stable IDs, accepted/reviewable counts and grouped-article counts.
 - Worker repository tests use PostgreSQL to prove transactional generation replacement, dual writes, foreign keys, correction persistence, expiry and failed-generation rollback.
 - Server integration tests prove owner/CSRF enforcement, split, multi-split, idempotency, undo, stale `409`, missing article behavior, feed/audit parity and legacy fallback.
 - Frontend render tests cover compact counts, evidence explanation, disclosure, correction selection, optimistic replacement, stale refresh, undo and ARIA announcements.

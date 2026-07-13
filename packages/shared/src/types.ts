@@ -167,6 +167,8 @@ export interface CoverageProjectionParity {
 
 export interface CoverageBundleSplitRequest {
   expectedGeneratedAt: string;
+  expectedProjectionRevision?: number;
+  originalBundleId?: string;
   anchorArticleId: string;
   rejectedArticleIds: string[];
   reason?: string;
@@ -228,6 +230,10 @@ export interface ArticleCoverageBundle {
   generatedAt: string;
   matchConfidence?: CoverageMatchConfidence;
   matcherVersion?: "v1" | "v2";
+  correctionTarget?: {
+    originalBundleId: string;
+    projectionRevision: number;
+  };
 }
 
 export interface EvidenceItem {
@@ -1397,7 +1403,12 @@ export interface CityPulseStoryProjection {
   generationId?: string;
   matcherVersion: "v1" | "v2";
   parityClean: boolean;
-  fallbackReason?: "disabled" | "no_completed_active_generation" | "integrity_error";
+  projectionRevision?: number;
+  fallbackReason?:
+    | "disabled"
+    | "no_completed_active_generation"
+    | "integrity_error"
+    | "parity_error";
 }
 
 export interface SituationPage {

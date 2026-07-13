@@ -13,6 +13,8 @@ describe("CoverageSourceCluster", () => {
     expect(html).toContain("7 saker fra 5 kilder");
     expect(html).toContain("Vis alle 7 saker fra 5 kilder");
     expect((html.match(/class="coverage-source-row/g) ?? []).length).toBe(2);
+    expect(html).toContain('data-article-id="cluster-article-2"');
+    expect(html).toContain('data-article-id="cluster-article-3"');
     expect(html).toContain("Felles tema og kamp");
     expect(html).toContain("Feil gruppering?");
   });

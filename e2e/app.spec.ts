@@ -6,6 +6,7 @@ import {
   sampleBootstrap,
   sampleWorkspace,
   type Article,
+  type CityPulseStory,
   type MorningBrief,
   type SourceHealth,
 } from "@nytt/shared";
@@ -142,6 +143,62 @@ async function useViewerSession(page: Page): Promise<void> {
       }),
     });
   });
+}
+
+async function coverageFixtureControl(
+  page: Page,
+  action: "reset" | "advance-generation" | "restore-defaults",
+): Promise<{ generationId: string }> {
+  const session = await page.request.get("/api/session");
+  expect(session.ok()).toBe(true);
+  const { csrfToken } = (await session.json()) as { csrfToken: string };
+  const response = await page.request.post(`/api/__e2e/coverage/${action}`, {
+    headers: { "X-CSRF-Token": csrfToken },
+  });
+  expect(response.ok()).toBe(true);
+  return (await response.json()) as { generationId: string };
+}
+
+function staleCoverageSplitStory(): CityPulseStory {
+  const primary = {
+    ...sampleBootstrap.articles[0]!,
+    id: "stale-split-result-article",
+    title: "Gammelt splitteresultat skal forkastes",
+    url: "https://example.test/stale-split-result",
+  } satisfies Article;
+  return {
+    id: "stale-split-result-story",
+    primaryArticleId: primary.id,
+    articleIds: [primary.id],
+    primary,
+    articles: [primary],
+    sourceLabels: [primary.sourceLabel],
+    sourceCount: 1,
+    updateCount: 1,
+    latestAt: primary.publishedAt,
+    category: primary.category,
+  };
+}
+
+async function changeCoverageRouteFilterAndGeneration(page: Page): Promise<string> {
+  const { generationId } = await coverageFixtureControl(page, "advance-generation");
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/?scope=trondelag&category=Krim");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page).toHaveURL(/scope=trondelag/);
+  await expect(page).toHaveURL(/category=Krim/);
+  await expect(page.locator("main.home")).toHaveAttribute("data-generation-id", generationId);
+  return generationId;
+}
+
+async function normalizedArticleIds(locator: Locator): Promise<string[]> {
+  return locator.evaluateAll((nodes) =>
+    nodes
+      .map((node) => node.getAttribute("data-article-id"))
+      .filter((id): id is string => Boolean(id))
+      .sort(),
+  );
 }
 
 async function mockTrafficDepartureBoard(page: Page): Promise<void> {
@@ -284,6 +341,7 @@ async function mockTravelPlaceSuggestions(page: Page): Promise<void> {
 }
 
 test.beforeEach(async ({ page }) => {
+  await coverageFixtureControl(page, "restore-defaults");
   await mockTrafficDepartureBoard(page);
   await mockTravelPlaceSuggestions(page);
 });
@@ -464,7 +522,7 @@ test("default City Pulse load more uses story pagination instead of raw article 
   ).toBeVisible();
   await page.getByRole("button", { name: "Vis flere saker" }).click();
   await expect(
-    page.locator(".source-cluster").getByRole("link", { name: /Neste samlede bypulsrad/ }),
+    page.locator(".coverage-source-cluster").getByRole("link", { name: /Neste samlede bypulsrad/ }),
   ).toBeVisible();
   expect(rawArticleRequests).toEqual([]);
 });
@@ -1039,17 +1097,18 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await expect(page.getByRole("button", { name: "Tilpass oppsett" })).toHaveCount(0);
 
   const lead = page.locator(".lead-story");
-  const sources = lead.locator(".source-cluster");
+  const sources = lead.locator(".coverage-source-cluster");
   await expect(lead.getByRole("heading", { name: "Tente på antibac i Trondheim" })).toBeVisible();
   await expect(lead.locator(".story-event-summary")).toContainText("Samlet hendelse");
   await expect(lead.locator(".story-event-summary")).toContainText(
     "2 kilder · samme hendelse på tvers av kilder",
   );
   await expect(lead.getByText(/Kildetillit: Bekreftet/)).toBeVisible();
-  await expect(lead.locator(".story-badge-verified")).toContainText("Verifisert");
-  await expect(lead.locator(".story-verification-proof")).toContainText("Politiloggen + NRK");
-  await expect(sources.getByText("2 kilder · samme hendelse på tvers av kilder")).toBeVisible();
-  await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toBeVisible();
+  await expect(lead.locator(".story-badge-verified")).toHaveCount(0);
+  await expect(lead.locator(".story-verification-proof")).toHaveCount(0);
+  await expect(sources).toHaveAttribute("aria-label", "2 saker fra 2 kilder");
+  await expect(sources.getByText("Sammenfallende dekning")).toBeVisible();
+  await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toHaveCount(0);
   await expect(sources.getByRole("link", { name: /Politiloggen/ })).toBeVisible();
   await expect(sources.getByText("Ro og orden: Trondheim, Torvet")).toBeVisible();
   await expect(page.locator(".story-card .story-title", { hasText: "Ro og orden" })).toHaveCount(0);
@@ -1088,6 +1147,511 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await page.getByLabel("Velg nærområde").selectOption("midtbyen");
   await expect(page.getByText(/Nær Midtbyen · innen 3 km/i)).toBeVisible();
   await expect(page.getByLabel("Velg lokal radius")).toHaveAttribute("aria-valuetext", "3 km");
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("owner splits and restores a grouped Siste nytt card", async ({ page }) => {
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/");
+  const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+  await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+  await card.getByRole("button", { name: "Feil gruppering?" }).click();
+  await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
+  await page.getByRole("button", { name: "Splitt nå" }).click();
+  await expect(page.locator(".coverage-correction-toast")).toContainText("Gruppen er splittet");
+  await expect(page.getByRole("link", { name: "Urelatert støttesak" })).toBeVisible();
+  await page.getByRole("button", { name: "Angre" }).click();
+  await expect(page.locator("p.sr-only[role=status]")).toContainText(
+    "Grupperingen er gjenopprettet",
+  );
+  await expect(
+    page.locator("article", { hasText: "Korrigerbar hovedsak" }).getByText("3 saker fra 3 kilder"),
+  ).toBeVisible();
+});
+
+test("undo context is dropped after a projection generation change without false success", async ({
+  page,
+}) => {
+  let undoRequests = 0;
+  page.on("request", (request) => {
+    if (/\/api\/coverage-bundle-corrections\/[^/]+\/undo$/.test(request.url())) {
+      undoRequests += 1;
+    }
+  });
+
+  const splitFixtureGroup = async () => {
+    const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+    await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+    await card.getByRole("button", { name: "Feil gruppering?" }).click();
+    await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
+    await page.getByRole("button", { name: "Splitt nå" }).click();
+    await expect(page.locator(".coverage-correction-toast")).toContainText("Gruppen er splittet");
+  };
+
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/");
+  await splitFixtureGroup();
+  const splitGeneration = await page.locator("main.home").getAttribute("data-generation-id");
+  await coverageFixtureControl(page, "advance-generation");
+  await page.getByRole("button", { name: "Oppdater bypuls" }).click();
+  await expect(page.locator("main.home")).not.toHaveAttribute(
+    "data-generation-id",
+    splitGeneration ?? "",
+  );
+  await expect(page.locator(".coverage-correction-toast")).toHaveCount(0);
+  await expect(page.locator("p.sr-only[role=status]")).not.toContainText(
+    "Grupperingen er gjenopprettet",
+  );
+  expect(undoRequests).toBe(0);
+});
+
+test("undo context is dropped across scope and filter changes without false success", async ({
+  page,
+}) => {
+  let undoRequests = 0;
+  page.on("request", (request) => {
+    if (/\/api\/coverage-bundle-corrections\/[^/]+\/undo$/.test(request.url())) {
+      undoRequests += 1;
+    }
+  });
+
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/");
+  const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+  await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+  await card.getByRole("button", { name: "Feil gruppering?" }).click();
+  await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
+  await page.getByRole("button", { name: "Splitt nå" }).click();
+  await expect(page.locator(".coverage-correction-toast")).toContainText("Gruppen er splittet");
+  await page.getByRole("button", { name: "Trøndelag" }).click();
+  await page.getByRole("button", { name: /Krim/ }).click();
+  await expect(page).toHaveURL(/scope=trondelag/);
+  await expect(page).toHaveURL(/category=Krim/);
+  await expect(page.locator(".coverage-correction-toast")).toHaveCount(0);
+  await expect(page.locator("p.sr-only[role=status]")).not.toContainText(
+    "Grupperingen er gjenopprettet",
+  );
+  expect(undoRequests).toBe(0);
+});
+
+test("split dialog closes when route, filter and generation change", async ({ page }) => {
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/");
+  const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+  await card.getByRole("button", { name: "Feil gruppering?" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+
+  await changeCoverageRouteFilterAndGeneration(page);
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator("p.sr-only[role=status]")).toHaveText("");
+});
+
+test("in-flight split success is discarded after coverage context changes", async ({ page }) => {
+  let releaseSplit!: () => void;
+  let markSplitStarted!: () => void;
+  const splitRelease = new Promise<void>((resolve) => {
+    releaseSplit = resolve;
+  });
+  const splitStarted = new Promise<void>((resolve) => {
+    markSplitStarted = resolve;
+  });
+  await page.route("**/api/coverage-bundles/*/corrections/split", async (route) => {
+    markSplitStarted();
+    await splitRelease;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        corrections: [],
+        removedStoryIds: ["coverage:e2e-correctable-group"],
+        replacementStories: [staleCoverageSplitStory()],
+      }),
+    });
+  });
+
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/");
+  const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+  await card.getByRole("button", { name: "Feil gruppering?" }).click();
+  await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
+  await page.getByRole("button", { name: "Splitt nå" }).click();
+  await splitStarted;
+
+  await changeCoverageRouteFilterAndGeneration(page);
+  releaseSplit();
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("Gammelt splitteresultat skal forkastes")).toHaveCount(0);
+  await expect(page.locator(".coverage-correction-toast")).toHaveCount(0);
+  await expect(page.locator("p.sr-only[role=status]")).not.toContainText("Gruppen er splittet");
+});
+
+test("in-flight stale split performs no old-feed refresh after context changes", async ({
+  page,
+}) => {
+  let releaseSplit!: () => void;
+  let markSplitStarted!: () => void;
+  let oldFeedRefreshes = 0;
+  const splitRelease = new Promise<void>((resolve) => {
+    releaseSplit = resolve;
+  });
+  const splitStarted = new Promise<void>((resolve) => {
+    markSplitStarted = resolve;
+  });
+  page.on("request", (request) => {
+    if (!request.url().includes("/api/city-pulse/stories")) return;
+    const url = new URL(request.url());
+    if (url.searchParams.get("scope") === "trondheim") oldFeedRefreshes += 1;
+  });
+  await page.route("**/api/coverage-bundles/*/corrections/split", async (route) => {
+    markSplitStarted();
+    await splitRelease;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ replacementStories: [staleCoverageSplitStory()] }),
+    });
+  });
+
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/");
+  const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+  await card.getByRole("button", { name: "Feil gruppering?" }).click();
+  await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
+  await page.getByRole("button", { name: "Splitt nå" }).click();
+  await splitStarted;
+
+  await changeCoverageRouteFilterAndGeneration(page);
+  releaseSplit();
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("Gammelt splitteresultat skal forkastes")).toHaveCount(0);
+  await expect(page.locator("p.sr-only[role=status]")).not.toContainText(
+    "Gruppen ble oppdatert før endringen kunne lagres",
+  );
+  await expect.poll(() => oldFeedRefreshes).toBe(0);
+});
+
+test("grouped cards remain compact and correctable by keyboard at phone width", async ({
+  page,
+}) => {
+  await coverageFixtureControl(page, "reset");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const card = page.locator("article", { hasText: "Stor gruppesak" });
+  await expect(card.locator(".coverage-source-row")).toHaveCount(2);
+  await expect(card.getByRole("button", { name: "Vis alle 7 saker fra 5 kilder" })).toBeVisible();
+  await card.getByRole("button", { name: "Feil gruppering?" }).focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  const firstCheckbox = dialog.getByRole("checkbox").first();
+  await expect(firstCheckbox).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(firstCheckbox).toBeChecked();
+  for (let index = 0; index < 8; index += 1) await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "Splitt nå" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".coverage-correction-toast")).toContainText("Gruppen er splittet");
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test("regional grouped coverage keeps feed and active audit membership in parity", async ({
+  page,
+}) => {
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/?scope=trondelag");
+  const card = page.locator("article", { hasText: "Stor gruppesak" });
+  const countLabel = card.locator(".coverage-source-heading strong");
+  await expect(countLabel).toHaveText("7 saker fra 5 kilder");
+  await card.getByRole("button", { name: "Vis alle 7 saker fra 5 kilder" }).click();
+  const primaryArticleId = await card.getAttribute("data-article-id");
+  const feedArticleIds = [
+    ...(primaryArticleId ? [primaryArticleId] : []),
+    ...(await normalizedArticleIds(card.locator("[data-article-id]"))),
+  ].sort();
+  expect(feedArticleIds).toHaveLength(7);
+  const feedGenerationId = await page.locator("main.home").getAttribute("data-generation-id");
+  expect(feedGenerationId).toBeTruthy();
+
+  await page.goto("/command/dekning?projection=active");
+  await page.locator('[data-primary-article-id="e2e-large-1"]').click();
+  const audit = page.locator("main.coverage-bundles-page");
+  const auditArticleIds = await normalizedArticleIds(
+    audit.locator(".coverage-bundle-member-list [data-article-id]"),
+  );
+  await expect(audit.locator(".coverage-bundle-badges")).toContainText("7 saker");
+  expect(auditArticleIds).toEqual(feedArticleIds);
+  await expect(audit).toHaveAttribute("data-generation-id", feedGenerationId!);
+});
+
+test("stale grouped correction refreshes current membership without a correction toast", async ({
+  page,
+}) => {
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/?scope=trondelag");
+  const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+  await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+  const home = page.locator("main.home");
+  await expect(home).toHaveAttribute("data-generation-id", /.+/);
+  const staleGenerationId = await home.getAttribute("data-generation-id");
+  await card.getByRole("button", { name: "Feil gruppering?" }).click();
+  await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
+  const advanced = await coverageFixtureControl(page, "advance-generation");
+  const conflict = page.waitForResponse(
+    (response) => response.url().includes("/corrections/split") && response.status() === 409,
+  );
+  await page.getByRole("button", { name: "Splitt nå" }).click();
+  await conflict;
+
+  await expect(page.locator("p.sr-only[role=status]")).toContainText(
+    "Gruppen ble oppdatert før endringen kunne lagres",
+  );
+  await expect(page.locator(".coverage-correction-toast")).toHaveCount(0);
+  await expect(
+    page.locator("article", { hasText: "Korrigerbar hovedsak" }).getByText("2 saker fra 2 kilder"),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Urelatert støttesak" })).toBeVisible();
+  const refreshedGenerationId = await page.locator("main.home").getAttribute("data-generation-id");
+  expect(refreshedGenerationId).toBe(advanced.generationId);
+  expect(refreshedGenerationId).not.toBe(staleGenerationId);
+
+  await page.goto("/command/dekning?projection=active");
+  await page.locator('[data-primary-article-id="e2e-correctable-main"]').click();
+  await expect(page.locator("main.coverage-bundles-page")).toHaveAttribute(
+    "data-generation-id",
+    refreshedGenerationId!,
+  );
+});
+
+test("stale correction on a later loaded page preserves older cards, cursor, focus and scope", async ({
+  page,
+}) => {
+  const storyArticle = (
+    id: string,
+    title: string,
+    publishedAt: string,
+    source: Article["source"],
+  ) =>
+    ({
+      ...sampleBootstrap.articles[0]!,
+      id,
+      title,
+      excerpt: `${title} i den deterministiske pagineringsprøven.`,
+      publishedAt,
+      source,
+      sourceLabel: source === "nrk" ? "NRK Trøndelag" : "Adresseavisen",
+      scope: "trondelag" as const,
+      places: ["Trondheim"],
+    }) satisfies Article;
+  const story = (article: Article, id = article.id): CityPulseStory => ({
+    id,
+    primaryArticleId: article.id,
+    articleIds: [article.id],
+    primary: article,
+    articles: [article],
+    sourceLabels: [article.sourceLabel],
+    sourceCount: 1,
+    updateCount: 1,
+    latestAt: article.publishedAt,
+    category: article.category,
+  });
+  const first = story(
+    storyArticle(
+      "stale-page-first",
+      "Første side før generasjonsbytte",
+      "2026-07-13T09:00:00.000Z",
+      "nrk",
+    ),
+  );
+  const refreshedFirst = story({
+    ...first.primary,
+    title: "Første side etter generasjonsbytte",
+    publishedAt: "2026-07-13T09:01:00.000Z",
+  });
+  const anchor = storyArticle(
+    "stale-later-anchor",
+    "Korrigerbar sak på side to",
+    "2026-07-13T08:00:00.000Z",
+    "nrk",
+  );
+  const supporting = storyArticle(
+    "stale-later-support",
+    "Urelatert side-to-støttesak",
+    "2026-07-13T07:59:00.000Z",
+    "adressa",
+  );
+  const effectiveBundle = {
+    id: "coverage:effective-page-two",
+    kind: "incident" as const,
+    confidence: "high" as const,
+    reason: "Testgruppe på side to",
+    generatedAt: "2026-07-13T08:05:00.000Z",
+    matcherVersion: "v2" as const,
+    correctionTarget: {
+      originalBundleId: "coverage:stable-page-two",
+      projectionRevision: 7,
+    },
+  };
+  const laterTarget: CityPulseStory = {
+    id: effectiveBundle.id,
+    primaryArticleId: anchor.id,
+    articleIds: [anchor.id, supporting.id],
+    primary: anchor,
+    articles: [anchor, supporting],
+    sourceLabels: [anchor.sourceLabel, supporting.sourceLabel],
+    sourceCount: 2,
+    updateCount: 2,
+    latestAt: anchor.publishedAt,
+    category: anchor.category,
+    coverageBundle: effectiveBundle,
+  };
+  const refreshedCanonicalTarget: CityPulseStory = {
+    ...laterTarget,
+    articleIds: [anchor.id],
+    articles: [anchor],
+    sourceLabels: [anchor.sourceLabel],
+    sourceCount: 1,
+    updateCount: 1,
+    coverageBundle: {
+      ...effectiveBundle,
+      correctionTarget: {
+        ...effectiveBundle.correctionTarget,
+        projectionRevision: 8,
+      },
+    },
+  };
+  const older = story(
+    storyArticle("stale-page-older", "Eldre upåvirket sak", "2026-07-13T07:00:00.000Z", "nrk"),
+  );
+  const replacementAnchor = story(anchor, `article:${anchor.id}`);
+  const replacementSupporting = story(supporting, `article:${supporting.id}`);
+  const finalPageStory = story(
+    storyArticle("stale-page-final", "Tredje side beholdt", "2026-07-13T06:00:00.000Z", "nrk"),
+  );
+  const projection = (generationId: string) => ({
+    mode: "normalized" as const,
+    generationId,
+    matcherVersion: "v2" as const,
+    parityClean: true,
+  });
+  let firstPageReads = 0;
+  let splitBody: Record<string, unknown> | undefined;
+  const requestedCursors: Array<string | null> = [];
+
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...sampleBootstrap,
+        articles: [],
+        stories: [],
+        situations: [],
+        morningBrief: undefined,
+      }),
+    });
+  });
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get("cursor");
+    requestedCursors.push(cursor);
+    const body =
+      cursor === "page-2"
+        ? { items: [laterTarget, older], nextCursor: "page-3", projection: projection("gen-1") }
+        : cursor === "page-3"
+          ? { items: [finalPageStory], projection: projection("gen-2") }
+          : firstPageReads++ === 0
+            ? { items: [first], nextCursor: "page-2", projection: projection("gen-1") }
+            : {
+                items: [refreshedFirst, refreshedCanonicalTarget],
+                nextCursor: "new-page-2",
+                projection: projection("gen-2"),
+              };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+  await page.route("**/api/coverage-bundles/*/corrections/split", async (route) => {
+    splitBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        replacementStories: [replacementAnchor, replacementSupporting],
+      }),
+    });
+  });
+  await page.goto("/?scope=trondelag");
+  await expect(page.locator(`[id="story-${first.id}"]`)).toContainText(first.primary.title);
+  await page.getByRole("button", { name: "Vis flere saker" }).click();
+  const laterCard = page.locator("article", { hasText: anchor.title });
+  await laterCard.scrollIntoViewIfNeeded();
+  await laterCard.getByRole("button", { name: "Feil gruppering?" }).click();
+  await page.getByRole("checkbox", { name: new RegExp(supporting.title) }).check();
+  const scrollBeforeSubmit = await page.evaluate(() => window.scrollY);
+  await page.getByRole("button", { name: "Splitt nå" }).click();
+
+  await expect(page.locator("p.sr-only[role=status]")).toContainText(
+    "Gruppen ble oppdatert før endringen kunne lagres",
+  );
+  await expect(page.locator(".coverage-correction-toast")).toHaveCount(0);
+  await expect(page.locator(`[id="story-${refreshedFirst.id}"]`)).toContainText(
+    refreshedFirst.primary.title,
+  );
+  await expect(page.locator(`[id="story-${refreshedCanonicalTarget.id}"]`)).toContainText(
+    anchor.title,
+  );
+  await expect(page.locator(`[id="story-${replacementAnchor.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`[id="story-${older.id}"]`)).toContainText(older.primary.title);
+  await expect(page.locator(`[id="story-${replacementSupporting.id}"]`)).toContainText(
+    replacementSupporting.primary.title,
+  );
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeSubmit);
+  await expect(page.locator(`[id="story-${replacementSupporting.id}"]`)).toBeFocused();
+  expect(page.url()).toContain("scope=trondelag");
+  expect(splitBody).toMatchObject({
+    originalBundleId: "coverage:stable-page-two",
+    expectedProjectionRevision: 7,
+    anchorArticleId: anchor.id,
+    rejectedArticleIds: [supporting.id],
+  });
+
+  await page.getByRole("button", { name: "Vis flere saker" }).click();
+  await expect(page.locator(`[id="story-${finalPageStory.id}"]`)).toContainText(
+    finalPageStory.primary.title,
+  );
+  expect(requestedCursors).toEqual([null, "page-2", null, "page-3"]);
+});
+
+test("coverage audit review filters are keyboard-safe and usable at phone width", async ({
+  page,
+}, testInfo) => {
+  await coverageFixtureControl(page, "reset");
+  if (testInfo.project.name === "desktop-chromium") {
+    await page.setViewportSize({ width: 390, height: 844 });
+  }
+  await page.goto("/command/dekning?projection=active");
+
+  const weakFilter = page.getByRole("checkbox", { name: "Svake kandidater" });
+  await weakFilter.focus();
+  await page.keyboard.press("Space");
+  await expect(weakFilter).toBeChecked();
+  await expect(page).toHaveURL(/review=weak/);
+  await expect(page.getByRole("status")).toContainText(/Serverfilteret returnerte \d+ grupper/);
+  await expectNoHorizontalPageOverflow(page);
+  const accessibility = await new AxeBuilder({ page })
+    .include("main.coverage-bundles-page")
+    .analyze();
+  expect(accessibility.violations).toEqual([]);
+
+  await page.getByRole("combobox", { name: "Projeksjon" }).selectOption("superseded");
+  await expect(page.getByLabel("Historisk generasjon")).toContainText(
+    "Viser valgt tidligere generering",
+  );
+  await expect(page.getByRole("button", { name: "Splitt gruppe" })).toHaveCount(0);
   await expectNoHorizontalPageOverflow(page);
 });
 
@@ -1260,6 +1824,18 @@ test("verified public story proof opens the linked situation room for viewers", 
 test("coverage bundle operations page renders persisted decisions and drawer detail", async ({
   page,
 }) => {
+  const generation = {
+    id: "coverage-generation-shadow-1",
+    matcherVersion: "v2",
+    mode: "shadow",
+    status: "completed",
+    startedAt: "2026-06-18T10:54:00.000Z",
+    completedAt: "2026-06-18T10:55:00.000Z",
+    articleCount: 3,
+    bundleCount: 1,
+    edgeCount: 2,
+    correctionConflictCount: 0,
+  } as const;
   await page.route("**/api/operations/coverage-bundles**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -1270,6 +1846,23 @@ test("coverage bundle operations page renders persisted decisions and drawer det
           byKind: { incident: 1, topic: 0, update: 0 },
           byConfidence: { high: 1, medium: 0 },
           latestGeneratedAt: "2026-06-18T10:55:00.000Z",
+          activeBundleCount: 1,
+          byMatchTier: { strong: 1, moderate: 0 },
+          reviewCandidateCount: 1,
+          activeCorrectionCount: 0,
+          integrityErrorCount: 0,
+          matcherVersion: "v2",
+          projectionState: "shadow",
+          generation,
+        },
+        selectedProjection: "shadow",
+        correctionsEnabled: false,
+        parity: {
+          legacyBundleCount: 1,
+          normalizedBundleCount: 1,
+          membershipMismatchCount: 0,
+          primaryMismatchCount: 0,
+          clean: true,
         },
         items: [
           {
@@ -1278,6 +1871,14 @@ test("coverage bundle operations page renders persisted decisions and drawer det
             confidence: "high",
             reason: "Samme hendelse på tvers av kilder",
             generatedAt: "2026-06-18T10:55:00.000Z",
+            matcherVersion: "v2",
+            matchConfidence: {
+              tier: "strong",
+              score: 0.91,
+              rationale: "To uavhengige kilder beskriver samme hendelse på Flatåsen.",
+            },
+            generation,
+            state: "shadow",
             lastSeenAt: "2026-06-18T10:55:00.000Z",
             updatedAt: "2026-06-18T10:55:30.000Z",
             primaryArticleId: "nrk-flatåsen-smoke",
@@ -1338,6 +1939,68 @@ test("coverage bundle operations page renders persisted decisions and drawer det
                 places: ["Heimdal", "Trondheim"],
               },
             ],
+            edges: [
+              {
+                articleIds: ["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke"],
+                tier: "strong",
+                score: 0.91,
+                kind: "incident",
+                positiveIncidentEvidence: ["shared_specific_place"],
+                signals: [
+                  {
+                    kind: "generic_place_incident",
+                    articleIds: ["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke"],
+                    detail: "brann",
+                    overlap: 4,
+                    score: 0.42,
+                  },
+                ],
+                conflicts: [],
+                evidenceFingerprint: "accepted-flatåsen-smoke",
+                reviewable: false,
+                correctionConflict: false,
+              },
+              {
+                articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+                tier: "weak",
+                score: 0.24,
+                kind: "incident",
+                positiveIncidentEvidence: [],
+                signals: [],
+                conflicts: [
+                  {
+                    kind: "specific_place",
+                    articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+                    detail: "Flatåsen og Heimdal er ulike spesifikke steder.",
+                  },
+                ],
+                evidenceFingerprint: "review-flatåsen-heimdal",
+                reviewable: true,
+                correctionConflict: false,
+              },
+            ],
+            reviewCandidates: [
+              {
+                articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+                tier: "weak",
+                score: 0.24,
+                kind: "incident",
+                positiveIncidentEvidence: [],
+                signals: [],
+                conflicts: [
+                  {
+                    kind: "specific_place",
+                    articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+                    detail: "Flatåsen og Heimdal er ulike spesifikke steder.",
+                  },
+                ],
+                evidenceFingerprint: "review-flatåsen-heimdal",
+                reviewable: true,
+                correctionConflict: false,
+              },
+            ],
+            corrections: [],
+            integrityErrors: [],
           },
         ],
       }),
@@ -1348,7 +2011,9 @@ test("coverage bundle operations page renders persisted decisions and drawer det
 
   await expect(page.getByRole("heading", { name: "Dekningsgrupper" })).toBeVisible();
   await expect(page.getByText("Samme hendelse på tvers av kilder").first()).toBeVisible();
-  await expect(page.getByText("Generisk steds-hendelse")).toBeVisible();
+  await expect(
+    page.getByText("Generisk steds-hendelse · 4 treff · 42 % · brann", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Konflikt i spesifikt sted")).toBeVisible();
   await expect(page.getByText("Adresseavisen: Røykmelding ved Heimdal")).toBeVisible();
   await expect(page.getByRole("link", { name: "Tidslinje" })).toHaveAttribute(
@@ -1391,6 +2056,22 @@ test("legacy drift routes redirect to canonical command center paths", async ({ 
           recentBundleCount: 0,
           byKind: { incident: 0, topic: 0, update: 0 },
           byConfidence: { high: 0, medium: 0 },
+          activeBundleCount: 0,
+          byMatchTier: { strong: 0, moderate: 0 },
+          reviewCandidateCount: 0,
+          activeCorrectionCount: 0,
+          integrityErrorCount: 0,
+          matcherVersion: "v2",
+          projectionState: "shadow",
+        },
+        selectedProjection: "shadow",
+        correctionsEnabled: false,
+        parity: {
+          legacyBundleCount: 0,
+          normalizedBundleCount: 0,
+          membershipMismatchCount: 0,
+          primaryMismatchCount: 0,
+          clean: true,
         },
         items: [],
       }),

@@ -28,6 +28,7 @@ function edge(
     tier,
     score,
     kind: "incident",
+    positiveIncidentEvidence: [],
     signals: [],
     conflicts: [],
     evidenceFingerprint: `v2:${left}:${right}`,

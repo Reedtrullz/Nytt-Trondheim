@@ -40,6 +40,8 @@ services:
     env_file: .env.production
     environment:
       UPLOAD_DIR: /data/uploads
+      COVERAGE_PROJECTION_MODE: ${COVERAGE_PROJECTION_MODE:-legacy}
+      COVERAGE_CORRECTIONS_ENABLED: ${COVERAGE_CORRECTIONS_ENABLED:-false}
     ports:
       - "127.0.0.1:${APP_PORT:-8090}:8080"
     volumes:
@@ -73,6 +75,12 @@ services:
     image: nytt-trondheim-worker:latest
     restart: unless-stopped
     env_file: .env.production
+    environment:
+      COVERAGE_MATCHER_VERSION: ${COVERAGE_MATCHER_VERSION:-v1}
+      COVERAGE_GENERATION_MODE: ${COVERAGE_GENERATION_MODE:-shadow}
+      COVERAGE_ACTIVE_MIN_ARTICLES: ${COVERAGE_ACTIVE_MIN_ARTICLES:-20}
+      COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO: ${COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO:-0.5}
+      COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE: ${COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE:-false}
     networks: [database, outbound]
     depends_on:
       postgres:

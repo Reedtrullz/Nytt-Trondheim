@@ -1,6 +1,7 @@
 import type { ClientConfig } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import {
+  assertCoverageProjectionReady,
   createDatabaseReadinessProbe,
   probeDatabaseReadiness,
   type DatabaseReadinessClient,
@@ -31,6 +32,48 @@ function clientFixture(
 }
 
 describe("database readiness probe", () => {
+  it("accepts a clean completed current active v2 coverage projection", () => {
+    expect(() =>
+      assertCoverageProjectionReady({
+        generationValid: true,
+        integrityErrorCount: 0,
+        parityClean: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["missing generation", { generationValid: false, integrityErrorCount: 0, parityClean: true }],
+    [
+      "wrong matcher",
+      {
+        generationValid: false,
+        integrityErrorCount: 0,
+        parityClean: true,
+      },
+    ],
+    [
+      "dirty integrity",
+      {
+        generationValid: true,
+        integrityErrorCount: 1,
+        parityClean: true,
+      },
+    ],
+    [
+      "dirty base parity",
+      {
+        generationValid: true,
+        integrityErrorCount: 0,
+        parityClean: false,
+      },
+    ],
+  ])("rejects normalized-active readiness for %s", (_label, projection) => {
+    expect(() => assertCoverageProjectionReady(projection)).toThrow(
+      "Normalized coverage projection is not ready",
+    );
+  });
+
   it("bounds connection and query work with a dedicated PostgreSQL client", async () => {
     const client = clientFixture();
     let capturedConfig: ClientConfig | undefined;

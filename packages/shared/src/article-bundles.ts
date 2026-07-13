@@ -90,12 +90,17 @@ export interface CoverageBundleListItem extends ArticleCoverageBundleDecision {
   reviewCandidates: ArticleCoverageEdge[];
   corrections: Array<{
     id: string;
+    generationId?: string;
     anchorArticleId: string;
     rejectedArticleId: string;
     status: "active" | "reverted";
+    applicability?: "active" | "history";
     createdAt: string;
     revertedAt?: string;
   }>;
+  publicVerification?: Article["publicVerification"];
+  generationChanged?: boolean;
+  correctionTombstone?: boolean;
   integrityErrors: string[];
 }
 
@@ -119,6 +124,8 @@ export interface CoverageBundlePage {
   summary: CoverageBundleSummary;
   selectedProjection?: CoverageProjectionState;
   nextCursor?: string;
+  historyNextCursor?: string;
+  selectedGenerationId?: string;
   parity?: CoverageProjectionParity;
   correctionsEnabled?: boolean;
 }
@@ -1436,7 +1443,9 @@ export function analyzeArticleCoverageV2(
       return true;
     })
     .slice(0, 500);
-  const edges = [...acceptedEdges, ...correctionConflicts, ...reviewableEdges];
+  const edges = [...acceptedEdges, ...correctionConflicts, ...reviewableEdges].sort((left, right) =>
+    left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")),
+  );
   const groups = clusterArticlesByCoverageEdges(articles, edges, {
     rejectedPairs: options.rejectedPairs ?? [],
   });

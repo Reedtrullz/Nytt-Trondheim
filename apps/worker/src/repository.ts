@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import {
+  articleCoverageEvidence,
   comparePublicHomeSituations,
   publicLeadLongRunningSituationAgeMs,
   shouldFeaturePublicHomeSituation,
@@ -43,7 +44,19 @@ export interface PersistCoverageGenerationInput {
   startedAt: string;
   completedAt: string;
   analysis: ArticleCoverageAnalysis;
+  legacyBundles: ArticleCoverageBundleDecision[];
+  correctionRevisionSnapshot?: number;
+  correctionConflictCount?: number;
+  activeVolumeGuard?: {
+    minimumArticleCount: number;
+    minimumPreviousRatio: number;
+    allowUnsafeOverride: boolean;
+  };
 }
+
+// Shared with the deployment promotion transaction. Both paths serialize changes to the current
+// coverage generation with PostgreSQL transaction-scoped advisory lock (20260713, 7).
+export const coverageGenerationAdvisoryLockKey = [20260713, 7] as const;
 
 export async function withTransaction<T>(
   pool: pg.Pool,
@@ -61,6 +74,62 @@ export async function withTransaction<T>(
   } finally {
     client.release();
   }
+}
+
+async function upsertLegacyCoverageBundles(
+  queryable: Queryable,
+  bundles: ArticleCoverageBundleDecision[],
+  seenAt: string,
+  legacyGenerationId: string | null,
+): Promise<void> {
+  for (const bundle of bundles) {
+    await queryable.query(
+      `INSERT INTO coverage_bundles
+        (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
+         member_article_ids, source_ids, source_labels, signals, near_misses, payload,
+         generation_id, state, matcher_version, legacy_generation_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,'legacy','v1',$14)
+       ON CONFLICT (id) DO UPDATE SET
+         kind=EXCLUDED.kind,
+         confidence=EXCLUDED.confidence,
+         reason=EXCLUDED.reason,
+         generated_at=EXCLUDED.generated_at,
+         last_seen_at=EXCLUDED.last_seen_at,
+         primary_article_id=EXCLUDED.primary_article_id,
+         member_article_ids=EXCLUDED.member_article_ids,
+         source_ids=EXCLUDED.source_ids,
+         source_labels=EXCLUDED.source_labels,
+         signals=EXCLUDED.signals,
+         near_misses=EXCLUDED.near_misses,
+         payload=EXCLUDED.payload,
+         generation_id=NULL,
+         state='legacy',
+         matcher_version='v1',
+         legacy_generation_id=EXCLUDED.legacy_generation_id,
+         updated_at=now()`,
+      [
+        bundle.id,
+        bundle.kind,
+        bundle.confidence,
+        bundle.reason,
+        bundle.generatedAt,
+        seenAt,
+        bundle.primaryArticleId,
+        bundle.memberArticleIds,
+        bundle.sourceIds,
+        bundle.sourceLabels,
+        JSON.stringify(bundle.signals),
+        JSON.stringify(bundle.nearMisses),
+        JSON.stringify(bundle),
+        legacyGenerationId,
+      ],
+    );
+  }
+  await queryable.query(
+    `UPDATE coverage_projection_revisions
+     SET legacy_revision=legacy_revision+1, updated_at=now()
+     WHERE projection='active'`,
+  );
 }
 
 type CoverageBundleIdentity = {
@@ -213,66 +282,70 @@ export class WorkerRepository {
     bundles: ArticleCoverageBundleDecision[],
     seenAt = new Date().toISOString(),
   ): Promise<void> {
-    for (const bundle of bundles) {
-      await this.pool.query(
-        `INSERT INTO coverage_bundles
-          (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
-           member_article_ids, source_ids, source_labels, signals, near_misses, payload)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         ON CONFLICT (id) DO UPDATE SET
-           kind=EXCLUDED.kind,
-           confidence=EXCLUDED.confidence,
-           reason=EXCLUDED.reason,
-           generated_at=EXCLUDED.generated_at,
-           last_seen_at=EXCLUDED.last_seen_at,
-           primary_article_id=EXCLUDED.primary_article_id,
-           member_article_ids=EXCLUDED.member_article_ids,
-           source_ids=EXCLUDED.source_ids,
-           source_labels=EXCLUDED.source_labels,
-           signals=EXCLUDED.signals,
-           near_misses=EXCLUDED.near_misses,
-           payload=EXCLUDED.payload,
-           updated_at=now()`,
-        [
-          bundle.id,
-          bundle.kind,
-          bundle.confidence,
-          bundle.reason,
-          bundle.generatedAt,
-          seenAt,
-          bundle.primaryArticleId,
-          bundle.memberArticleIds,
-          bundle.sourceIds,
-          bundle.sourceLabels,
-          JSON.stringify(bundle.signals),
-          JSON.stringify(bundle.nearMisses),
-          JSON.stringify(bundle),
-        ],
-      );
-    }
+    await upsertLegacyCoverageBundles(this.pool, bundles, seenAt, null);
   }
 
-  async activeCoverageRejectedPairs(): Promise<CoverageRejectedPair[]> {
+  async activeCoverageRejectedPairs(): Promise<{
+    revision: number;
+    pairs: CoverageRejectedPair[];
+  }> {
     const result = await this.pool.query<{
       id: string;
       anchor_article_id: string;
       rejected_article_id: string;
+      revision: number | string;
     }>(
-      `SELECT id, anchor_article_id, rejected_article_id
-       FROM coverage_bundle_corrections
-       WHERE status='active'
-       ORDER BY created_at, id`,
+      `SELECT cbc.id, cbc.anchor_article_id, cbc.rejected_article_id, revision.revision
+       FROM coverage_projection_revisions revision
+       LEFT JOIN coverage_bundle_corrections cbc ON cbc.status='active'
+       WHERE revision.projection='active'
+       ORDER BY cbc.created_at, cbc.id`,
     );
-    return result.rows.map((row) => ({
-      articleIds: [row.anchor_article_id, row.rejected_article_id],
-      correctionId: row.id,
-    }));
+    return {
+      revision: Number(result.rows[0]?.revision ?? 0),
+      pairs: result.rows.flatMap((row) =>
+        row.id
+          ? [
+              {
+                articleIds: [row.anchor_article_id, row.rejected_article_id] as [string, string],
+                correctionId: row.id,
+              },
+            ]
+          : [],
+      ),
+    };
   }
 
   async persistCoverageGeneration(input: PersistCoverageGenerationInput): Promise<string> {
     let generationId: string;
     try {
       generationId = await withTransaction(this.pool, async (client) => {
+        await client.query("SELECT pg_advisory_xact_lock($1,$2)", [
+          coverageGenerationAdvisoryLockKey[0],
+          coverageGenerationAdvisoryLockKey[1],
+        ]);
+        if (input.mode === "active") {
+          const currentResult = await client.query<{ id: string; article_count: number | string }>(
+            `SELECT id, article_count
+             FROM coverage_bundle_generations
+             WHERE is_current AND status='completed' AND mode='active'
+             FOR UPDATE`,
+          );
+          const guard = input.activeVolumeGuard ?? {
+            minimumArticleCount: 1,
+            minimumPreviousRatio: 0.5,
+            allowUnsafeOverride: false,
+          };
+          const previousCount = Number(currentResult.rows[0]?.article_count ?? 0);
+          const currentCount = input.analysis.articles.length;
+          if (
+            !guard.allowUnsafeOverride &&
+            (currentCount < guard.minimumArticleCount ||
+              (previousCount > 0 && currentCount / previousCount < guard.minimumPreviousRatio))
+          ) {
+            throw new Error("Coverage active candidate volume guard rejected the generation");
+          }
+        }
         const generation = await client.query<{ id: string }>(
           `INSERT INTO coverage_bundle_generations
             (matcher_version, mode, status, started_at, article_count)
@@ -282,6 +355,13 @@ export class WorkerRepository {
         );
         const generationId = generation.rows[0]?.id;
         if (!generationId) throw new Error("Coverage generation insert returned no id");
+
+        await upsertLegacyCoverageBundles(
+          client,
+          input.legacyBundles,
+          input.completedAt,
+          generationId,
+        );
 
         const articleIds = [...new Set(input.analysis.articles.map(({ id }) => id))];
         const storedArticles = await client.query<{ id: string }>(
@@ -348,13 +428,6 @@ export class WorkerRepository {
           })),
         );
 
-        if (input.mode === "active") {
-          await client.query(
-            `SELECT id FROM coverage_bundle_generations
-             WHERE is_current AND status='completed' AND mode='active'
-             FOR UPDATE`,
-          );
-        }
         if (previousGenerationId) {
           await client.query(
             `UPDATE coverage_bundles
@@ -463,8 +536,14 @@ export class WorkerRepository {
 
         for (const edge of input.analysis.edges ?? []) {
           const [leftArticleId, rightArticleId] = [...edge.articleIds].sort() as [string, string];
+          const leftArticle = input.analysis.articles.find(({ id }) => id === leftArticleId);
+          const rightArticle = input.analysis.articles.find(({ id }) => id === rightArticleId);
+          if (!leftArticle || !rightArticle) {
+            throw new Error("Coverage edge references an article outside the generation snapshot");
+          }
+          const pairEvidence = articleCoverageEvidence(leftArticle, rightArticle, "v2");
           const leftBundleId = bundleByArticle.get(leftArticleId);
-          const accepted = !edge.reviewable && edge.tier !== "weak";
+          const accepted = !edge.reviewable && edge.tier !== "weak" && edge.conflicts.length === 0;
           const bundleId =
             accepted && leftBundleId === bundleByArticle.get(rightArticleId)
               ? (leftBundleId ?? null)
@@ -472,8 +551,9 @@ export class WorkerRepository {
           await client.query(
             `INSERT INTO coverage_bundle_edges
               (generation_id, bundle_id, left_article_id, right_article_id, tier, score, kind,
-               status, signals, conflicts, evidence_fingerprint, correction_conflict)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+               status, signals, conflicts, evidence_fingerprint, correction_conflict,
+               positive_incident_evidence)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
             [
               generationId,
               bundleId,
@@ -487,27 +567,100 @@ export class WorkerRepository {
               JSON.stringify(edge.conflicts),
               edge.evidenceFingerprint,
               edge.correctionConflict,
+              pairEvidence.positiveIncidentEvidence,
             ],
           );
         }
 
-        const correctionConflictCount = (input.analysis.edges ?? []).filter(
-          ({ correctionConflict }) => correctionConflict,
-        ).length;
+        const candidateHealth = await client.query<{
+          parity_clean: boolean;
+          integrity_error_count: number | string;
+        }>(
+          `WITH legacy AS (
+             SELECT ARRAY(SELECT DISTINCT unnest(cb.member_article_ids) ORDER BY 1) AS members,
+                    cb.primary_article_id
+             FROM coverage_bundles cb
+             WHERE cb.legacy_generation_id=$1 AND cb.state='legacy' AND cb.matcher_version='v1'
+           ), normalized AS (
+             SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) AS members,
+                    cbv.primary_article_id
+             FROM coverage_bundle_versions cbv
+             JOIN coverage_bundle_members cbm
+               ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+             WHERE cbv.generation_id=$1
+             GROUP BY cbv.bundle_id, cbv.primary_article_id
+           ), parity_mismatches AS (
+             (SELECT * FROM legacy EXCEPT ALL SELECT * FROM normalized)
+             UNION ALL
+             (SELECT * FROM normalized EXCEPT ALL SELECT * FROM legacy)
+           ), invalid_primary AS (
+             SELECT cbv.bundle_id
+             FROM coverage_bundle_versions cbv
+             LEFT JOIN coverage_bundle_members cbm
+               ON cbm.generation_id=cbv.generation_id AND cbm.bundle_id=cbv.bundle_id
+              AND cbm.role='primary'
+             WHERE cbv.generation_id=$1
+             GROUP BY cbv.bundle_id
+             HAVING count(cbm.article_id) <> 1
+           ), stable_mismatches AS (
+             SELECT cbv.bundle_id
+             FROM coverage_bundle_versions cbv
+             LEFT JOIN coverage_bundles stable
+               ON stable.id=cbv.bundle_id AND stable.generation_id=cbv.generation_id
+              AND stable.matcher_version='v2'
+              AND stable.state=CASE WHEN $2='active' THEN 'active' ELSE 'shadow' END
+             WHERE cbv.generation_id=$1
+               AND (stable.id IS NULL
+                 OR stable.primary_article_id IS DISTINCT FROM cbv.primary_article_id
+                 OR ARRAY(SELECT DISTINCT unnest(stable.member_article_ids) ORDER BY 1)
+                    IS DISTINCT FROM ARRAY(
+                      SELECT DISTINCT member.article_id
+                      FROM coverage_bundle_members member
+                      WHERE member.generation_id=cbv.generation_id
+                        AND member.bundle_id=cbv.bundle_id
+                      ORDER BY member.article_id
+                    ))
+           )
+           SELECT NOT EXISTS(SELECT 1 FROM parity_mismatches) AS parity_clean,
+             (SELECT count(*) FROM coverage_bundle_members cbm
+              LEFT JOIN articles a ON a.id=cbm.article_id
+              WHERE cbm.generation_id=$1 AND a.id IS NULL)
+             + (SELECT count(*) FROM invalid_primary)
+             + (SELECT count(*) FROM stable_mismatches)
+             + CASE WHEN $3::int = (SELECT count(*) FROM coverage_generation_articles
+                                    WHERE generation_id=$1)
+                       AND $4::int = (SELECT count(*) FROM coverage_bundle_versions
+                                     WHERE generation_id=$1)
+               THEN 0 ELSE 1 END AS integrity_error_count`,
+          [generationId, input.mode, input.analysis.articles.length, bundles.length],
+        );
+        const health = candidateHealth.rows[0];
+        if (health?.parity_clean !== true || Number(health.integrity_error_count) !== 0) {
+          throw new Error("Coverage generation candidate failed parity or integrity validation");
+        }
         await client.query(
           `UPDATE coverage_bundle_generations
            SET status='completed', completed_at=$2, bundle_count=$3, edge_count=$4,
-               correction_conflict_count=$5
+               correction_conflict_count=$5, correction_revision_snapshot=$6,
+               health_outcome='healthy'
            WHERE id=$1 AND status='running'`,
           [
             generationId,
             input.completedAt,
             bundles.length,
             input.analysis.edges?.length ?? 0,
-            correctionConflictCount,
+            input.correctionConflictCount ?? 0,
+            input.correctionRevisionSnapshot ?? 0,
           ],
         );
         if (input.mode === "active") {
+          await client.query(
+            `UPDATE coverage_bundles
+             SET state='superseded', updated_at=now()
+             WHERE matcher_version='v2' AND state='active'
+               AND generation_id IS DISTINCT FROM $1`,
+            [generationId],
+          );
           await client.query(
             `UPDATE coverage_bundle_generations
              SET is_current=false

@@ -6,6 +6,7 @@ import { CoverageCorrectionConflictError } from "../api.js";
 import {
   CoverageBundlesDashboard,
   coverageQueryFromFilters,
+  coverageReviewFilteredItems,
   coverageWorkspaceFilters,
   coverageWorkspaceSearch,
   groupedCoverageReviewCandidates,
@@ -132,6 +133,7 @@ const page: CoverageBundlePage = {
           tier: "strong",
           score: 0.91,
           kind: "incident",
+          positiveIncidentEvidence: ["same_situation_id", "shared_specific_place"],
           signals: [
             {
               kind: "situation_id",
@@ -150,6 +152,7 @@ const page: CoverageBundlePage = {
           tier: "weak",
           score: 0.24,
           kind: "incident",
+          positiveIncidentEvidence: [],
           signals: [
             {
               kind: "generic_place_incident",
@@ -248,6 +251,74 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Eksporter korrigeringer");
     expect(html).toContain("Gjennomgå og anonymiser eksporten før den legges i testkorpuset.");
     expect(html).toContain("Angre");
+    expect(html).toContain('data-generation-id="coverage-generation-shadow-1"');
+    expect(html).toContain('data-primary-article-id="nrk-flatåsen-smoke"');
+    expect(html).toContain('data-article-id="nrk-flatåsen-smoke"');
+    expect(html).toContain('data-article-id="politiloggen-flatåsen-smoke"');
+    expect(html).toContain("Gjennomgang i serverens kanoniske utvalg");
+    expect(html).toContain("Svake kandidater");
+    expect(html).toContain("Mangler positivt stedsbevis");
+    expect(html).toContain("Mangler positivt entitetsbevis");
+    expect(html).toContain("Mangler sterk offisiell verifisering");
+  });
+
+  it("offers one honest superseded generation projection without mutation controls", () => {
+    const supersededPage: CoverageBundlePage = {
+      ...page,
+      selectedProjection: "superseded",
+      correctionsEnabled: true,
+      summary: { ...page.summary, projectionState: "superseded" },
+      items: [{ ...page.items[0]!, state: "superseded" }],
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={supersededPage}
+          filters={{ projection: "superseded" }}
+          onFiltersChange={vi.fn()}
+          onSplit={vi.fn()}
+          onUndo={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Historisk generering");
+    expect(html).toContain("Viser valgt tidligere generering");
+    expect(html).toContain("Valgt generering");
+    expect(html).toContain("Grupper i genereringen");
+    expect(html).toContain("Grupper i valgt generering");
+    expect(html).toContain("coverage-generation-shadow-1");
+    expect(html).not.toContain("siste vellykkede generering");
+    expect(html).not.toContain("Aktive grupper");
+    expect(html).not.toContain("Grupper til gjennomgang");
+    expect(html).not.toContain("Splitt gruppe");
+    expect(html).not.toContain(">Angre<");
+  });
+
+  it("treats history and review results as canonical server-owned pages", () => {
+    const historicalPage: CoverageBundlePage = {
+      ...page,
+      selectedProjection: "superseded",
+      selectedGenerationId: "11111111-1111-4111-8111-111111111111",
+      historyNextCursor: "older-generation-cursor",
+      summary: { ...page.summary, projectionState: "superseded" },
+      items: [{ ...page.items[0]!, state: "superseded" }],
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={historicalPage}
+          filters={{ projection: "superseded", review: ["missing_place"] }}
+          onFiltersChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Samme hendelse på tvers av kilder");
+    expect(html).toContain("Gjennomgang i serverens kanoniske utvalg");
+    expect(html).not.toContain("bare gruppene som er lastet på denne siden");
+    expect(html).toContain("11111111-1111-4111-8111-111111111111");
+    expect(html).toContain("Eldre generering");
   });
 
   it("warns about integrity and parity failures without promotion-ready copy", () => {
@@ -419,7 +490,7 @@ describe("coverage workspace helpers", () => {
 
   it("round-trips all filters while changing one value", () => {
     const filters = coverageWorkspaceFilters(
-      "?projection=active&matchTier=strong&corrected=yes&integrity=error&q=Flat%C3%A5sen&cursor=next&bundle=coverage%3Aone",
+      "?projection=active&matchTier=strong&corrected=yes&integrity=error&review=weak%2Cmissing_place&q=Flat%C3%A5sen&cursor=next&bundle=coverage%3Aone",
     );
     const search = coverageWorkspaceSearch({ ...filters, matchTier: "moderate" });
 
@@ -428,10 +499,96 @@ describe("coverage workspace helpers", () => {
       matchTier: "moderate",
       corrected: "yes",
       integrity: "error",
+      review: ["weak", "missing_place"],
       query: "Flatåsen",
       cursor: "next",
       bundleId: "coverage:one",
     });
+  });
+
+  it("parses the superseded projection and composes review-quality filters", () => {
+    const filters = coverageWorkspaceFilters(
+      "?projection=superseded&review=reviewable%2Ccorrection_conflict%2Cmissing_entity%2Cmissing_official%2Cgeneration_change&generationId=11111111-1111-4111-8111-111111111111&historyCursor=history-next",
+    );
+
+    expect(filters).toEqual({
+      projection: "superseded",
+      review: [
+        "reviewable",
+        "correction_conflict",
+        "missing_entity",
+        "missing_official",
+        "generation_change",
+      ],
+      generationId: "11111111-1111-4111-8111-111111111111",
+      historyCursor: "history-next",
+    });
+    expect(coverageQueryFromFilters(filters)).toEqual({
+      projection: "superseded",
+      review: [
+        "reviewable",
+        "correction_conflict",
+        "missing_entity",
+        "missing_official",
+        "generation_change",
+      ],
+      generationId: "11111111-1111-4111-8111-111111111111",
+      historyCursor: "history-next",
+      limit: 30,
+    });
+    expect(coverageWorkspaceSearch(filters)).toBe(
+      "projection=superseded&review=reviewable%2Ccorrection_conflict%2Cmissing_entity%2Cmissing_official%2Cgeneration_change&generationId=11111111-1111-4111-8111-111111111111&historyCursor=history-next",
+    );
+  });
+
+  it("applies review-quality filters together to the loaded page", () => {
+    const weak = page.items[0]!;
+    const correctionConflict = {
+      ...weak,
+      id: "coverage:conflict",
+      reviewCandidates: [
+        {
+          ...weak.reviewCandidates[0]!,
+          correctionConflict: true,
+        },
+      ],
+    };
+    const noPlaceOrOfficial = {
+      ...weak,
+      id: "coverage:no-place-or-official",
+      sourceIds: ["nrk", "adressa"] satisfies CoverageBundlePage["items"][number]["sourceIds"],
+      sourceLabels: ["NRK Trøndelag", "Adresseavisen"],
+      memberArticles: weak.memberArticles.map((article, index) =>
+        index === 0
+          ? article
+          : {
+              ...article,
+              source: "adressa" as const,
+              sourceLabel: "Adresseavisen",
+            },
+      ),
+      signals: [],
+      edges: weak.edges.map((edge) => ({
+        ...edge,
+        positiveIncidentEvidence: [],
+        signals: edge.signals.filter(
+          ({ kind }) => kind !== "shared_place" && kind !== "generic_place_incident",
+        ),
+      })),
+      reviewCandidates: [],
+    };
+
+    expect(
+      coverageReviewFilteredItems(
+        [weak, correctionConflict, noPlaceOrOfficial],
+        ["missing_place", "missing_entity", "missing_official"],
+      ).map(({ id }) => id),
+    ).toEqual(["coverage:no-place-or-official"]);
+    expect(
+      coverageReviewFilteredItems([weak, correctionConflict], ["weak", "correction_conflict"]).map(
+        ({ id }) => id,
+      ),
+    ).toEqual(["coverage:conflict"]);
   });
 
   it("keeps confidence only for the legacy projection", () => {
@@ -442,6 +599,15 @@ describe("coverage workspace helpers", () => {
     expect(coverageWorkspaceFilters("?projection=shadow&confidence=high")).toEqual({
       projection: "shadow",
     });
+    expect(coverageWorkspaceFilters("?projection=legacy&review=weak%2Cmissing_entity")).toEqual({
+      projection: "legacy",
+    });
+    expect(
+      coverageWorkspaceSearch({
+        projection: "legacy",
+        review: ["weak", "missing_entity"],
+      }),
+    ).toBe("projection=legacy");
   });
 
   it("groups review candidates by reason and bounds initial rows to five", () => {

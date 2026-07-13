@@ -33,6 +33,7 @@ function directStrongIncidentEdge(left: string, right: string): ArticleCoverageE
     tier: "strong",
     score: 0.95,
     kind: "incident",
+    positiveIncidentEvidence: [],
     signals: [],
     conflicts: [],
     evidenceFingerprint: `v2:${left}:${right}`,

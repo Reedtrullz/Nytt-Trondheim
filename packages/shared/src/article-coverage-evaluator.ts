@@ -1,5 +1,6 @@
 import type { Article } from "./types.js";
 import type { ArticleCoverageAnalysis } from "./article-bundles.js";
+import type { CoverageRejectedPair } from "./article-coverage-clustering.js";
 import { derivePublicVerificationForArticleGroup } from "./public-verification.js";
 
 export interface ArticleCoverageGoldenCase {
@@ -9,6 +10,7 @@ export interface ArticleCoverageGoldenCase {
   expectedSeparatePairs: Array<[string, string]>;
   expectedGroups: string[][];
   expectedVerifiedGroups: string[][];
+  rejectedPairs?: CoverageRejectedPair[];
   critical: boolean;
   provenance: "synthetic" | "sanitized-production-shape" | "owner-correction";
 }
@@ -26,7 +28,10 @@ export interface ArticleCoverageEvaluation {
   criticalFailures: string[];
 }
 
-type Analyzer = (articles: Article[]) => ArticleCoverageAnalysis;
+type Analyzer = (
+  articles: Article[],
+  fixture: ArticleCoverageGoldenCase,
+) => ArticleCoverageAnalysis;
 
 function pairKey(left: string, right: string): string {
   return [left, right].sort().join("\u0000");
@@ -83,8 +88,8 @@ export function evaluateArticleCoverageCorpus(
 
   for (const fixture of cases) {
     labelledPairCount += fixture.expectedSamePairs.length + fixture.expectedSeparatePairs.length;
-    const first = analyze(fixture.articles);
-    const second = analyze([...fixture.articles]);
+    const first = analyze(fixture.articles, fixture);
+    const second = analyze([...fixture.articles], fixture);
     const observedPairs = new Set(
       first.bundles.flatMap((bundle) =>
         bundle.memberArticleIds.flatMap((left, index) =>

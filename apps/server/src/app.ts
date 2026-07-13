@@ -7,7 +7,7 @@ import helmet from "helmet";
 import multer from "multer";
 import pg from "pg";
 import { ZodError } from "zod";
-import { createDatabaseReadinessProbe } from "./readiness.js";
+import { assertCoverageProjectionReady, createDatabaseReadinessProbe } from "./readiness.js";
 import {
   accessRequestInputSchema,
   accessRequestDecisionSchema,
@@ -992,6 +992,12 @@ export interface AppRuntime {
 }
 
 export async function createApp(config: AppConfig): Promise<AppRuntime> {
+  if (config.nodeEnv === "production" && config.e2eCoverageFixtures === true) {
+    throw new Error("E2E_COVERAGE_FIXTURES must not be enabled in production");
+  }
+  if (config.e2eCoverageFixtures === true && config.databaseUrl) {
+    throw new Error("E2E_COVERAGE_FIXTURES requires development memory storage");
+  }
   const app = express();
   const pool = config.databaseUrl
     ? new pg.Pool({
@@ -1002,7 +1008,9 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   const coverageProjectionMode = config.coverageProjectionMode ?? "legacy";
   const store: Store = pool
     ? new PgStore(pool, coverageProjectionMode)
-    : new MemoryStore(coverageProjectionMode);
+    : new MemoryStore(coverageProjectionMode, {
+        e2eCoverageFixtures: config.e2eCoverageFixtures === true,
+      });
   if (pool && config.seedDemo) await (store as PgStore).seedDevelopmentData();
 
   await mkdir(config.uploadDir, { recursive: true });
@@ -1048,9 +1056,13 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   const readinessPayload = async () => {
     await databaseReadinessProbe?.();
+    if (config.coverageProjectionMode === "normalized-active") {
+      assertCoverageProjectionReady(await store.coverageProjectionReadiness());
+    }
     return {
       status: "ok" as const,
       storage: pool ? "postgres" : "development-memory",
+      coverageProjectionMode: config.coverageProjectionMode ?? "legacy",
       ...(pool
         ? {
             pool: {
@@ -1071,9 +1083,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       res.json(await readinessPayload());
     } catch {
-      res
-        .status(503)
-        .json({ status: "degraded", storage: pool ? "postgres" : "development-memory" });
+      res.status(503).json({
+        status: "degraded",
+        storage: pool ? "postgres" : "development-memory",
+        coverageProjectionMode: config.coverageProjectionMode ?? "legacy",
+      });
     }
   });
 
@@ -1217,6 +1231,33 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   );
   app.use("/api", requireUser);
   app.use("/api", requireCsrf(config));
+
+  if (config.e2eCoverageFixtures === true) {
+    if (!(store instanceof MemoryStore)) {
+      throw new Error("E2E_COVERAGE_FIXTURES requires development memory storage");
+    }
+    app.post("/api/__e2e/coverage/reset", requireOwner, async (_req, res, next) => {
+      try {
+        res.json(await store.resetE2ECoverageFixtures());
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.post("/api/__e2e/coverage/advance-generation", requireOwner, async (_req, res, next) => {
+      try {
+        res.json(await store.advanceE2ECoverageFixtureGeneration());
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.post("/api/__e2e/coverage/restore-defaults", requireOwner, async (_req, res, next) => {
+      try {
+        res.json(await store.restoreE2EDefaultFixtures());
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
 
   app.use("/api/operations", requireOwner);
   app.use("/api/saved", requireOwner);
@@ -2415,12 +2456,13 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
 
   app.get("/api/operations/coverage-bundles", async (req, res, next) => {
     try {
+      const projectionWasRequested = Object.prototype.hasOwnProperty.call(req.query, "projection");
       const requestedFilters = coverageBundleQuerySchema.parse(req.query);
       const defaultProjection =
         config.coverageProjectionMode === "normalized-active" ? "active" : "shadow";
       const filters = {
         ...requestedFilters,
-        projection: requestedFilters.projection ?? defaultProjection,
+        projection: projectionWasRequested ? requestedFilters.projection : defaultProjection,
       };
       const page = await store.listCoverageBundles(filters, currentLogin(req));
       res.json({
@@ -2497,6 +2539,17 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
         );
         res.json(result);
       } catch (error) {
+        if (error instanceof CoverageBundleConflictError) {
+          res.status(409).json({
+            error: "Korrigeringen kan ikke angres i gjeldende dekningsgenerasjon.",
+            replacementStories: error.replacementStories.slice(0, 10),
+          });
+          return;
+        }
+        if (errorStatus(error) === 404) {
+          res.status(404).json({ error: "Korrigeringen finnes ikke." });
+          return;
+        }
         next(error);
       }
     },

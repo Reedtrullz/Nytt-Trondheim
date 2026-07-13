@@ -5,16 +5,16 @@ import type {
   ArticleCoverageBundleKind,
   CoverageBundleListItem,
   CoverageBundlePage,
-  CoverageBundleQueryInput,
   CoverageBundleSplitRequest,
+  PositiveIncidentEvidence,
 } from "@nytt/shared";
-import { api, CoverageCorrectionConflictError } from "../api.js";
+import { api, CoverageCorrectionConflictError, type CoverageBundleRequestQuery } from "../api.js";
 import { CoverageCorrectionDialog } from "../components/news/CoverageCorrectionDialog.js";
 import { homeStoryCardForGroup } from "../homeStoryCards.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 
 export type CoverageWorkspaceFilters = {
-  projection: "legacy" | "shadow" | "active";
+  projection: "legacy" | "shadow" | "active" | "superseded";
   projectionDefaulted?: boolean;
   matchTier?: "strong" | "moderate";
   corrected?: "yes" | "no";
@@ -23,7 +23,19 @@ export type CoverageWorkspaceFilters = {
   cursor?: string;
   bundleId?: string;
   confidence?: ArticleCoverageBundleConfidence;
+  review?: CoverageReviewFilter[];
+  generationId?: string;
+  historyCursor?: string;
 };
+
+export type CoverageReviewFilter =
+  | "weak"
+  | "reviewable"
+  | "correction_conflict"
+  | "missing_place"
+  | "missing_entity"
+  | "missing_official"
+  | "generation_change";
 
 const kindLabels: Record<ArticleCoverageBundleKind, string> = {
   incident: "Hendelse",
@@ -39,8 +51,21 @@ const confidenceLabels: Record<ArticleCoverageBundleConfidence, string> = {
 const projectionLabels: Record<CoverageWorkspaceFilters["projection"], string> = {
   shadow: "Skyggevisning",
   active: "Aktiv v2-visning",
+  superseded: "Historisk generering",
   legacy: "Dagens publiserte",
 };
+
+const coverageReviewFilterLabels: Record<CoverageReviewFilter, string> = {
+  weak: "Svake kandidater",
+  reviewable: "Har kandidater til vurdering",
+  correction_conflict: "Konflikt med korrigering",
+  missing_place: "Mangler positivt stedsbevis",
+  missing_entity: "Mangler positivt entitetsbevis",
+  missing_official: "Mangler sterk offisiell verifisering",
+  generation_change: "Endret siden forrige generering",
+};
+
+const coverageReviewFilters = Object.keys(coverageReviewFilterLabels) as CoverageReviewFilter[];
 
 const matchTierLabels = {
   strong: "Sterkt treff",
@@ -78,6 +103,15 @@ const candidateReasonLabels: Record<string, string> = {
   strong: "Sterkt treff til vurdering",
 };
 
+const positiveEvidenceLabels: Record<PositiveIncidentEvidence, string> = {
+  same_situation_id: "Samme situasjons-ID",
+  shared_specific_place: "Delt spesifikt sted",
+  mentioned_specific_place: "Nevnt spesifikt sted",
+  shared_named_entity: "Delt navngitt entitet",
+  shared_city_incident_fingerprint: "Delt hendelsesfingeravtrykk",
+  compatible_incident_subtype: "Forenlig hendelsestype",
+};
+
 function time(value?: string) {
   return value
     ? new Intl.DateTimeFormat("nb-NO", {
@@ -96,7 +130,9 @@ export function coverageWorkspaceFilters(search: string): CoverageWorkspaceFilte
   const parameters = new URLSearchParams(search);
   const requestedProjection = parameters.get("projection");
   const projection =
-    requestedProjection === "legacy" || requestedProjection === "active"
+    requestedProjection === "legacy" ||
+    requestedProjection === "active" ||
+    requestedProjection === "superseded"
       ? requestedProjection
       : "shadow";
   const matchTier = parameters.get("matchTier");
@@ -106,6 +142,12 @@ export function coverageWorkspaceFilters(search: string): CoverageWorkspaceFilte
   const query = parameters.get("q")?.trim() || undefined;
   const cursor = parameters.get("cursor") || undefined;
   const bundleId = parameters.get("bundle") || undefined;
+  const generationId = parameters.get("generationId") || undefined;
+  const historyCursor = parameters.get("historyCursor") || undefined;
+  const review = (parameters.get("review")?.split(",") ?? []).filter(
+    (value): value is CoverageReviewFilter =>
+      coverageReviewFilters.includes(value as CoverageReviewFilter),
+  );
   return {
     projection,
     ...(requestedProjection === null ? { projectionDefaulted: true } : {}),
@@ -117,6 +159,9 @@ export function coverageWorkspaceFilters(search: string): CoverageWorkspaceFilte
     ...(query ? { query } : {}),
     ...(cursor ? { cursor } : {}),
     ...(bundleId ? { bundleId } : {}),
+    ...(projection !== "legacy" && review.length ? { review: [...new Set(review)] } : {}),
+    ...(projection === "superseded" && generationId ? { generationId } : {}),
+    ...(projection === "superseded" && historyCursor ? { historyCursor } : {}),
     ...(projection === "legacy" && (confidence === "high" || confidence === "medium")
       ? { confidence }
       : {}),
@@ -136,12 +181,21 @@ export function coverageWorkspaceSearch(filters: CoverageWorkspaceFilters): stri
   if (filters.query) parameters.set("q", filters.query);
   if (filters.cursor) parameters.set("cursor", filters.cursor);
   if (filters.bundleId) parameters.set("bundle", filters.bundleId);
+  if (filters.projection !== "legacy" && filters.review?.length) {
+    parameters.set("review", filters.review.join(","));
+  }
+  if (filters.projection === "superseded" && filters.generationId) {
+    parameters.set("generationId", filters.generationId);
+  }
+  if (filters.projection === "superseded" && filters.historyCursor) {
+    parameters.set("historyCursor", filters.historyCursor);
+  }
   return parameters.toString();
 }
 
 export function coverageQueryFromFilters(
   filters: CoverageWorkspaceFilters,
-): CoverageBundleQueryInput {
+): CoverageBundleRequestQuery {
   return {
     ...(!filters.projectionDefaulted ? { projection: filters.projection } : {}),
     limit: 30,
@@ -154,6 +208,15 @@ export function coverageQueryFromFilters(
     ...(filters.corrected ? { corrected: filters.corrected === "yes" } : {}),
     ...(filters.integrity
       ? { integrity: filters.integrity === "clean" ? ("ok" as const) : ("error" as const) }
+      : {}),
+    ...(filters.projection !== "legacy" && filters.review?.length
+      ? { review: filters.review }
+      : {}),
+    ...(filters.projection === "superseded" && filters.generationId
+      ? { generationId: filters.generationId }
+      : {}),
+    ...(filters.projection === "superseded" && filters.historyCursor
+      ? { historyCursor: filters.historyCursor }
       : {}),
     ...(filters.query ? { q: filters.query } : {}),
     ...(filters.cursor ? { cursor: filters.cursor } : {}),
@@ -252,10 +315,17 @@ function acceptedEdges(bundle: CoverageBundleListItem) {
 
 function edgeText(edge: CoverageBundleListItem["edges"][number]) {
   const evidence = edge.signals.map(signalText);
-  const conflicts = edge.conflicts.map(({ detail }) => detail);
-  return [matchTierLabels[edge.tier], percentage(edge.score), ...evidence, ...conflicts].join(
-    " · ",
+  const positiveEvidence = edge.positiveIncidentEvidence.map(
+    (item) => positiveEvidenceLabels[item],
   );
+  const conflicts = edge.conflicts.map(({ detail }) => detail);
+  return [
+    matchTierLabels[edge.tier],
+    percentage(edge.score),
+    ...positiveEvidence,
+    ...evidence,
+    ...conflicts,
+  ].join(" · ");
 }
 
 function admissionEdge(bundle: CoverageBundleListItem, memberId: string) {
@@ -281,6 +351,54 @@ function coverageBundleCard(bundle: CoverageBundleListItem) {
     bundle,
     acceptedEdges: acceptedEdges(bundle),
   });
+}
+
+function coverageBundlePositiveEvidence(bundle: CoverageBundleListItem) {
+  return acceptedEdges(bundle).flatMap(({ positiveIncidentEvidence }) => positiveIncidentEvidence);
+}
+
+function coverageBundleMatchesReviewFilter(
+  bundle: CoverageBundleListItem,
+  filter: CoverageReviewFilter,
+): boolean {
+  switch (filter) {
+    case "weak":
+      return bundle.reviewCandidates.some(({ tier }) => tier === "weak");
+    case "reviewable":
+      return bundle.reviewCandidates.length > 0;
+    case "correction_conflict":
+      return [...bundle.edges, ...bundle.reviewCandidates].some(
+        ({ correctionConflict }) => correctionConflict,
+      );
+    case "missing_place":
+      return (
+        bundle.kind === "incident" &&
+        !coverageBundlePositiveEvidence(bundle).some(
+          (evidence) =>
+            evidence === "shared_specific_place" || evidence === "mentioned_specific_place",
+        )
+      );
+    case "missing_entity":
+      return (
+        bundle.kind === "incident" &&
+        !coverageBundlePositiveEvidence(bundle).includes("shared_named_entity")
+      );
+    case "missing_official":
+      return bundle.kind === "incident" && !coverageBundleCard(bundle)?.verification;
+    case "generation_change":
+      return false;
+  }
+}
+
+export function coverageReviewFilteredItems(
+  items: CoverageBundleListItem[],
+  filters: CoverageReviewFilter[],
+): CoverageBundleListItem[] {
+  return filters.length === 0
+    ? items
+    : items.filter((item) =>
+        filters.every((filter) => coverageBundleMatchesReviewFilter(item, filter)),
+      );
 }
 
 function integrityErrorParts(error: string) {
@@ -336,7 +454,11 @@ function CandidateGroups({ bundle }: { bundle: CoverageBundleListItem }) {
                 {expanded ? "Vis færre" : `Vis ${group.total} nesten-treff`}
               </button>
             </header>
-            <ul className="coverage-bundle-signal-list">
+            <ul
+              className="coverage-bundle-signal-list"
+              aria-label={`${candidateReasonLabels[group.reason] ?? group.reason}: kandidater`}
+              tabIndex={0}
+            >
               {candidates.map((candidate) => (
                 <li key={candidate.evidenceFingerprint}>
                   <span>{edgeText(candidate)}</span>
@@ -407,7 +529,7 @@ function BundleDrawer({
         ) : null}
       </div>
       <div className="coverage-bundle-badges">
-        <span>{projectionLabels[bundle.state === "superseded" ? "shadow" : bundle.state]}</span>
+        <span>{projectionLabels[bundle.state]}</span>
         <span>{bundle.memberArticles.length} saker</span>
         <span>{bundle.sourceLabels.join(", ")}</span>
       </div>
@@ -462,11 +584,15 @@ function BundleDrawer({
               </>
             );
             return href ? (
-              <a href={href} key={article.id}>
+              <a data-article-id={article.id} href={href} key={article.id}>
                 {content}
               </a>
             ) : (
-              <div className="coverage-bundle-member-linkless" key={article.id}>
+              <div
+                className="coverage-bundle-member-linkless"
+                data-article-id={article.id}
+                key={article.id}
+              >
                 {content}
               </div>
             );
@@ -617,13 +743,17 @@ export function CoverageBundlesDashboard({
   const selectedProjection =
     page.selectedProjection === "legacy" ||
     page.selectedProjection === "shadow" ||
-    page.selectedProjection === "active"
+    page.selectedProjection === "active" ||
+    page.selectedProjection === "superseded"
       ? page.selectedProjection
       : filters.projection;
   const displayedFilters = { ...filters, projection: selectedProjection };
-  const selectedBundle = page.items.find((item) => item.id === filters.bundleId) ?? page.items[0];
+  const visibleItems = page.items;
+  const selectedBundle =
+    visibleItems.find((item) => item.id === filters.bundleId) ?? visibleItems[0];
   const parityClean = page.parity?.clean !== false;
   const integrityClean = page.summary.integrityErrorCount === 0;
+  const isSuperseded = selectedProjection === "superseded";
   const correctionsEnabled =
     page.correctionsEnabled === true &&
     (selectedProjection === "shadow" || selectedProjection === "active") &&
@@ -634,13 +764,14 @@ export function CoverageBundlesDashboard({
   }
 
   return (
-    <main className="coverage-bundles-page">
+    <main className="coverage-bundles-page" data-generation-id={page.summary.generation?.id}>
       <header className="coverage-bundles-hero">
         <div>
           <p className="label">Privat kommandosenter</p>
           <h1>Dekningsgrupper</h1>
           <p>
-            Matcher {page.summary.matcherVersion} · siste vellykkede generering{" "}
+            Matcher {page.summary.matcherVersion} ·{" "}
+            {isSuperseded ? "Valgt generering" : "siste vellykkede generering"}{" "}
             {time(page.summary.generation?.completedAt ?? page.summary.latestGeneratedAt)}
           </p>
         </div>
@@ -654,6 +785,17 @@ export function CoverageBundlesDashboard({
         <div className="coverage-workspace-alert" role="alert">
           {visibleError}
         </div>
+      ) : null}
+      {selectedProjection === "superseded" ? (
+        <section className="coverage-workspace-history" aria-label="Historisk generasjon">
+          <strong>Viser valgt tidligere generering</strong>
+          <span>
+            Historikken og gjennomgangsfiltrene hentes fra serverens kanoniske genereringsarkiv.
+          </span>
+          {page.selectedGenerationId || page.summary.generation ? (
+            <code>{page.selectedGenerationId ?? page.summary.generation?.id}</code>
+          ) : null}
+        </section>
       ) : null}
       {!parityClean || !integrityClean ? (
         <section className="coverage-workspace-alert" role="alert">
@@ -672,7 +814,7 @@ export function CoverageBundlesDashboard({
       <section className="coverage-bundles-summary" aria-label="Dekningsoppsummering">
         <article>
           <strong>{page.summary.activeBundleCount}</strong>
-          <span>Aktive grupper</span>
+          <span>{isSuperseded ? "Grupper i genereringen" : "Aktive grupper"}</span>
         </article>
         <article>
           <strong>{page.summary.byMatchTier.strong}</strong>
@@ -718,17 +860,22 @@ export function CoverageBundlesDashboard({
             Projeksjon
             <select
               value={selectedProjection}
-              onChange={(event) =>
+              onChange={(event) => {
+                const projection = event.target.value as CoverageWorkspaceFilters["projection"];
                 update({
-                  projection: event.target.value as CoverageWorkspaceFilters["projection"],
+                  projection,
                   projectionDefaulted: undefined,
                   matchTier: undefined,
                   confidence: undefined,
-                })
-              }
+                  generationId: undefined,
+                  historyCursor: undefined,
+                  ...(projection === "legacy" ? { review: undefined } : {}),
+                });
+              }}
             >
               <option value="shadow">Skyggevisning</option>
               <option value="active">Aktiv v2-visning</option>
+              <option value="superseded">Tidligere genereringer</option>
               <option value="legacy">Dagens publiserte</option>
             </select>
           </label>
@@ -783,6 +930,36 @@ export function CoverageBundlesDashboard({
               <option value="no">Uten aktiv korrigering</option>
             </select>
           </label>
+          {selectedProjection !== "legacy" ? (
+            <fieldset className="coverage-review-filters">
+              <legend>Gjennomgang i serverens kanoniske utvalg</legend>
+              <p id="coverage-review-filter-help">
+                Valgene kombineres av serveren og følger den valgte genereringen og URL-en.
+              </p>
+              {coverageReviewFilters.map((reviewFilter) => (
+                <label key={reviewFilter}>
+                  <input
+                    type="checkbox"
+                    checked={filters.review?.includes(reviewFilter) ?? false}
+                    aria-describedby="coverage-review-filter-help"
+                    onChange={(event) =>
+                      update({
+                        review: event.target.checked
+                          ? [...(filters.review ?? []), reviewFilter]
+                          : filters.review?.filter((value) => value !== reviewFilter),
+                      })
+                    }
+                  />
+                  <span>{coverageReviewFilterLabels[reviewFilter]}</span>
+                </label>
+              ))}
+              {filters.review?.length ? (
+                <button type="button" onClick={() => update({ review: undefined })}>
+                  Nullstill gjennomgang
+                </button>
+              ) : null}
+            </fieldset>
+          ) : null}
           <label>
             Dataintegritet
             <select
@@ -804,7 +981,9 @@ export function CoverageBundlesDashboard({
           <div className="coverage-bundle-list-heading">
             <div>
               <p className="label">{projectionLabels[selectedProjection]}</p>
-              <h2 id="coverage-bundle-list-heading">Grupper til gjennomgang</h2>
+              <h2 id="coverage-bundle-list-heading">
+                {isSuperseded ? "Grupper i valgt generering" : "Grupper til gjennomgang"}
+              </h2>
             </div>
             {page.nextCursor ? (
               <button
@@ -814,14 +993,36 @@ export function CoverageBundlesDashboard({
                 Neste side
               </button>
             ) : null}
+            {selectedProjection === "superseded" && page.historyNextCursor ? (
+              <button
+                type="button"
+                onClick={() =>
+                  onFiltersChange({
+                    ...displayedFilters,
+                    generationId: undefined,
+                    historyCursor: page.historyNextCursor,
+                    cursor: undefined,
+                    bundleId: undefined,
+                  })
+                }
+              >
+                Eldre generering
+              </button>
+            ) : null}
           </div>
-          {page.items.length ? (
-            page.items.map((bundle) => {
+          {filters.review?.length ? (
+            <p className="coverage-bundle-filter-count" role="status">
+              Serverfilteret returnerte {visibleItems.length} grupper på denne siden.
+            </p>
+          ) : null}
+          {visibleItems.length ? (
+            visibleItems.map((bundle) => {
               const selected = selectedBundle?.id === bundle.id;
               return (
                 <button
                   className={`coverage-bundle-row ${selected ? "selected" : ""}`}
                   data-coverage-bundle-row
+                  data-primary-article-id={bundle.primaryArticleId}
                   key={bundle.id}
                   onClick={() => onFiltersChange({ ...displayedFilters, bundleId: bundle.id })}
                   type="button"

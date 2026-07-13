@@ -118,6 +118,11 @@ interface WorkerCollectorTelemetry {
 export interface PreparedCoverageAnalysis {
   matcherVersion: "v1" | "v2";
   analysis: ArticleCoverageAnalysis;
+  correctionDiagnostics?: {
+    revision: number;
+    conflictCount: number;
+    edges: NonNullable<ArticleCoverageAnalysis["edges"]>;
+  };
 }
 
 export interface PreparedCoverageAnalyses {
@@ -130,11 +135,45 @@ export interface CoverageLegacyWriter {
   upsertCoverageBundles(bundles: ArticleCoverageBundleDecision[], seenAt: string): Promise<void>;
   persistCoverageGeneration(input: {
     matcherVersion: "v2";
-    mode: "shadow";
+    mode: "shadow" | "active";
     startedAt: string;
     completedAt: string;
     analysis: ArticleCoverageAnalysis;
+    legacyBundles: ArticleCoverageBundleDecision[];
+    correctionRevisionSnapshot?: number;
+    correctionConflictCount?: number;
+    activeVolumeGuard?: CoverageActiveVolumeGuard;
   }): Promise<string>;
+}
+
+export interface CoverageCorrectionSnapshot {
+  revision: number;
+  pairs: CoverageRejectedPair[];
+}
+
+export interface CoverageActiveVolumeGuard {
+  minimumArticleCount: number;
+  minimumPreviousRatio: number;
+  allowUnsafeOverride: boolean;
+}
+
+export function coverageActiveVolumeGuard(
+  env: NodeJS.ProcessEnv = process.env,
+): CoverageActiveVolumeGuard {
+  const minimumArticleCount = Number(env.COVERAGE_ACTIVE_MIN_ARTICLES ?? "20");
+  const minimumPreviousRatio = Number(env.COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO ?? "0.5");
+  const allowUnsafeOverride = env.COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE === "true";
+  if (!Number.isInteger(minimumArticleCount) || minimumArticleCount < 1) {
+    throw new Error("COVERAGE_ACTIVE_MIN_ARTICLES must be a positive integer");
+  }
+  if (
+    !Number.isFinite(minimumPreviousRatio) ||
+    minimumPreviousRatio <= 0 ||
+    minimumPreviousRatio > 1
+  ) {
+    throw new Error("COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO must be greater than 0 and at most 1");
+  }
+  return { minimumArticleCount, minimumPreviousRatio, allowUnsafeOverride };
 }
 
 export function coverageMatcherVersion(value = process.env.COVERAGE_MATCHER_VERSION): "v1" | "v2" {
@@ -143,12 +182,23 @@ export function coverageMatcherVersion(value = process.env.COVERAGE_MATCHER_VERS
   throw new Error(`Ugyldig COVERAGE_MATCHER_VERSION: ${normalized}`);
 }
 
+export function coverageGenerationMode(env: NodeJS.ProcessEnv = process.env): "shadow" | "active" {
+  const value = env.COVERAGE_GENERATION_MODE ?? "shadow";
+  if (value !== "shadow" && value !== "active") {
+    throw new Error("COVERAGE_GENERATION_MODE must be shadow or active");
+  }
+  if (value === "active" && env.COVERAGE_MATCHER_VERSION !== "v2") {
+    throw new Error("active coverage generations require COVERAGE_MATCHER_VERSION=v2");
+  }
+  return value;
+}
+
 export async function prepareArticleCoverageAnalyses(
   articles: Article[],
   geocoder: (articles: Article[]) => Promise<Article[]>,
   generatedAt = new Date().toISOString(),
   matcherVersion: "v1" | "v2" = "v1",
-  rejectedPairs: CoverageRejectedPair[] = [],
+  correctionSnapshot: CoverageCorrectionSnapshot = { revision: 0, pairs: [] },
 ): Promise<PreparedCoverageAnalyses> {
   const geocoded = await geocoder(articles.map(stripArticleCoverageBundle));
   const clean = geocoded.map(stripArticleCoverageBundle);
@@ -158,7 +208,18 @@ export async function prepareArticleCoverageAnalyses(
       ? {
           shadow: {
             matcherVersion: "v2" as const,
-            analysis: analyzeArticleCoverageV2(clean, generatedAt, { rejectedPairs }),
+            analysis: analyzeArticleCoverageV2(clean, generatedAt),
+            correctionDiagnostics: (() => {
+              const diagnostic = analyzeArticleCoverageV2(clean, generatedAt, {
+                rejectedPairs: correctionSnapshot.pairs,
+              });
+              const edges = diagnostic.edges ?? [];
+              return {
+                revision: correctionSnapshot.revision,
+                conflictCount: edges.filter(({ correctionConflict }) => correctionConflict).length,
+                edges,
+              };
+            })(),
           },
         }
       : {}),
@@ -170,16 +231,24 @@ export async function persistPreparedCoverage(
   analyses: PreparedCoverageAnalyses,
   seenAt = new Date().toISOString(),
   startedAt = seenAt,
+  mode: "shadow" | "active" = "shadow",
+  activeVolumeGuard?: CoverageActiveVolumeGuard,
 ): Promise<string | undefined> {
   await repository.upsertArticles(analyses.active.analysis.articles);
-  await repository.upsertCoverageBundles(analyses.active.analysis.bundles, seenAt);
-  if (!analyses.shadow) return undefined;
+  if (!analyses.shadow) {
+    await repository.upsertCoverageBundles(analyses.active.analysis.bundles, seenAt);
+    return undefined;
+  }
   return repository.persistCoverageGeneration({
     matcherVersion: "v2",
-    mode: "shadow",
+    mode,
     startedAt,
     completedAt: seenAt,
     analysis: analyses.shadow.analysis,
+    legacyBundles: analyses.active.analysis.bundles,
+    correctionRevisionSnapshot: analyses.shadow.correctionDiagnostics?.revision ?? 0,
+    correctionConflictCount: analyses.shadow.correctionDiagnostics?.conflictCount ?? 0,
+    ...(activeVolumeGuard ? { activeVolumeGuard } : {}),
   });
 }
 
@@ -188,17 +257,19 @@ export function coverageGenerationMetrics({
   analysis,
   startedAt,
   completedAt,
+  mode = "shadow",
 }: {
   generationId: string;
   analysis: ArticleCoverageAnalysis;
   startedAt: string;
   completedAt: string;
+  mode?: "shadow" | "active";
 }): NonNullable<WorkerCycleMetrics["coverage"]> {
   const edges = analysis.edges ?? [];
   return {
     matcherVersion: "v2",
     generationId,
-    mode: "shadow",
+    mode,
     analysisDurationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)),
     articleCount: analysis.articles.length,
     bundleCountByTier: {
@@ -258,14 +329,14 @@ async function prepareCollectedArticleCoverageAnalyses({
   generatedAt = new Date().toISOString(),
   geocoder = geocodeArticles,
   matcherVersion = "v1",
-  rejectedPairs = [],
+  correctionSnapshot = { revision: 0, pairs: [] },
 }: {
   articlesForGeocoding: Article[];
   articlesWithoutGeocoding?: Article[];
   generatedAt?: string;
   geocoder?: typeof geocodeArticles;
   matcherVersion?: "v1" | "v2";
-  rejectedPairs?: CoverageRejectedPair[];
+  correctionSnapshot?: CoverageCorrectionSnapshot;
 }): Promise<PreparedCoverageAnalyses> {
   const articlesForAnalysis = articlesForGeocoding.map(stripArticleCoverageBundle);
   const fixedArticlesForAnalysis = articlesWithoutGeocoding.map(stripArticleCoverageBundle);
@@ -278,7 +349,7 @@ async function prepareCollectedArticleCoverageAnalyses({
     async (items) => items,
     generatedAt,
     matcherVersion,
-    rejectedPairs,
+    correctionSnapshot,
   );
 }
 
@@ -1449,13 +1520,14 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   }
   const coverageStartedAt = new Date().toISOString();
   const coverageGeneratedAt = new Date().toISOString();
-  const coverageRejectedPairs = await repository.activeCoverageRejectedPairs();
+  const generationMode = coverageGenerationMode();
+  const coverageCorrectionSnapshot = await repository.activeCoverageRejectedPairs();
   const coverageAnalyses = await prepareCollectedArticleCoverageAnalyses({
     articlesForGeocoding: articleSets.flat(),
     articlesWithoutGeocoding,
     generatedAt: coverageGeneratedAt,
     matcherVersion: coverageMatcherVersion(),
-    rejectedPairs: coverageRejectedPairs,
+    correctionSnapshot: coverageCorrectionSnapshot,
   });
   const coverageCompletedAt = new Date().toISOString();
   const coverageGenerationId = await persistPreparedCoverage(
@@ -1463,6 +1535,8 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     coverageAnalyses,
     coverageCompletedAt,
     coverageStartedAt,
+    generationMode,
+    generationMode === "active" ? coverageActiveVolumeGuard() : undefined,
   );
   const coverageMetrics =
     coverageGenerationId && coverageAnalyses.shadow
@@ -1471,11 +1545,14 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
           analysis: coverageAnalyses.shadow.analysis,
           startedAt: coverageStartedAt,
           completedAt: coverageCompletedAt,
+          mode: generationMode,
         })
       : undefined;
-  const shadowMetrics = coverageShadowMetrics(coverageAnalyses);
-  if (shadowMetrics) {
-    console.log(`[worker] coverage shadow ${JSON.stringify(shadowMetrics)}`);
+  const comparisonMetrics = coverageShadowMetrics(coverageAnalyses);
+  if (comparisonMetrics) {
+    console.log(
+      `[worker] coverage ${generationMode} comparison ${JSON.stringify(comparisonMetrics)}`,
+    );
   }
   for (const status of await probeOfficialSources()) {
     if (status.source === "politiloggen") continue;

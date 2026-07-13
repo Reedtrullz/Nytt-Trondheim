@@ -57,6 +57,31 @@ describe("loadConfig session secret policy", () => {
     });
   });
 
+  it("keeps deterministic E2E coverage fixtures explicit and outside production", () => {
+    withEnv({ NODE_ENV: "development", E2E_COVERAGE_FIXTURES: undefined }, () => {
+      expect(loadConfig().e2eCoverageFixtures).toBe(false);
+    });
+    withEnv({ NODE_ENV: "development", E2E_COVERAGE_FIXTURES: "true" }, () => {
+      expect(loadConfig().e2eCoverageFixtures).toBe(true);
+    });
+    withEnv({ NODE_ENV: "development", E2E_COVERAGE_FIXTURES: "yes" }, () => {
+      expect(() => loadConfig()).toThrow("E2E_COVERAGE_FIXTURES must be true or false");
+    });
+    withEnv(
+      {
+        NODE_ENV: "production",
+        DATABASE_URL: "postgres://nytt:test@localhost:5432/nytt",
+        SESSION_SECRET: "x".repeat(32),
+        E2E_COVERAGE_FIXTURES: "true",
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(
+          "E2E_COVERAGE_FIXTURES must not be enabled in production",
+        );
+      },
+    );
+  });
+
   it("keeps a development-only fallback outside production", () => {
     withEnv({ NODE_ENV: "development", SESSION_SECRET: undefined }, () => {
       expect(loadConfig().sessionSecret).toBe("development-only-session-secret");

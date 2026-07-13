@@ -79,6 +79,10 @@ export class CoverageCorrectionConflictError extends ApiError {
   }
 }
 
+export type CoverageBundleRequestQuery = Omit<CoverageBundleQueryInput, "projection"> & {
+  projection?: CoverageBundleQueryInput["projection"];
+};
+
 async function csrfToken(): Promise<string> {
   csrfTokenPromise ??= fetch("/api/session", { credentials: "include" })
     .then(async (response) => {
@@ -264,10 +268,12 @@ export const api = {
       `/api/operations/source-audit${search ? `?${search}` : ""}`,
     );
   },
-  coverageBundles: (query: CoverageBundleQueryInput = { limit: 30 }) => {
+  coverageBundles: (query: CoverageBundleRequestQuery = { limit: 30 }) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
-      if (typeof value === "number" || typeof value === "boolean") {
+      if (Array.isArray(value) && value.length > 0) {
+        parameters.set(key, value.join(","));
+      } else if (typeof value === "number" || typeof value === "boolean") {
         parameters.set(key, String(value));
       } else if (typeof value === "string" && value.length > 0) {
         parameters.set(key, value);

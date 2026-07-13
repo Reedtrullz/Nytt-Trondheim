@@ -46,6 +46,7 @@ export function CoverageSourceCluster({
           return href ? (
             <a
               className="coverage-source-row"
+              data-article-id={article.id}
               href={href}
               key={article.id}
               target="_blank"
@@ -54,7 +55,7 @@ export function CoverageSourceCluster({
               {content}
             </a>
           ) : (
-            <span className="coverage-source-row" key={article.id}>
+            <span className="coverage-source-row" data-article-id={article.id} key={article.id}>
               {content}
             </span>
           );

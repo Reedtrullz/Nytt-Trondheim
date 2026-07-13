@@ -87,6 +87,15 @@ function transactionClient(options: { failOn?: string } = {}) {
     if (sql.includes("SELECT id FROM articles")) {
       return { rows: [{ id: "article-a" }, { id: "article-b" }], rowCount: 2 };
     }
+    if (sql.includes("SET legacy_generation_id")) {
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.includes("AS parity_clean") && sql.includes("AS integrity_error_count")) {
+      return {
+        rows: [{ parity_clean: true, integrity_error_count: 0 }],
+        rowCount: 1,
+      };
+    }
     return { rows: [], rowCount: 0 };
   });
   return { query, release, queries } as unknown as pg.PoolClient & {
@@ -103,22 +112,25 @@ function poolReturning(client: pg.PoolClient): pg.Pool {
 }
 
 describe("coverage generation repository", () => {
-  it("loads active rejected pairs for future generations", async () => {
+  it("loads active rejected pairs with the correction revision snapshot", async () => {
     const query = vi.fn(async () => ({
       rows: [
         {
           id: "correction-1",
           anchor_article_id: "article-a",
           rejected_article_id: "article-b",
+          revision: "7",
         },
       ],
     }));
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);
 
-    await expect(repository.activeCoverageRejectedPairs()).resolves.toEqual([
-      { articleIds: ["article-a", "article-b"], correctionId: "correction-1" },
-    ]);
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("WHERE status='active'"));
+    await expect(repository.activeCoverageRejectedPairs()).resolves.toEqual({
+      revision: 7,
+      pairs: [{ articleIds: ["article-a", "article-b"], correctionId: "correction-1" }],
+    });
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("cbc.status='active'"));
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("coverage_projection_revisions"));
   });
 
   it("persists one completed shadow generation in a transaction", async () => {
@@ -132,10 +144,19 @@ describe("coverage generation repository", () => {
       startedAt: "2026-07-12T20:59:00.000Z",
       completedAt: "2026-07-12T21:00:00.000Z",
       analysis: coverageAnalysisFixture(),
+      correctionRevisionSnapshot: 7,
+      correctionConflictCount: 1,
+      legacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
+        ...bundle,
+        id: "coverage:v1:paired",
+        matcherVersion: "v1" as const,
+        matchConfidence: undefined,
+      })),
     });
 
     expect(id).toBe("11111111-1111-4111-8111-111111111111");
     expect(client.queries[0]?.sql).toBe("BEGIN");
+    expect(client.queries[1]?.sql).toContain("pg_advisory_xact_lock");
     expect(
       client.queries.some(({ sql }) => sql.includes("INSERT INTO coverage_bundle_members")),
     ).toBe(true);
@@ -145,6 +166,27 @@ describe("coverage generation repository", () => {
     expect(
       client.queries.some(({ sql }) => sql.includes("INSERT INTO coverage_bundle_edges")),
     ).toBe(true);
+    const storedEdge = client.queries.find(({ sql }) =>
+      sql.includes("INSERT INTO coverage_bundle_edges"),
+    );
+    expect(storedEdge?.sql).toContain("positive_incident_evidence");
+    expect(storedEdge?.params?.[12]).toEqual(
+      expect.arrayContaining(["shared_specific_place", "compatible_incident_subtype"]),
+    );
+    const completedGeneration = client.queries.find(({ sql }) =>
+      sql.includes("SET status='completed'"),
+    );
+    expect(completedGeneration?.sql).toContain("correction_revision_snapshot");
+    expect(completedGeneration?.sql).toContain("health_outcome='healthy'");
+    expect(completedGeneration?.params).toEqual(expect.arrayContaining([7, 1]));
+    const lockIndex = client.queries.findIndex(({ sql }) => sql.includes("pg_advisory_xact_lock"));
+    const legacyIndex = client.queries.findIndex(
+      ({ sql, params }) =>
+        sql.includes("INSERT INTO coverage_bundles") &&
+        sql.includes("legacy_generation_id") &&
+        params?.includes("11111111-1111-4111-8111-111111111111"),
+    );
+    expect(legacyIndex).toBeGreaterThan(lockIndex);
     expect(client.queries.at(-1)?.sql).toBe("COMMIT");
     expect(client.release).toHaveBeenCalledOnce();
     expect(pool.query).toHaveBeenCalledWith(
@@ -165,16 +207,119 @@ describe("coverage generation repository", () => {
         startedAt: "2026-07-12T20:59:00.000Z",
         completedAt: "2026-07-12T21:00:00.000Z",
         analysis: coverageAnalysisFixture(),
+        legacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
+          ...bundle,
+          id: "coverage:v1:paired",
+          matcherVersion: "v1" as const,
+          matchConfidence: undefined,
+        })),
       }),
     ).rejects.toThrow("member insert failed");
 
     expect(client.queries.some(({ sql }) => sql === "ROLLBACK")).toBe(true);
+    expect(
+      client.queries.some(
+        ({ sql }) =>
+          sql.includes("INSERT INTO coverage_bundles") && sql.includes("legacy_generation_id"),
+      ),
+    ).toBe(true);
     expect(client.queries.some(({ sql }) => sql.includes("state='superseded'"))).toBe(false);
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO coverage_bundle_generations"),
       expect.arrayContaining(["v2", "shadow", "Error"]),
     );
     expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("quarantines a dirty active candidate before changing the current projection", async () => {
+    const client = transactionClient();
+    client.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+      client.queries.push({ sql, params });
+      if (sql.includes("INSERT INTO coverage_bundle_generations") && sql.includes("RETURNING id")) {
+        return { rows: [{ id: "11111111-1111-4111-8111-111111111111" }], rowCount: 1 };
+      }
+      if (sql.includes("SELECT id FROM articles")) {
+        return { rows: [{ id: "article-a" }, { id: "article-b" }], rowCount: 2 };
+      }
+      if (sql.includes("AS parity_clean") && sql.includes("AS integrity_error_count")) {
+        return { rows: [{ parity_clean: false, integrity_error_count: 1 }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const pool = poolReturning(client);
+    const repository = new WorkerRepository(pool);
+
+    await expect(
+      repository.persistCoverageGeneration({
+        matcherVersion: "v2",
+        mode: "active",
+        startedAt: "2026-07-12T20:59:00.000Z",
+        completedAt: "2026-07-12T21:00:00.000Z",
+        analysis: coverageAnalysisFixture(),
+        legacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
+          ...bundle,
+          id: "coverage:v1:paired",
+          matcherVersion: "v1" as const,
+          matchConfidence: undefined,
+        })),
+      }),
+    ).rejects.toThrow("Coverage generation candidate failed parity or integrity validation");
+
+    const validationIndex = client.queries.findIndex(({ sql }) => sql.includes("AS parity_clean"));
+    const currentMutationIndex = client.queries.findIndex(({ sql }) =>
+      sql.includes("SET is_current"),
+    );
+    expect(validationIndex).toBeGreaterThan(0);
+    expect(currentMutationIndex).toBe(-1);
+    expect(client.queries.some(({ sql }) => sql === "ROLLBACK")).toBe(true);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO coverage_bundle_generations"),
+      expect.arrayContaining(["v2", "active", "Error"]),
+    );
+  });
+
+  it("quarantines empty and large-drop active candidates unless the explicit override is set", async () => {
+    const previousCurrent = { id: "previous", article_count: 100 };
+    for (const [articleCount, override] of [
+      [0, false],
+      [20, false],
+    ] as const) {
+      const client = transactionClient();
+      client.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+        client.queries.push({ sql, params });
+        if (
+          sql.includes("INSERT INTO coverage_bundle_generations") &&
+          sql.includes("RETURNING id")
+        ) {
+          return { rows: [{ id: "11111111-1111-4111-8111-111111111111" }], rowCount: 1 };
+        }
+        if (sql.includes("WHERE is_current") && sql.includes("FOR UPDATE")) {
+          return { rows: [previousCurrent], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+      const pool = poolReturning(client);
+      const analysis = {
+        ...coverageAnalysisFixture(),
+        articles: coverageAnalysisFixture().articles.slice(0, articleCount),
+      };
+      await expect(
+        new WorkerRepository(pool).persistCoverageGeneration({
+          matcherVersion: "v2",
+          mode: "active",
+          startedAt: "2026-07-12T20:59:00.000Z",
+          completedAt: "2026-07-12T21:00:00.000Z",
+          analysis,
+          legacyBundles: [],
+          activeVolumeGuard: {
+            minimumArticleCount: 1,
+            minimumPreviousRatio: 0.5,
+            allowUnsafeOverride: override,
+          },
+        }),
+      ).rejects.toThrow("active candidate volume guard");
+      expect(client.queries.some(({ sql }) => sql.includes("SET is_current"))).toBe(false);
+    }
   });
 
   it("prunes old superseded generations while preserving correction-referenced history", async () => {

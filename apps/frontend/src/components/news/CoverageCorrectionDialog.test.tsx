@@ -1,6 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { CoverageCorrectionDialog } from "./CoverageCorrectionDialog.js";
+import {
+  CoverageCorrectionDialog,
+  coverageCorrectionSplitInput,
+} from "./CoverageCorrectionDialog.js";
 import { clusteredHomeStoryCard } from "../../test-fixtures/homeStoryCards.js";
 
 describe("CoverageCorrectionDialog", () => {
@@ -51,5 +54,28 @@ describe("CoverageCorrectionDialog", () => {
 
     expect(html).toContain('role="alert"');
     expect(html).toContain("Kunne ikke splitte gruppen.");
+  });
+
+  it("carries the stable original target separately from the effective displayed bundle", () => {
+    const card = clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 });
+    card.group.bundle = {
+      ...card.group.bundle!,
+      id: "coverage:effective-derived",
+      correctionTarget: {
+        originalBundleId: "coverage:stable-original",
+        projectionRevision: 4,
+      },
+    };
+    const bundle = card.group.bundle;
+
+    expect(coverageCorrectionSplitInput(card, ["cluster-article-2"], "Feil sted")).toEqual({
+      expectedGeneratedAt: bundle.generatedAt,
+      expectedProjectionRevision: 4,
+      originalBundleId: "coverage:stable-original",
+      anchorArticleId: card.primary.id,
+      rejectedArticleIds: ["cluster-article-2"],
+      reason: "Feil sted",
+    });
+    expect(bundle.id).toBe("coverage:effective-derived");
   });
 });

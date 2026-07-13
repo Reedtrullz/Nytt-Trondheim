@@ -2048,3 +2048,68 @@ npm run check:coverage-matcher
 ```
 
 Expected: only pre-existing untracked files remain; seven focused commits are present; the quality gate passes; v1 remains the only persisted/public matcher.
+
+---
+
+## Final review remediation: recurring incidents and deterministic corpus coverage
+
+Final review findings 8–9 tighten the implemented v2 contract without changing fixture-specific
+IDs, titles or sources:
+
+1. Treat compatible broad subtype as diagnostic positive evidence only. It cannot admit an
+   incident edge with generic/title similarity.
+2. Apply fail-closed evidence-class maxima: official situation 72 hours, specific place 12 hours,
+   named entity 8 hours, same URL/non-incident duplicate 24 hours, topic 12 hours, and explicit
+   city fingerprint 30–120 minutes. An edge outside its strongest eligible class remains weak and
+   reviewable.
+3. Admit city-only incidents only through a cross-source allowlisted fingerprint with at least
+   four shared body tokens and two shared distinctive tokens. Generic collision has no city-level
+   fingerprint. Fire, order, violence and classified collision fingerprints use the subtype-
+   specific windows documented in the design.
+4. Expose `positiveIncidentEvidence` on every v2 `ArticleCoverageEdge` so audit consumers can
+   distinguish specific place, named entity, official situation, city fingerprint and broad
+   compatible-subtype evidence.
+5. Expand the sanitized golden corpus with downtown order, all classified fire conflicts,
+   collision, specific-place conflict, official expiry, recurring identical order wording and an
+   owner-correction history shape.
+6. Add property coverage that exhausts permutations only through five articles and uses a fixed,
+   capped 32-ordering sample above that size. Compare ordered edges, groups, primary article,
+   stable IDs, accepted/reviewable counts and grouped-article counts.
+7. Include golden, invariance, evidence, clustering, corrections and public-verification tests in
+   `npm run check:coverage-matcher`.
+
+### Independent review hardening
+
+The final independent review adds these non-gameable requirements to the remediation:
+
+1. A city fingerprint must share at least one subtype-specific required token family on both
+   articles. Generic sentence-initial capitalized words and broad incident vocabulary cannot
+   manufacture named-entity or distinctive-token overlap.
+2. Named central streets remain distinct. Broad `sentrum` and `Midtbyen` locations are generic,
+   and free-text place checks use token boundaries.
+3. Exact URL and duplicate wording cannot satisfy automatic incident evidence. Eligible city
+   fingerprint evidence is advertised only after every source, time, overlap and subtype-token
+   gate passes.
+4. Fire classification requires fire or smoke context and prioritizes the explicit burning object
+   over the surrounding scene. Bare construction, meal or material terms do not classify fire.
+5. The corpus includes a generic official/newsroom fight pair that must neither group nor verify,
+   and a six-article fixture whose matcher output is checked across all 32 deterministic sampled
+   permutations without sorting emitted groups in the assertion.
+
+### Final Important and minor closure
+
+The final matcher review adds four focused evidence regressions:
+
+1. Shared named entity evidence may promote an incident only when both articles have the same
+   classified non-unknown subtype. A Solsiden pair with one unknown subtype remains weak, while a
+   compatible classified pair may group.
+2. Sentence-initial single-token entities are restored only through an explicit safe locality set;
+   `Solsiden` is recognized and generic `Flere` remains excluded.
+3. Fanrem/Fannrem is the only locality spelling alias in that area. Fanrem/Fannrem, Orkdal and
+   Orkland are not collapsed into one specific place.
+4. Smoke-only vehicle, building and vegetation phrases classify by their explicit object. Cooking
+   smoke remains cooking-classified when a building is merely the containing scene.
+
+Required verification remains the focused RED/GREEN cycle, matcher gate, full shared tests,
+typecheck, build, lint, format check and `git diff --check`. The remediation does not authorize
+promotion, persistence changes or production claims.

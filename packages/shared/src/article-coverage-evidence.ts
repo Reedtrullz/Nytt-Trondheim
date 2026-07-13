@@ -48,12 +48,15 @@ export type PositiveIncidentEvidence =
   | "shared_specific_place"
   | "mentioned_specific_place"
   | "shared_named_entity"
+  | "shared_city_incident_fingerprint"
   | "compatible_incident_subtype";
 
 export interface ArticleCoveragePairEvidence {
   articleIds: [string, string];
   positiveIncidentEvidence: PositiveIncidentEvidence[];
   incidentSubtypes: [ArticleIncidentSubtype, ArticleIncidentSubtype];
+  cityIncidentFingerprints: [string | undefined, string | undefined];
+  sharedCityIncidentFingerprint?: string;
   sharedBodyTokenCount: number;
   sharedDistinctiveTokenCount: number;
   titleScore: number;
@@ -70,6 +73,7 @@ export interface ArticleCoverageEdge {
   tier: ArticleCoverageMatchTier;
   score: number;
   kind: ArticleCoverageEdgeKind;
+  positiveIncidentEvidence: PositiveIncidentEvidence[];
   signals: ArticleCoverageDecisionSignal[];
   conflicts: ArticleCoverageConflictSignal[];
   evidenceFingerprint: string;
@@ -116,21 +120,70 @@ const stopWords = new Set([
   "ved",
 ]);
 
-const genericPlaceTokens = new Set(["trondheim", "trøndelag", "trondelag"]);
+const genericPlaceTokens = new Set([
+  "trondheim",
+  "trøndelag",
+  "trondelag",
+  "sentrum",
+  "midtbyen",
+  "trondheim sentrum",
+]);
 const nonIncidentPlaceTokens = new Set(["olavs"]);
 const genericIncidentTokens = new Set([
   ...genericPlaceTokens,
+  "anleggsbrakke",
+  "bil",
+  "bilbrann",
   "brann",
+  "brant",
+  "brakke",
+  "byggeplass",
+  "fjordland",
+  "bortvist",
+  "bortvisning",
+  "bortvise",
+  "kollisjon",
+  "kontroll",
+  "flere",
+  "involvert",
+  "kjøretøy",
+  "komfyr",
+  "mann",
+  "meldt",
   "melding",
   "meldinger",
+  "middag",
   "nødetatene",
+  "ordensforstyrrelse",
+  "person",
+  "personer",
   "politiet",
+  "slagsmål",
+  "sloss",
+  "slåss",
+  "utested",
+  "utestengt",
+  "trafikkulykke",
+  "trussel",
+  "vold",
   "røyk",
   "røykutvikling",
+  "skogbrann",
   "trafikk",
   "ulykke",
+  "vegetasjon",
 ]);
 const namedEntityStopTokens = new Set([
+  "ambulanse",
+  "brannvesenet",
+  "flere",
+  "hendelse",
+  "kollisjon",
+  "mange",
+  "meldt",
+  "ny",
+  "nytt",
+  "oppdatering",
   "politiet",
   "trondheim",
   "trøndelag",
@@ -141,6 +194,10 @@ const namedEntityStopTokens = new Set([
   "ungdom",
   "ungdommer",
   "person",
+  "personer",
+  "slagsmål",
+  "utested",
+  "utestengt",
   "norge",
   "mandag",
   "tirsdag",
@@ -150,13 +207,178 @@ const namedEntityStopTokens = new Set([
   "lørdag",
   "søndag",
 ]);
-const incompatibleSubtypes = new Set([
-  "construction_fire\u0000cooking_smoke",
-  "building_fire\u0000cooking_smoke",
-  "building_fire\u0000vehicle_fire",
-  "construction_fire\u0000vehicle_fire",
-  "construction_fire\u0000vegetation_fire",
-  "public_order\u0000threat_or_violence",
+const recognizedSentenceInitialSingleTokenEntities = new Set(["solsiden"]);
+const fireSubtypes = new Set<ArticleIncidentSubtype>([
+  "building_fire",
+  "vehicle_fire",
+  "vegetation_fire",
+  "construction_fire",
+  "cooking_smoke",
+]);
+
+const officialSituationWindowMs = 72 * 60 * 60 * 1000;
+const specificPlaceWindowMs = 12 * 60 * 60 * 1000;
+const namedEntityWindowMs = 8 * 60 * 60 * 1000;
+const nearDuplicateWindowMs = 24 * 60 * 60 * 1000;
+const topicalThreadWindowMs = 12 * 60 * 60 * 1000;
+
+interface CityIncidentFingerprintRule {
+  windowMs: number;
+  minBodyOverlap: number;
+  minDistinctiveOverlap: number;
+  requiredSharedTokenFamilies: RegExp[];
+}
+
+const cityIncidentFingerprintRules = new Map<string, CityIncidentFingerprintRule>([
+  [
+    "fire:construction",
+    {
+      windowMs: 2 * 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\banleggs?brakk\w*\b/u, /\bbyggeplass\w*\b/u],
+    },
+  ],
+  [
+    "fire:vegetation",
+    {
+      windowMs: 2 * 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [
+        /\bskog\w*\b/u,
+        /\bgress\w*\b/u,
+        /\blyng\w*\b/u,
+        /\bvegetasjon\w*\b/u,
+      ],
+    },
+  ],
+  [
+    "fire:building",
+    {
+      windowMs: 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [
+        /\bleilighet\w*\b/u,
+        /\bbolig\w*\b/u,
+        /\bhus\w*\b/u,
+        /\bgarasje\w*\b/u,
+        /\bbygning\w*\b/u,
+      ],
+    },
+  ],
+  [
+    "fire:vehicle",
+    {
+      windowMs: 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\bbil\w*\b/u, /\bkjøretøy\w*\b/u],
+    },
+  ],
+  [
+    "fire:cooking",
+    {
+      windowMs: 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [
+        /\bmatlag\w*\b/u,
+        /\bkomfyr\w*\b/u,
+        /\bmiddag\w*\b/u,
+        /\bstekt\w*\b/u,
+      ],
+    },
+  ],
+  [
+    "order:fight",
+    {
+      windowMs: 30 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [
+        /\bkniv\w*\b/u,
+        /\bvåpen\w*\b/u,
+        /\bskadet\w*\b/u,
+        /\bambulanse\w*\b/u,
+        /\bflaske\w*\b/u,
+      ],
+    },
+  ],
+  [
+    "order:removed",
+    {
+      windowMs: 30 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\bvekter\w*\b/u, /\bdørvakt\w*\b/u, /\bserveringssted\w*\b/u],
+    },
+  ],
+  [
+    "order:disturbance",
+    {
+      windowMs: 30 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\bstøy\w*\b/u, /\bnattero\w*\b/u, /\bmusikk\w*\b/u],
+    },
+  ],
+  [
+    "violence:threat",
+    {
+      windowMs: 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [
+        /\bkniv\w*\b/u,
+        /\bvåpen\w*\b/u,
+        /\bbombe\w*\b/u,
+        /\bdrapstrussel\w*\b/u,
+      ],
+    },
+  ],
+  [
+    "violence:assault",
+    {
+      windowMs: 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [
+        /\bskadet\w*\b/u,
+        /\bambulanse\w*\b/u,
+        /\bkniv\w*\b/u,
+        /\bslag\w*\b/u,
+      ],
+    },
+  ],
+  [
+    "collision:vulnerable-road-user",
+    {
+      windowMs: 90 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\bfotgjenger\w*\b/u, /\bsyklist\w*\b/u, /\bpåkjør\w*\b/u],
+    },
+  ],
+  [
+    "collision:single-vehicle",
+    {
+      windowMs: 90 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\butforkjør\w*\b/u, /\bkjørte\s+(?:av|ut)\b/u],
+    },
+  ],
+  [
+    "collision:multiple-vehicles",
+    {
+      windowMs: 60 * 60 * 1000,
+      minBodyOverlap: 4,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\bto\s+bil\w*\b/u, /\bflere\s+(?:bil\w*|kjøretøy\w*)\b/u],
+    },
+  ],
 ]);
 
 function normalizeText(value: string): string {
@@ -213,25 +435,13 @@ function articleDistinctiveIncidentTokens(article: Article): Set<string> {
 
 function canonicalPlace(value: string): string {
   const normalized = normalizeToken(value);
-  if (["fanrem", "orkdal", "orkland"].includes(normalized)) return "orkland-area";
+  if (["fanrem", "fannrem"].includes(normalized)) return "fannrem";
   if (["kroppanbrua", "kroppan bru"].includes(normalized)) return "kroppan-bru";
-  if (
-    [
-      "midtbyen",
-      "sentrum",
-      "trondheim sentrum",
-      "prinsengate",
-      "prinsen gate",
-      "prinsensgate",
-      "prinsens gate",
-      "elgeseter",
-      "elgeseter gate",
-      "elgesetergate",
-      "elgesetergata",
-      "elgesetergaten",
-    ].includes(normalized)
-  ) {
-    return "trondheim-sentrum";
+  if (["prinsengate", "prinsen gate", "prinsensgate", "prinsens gate"].includes(normalized)) {
+    return "prinsens gate";
+  }
+  if (["elgeseter gate", "elgesetergate", "elgesetergata", "elgesetergaten"].includes(normalized)) {
+    return "elgeseter gate";
   }
   return normalized;
 }
@@ -262,9 +472,16 @@ function hasSharedSpecificPlace(left: Article, right: Article): boolean {
 function hasSpecificPlaceMention(left: Article, right: Article): boolean {
   const leftText = normalizeText(`${left.title} ${left.excerpt}`);
   const rightText = normalizeText(`${right.title} ${right.excerpt}`);
+  const containsPlace = (text: string, place: string) => {
+    const escaped = place
+      .split(" ")
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s+");
+    return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, "u").test(text);
+  };
   return (
-    articlePlaceTokens(left).some((place) => rightText.includes(place.replaceAll("-", " "))) ||
-    articlePlaceTokens(right).some((place) => leftText.includes(place.replaceAll("-", " ")))
+    articlePlaceTokens(left).some((place) => containsPlace(rightText, place)) ||
+    articlePlaceTokens(right).some((place) => containsPlace(leftText, place))
   );
 }
 
@@ -276,14 +493,38 @@ function hasConflictingSpecificPlaces(left: Article, right: Article): boolean {
 }
 
 function articleNamedEntityTokens(article: Article): string[] {
-  const text = `${article.title} ${article.excerpt}`;
-  const candidates =
-    text.match(/\b[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}(?:\s+[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}){0,2}\b/gu) ??
-    [];
-  return [...new Set(candidates.map(normalizeToken))].filter(
-    (token) =>
-      token.length >= 4 && !genericPlaceTokens.has(token) && !namedEntityStopTokens.has(token),
-  );
+  const text = `${article.title}. ${article.excerpt}`;
+  const matches = [
+    ...text.matchAll(
+      /\b[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}(?:\s+[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}){0,2}\b/gu,
+    ),
+  ];
+  const candidates = matches.flatMap((match) => {
+    const candidate = match[0];
+    const normalizedCandidate = normalizeToken(candidate);
+    const index = match.index ?? 0;
+    const sentenceInitial = index === 0 || /[.!?]\s*$/u.test(text.slice(0, index));
+    if (
+      !candidate.includes(" ") &&
+      sentenceInitial &&
+      !recognizedSentenceInitialSingleTokenEntities.has(normalizedCandidate)
+    ) {
+      return [];
+    }
+    return [normalizedCandidate];
+  });
+  return [...new Set(candidates)].filter((token) => {
+    if (token.length < 4 || genericPlaceTokens.has(token) || namedEntityStopTokens.has(token)) {
+      return false;
+    }
+    const parts = token.split(" ");
+    return parts.some(
+      (part) =>
+        !genericPlaceTokens.has(part) &&
+        !namedEntityStopTokens.has(part) &&
+        !genericIncidentTokens.has(part),
+    );
+  });
 }
 
 function hasSharedNamedEntity(left: Article, right: Article): boolean {
@@ -293,20 +534,50 @@ function hasSharedNamedEntity(left: Article, right: Article): boolean {
 
 export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype {
   const text = normalizedText(article);
-  if (/\b(byggeplass|anleggsbrakke|brakke(?:brann|n)?|anlegg)\b/u.test(text)) {
-    return "construction_fire";
-  }
-  if (/\b(matlag\w*|stekt\w*|komfyr\w*|middag|fjordland|plast(?:en)?)\b/u.test(text)) {
-    return "cooking_smoke";
-  }
-  if (/\b(bilbrann|kjøretøy\w*\s+br(?:ann|enner)|bil\w*\s+br(?:ann|enner))\b/u.test(text)) {
+  const hasActiveFire = /\b(?:[\p{L}]+brann(?:en|er)?|brann(?:en|er)?|brant|brenner)\b/u.test(text);
+  const hasFireOrSmoke = hasActiveFire || /\brøyk\w*\b/u.test(text);
+  if (
+    /\bbilbrann\w*\b/u.test(text) ||
+    (hasFireOrSmoke &&
+      /\b(?:bil\w*|kjøretøy\w*)\b.{0,40}\b(?:brann\w*|brant|brenner|røyk\w*)\b|\b(?:brann\w*|brant|brenner|røyk\w*)\b.{0,40}\b(?:bil\w*|kjøretøy\w*)\b/u.test(
+        text,
+      ))
+  ) {
     return "vehicle_fire";
   }
-  if (/\b(skogbrann|gressbrann|lyngbrann|vegetasjon\w*\s+br(?:ann|enner))\b/u.test(text)) {
+  if (
+    /\b(?:skogbrann|gressbrann|lyngbrann)\w*\b/u.test(text) ||
+    (hasFireOrSmoke &&
+      /\b(?:skog\w*|gress\w*|lyng\w*|vegetasjon\w*)\b.{0,40}\b(?:brann\w*|brant|brenner|røyk\w*)\b|\b(?:brann\w*|brant|brenner|røyk\w*)\b.{0,40}\b(?:skog\w*|gress\w*|lyng\w*|vegetasjon\w*)\b/u.test(
+        text,
+      ))
+  ) {
     return "vegetation_fire";
   }
-  if (/\b(bygningsbrann|husbrann|leilighet\w*\s+br(?:ann|enner)|garasjebrann)\b/u.test(text)) {
+  if (
+    /\b(?:bygningsbrann|husbrann|garasjebrann)\w*\b/u.test(text) ||
+    (hasActiveFire &&
+      /\b(?:leilighet\w*|bolig\w*|hus\w*|garasje\w*|bygning\w*)\b.{0,40}\b(?:brann\w*|brant|brenner)\b|\b(?:brann\w*|brant|brenner)\b.{0,40}\b(?:leilighet\w*|bolig\w*|hus\w*|garasje\w*|bygning\w*)\b/u.test(
+        text,
+      ))
+  ) {
     return "building_fire";
+  }
+  if (hasFireOrSmoke && /\b(?:matlag\w*|stekt\w*|komfyr\w*|middag\w*|fjordland\w*)\b/u.test(text)) {
+    return "cooking_smoke";
+  }
+  if (
+    /\b(?:leilighet\w*|bolig\w*|hus\w*|garasje\w*|bygning\w*)\b.{0,40}\brøyk\w*\b|\brøyk\w*\b.{0,40}\b(?:leilighet\w*|bolig\w*|hus\w*|garasje\w*|bygning\w*)\b/u.test(
+      text,
+    )
+  ) {
+    return "building_fire";
+  }
+  if (
+    hasFireOrSmoke &&
+    /\b(?:byggeplass\w*|anleggsbrakke\w*|brakke(?:brann|n)?\w*)\b/u.test(text)
+  ) {
+    return "construction_fire";
   }
   if (/\b(kollisjon|trafikkulykke|påkjør\w*|kjørte\s+(?:av|ut))\b/u.test(text)) {
     return "traffic_collision";
@@ -316,12 +587,83 @@ export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype
   return "unknown";
 }
 
+function articleCityIncidentFingerprint(article: Article): string | undefined {
+  const text = normalizedText(article);
+  switch (articleIncidentSubtype(article)) {
+    case "construction_fire":
+      return "fire:construction";
+    case "cooking_smoke":
+      return "fire:cooking";
+    case "vehicle_fire":
+      return "fire:vehicle";
+    case "vegetation_fire":
+      return "fire:vegetation";
+    case "building_fire":
+      return "fire:building";
+    case "public_order":
+      if (/\b(slagsm[åa]l\w*|sloss\w*|slåss\w*)\b/u.test(text)) return "order:fight";
+      if (/\bbortvis\w*\b/u.test(text)) return "order:removed";
+      if (/\bordensforstyr\w*\b/u.test(text)) return "order:disturbance";
+      return undefined;
+    case "threat_or_violence":
+      if (/\btrussel\w*\b/u.test(text)) return "violence:threat";
+      if (/\b(vold\w*|angrep\w*)\b/u.test(text)) return "violence:assault";
+      return undefined;
+    case "traffic_collision":
+      if (/\b(fotgjenger\w*|syklist\w*|påkjør\w*)\b/u.test(text)) {
+        return "collision:vulnerable-road-user";
+      }
+      if (/\b(utforkjør\w*|kjørte\s+(?:av|ut))\b/u.test(text)) {
+        return "collision:single-vehicle";
+      }
+      if (/\b(to|flere)\s+(?:bil\w*|kjøretøy\w*)\b/u.test(text)) {
+        return "collision:multiple-vehicles";
+      }
+      return undefined;
+    case "unknown":
+      return undefined;
+  }
+}
+
 function subtypesCompatible(left: ArticleIncidentSubtype, right: ArticleIncidentSubtype): boolean {
   return left !== "unknown" && left === right;
 }
 
 function subtypePair(left: ArticleIncidentSubtype, right: ArticleIncidentSubtype): string {
   return [left, right].sort().join("\u0000");
+}
+
+function subtypesConflict(left: ArticleIncidentSubtype, right: ArticleIncidentSubtype): boolean {
+  if (left === "unknown" || right === "unknown" || left === right) return false;
+  if (fireSubtypes.has(left) && fireSubtypes.has(right)) return true;
+  return subtypePair(left, right) === "public_order\u0000threat_or_violence";
+}
+
+function eligibleSharedCityIncidentFingerprint(
+  left: Article,
+  right: Article,
+  candidate: string | undefined,
+  timeDistanceMs: number,
+  sharedBodyTokenCount: number,
+  sharedDistinctiveTokenCount: number,
+): string | undefined {
+  if (!candidate || left.source === right.source) return undefined;
+  const rule = cityIncidentFingerprintRules.get(candidate);
+  if (
+    !rule ||
+    timeDistanceMs > rule.windowMs ||
+    sharedBodyTokenCount < rule.minBodyOverlap ||
+    sharedDistinctiveTokenCount < rule.minDistinctiveOverlap
+  ) {
+    return undefined;
+  }
+  const leftText = normalizedText(left);
+  const rightText = normalizedText(right);
+  return rule.requiredSharedTokenFamilies.some(
+    (pattern) => pattern.test(leftText) && pattern.test(rightText),
+  )
+    ? candidate
+    : undefined;
 }
 
 function fingerprintHash(text: string, seed: number): string {
@@ -346,22 +688,41 @@ export function articleCoverageEvidence(
   const articleIds = [left.id, right.id].sort() as [string, string];
   const leftSubtype = articleIncidentSubtype(left);
   const rightSubtype = articleIncidentSubtype(right);
+  const leftFingerprint = articleCityIncidentFingerprint(left);
+  const rightFingerprint = articleCityIncidentFingerprint(right);
+  const body = tokenSimilarity(articleBodyTokens(left), articleBodyTokens(right));
+  const distinctive = tokenSimilarity(
+    articleDistinctiveIncidentTokens(left),
+    articleDistinctiveIncidentTokens(right),
+  );
+  const titleScore = tokenSimilarity(articleTitleTokens(left), articleTitleTokens(right)).score;
+  const timeDistanceMs = Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt));
+  const sharedCityIncidentFingerprintCandidate =
+    leftFingerprint && leftFingerprint === rightFingerprint ? leftFingerprint : undefined;
+  const sharedCityIncidentFingerprint = eligibleSharedCityIncidentFingerprint(
+    left,
+    right,
+    sharedCityIncidentFingerprintCandidate,
+    timeDistanceMs,
+    body.overlap,
+    distinctive.overlap,
+  );
   const conflicts: ArticleCoverageConflictSignal[] = [];
   if (hasConflictingSpecificPlaces(left, right)) {
     conflicts.push({ kind: "specific_place", articleIds, detail: "Ulike spesifikke steder" });
   }
-  if (incompatibleSubtypes.has(subtypePair(leftSubtype, rightSubtype))) {
+  if (subtypesConflict(leftSubtype, rightSubtype)) {
     conflicts.push({
       kind: "incident_subtype",
       articleIds,
-      detail: `${leftSubtype}/${rightSubtype}`,
+      detail: [leftSubtype, rightSubtype].sort().join("/"),
     });
   }
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
     conflicts.push({
       kind: "situation_id",
       articleIds,
-      detail: `${left.situationId}/${right.situationId}`,
+      detail: [left.situationId, right.situationId].sort().join("/"),
     });
   }
 
@@ -378,21 +739,19 @@ export function articleCoverageEvidence(
   if (hasSharedNamedEntity(left, right)) {
     positiveIncidentEvidence.push("shared_named_entity");
   }
+  if (sharedCityIncidentFingerprint) {
+    positiveIncidentEvidence.push("shared_city_incident_fingerprint");
+  }
   if (subtypesCompatible(leftSubtype, rightSubtype)) {
     positiveIncidentEvidence.push("compatible_incident_subtype");
   }
 
-  const body = tokenSimilarity(articleBodyTokens(left), articleBodyTokens(right));
-  const distinctive = tokenSimilarity(
-    articleDistinctiveIncidentTokens(left),
-    articleDistinctiveIncidentTokens(right),
-  );
-  const titleScore = tokenSimilarity(articleTitleTokens(left), articleTitleTokens(right)).score;
-  const timeDistanceMs = Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt));
   return {
     articleIds,
     positiveIncidentEvidence,
     incidentSubtypes: [leftSubtype, rightSubtype],
+    cityIncidentFingerprints: [leftFingerprint, rightFingerprint],
+    ...(sharedCityIncidentFingerprint ? { sharedCityIncidentFingerprint } : {}),
     sharedBodyTokenCount: body.overlap,
     sharedDistinctiveTokenCount: distinctive.overlap,
     titleScore,
@@ -402,6 +761,7 @@ export function articleCoverageEvidence(
       matcherVersion,
       positiveIncidentEvidence: [...positiveIncidentEvidence].sort(),
       incidentSubtypes: [leftSubtype, rightSubtype].sort(),
+      cityIncidentFingerprints: [leftFingerprint, rightFingerprint].sort(),
       conflicts: conflicts.map((item) => item.kind).sort(),
       bodyBucket: Math.min(body.overlap, 8),
       distinctiveBucket: Math.min(distinctive.overlap, 5),
@@ -496,6 +856,14 @@ function articlePairSignalsForV2(
       overlap: body.overlap,
       score: body.score,
     });
+  } else if (evidence.sharedCityIncidentFingerprint) {
+    signals.push({
+      kind: "generic_place_incident",
+      articleIds: evidence.articleIds,
+      detail: evidence.sharedCityIncidentFingerprint,
+      overlap: body.overlap,
+      score: body.score,
+    });
   } else if (hasGenericIncidentOverlap(left, right)) {
     signals.push({
       kind: "generic_place_incident",
@@ -507,17 +875,88 @@ function articlePairSignalsForV2(
   return signals;
 }
 
-function coverageKindForPair(signals: ArticleCoverageDecisionSignal[]): ArticleCoverageEdgeKind {
-  const hasIncident = signals.some((signal) =>
-    ["situation_id", "generic_place_incident", "cross_source_incident", "shared_place"].includes(
-      signal.kind,
-    ),
-  );
+function coverageKindForPair(
+  signals: ArticleCoverageDecisionSignal[],
+  evidence: ArticleCoveragePairEvidence,
+): ArticleCoverageEdgeKind {
+  const hasIncident =
+    evidence.incidentSubtypes.some((subtype) => subtype !== "unknown") ||
+    signals.some((signal) =>
+      ["situation_id", "generic_place_incident", "cross_source_incident", "shared_place"].includes(
+        signal.kind,
+      ),
+    );
   const hasTopic = signals.some((signal) => signal.kind === "topical_thread");
   if (hasTopic && !hasIncident) return "topic";
   if (hasTopic && signals.every((signal) => signal.kind === "topical_thread")) return "topic";
   if (hasIncident) return "incident";
   return hasTopic ? "topic" : "update";
+}
+
+function hasSignal(
+  signals: ArticleCoverageDecisionSignal[],
+  kind: ArticleCoverageDecisionSignalKind,
+) {
+  return signals.some((signal) => signal.kind === kind);
+}
+
+function cityFingerprintEligible(
+  left: Article,
+  right: Article,
+  evidence: ArticleCoveragePairEvidence,
+): boolean {
+  return Boolean(
+    evidence.sharedCityIncidentFingerprint &&
+    evidence.positiveIncidentEvidence.includes("shared_city_incident_fingerprint") &&
+    left.source !== right.source,
+  );
+}
+
+function automaticEvidenceEligible(
+  left: Article,
+  right: Article,
+  evidence: ArticleCoveragePairEvidence,
+  signals: ArticleCoverageDecisionSignal[],
+  kind: ArticleCoverageEdgeKind,
+): boolean {
+  if (
+    evidence.positiveIncidentEvidence.includes("same_situation_id") &&
+    evidence.timeDistanceMs <= officialSituationWindowMs
+  ) {
+    return true;
+  }
+  if (
+    evidence.positiveIncidentEvidence.some(
+      (item) => item === "shared_specific_place" || item === "mentioned_specific_place",
+    ) &&
+    evidence.timeDistanceMs <= specificPlaceWindowMs
+  ) {
+    return true;
+  }
+  if (
+    evidence.positiveIncidentEvidence.includes("shared_named_entity") &&
+    evidence.timeDistanceMs <= namedEntityWindowMs &&
+    (kind !== "incident" ||
+      subtypesCompatible(evidence.incidentSubtypes[0], evidence.incidentSubtypes[1]))
+  ) {
+    return true;
+  }
+  if (cityFingerprintEligible(left, right, evidence)) return true;
+  if (kind === "topic") {
+    return hasSignal(signals, "topical_thread") && evidence.timeDistanceMs <= topicalThreadWindowMs;
+  }
+  if (kind === "incident") return false;
+  if (
+    left.url.length > 0 &&
+    left.url === right.url &&
+    evidence.timeDistanceMs <= nearDuplicateWindowMs
+  ) {
+    return true;
+  }
+  return (
+    (hasSignal(signals, "near_duplicate") || hasSignal(signals, "title_similarity")) &&
+    evidence.timeDistanceMs <= nearDuplicateWindowMs
+  );
 }
 
 export function articleCoverageEdge(
@@ -526,14 +965,15 @@ export function articleCoverageEdge(
 ): ArticleCoverageEdge | undefined {
   const evidence = articleCoverageEvidence(left, right, "v2");
   const signals = articlePairSignalsForV2(left, right, evidence);
-  const kind = coverageKindForPair(signals);
+  const kind = coverageKindForPair(signals, evidence);
+  const automaticEvidence = automaticEvidenceEligible(left, right, evidence, signals, kind);
   const positiveCount = evidence.positiveIncidentEvidence.length;
   const hasBlockingConflict = evidence.conflicts.length > 0;
   const textScore = Math.min(
     0.25,
     evidence.titleScore * 0.15 + evidence.sharedDistinctiveTokenCount * 0.025,
   );
-  const situationScore = evidence.positiveIncidentEvidence.includes("same_situation_id") ? 0.7 : 0;
+  const situationScore = evidence.positiveIncidentEvidence.includes("same_situation_id") ? 0.85 : 0;
   const placeScore = evidence.positiveIncidentEvidence.some(
     (item) => item === "shared_specific_place" || item === "mentioned_specific_place",
   )
@@ -543,6 +983,7 @@ export function articleCoverageEdge(
   const subtypeScore = evidence.positiveIncidentEvidence.includes("compatible_incident_subtype")
     ? 0.15
     : 0;
+  const cityFingerprintScore = cityFingerprintEligible(left, right, evidence) ? 0.35 : 0;
   const topicScore =
     kind === "topic" && signals.some((signal) => signal.kind === "topical_thread") ? 0.65 : 0;
   const duplicateScore = signals.some(
@@ -558,6 +999,7 @@ export function articleCoverageEdge(
       placeScore +
       entityScore +
       subtypeScore +
+      cityFingerprintScore +
       topicScore +
       duplicateScore +
       crossSourceScore +
@@ -568,11 +1010,17 @@ export function articleCoverageEdge(
   let tier: ArticleCoverageMatchTier = "weak";
   if (
     !hasBlockingConflict &&
+    automaticEvidence &&
     score >= 0.85 &&
     (situationScore > 0 || topicScore > 0 || duplicateScore > 0)
   ) {
     tier = "strong";
-  } else if (!hasBlockingConflict && score >= 0.6 && (kind !== "incident" || positiveCount > 0)) {
+  } else if (
+    !hasBlockingConflict &&
+    automaticEvidence &&
+    score >= 0.6 &&
+    (kind !== "incident" || positiveCount > 0)
+  ) {
     tier = "moderate";
   }
 
@@ -581,6 +1029,7 @@ export function articleCoverageEdge(
     tier,
     score,
     kind,
+    positiveIncidentEvidence: evidence.positiveIncidentEvidence,
     signals,
     conflicts: evidence.conflicts,
     evidenceFingerprint: evidence.evidenceFingerprint,

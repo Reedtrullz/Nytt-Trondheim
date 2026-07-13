@@ -2,6 +2,27 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import type { CoverageBundleSplitRequest } from "@nytt/shared";
 import type { HomeStoryCard } from "../../homeStoryCards.js";
 
+export function coverageCorrectionSplitInput(
+  card: HomeStoryCard,
+  rejectedArticleIds: string[],
+  reason: string,
+): CoverageBundleSplitRequest | undefined {
+  const bundle = card.group.bundle;
+  if (!bundle || rejectedArticleIds.length === 0) return undefined;
+  return {
+    expectedGeneratedAt: bundle.generatedAt,
+    ...(bundle.correctionTarget
+      ? {
+          expectedProjectionRevision: bundle.correctionTarget.projectionRevision,
+          originalBundleId: bundle.correctionTarget.originalBundleId,
+        }
+      : {}),
+    anchorArticleId: card.primary.id,
+    rejectedArticleIds: [...rejectedArticleIds].sort(),
+    ...(reason.trim() ? { reason: reason.trim() } : {}),
+  };
+}
+
 export function CoverageCorrectionDialog({
   card,
   pending,
@@ -60,13 +81,9 @@ export function CoverageCorrectionDialog({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending || selectedIds.size === 0 || !card.group.bundle) return;
-    onConfirm({
-      expectedGeneratedAt: card.group.bundle.generatedAt,
-      anchorArticleId: card.primary.id,
-      rejectedArticleIds: [...selectedIds].sort(),
-      ...(reason.trim() ? { reason: reason.trim() } : {}),
-    });
+    if (pending) return;
+    const input = coverageCorrectionSplitInput(card, [...selectedIds], reason);
+    if (input) onConfirm(input);
   }
 
   return (

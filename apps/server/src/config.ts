@@ -16,6 +16,7 @@ export interface AppConfig {
   rateLimitEnabled: boolean;
   coverageProjectionMode?: "legacy" | "normalized-shadow" | "normalized-active";
   coverageCorrectionsEnabled?: boolean;
+  e2eCoverageFixtures?: boolean;
   webPushPublicKey?: string;
   webPushConfigured?: boolean;
   enturClientName?: string;
@@ -112,6 +113,10 @@ export function loadConfig(): AppConfig {
   if (nodeEnv === "production" && process.env.SEED_DEMO === "true") {
     throw new Error("SEED_DEMO must not be enabled in production");
   }
+  const e2eCoverageFixtures = booleanEnvironmentValue("E2E_COVERAGE_FIXTURES", false);
+  if (nodeEnv === "production" && e2eCoverageFixtures) {
+    throw new Error("E2E_COVERAGE_FIXTURES must not be enabled in production");
+  }
   return {
     port: Number(process.env.PORT ?? 8080),
     nodeEnv,
@@ -128,6 +133,7 @@ export function loadConfig(): AppConfig {
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
     coverageProjectionMode: coverageProjectionModeFromEnvironment(),
     coverageCorrectionsEnabled: booleanEnvironmentValue("COVERAGE_CORRECTIONS_ENABLED", false),
+    e2eCoverageFixtures,
     webPushPublicKey,
     webPushConfigured: Boolean(webPushPublicKey && webPushPrivateKeyConfigured),
     enturClientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",

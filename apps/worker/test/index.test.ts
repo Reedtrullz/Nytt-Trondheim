@@ -22,7 +22,9 @@ import {
   buildWorkerNotificationTriggerPage,
   buildWorkerSpatialNotificationItems,
   collectorRunFromMetric,
+  coverageActiveVolumeGuard,
   coverageGenerationMetrics,
+  coverageGenerationMode,
   coverageMatcherVersion,
   coverageShadowMetrics,
   normalizeDatexSituationEndpoint,
@@ -150,13 +152,63 @@ function okXmlResponse(xml: string): Response {
 }
 
 describe("worker lifecycle helpers", () => {
+  it("defaults coverage generations to shadow mode", () => {
+    expect(coverageGenerationMode({})).toBe("shadow");
+  });
+
+  it("rejects unsupported coverage generation modes", () => {
+    expect(() => coverageGenerationMode({ COVERAGE_GENERATION_MODE: "preview" })).toThrow(
+      "COVERAGE_GENERATION_MODE must be shadow or active",
+    );
+  });
+
+  it("requires matcher v2 for active coverage generations", () => {
+    expect(() =>
+      coverageGenerationMode({
+        COVERAGE_GENERATION_MODE: "active",
+        COVERAGE_MATCHER_VERSION: "v1",
+      }),
+    ).toThrow("active coverage generations require COVERAGE_MATCHER_VERSION=v2");
+    expect(
+      coverageGenerationMode({
+        COVERAGE_GENERATION_MODE: "active",
+        COVERAGE_MATCHER_VERSION: "v2",
+      }),
+    ).toBe("active");
+  });
+
   it("rejects unsupported coverage matcher versions", () => {
     expect(coverageMatcherVersion(undefined)).toBe("v1");
     expect(coverageMatcherVersion("v2")).toBe("v2");
     expect(() => coverageMatcherVersion("v3")).toThrow("Ugyldig COVERAGE_MATCHER_VERSION");
   });
 
-  it("computes v2 shadow coverage without changing persisted v1 decisions", async () => {
+  it("parses bounded active coverage volume guard settings", () => {
+    expect(coverageActiveVolumeGuard({})).toEqual({
+      minimumArticleCount: 20,
+      minimumPreviousRatio: 0.5,
+      allowUnsafeOverride: false,
+    });
+    expect(
+      coverageActiveVolumeGuard({
+        COVERAGE_ACTIVE_MIN_ARTICLES: "12",
+        COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO: "0.75",
+        COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE: "true",
+      }),
+    ).toEqual({
+      minimumArticleCount: 12,
+      minimumPreviousRatio: 0.75,
+      allowUnsafeOverride: true,
+    });
+    expect(() => coverageActiveVolumeGuard({ COVERAGE_ACTIVE_MIN_ARTICLES: "0" })).toThrow(
+      "COVERAGE_ACTIVE_MIN_ARTICLES",
+    );
+    expect(() => coverageActiveVolumeGuard({ COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO: "1.1" })).toThrow(
+      "COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO",
+    );
+  });
+
+  it("hands paired v1 decisions to the locked v2 persistence transaction", async () => {
     const articles = [
       newsArticle({
         id: "coverage-a",
@@ -215,24 +267,44 @@ describe("worker lifecycle helpers", () => {
       ),
     ).resolves.toBe("generation-v2");
     expect(repository.upsertArticles).toHaveBeenCalledWith(analyses.active.analysis.articles);
-    expect(repository.upsertCoverageBundles).toHaveBeenCalledWith(
-      analyses.active.analysis.bundles,
-      "2026-07-12T21:00:00.000Z",
-    );
-    expect(repository.upsertCoverageBundles).not.toHaveBeenCalledWith(
-      shadow.analysis.bundles,
-      expect.any(String),
-    );
+    expect(repository.upsertCoverageBundles).not.toHaveBeenCalled();
     expect(repository.persistCoverageGeneration).toHaveBeenCalledWith({
       matcherVersion: "v2",
       mode: "shadow",
       startedAt: "2026-07-12T20:59:59.000Z",
       completedAt: "2026-07-12T21:00:00.000Z",
       analysis: shadow.analysis,
+      legacyBundles: analyses.active.analysis.bundles,
+      correctionRevisionSnapshot: 0,
+      correctionConflictCount: 0,
     });
   });
 
-  it("applies active corrections when preparing the next v2 generation", async () => {
+  it("preserves the direct legacy persistence path when no v2 analysis exists", async () => {
+    const analyses = await prepareArticleCoverageAnalyses(
+      [newsArticle({ id: "legacy-only" })],
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v1",
+    );
+    const repository = {
+      upsertArticles: vi.fn(async () => undefined),
+      upsertCoverageBundles: vi.fn(async () => undefined),
+      persistCoverageGeneration: vi.fn(async () => "unexpected-v2"),
+    };
+
+    await expect(
+      persistPreparedCoverage(repository, analyses, "2026-07-12T21:00:00.000Z"),
+    ).resolves.toBeUndefined();
+
+    expect(repository.upsertCoverageBundles).toHaveBeenCalledWith(
+      analyses.active.analysis.bundles,
+      "2026-07-12T21:00:00.000Z",
+    );
+    expect(repository.persistCoverageGeneration).not.toHaveBeenCalled();
+  });
+
+  it("keeps the persisted v2 base uncorrected and computes correction diagnostics separately", async () => {
     const articles = [
       newsArticle({ id: "corrected-a", situationId: "same-synthetic-case" }),
       newsArticle({
@@ -247,7 +319,10 @@ describe("worker lifecycle helpers", () => {
       async (items) => items,
       "2026-07-12T21:00:00.000Z",
       "v2",
-      [{ articleIds: ["corrected-a", "corrected-b"], correctionId: "correction-1" }],
+      {
+        revision: 7,
+        pairs: [{ articleIds: ["corrected-a", "corrected-b"], correctionId: "correction-1" }],
+      },
     );
 
     expect(
@@ -255,8 +330,16 @@ describe("worker lifecycle helpers", () => {
         ({ memberArticleIds }) =>
           memberArticleIds.includes("corrected-a") && memberArticleIds.includes("corrected-b"),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(analyses.shadow?.analysis.edges?.[0]).toMatchObject({
+      reviewable: false,
+      correctionConflict: false,
+    });
+    expect(analyses.shadow?.correctionDiagnostics).toMatchObject({
+      revision: 7,
+      conflictCount: 1,
+    });
+    expect(analyses.shadow?.correctionDiagnostics.edges[0]).toMatchObject({
       reviewable: true,
       correctionConflict: true,
     });

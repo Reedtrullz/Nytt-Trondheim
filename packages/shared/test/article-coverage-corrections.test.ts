@@ -36,6 +36,30 @@ describe("coverage corrections", () => {
     });
   });
 
+  it("accepts a stable correction target and projection revision for derived cards", () => {
+    expect(
+      coverageBundleSplitRequestSchema.parse({
+        expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+        expectedProjectionRevision: 7,
+        originalBundleId: "coverage:v2:stable",
+        anchorArticleId: "speed-a",
+        rejectedArticleIds: ["threat"],
+      }),
+    ).toMatchObject({
+      expectedProjectionRevision: 7,
+      originalBundleId: "coverage:v2:stable",
+    });
+    expect(() =>
+      coverageBundleSplitRequestSchema.parse({
+        expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+        expectedProjectionRevision: -1,
+        originalBundleId: "coverage:v2:stable",
+        anchorArticleId: "speed-a",
+        rejectedArticleIds: ["threat"],
+      }),
+    ).toThrow();
+  });
+
   it("splits an exact rejected pair and retains it as a correction conflict", () => {
     const analysis = analyzeArticleCoverageV2(
       correctionFixtureArticles(),

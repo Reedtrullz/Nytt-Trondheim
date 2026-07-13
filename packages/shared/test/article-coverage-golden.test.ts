@@ -4,8 +4,10 @@ import { articleCoverageGoldenCases } from "./fixtures/article-coverage-golden.j
 
 describe("coverage matcher golden corpus", () => {
   it("passes all critical expectations deterministically", () => {
-    const result = evaluateArticleCoverageCorpus(articleCoverageGoldenCases, (articles) =>
-      analyzeArticleCoverageV2(articles, "2026-07-12T21:00:00.000Z"),
+    const result = evaluateArticleCoverageCorpus(articleCoverageGoldenCases, (articles, fixture) =>
+      analyzeArticleCoverageV2(articles, "2026-07-12T21:00:00.000Z", {
+        rejectedPairs: fixture.rejectedPairs ?? [],
+      }),
     );
     expect(result.criticalFailures).toEqual([]);
     expect(result.falsePositivePairs).toBe(0);

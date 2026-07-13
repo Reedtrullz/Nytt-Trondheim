@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS coverage_bundle_generations (
   bundle_count integer NOT NULL DEFAULT 0 CHECK (bundle_count >= 0),
   edge_count integer NOT NULL DEFAULT 0 CHECK (edge_count >= 0),
   correction_conflict_count integer NOT NULL DEFAULT 0 CHECK (correction_conflict_count >= 0),
+  correction_revision_snapshot bigint NOT NULL DEFAULT 0 CHECK (correction_revision_snapshot >= 0),
+  health_outcome text NOT NULL DEFAULT 'unchecked'
+    CHECK (health_outcome IN ('unchecked', 'healthy')),
   is_current boolean NOT NULL DEFAULT false,
   error_class text,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -47,6 +50,12 @@ CREATE TABLE IF NOT EXISTS coverage_bundle_generations (
     OR (status <> 'running' AND completed_at IS NOT NULL)
   )
 );
+ALTER TABLE coverage_bundle_generations
+  ADD COLUMN IF NOT EXISTS correction_revision_snapshot bigint NOT NULL DEFAULT 0
+  CHECK (correction_revision_snapshot >= 0);
+ALTER TABLE coverage_bundle_generations
+  ADD COLUMN IF NOT EXISTS health_outcome text NOT NULL DEFAULT 'unchecked'
+  CHECK (health_outcome IN ('unchecked', 'healthy'));
 CREATE INDEX IF NOT EXISTS coverage_bundle_generations_completed_idx
   ON coverage_bundle_generations (completed_at DESC, id DESC)
   WHERE status = 'completed';
@@ -92,6 +101,8 @@ CREATE INDEX IF NOT EXISTS coverage_bundles_member_article_ids_gin_idx
   ON coverage_bundles USING gin (member_article_ids);
 ALTER TABLE coverage_bundles
   ADD COLUMN IF NOT EXISTS generation_id uuid REFERENCES coverage_bundle_generations(id) ON DELETE SET NULL;
+ALTER TABLE coverage_bundles
+  ADD COLUMN IF NOT EXISTS legacy_generation_id uuid REFERENCES coverage_bundle_generations(id) ON DELETE SET NULL;
 ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'legacy';
 ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS matcher_version text NOT NULL DEFAULT 'v1';
 ALTER TABLE coverage_bundles ADD COLUMN IF NOT EXISTS match_tier text;
@@ -112,6 +123,9 @@ ALTER TABLE coverage_bundles ADD CONSTRAINT coverage_bundles_match_score_check
   CHECK (match_score IS NULL OR (match_score >= 0 AND match_score <= 1));
 CREATE INDEX IF NOT EXISTS coverage_bundles_state_generation_idx
   ON coverage_bundles (state, generation_id, last_seen_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS coverage_bundles_legacy_generation_idx
+  ON coverage_bundles (legacy_generation_id, id)
+  WHERE legacy_generation_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS coverage_bundle_versions (
   generation_id uuid NOT NULL REFERENCES coverage_bundle_generations(id) ON DELETE CASCADE,
@@ -189,6 +203,8 @@ CREATE INDEX IF NOT EXISTS coverage_bundle_edges_bundle_idx
 CREATE INDEX IF NOT EXISTS coverage_bundle_edges_review_idx
   ON coverage_bundle_edges (generation_id, correction_conflict, tier, score DESC)
   WHERE status = 'reviewable';
+ALTER TABLE coverage_bundle_edges
+  ADD COLUMN IF NOT EXISTS positive_incident_evidence text[] NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS situations (
   id text PRIMARY KEY,
@@ -1407,6 +1423,18 @@ CREATE INDEX IF NOT EXISTS coverage_bundle_corrections_original_bundle_idx
 CREATE INDEX IF NOT EXISTS coverage_bundle_corrections_generation_idx
   ON coverage_bundle_corrections (generation_id, status, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS coverage_projection_revisions (
+  projection text PRIMARY KEY CHECK (projection = 'active'),
+  revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  legacy_revision bigint NOT NULL DEFAULT 0 CHECK (legacy_revision >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE coverage_projection_revisions
+  ADD COLUMN IF NOT EXISTS legacy_revision bigint NOT NULL DEFAULT 0 CHECK (legacy_revision >= 0);
+INSERT INTO coverage_projection_revisions (projection, revision)
+VALUES ('active', 0)
+ON CONFLICT (projection) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS user_identities (
   id text PRIMARY KEY,
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1530,3 +1558,6 @@ INSERT INTO schema_migrations (version) VALUES ('013_morning_briefs') ON CONFLIC
 INSERT INTO schema_migrations (version) VALUES ('014_web_push_notifications') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('015_home_feed_read_indexes') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('016_coverage_bundle_lifecycle') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('017_coverage_legacy_snapshot') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('018_coverage_effective_projection') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('019_coverage_projection_integrity') ON CONFLICT DO NOTHING;

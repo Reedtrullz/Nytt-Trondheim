@@ -3,10 +3,34 @@ import { coverageProjectionParity } from "../src/article-bundles.js";
 import { coverageBundleQuerySchema } from "../src/schemas.js";
 
 describe("coverage projection parity", () => {
-  it("preserves an omitted projection and parses corrected=false without truthiness coercion", () => {
+  it("defaults an omitted projection to shadow and parses corrected=false without truthiness coercion", () => {
     expect(coverageBundleQuerySchema.parse({ corrected: "false" })).toEqual({
+      projection: "shadow",
       corrected: false,
       limit: 30,
+    });
+  });
+
+  it("parses canonical review filters and explicit generation history selection", () => {
+    expect(
+      coverageBundleQuerySchema.parse({
+        review:
+          "reviewable,weak,missing_place,missing_entity,missing_official,correction_conflict,generation_change",
+        generationId: "11111111-1111-4111-8111-111111111111",
+        historyCursor: "cursor",
+      }),
+    ).toMatchObject({
+      review: [
+        "reviewable",
+        "weak",
+        "missing_place",
+        "missing_entity",
+        "missing_official",
+        "correction_conflict",
+        "generation_change",
+      ],
+      generationId: "11111111-1111-4111-8111-111111111111",
+      historyCursor: "cursor",
     });
   });
   it("compares canonical member sets independently of order and bundle id", () => {
