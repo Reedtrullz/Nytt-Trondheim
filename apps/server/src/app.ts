@@ -17,6 +17,8 @@ import {
   buildDatabasePoolOptions,
   commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
+  coverageBundleSplitRequestSchema,
+  coverageCorrectionExportQuerySchema,
   emailLoginRequestSchema,
   filterNotificationTriggerPageByDeliveryStates,
   isPublicSituation,
@@ -91,7 +93,7 @@ import {
 import { createEmailSender } from "./email.js";
 import { buildWorkspaceExport, safeFilename } from "./export.js";
 import { loadWorldCupDashboard } from "./sport/world-cup.js";
-import { MemoryStore, PgStore, type Store } from "./store.js";
+import { CoverageBundleConflictError, MemoryStore, PgStore, type Store } from "./store.js";
 import { roadClosingArticleTrafficEvents } from "./traffic/article-events.js";
 import { buildCorridorImpacts } from "./traffic/corridor-impact.js";
 import { officialEventToTrafficMapEvent } from "./traffic/datex-normalizer.js";
@@ -1201,7 +1203,14 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   });
 
   app.get("/api/session", requireUser, (req, res) =>
-    res.json({ user: req.user, csrfToken: csrfToken(req) }),
+    res.json({
+      user: req.user,
+      csrfToken: csrfToken(req),
+      capabilities: {
+        coverageCorrections:
+          req.user?.role === "owner" && config.coverageCorrectionsEnabled === true,
+      },
+    }),
   );
   app.use("/api", requireUser);
   app.use("/api", requireCsrf(config));
@@ -2405,6 +2414,85 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     try {
       const filters = coverageBundleQuerySchema.parse(req.query);
       res.json(await store.listCoverageBundles(filters, currentLogin(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post(
+    "/api/coverage-bundles/:bundleId/corrections/split",
+    requireOwner,
+    async (req, res, next) => {
+      try {
+        if (config.coverageCorrectionsEnabled !== true) {
+          res.status(503).json({ error: "Korrigering av grupper er ikke aktivert." });
+          return;
+        }
+        const input = coverageBundleSplitRequestSchema.parse(req.body);
+        const bundleId = String(req.params.bundleId);
+        const result = await store.splitCoverageBundle(bundleId, input, req.user!.id);
+        console.info(
+          JSON.stringify({
+            event: "coverage_correction",
+            action: "split",
+            bundleId,
+            correctionCount: result.corrections.length,
+            replacementStoryCount: result.replacementStories.length,
+          }),
+        );
+        res.json(result);
+      } catch (error) {
+        if (error instanceof CoverageBundleConflictError) {
+          console.info(
+            JSON.stringify({
+              event: "coverage_correction",
+              action: "split_conflict",
+              bundleId: String(req.params.bundleId),
+              replacementStoryCount: error.replacementStories.length,
+            }),
+          );
+          res.status(409).json({
+            error: "Gruppen ble endret mens du vurderte den.",
+            replacementStories: error.replacementStories,
+          });
+          return;
+        }
+        next(error);
+      }
+    },
+  );
+
+  app.post(
+    "/api/coverage-bundle-corrections/:correctionId/undo",
+    requireOwner,
+    async (req, res, next) => {
+      try {
+        if (config.coverageCorrectionsEnabled !== true) {
+          res.status(503).json({ error: "Korrigering av grupper er ikke aktivert." });
+          return;
+        }
+        const correctionId = String(req.params.correctionId);
+        const result = await store.undoCoverageCorrection(correctionId, req.user!.id);
+        console.info(
+          JSON.stringify({
+            event: "coverage_correction",
+            action: "undo",
+            correctionId,
+            replacementStoryCount: result.replacementStories.length,
+          }),
+        );
+        res.json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.get("/api/operations/coverage-corrections/export", async (req, res, next) => {
+    try {
+      const query = coverageCorrectionExportQuerySchema.parse(req.query);
+      const payload = await store.exportCoverageCorrections(query.sinceDays);
+      res.attachment("coverage-corrections-v1.json").json(payload);
     } catch (error) {
       next(error);
     }

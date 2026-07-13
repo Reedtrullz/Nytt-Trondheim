@@ -21,6 +21,21 @@ afterEach(() => {
 });
 
 describe("loadConfig session secret policy", () => {
+  it("parses coverage correction capability strictly and defaults off", () => {
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: undefined }, () => {
+      expect(loadConfig().coverageCorrectionsEnabled).toBe(false);
+    });
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: "true" }, () => {
+      expect(loadConfig().coverageCorrectionsEnabled).toBe(true);
+    });
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: "false" }, () => {
+      expect(loadConfig().coverageCorrectionsEnabled).toBe(false);
+    });
+    withEnv({ COVERAGE_CORRECTIONS_ENABLED: "yes" }, () => {
+      expect(() => loadConfig()).toThrow("COVERAGE_CORRECTIONS_ENABLED must be true or false");
+    });
+  });
+
   it("keeps a development-only fallback outside production", () => {
     withEnv({ NODE_ENV: "development", SESSION_SECRET: undefined }, () => {
       expect(loadConfig().sessionSecret).toBe("development-only-session-secret");

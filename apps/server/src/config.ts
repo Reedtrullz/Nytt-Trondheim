@@ -14,6 +14,7 @@ export interface AppConfig {
   uploadDir: string;
   runtimeStatusDir: string;
   rateLimitEnabled: boolean;
+  coverageCorrectionsEnabled?: boolean;
   webPushPublicKey?: string;
   webPushConfigured?: boolean;
   enturClientName?: string;
@@ -48,6 +49,14 @@ function sessionSecretForEnvironment(nodeEnv: string): string {
     throw new Error("SESSION_SECRET must be at least 32 characters in production");
   }
   return configured;
+}
+
+function booleanEnvironmentValue(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 function smtpConfigForEnvironment(nodeEnv: string): SmtpConfig | undefined {
@@ -103,6 +112,7 @@ export function loadConfig(): AppConfig {
     uploadDir: path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads"),
     runtimeStatusDir: path.resolve(process.env.RUNTIME_STATUS_DIR ?? "./data/runtime-status"),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== "false",
+    coverageCorrectionsEnabled: booleanEnvironmentValue("COVERAGE_CORRECTIONS_ENABLED", false),
     webPushPublicKey,
     webPushConfigured: Boolean(webPushPublicKey && webPushPrivateKeyConfigured),
     enturClientName: process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim",

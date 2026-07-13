@@ -1495,6 +1495,9 @@ export interface SessionUser {
 export interface SessionPayload {
   user: SessionUser;
   csrfToken: string;
+  capabilities?: {
+    coverageCorrections: boolean;
+  };
 }
 
 export type AccessRequestStatus = "unverified" | "pending" | "approved" | "rejected";

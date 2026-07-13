@@ -11,7 +11,7 @@ import { buildSituationExplanation, createApp } from "../src/app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { loadConfig, type EmailMessage } from "../src/config.js";
-import { PgStore, type Store } from "../src/store.js";
+import { CoverageBundleConflictError, PgStore, type Store } from "../src/store.js";
 import { sampleSituation } from "@nytt/shared";
 import type {
   Article,
@@ -28,6 +28,7 @@ import type {
   TrafficCounterSnapshot,
   TrafficMapEvent,
   TrafficPulseCorridor,
+  CoverageBundleSplitRequest,
 } from "@nytt/shared";
 
 const execFileAsync = promisify(execFile);
@@ -61,6 +62,40 @@ async function testApp() {
     rateLimitEnabled: true,
   });
   return { ...runtime, uploadDir };
+}
+
+function coverageSplitInput(): CoverageBundleSplitRequest {
+  return {
+    expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+    anchorArticleId: "speed-a",
+    rejectedArticleIds: ["threat"],
+    reason: "Ulik hendelse",
+  };
+}
+
+async function ownerAgentWithCoverageCorrections(enabled: boolean) {
+  const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-coverage-corrections-"));
+  const runtime = await createApp({
+    port: 0,
+    nodeEnv: "development",
+    publicOrigin: "http://localhost",
+    seedDemo: true,
+    devAuthBypass: true,
+    githubAllowedLogin: "Reedtrullz",
+    sessionSecret: "test-only-secret",
+    uploadDir,
+    runtimeStatusDir: uploadDir,
+    rateLimitEnabled: false,
+    coverageCorrectionsEnabled: enabled,
+  });
+  const agent = request.agent(runtime.app);
+  const session = await agent.get("/api/session").expect(200);
+  return {
+    ...runtime,
+    agent,
+    csrf: session.body.csrfToken as string,
+    capabilities: session.body.capabilities as { coverageCorrections: boolean },
+  };
 }
 
 async function testAppWithRateLimit(rateLimitEnabled: boolean) {
@@ -99,7 +134,7 @@ async function testAppWithPushPublicKey(publicKey = "test-public-vapid-key") {
   return { ...runtime, uploadDir };
 }
 
-async function testAppWithEmail(devAuthBypass = true) {
+async function testAppWithEmail(devAuthBypass = true, coverageCorrectionsEnabled = false) {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
   const sentEmails: EmailMessage[] = [];
   const runtime = await createApp({
@@ -115,6 +150,7 @@ async function testAppWithEmail(devAuthBypass = true) {
     uploadDir,
     runtimeStatusDir: uploadDir,
     rateLimitEnabled: true,
+    coverageCorrectionsEnabled,
     emailSender: {
       async send(message) {
         sentEmails.push(message);
@@ -765,6 +801,7 @@ describe("private situation API", () => {
       role: "viewer",
       status: "active",
     });
+    expect(session.body.capabilities).toEqual({ coverageCorrections: false });
     await viewerAgent.get("/api/bootstrap").expect(200);
     await viewerAgent.get("/api/situations/skogbrann-bymarka").expect(200);
     await viewerAgent.get("/api/operations/status").expect(403);
@@ -3396,6 +3433,152 @@ describe("private situation API", () => {
       )
       .expect(200);
     expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
+  });
+
+  describe("coverage bundle corrections API", () => {
+    it("advertises capability and fails closed while mutation is disabled", async () => {
+      const { agent, csrf, capabilities } = await ownerAgentWithCoverageCorrections(false);
+      expect(capabilities.coverageCorrections).toBe(false);
+      await agent
+        .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+        .set("X-CSRF-Token", csrf)
+        .send(coverageSplitInput())
+        .expect(503, { error: "Korrigering av grupper er ikke aktivert." });
+    });
+
+    it("requires authentication, owner access, CSRF, and strict input", async () => {
+      const authRuntime = await testAppWithEmail(false, true);
+      await request(authRuntime.app)
+        .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+        .send(coverageSplitInput())
+        .expect(401);
+
+      const viewer = await loginViewer(authRuntime);
+      const viewerSession = await viewer.get("/api/session").expect(200);
+      expect(viewerSession.body.capabilities).toEqual({ coverageCorrections: false });
+      await viewer
+        .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+        .set("X-CSRF-Token", viewerSession.body.csrfToken as string)
+        .send(coverageSplitInput())
+        .expect(403);
+
+      const owner = await ownerAgentWithCoverageCorrections(true);
+      await owner.agent
+        .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+        .send(coverageSplitInput())
+        .expect(403);
+      await owner.agent
+        .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+        .set("X-CSRF-Token", owner.csrf)
+        .send({ ...coverageSplitInput(), unexpected: true })
+        .expect(400);
+    });
+
+    it("returns replacements and emits content-free structured split telemetry", async () => {
+      const runtime = await ownerAgentWithCoverageCorrections(true);
+      expect(runtime.capabilities.coverageCorrections).toBe(true);
+      const split = vi.spyOn(runtime.store, "splitCoverageBundle").mockResolvedValue({
+        corrections: [
+          {
+            id: "correction-1",
+            originalBundleId: "coverage:v2:speed",
+            anchorArticleId: "speed-a",
+            rejectedArticleId: "threat",
+            matcherVersion: "v2",
+            evidenceFingerprint: "v2:test-edge",
+            status: "active",
+            createdAt: "2026-07-12T21:01:00.000Z",
+          },
+        ],
+        removedStoryIds: ["coverage:v2:speed"],
+        replacementStories: [],
+      });
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const response = await runtime.agent
+        .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+        .set("X-CSRF-Token", runtime.csrf)
+        .send(coverageSplitInput())
+        .expect(200);
+      expect(response.body).toMatchObject({
+        removedStoryIds: ["coverage:v2:speed"],
+        replacementStories: [],
+      });
+      expect(split).toHaveBeenCalledWith(
+        "coverage:v2:speed",
+        coverageSplitInput(),
+        expect.any(String),
+      );
+      const log = info.mock.calls.map(([value]) => String(value)).join("\n");
+      expect(log).toContain('"action":"split"');
+      expect(log).not.toMatch(/Ulik hendelse|speed-a|threat|session|credential/i);
+      info.mockRestore();
+      split.mockRestore();
+    });
+
+    it("returns current replacement stories for stale input", async () => {
+      const runtime = await ownerAgentWithCoverageCorrections(true);
+      const split = vi
+        .spyOn(runtime.store, "splitCoverageBundle")
+        .mockRejectedValue(new CoverageBundleConflictError("stale", []));
+      const response = await runtime.agent
+        .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+        .set("X-CSRF-Token", runtime.csrf)
+        .send(coverageSplitInput())
+        .expect(409);
+      expect(response.body).toEqual({
+        error: "Gruppen ble endret mens du vurderte den.",
+        replacementStories: [],
+      });
+      split.mockRestore();
+    });
+
+    it("undoes corrections and exports only sanitized review material", async () => {
+      const runtime = await ownerAgentWithCoverageCorrections(true);
+      const undo = vi.spyOn(runtime.store, "undoCoverageCorrection").mockResolvedValue({
+        corrections: [
+          {
+            id: "correction-1",
+            originalBundleId: "coverage:v2:speed",
+            anchorArticleId: "speed-a",
+            rejectedArticleId: "threat",
+            matcherVersion: "v2",
+            evidenceFingerprint: "v2:test-edge",
+            status: "reverted",
+            createdAt: "2026-07-12T21:01:00.000Z",
+            revertedAt: "2026-07-12T21:02:00.000Z",
+          },
+        ],
+        removedStoryIds: [],
+        replacementStories: [],
+      });
+      const exportCorrections = vi
+        .spyOn(runtime.store, "exportCoverageCorrections")
+        .mockResolvedValue({
+          schemaVersion: 1,
+          generatedAt: "2026-07-12T21:05:00.000Z",
+          rows: [],
+        });
+      await runtime.agent
+        .post("/api/coverage-bundle-corrections/correction-1/undo")
+        .set("X-CSRF-Token", runtime.csrf)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.corrections[0]).toMatchObject({ status: "reverted" });
+        });
+      const exported = await runtime.agent
+        .get("/api/operations/coverage-corrections/export?sinceDays=30")
+        .expect(200);
+      expect(exported.headers["content-disposition"]).toContain("coverage-corrections-v1.json");
+      expect(exported.body).toEqual({
+        schemaVersion: 1,
+        generatedAt: "2026-07-12T21:05:00.000Z",
+        rows: [],
+      });
+      expect(undo).toHaveBeenCalledWith("correction-1", expect.any(String));
+      expect(exportCorrections).toHaveBeenCalledWith(30);
+      undo.mockRestore();
+      exportCorrections.mockRestore();
+    });
   });
 
   it("serves notification trigger candidates as private derived operations data", async () => {
