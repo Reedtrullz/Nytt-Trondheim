@@ -3436,6 +3436,20 @@ describe("private situation API", () => {
   });
 
   describe("coverage bundle corrections API", () => {
+    it("exposes the corrections capability on coverage workspace responses", async () => {
+      const enabled = await ownerAgentWithCoverageCorrections(true);
+      const enabledResponse = await enabled.agent
+        .get("/api/operations/coverage-bundles?projection=shadow")
+        .expect(200);
+      expect(enabledResponse.body).toMatchObject({ correctionsEnabled: true });
+
+      const disabled = await ownerAgentWithCoverageCorrections(false);
+      const disabledResponse = await disabled.agent
+        .get("/api/operations/coverage-bundles?projection=shadow")
+        .expect(200);
+      expect(disabledResponse.body).toMatchObject({ correctionsEnabled: false });
+    });
+
     it("advertises capability and fails closed while mutation is disabled", async () => {
       const { agent, csrf, capabilities } = await ownerAgentWithCoverageCorrections(false);
       expect(capabilities.coverageCorrections).toBe(false);

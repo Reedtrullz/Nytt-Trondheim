@@ -119,6 +119,7 @@ export interface CoverageBundlePage {
   summary: CoverageBundleSummary;
   nextCursor?: string;
   parity?: CoverageProjectionParity;
+  correctionsEnabled?: boolean;
 }
 
 type CoverageParityItem = {

@@ -2,21 +2,42 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { CoverageBundlePage } from "@nytt/shared";
-import { CoverageBundlesDashboard } from "./CoverageBundlesPage.js";
+import { CoverageCorrectionConflictError } from "../api.js";
+import {
+  CoverageBundlesDashboard,
+  coverageWorkspaceFilters,
+  coverageWorkspaceSearch,
+  groupedCoverageReviewCandidates,
+  splitCoverageBundleAndRefresh,
+  undoCoverageCorrectionAndRefresh,
+} from "./CoverageBundlesPage.js";
 
 const page: CoverageBundlePage = {
+  correctionsEnabled: true,
   summary: {
     recentBundleCount: 1,
     byKind: { incident: 1, topic: 0, update: 0 },
     byConfidence: { high: 1, medium: 0 },
     latestGeneratedAt: "2026-06-18T10:55:00.000Z",
     activeBundleCount: 1,
-    byMatchTier: { strong: 0, moderate: 0 },
-    reviewCandidateCount: 0,
-    activeCorrectionCount: 0,
+    byMatchTier: { strong: 1, moderate: 0 },
+    reviewCandidateCount: 1,
+    activeCorrectionCount: 1,
     integrityErrorCount: 0,
-    matcherVersion: "v1",
-    projectionState: "legacy",
+    matcherVersion: "v2",
+    projectionState: "shadow",
+    generation: {
+      id: "coverage-generation-shadow-1",
+      matcherVersion: "v2",
+      mode: "shadow",
+      status: "completed",
+      startedAt: "2026-06-18T10:54:00.000Z",
+      completedAt: "2026-06-18T10:55:00.000Z",
+      articleCount: 3,
+      bundleCount: 1,
+      edgeCount: 2,
+      correctionConflictCount: 0,
+    },
   },
   items: [
     {
@@ -25,6 +46,12 @@ const page: CoverageBundlePage = {
       confidence: "high",
       reason: "Samme hendelse på tvers av kilder",
       generatedAt: "2026-06-18T10:55:00.000Z",
+      matcherVersion: "v2",
+      matchConfidence: {
+        tier: "strong",
+        score: 0.91,
+        rationale: "Alle støttesakene har et sterkt direkte treff med hovedsaken.",
+      },
       lastSeenAt: "2026-06-18T10:55:00.000Z",
       updatedAt: "2026-06-18T10:55:30.000Z",
       primaryArticleId: "nrk-flatåsen-smoke",
@@ -85,20 +112,92 @@ const page: CoverageBundlePage = {
           places: ["Heimdal", "Trondheim"],
         },
       ],
-      state: "legacy",
-      edges: [],
-      reviewCandidates: [],
-      corrections: [],
+      generation: {
+        id: "coverage-generation-shadow-1",
+        matcherVersion: "v2",
+        mode: "shadow",
+        status: "completed",
+        startedAt: "2026-06-18T10:54:00.000Z",
+        completedAt: "2026-06-18T10:55:00.000Z",
+        articleCount: 3,
+        bundleCount: 1,
+        edgeCount: 2,
+        correctionConflictCount: 0,
+      },
+      state: "shadow",
+      edges: [
+        {
+          articleIds: ["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke"],
+          tier: "strong",
+          score: 0.91,
+          kind: "incident",
+          signals: [
+            {
+              kind: "situation_id",
+              articleIds: ["nrk-flatåsen-smoke", "politiloggen-flatåsen-smoke"],
+            },
+          ],
+          conflicts: [],
+          evidenceFingerprint: "v2:accepted-flatåsen",
+          reviewable: false,
+          correctionConflict: false,
+        },
+      ],
+      reviewCandidates: [
+        {
+          articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+          tier: "weak",
+          score: 0.24,
+          kind: "incident",
+          signals: [
+            {
+              kind: "generic_place_incident",
+              articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+              overlap: 3,
+            },
+          ],
+          conflicts: [
+            {
+              kind: "specific_place",
+              articleIds: ["nrk-flatåsen-smoke", "adressa-other-smoke"],
+              detail: "Flatåsen og Heimdal",
+            },
+          ],
+          evidenceFingerprint: "v2:review-flatåsen-heimdal",
+          reviewable: true,
+          correctionConflict: false,
+        },
+      ],
+      corrections: [
+        {
+          id: "correction-flatåsen-1",
+          anchorArticleId: "nrk-flatåsen-smoke",
+          rejectedArticleId: "politiloggen-flatåsen-smoke",
+          status: "active",
+          createdAt: "2026-06-18T10:56:00.000Z",
+        },
+      ],
       integrityErrors: [],
     },
   ],
+  parity: {
+    legacyBundleCount: 1,
+    normalizedBundleCount: 1,
+    membershipMismatchCount: 0,
+    primaryMismatchCount: 0,
+    clean: true,
+  },
 };
 
 describe("CoverageBundlesDashboard", () => {
   it("renders bundle summary, rows and detail drawer", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
-        <CoverageBundlesDashboard page={page} filters={{ limit: 30 }} onFiltersChange={vi.fn()} />
+        <CoverageBundlesDashboard
+          page={page}
+          filters={{ projection: "shadow" }}
+          onFiltersChange={vi.fn()}
+        />
       </MemoryRouter>,
     );
 
@@ -115,6 +214,109 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Rykka til Flatåsen etter røykutvikling");
     expect(html).toContain("/command/tidslinje");
     expect(html).toContain("/command/kilder");
+    expect(html).toContain("Aktive grupper");
+    expect(html).toContain("Sterke treff");
+    expect(html).toContain("Moderate treff");
+    expect(html).toContain("Til vurdering");
+    expect(html).toContain("Aktive korrigeringer");
+    expect(html).toContain("Dataintegritet");
+    expect(html).toContain("Offentlig projeksjon samsvarer");
+    expect(html).toContain("Svakeste godkjente treff");
+    expect(html).toContain("Vis 1 nesten-treff");
+    expect(html).toContain("Splitt gruppe");
+    expect(html).toContain("Eksporter korrigeringer");
+    expect(html).toContain("Gjennomgå og anonymiser eksporten før den legges i testkorpuset.");
+    expect(html).toContain("Angre");
+  });
+
+  it("warns about integrity and parity failures without promotion-ready copy", () => {
+    const errorPage: CoverageBundlePage = {
+      ...page,
+      summary: { ...page.summary, integrityErrorCount: 1 },
+      items: [
+        {
+          ...page.items[0]!,
+          integrityErrors: ["missing_article:missing-article-id"],
+        },
+      ],
+      parity: {
+        legacyBundleCount: 1,
+        normalizedBundleCount: 1,
+        membershipMismatchCount: 1,
+        primaryMismatchCount: 0,
+        clean: false,
+      },
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={errorPage}
+          filters={{ projection: "shadow" }}
+          onFiltersChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Skyggevisningen avviker fra dagens publiserte grupper");
+    expect(html).toContain("missing-article-id");
+    expect(html).not.toContain("Offentlig projeksjon samsvarer");
+  });
+
+  it("keeps correction history read-only when corrections are disabled", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={{ ...page, correctionsEnabled: false }}
+          filters={{ projection: "shadow" }}
+          onFiltersChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Korrigeringshistorikk");
+    expect(html).toContain("Aktiv korrigering");
+    expect(html).not.toContain("Splitt gruppe");
+    expect(html).not.toContain("Angre");
+  });
+
+  it("keeps legacy bundle history read-only when corrections are enabled", () => {
+    const legacyPage: CoverageBundlePage = {
+      ...page,
+      correctionsEnabled: true,
+      summary: {
+        ...page.summary,
+        matcherVersion: "v1",
+        projectionState: "legacy",
+        generation: undefined,
+      },
+      items: [
+        {
+          ...page.items[0]!,
+          matcherVersion: "v1",
+          matchConfidence: undefined,
+          generation: undefined,
+          state: "legacy",
+        },
+      ],
+      parity: undefined,
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={legacyPage}
+          filters={{ projection: "legacy", confidence: "high" }}
+          onFiltersChange={vi.fn()}
+          onSplit={vi.fn()}
+          onUndo={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Korrigeringshistorikk");
+    expect(html).toContain("Aktiv korrigering");
+    expect(html).not.toContain("Splitt gruppe");
+    expect(html).not.toContain("Angre");
   });
 
   it("renders the empty state", () => {
@@ -136,7 +338,7 @@ describe("CoverageBundlesDashboard", () => {
             },
             items: [],
           }}
-          filters={{ limit: 30, kind: "topic" }}
+          filters={{ projection: "legacy", confidence: "high" }}
           onFiltersChange={vi.fn()}
         />
       </MemoryRouter>,
@@ -166,7 +368,7 @@ describe("CoverageBundlesDashboard", () => {
       <MemoryRouter>
         <CoverageBundlesDashboard
           page={unsafePage}
-          filters={{ limit: 30 }}
+          filters={{ projection: "shadow" }}
           onFiltersChange={vi.fn()}
         />
       </MemoryRouter>,
@@ -175,5 +377,162 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Utrygg lenke");
     expect(html).toContain("coverage-bundle-member-linkless");
     expect(html).not.toContain("javascript:alert");
+  });
+});
+
+describe("coverage workspace helpers", () => {
+  it("round-trips all filters while changing one value", () => {
+    const filters = coverageWorkspaceFilters(
+      "?projection=active&matchTier=strong&corrected=yes&integrity=error&q=Flat%C3%A5sen&cursor=next&bundle=coverage%3Aone",
+    );
+    const search = coverageWorkspaceSearch({ ...filters, matchTier: "moderate" });
+
+    expect(coverageWorkspaceFilters(search)).toEqual({
+      projection: "active",
+      matchTier: "moderate",
+      corrected: "yes",
+      integrity: "error",
+      query: "Flatåsen",
+      cursor: "next",
+      bundleId: "coverage:one",
+    });
+  });
+
+  it("keeps confidence only for the legacy projection", () => {
+    expect(coverageWorkspaceFilters("?projection=legacy&confidence=high")).toMatchObject({
+      projection: "legacy",
+      confidence: "high",
+    });
+    expect(coverageWorkspaceFilters("?projection=shadow&confidence=high")).toEqual({
+      projection: "shadow",
+    });
+  });
+
+  it("groups review candidates by reason and bounds initial rows to five", () => {
+    const candidate = page.items[0]!.reviewCandidates[0]!;
+    const bundle = {
+      ...page.items[0]!,
+      reviewCandidates: [
+        ...Array.from({ length: 6 }, (_, index) => ({
+          ...candidate,
+          articleIds: [`left-${index}`, `right-${index}`] as [string, string],
+          score: 0.1 + index / 10,
+        })),
+        {
+          ...candidate,
+          articleIds: ["conflict-left", "conflict-right"] as [string, string],
+          score: 0.99,
+          correctionConflict: true,
+        },
+      ],
+    };
+
+    const grouped = groupedCoverageReviewCandidates(bundle);
+
+    expect(grouped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "specific_place",
+          total: 6,
+          visible: expect.arrayContaining([expect.objectContaining({ score: 0.6 })]),
+        }),
+        expect.objectContaining({ reason: "correction_conflict", total: 1 }),
+      ]),
+    );
+    expect(grouped.find(({ reason }) => reason === "specific_place")?.visible).toHaveLength(5);
+  });
+
+  it("reloads the workspace after a successful split", async () => {
+    const split = vi.fn().mockResolvedValue(undefined);
+    const reload = vi.fn().mockResolvedValue(true);
+
+    await expect(
+      splitCoverageBundleAndRefresh(
+        "coverage:one",
+        {
+          expectedGeneratedAt: "2026-06-18T10:55:00.000Z",
+          anchorArticleId: "anchor",
+          rejectedArticleIds: ["rejected"],
+        },
+        reload,
+        split,
+      ),
+    ).resolves.toBe("updated");
+    expect(split).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("reloads stale split state instead of claiming success", async () => {
+    const split = vi.fn().mockRejectedValue(new CoverageCorrectionConflictError([]));
+    const reload = vi.fn().mockResolvedValue(true);
+
+    await expect(
+      splitCoverageBundleAndRefresh(
+        "coverage:one",
+        {
+          expectedGeneratedAt: "2026-06-18T10:55:00.000Z",
+          anchorArticleId: "anchor",
+          rejectedArticleIds: ["rejected"],
+        },
+        reload,
+        split,
+      ),
+    ).resolves.toBe("conflict");
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("reloads the workspace after undo", async () => {
+    const undo = vi.fn().mockResolvedValue(undefined);
+    const reload = vi.fn().mockResolvedValue(true);
+
+    await undoCoverageCorrectionAndRefresh("correction:one", reload, undo);
+
+    expect(undo).toHaveBeenCalledWith("correction:one");
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("reports a failed refresh after a successful split", async () => {
+    const split = vi.fn().mockResolvedValue(undefined);
+    const reload = vi.fn().mockResolvedValue(false);
+
+    await expect(
+      splitCoverageBundleAndRefresh(
+        "coverage:one",
+        {
+          expectedGeneratedAt: "2026-06-18T10:55:00.000Z",
+          anchorArticleId: "anchor",
+          rejectedArticleIds: ["rejected"],
+        },
+        reload,
+        split,
+      ),
+    ).resolves.toBe("reload_failed");
+  });
+
+  it("reports a failed refresh after a stale split conflict", async () => {
+    const split = vi.fn().mockRejectedValue(new CoverageCorrectionConflictError([]));
+    const reload = vi.fn().mockResolvedValue(false);
+
+    await expect(
+      splitCoverageBundleAndRefresh(
+        "coverage:one",
+        {
+          expectedGeneratedAt: "2026-06-18T10:55:00.000Z",
+          anchorArticleId: "anchor",
+          rejectedArticleIds: ["rejected"],
+        },
+        reload,
+        split,
+      ),
+    ).resolves.toBe("conflict_reload_failed");
+  });
+
+  it("reports a failed refresh after undo", async () => {
+    const undo = vi.fn().mockResolvedValue(undefined);
+    const reload = vi.fn().mockResolvedValue(false);
+
+    await expect(undoCoverageCorrectionAndRefresh("correction:one", reload, undo)).resolves.toBe(
+      false,
+    );
   });
 });

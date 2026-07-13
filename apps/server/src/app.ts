@@ -2413,7 +2413,11 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/api/operations/coverage-bundles", async (req, res, next) => {
     try {
       const filters = coverageBundleQuerySchema.parse(req.query);
-      res.json(await store.listCoverageBundles(filters, currentLogin(req)));
+      const page = await store.listCoverageBundles(filters, currentLogin(req));
+      res.json({
+        ...page,
+        correctionsEnabled: config.coverageCorrectionsEnabled === true,
+      });
     } catch (error) {
       next(error);
     }
