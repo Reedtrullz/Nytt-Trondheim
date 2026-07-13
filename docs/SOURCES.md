@@ -37,9 +37,9 @@ Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, inclu
 
 Articles and official MET/NVE/DATEX/Politiloggen situation events, Entur service alerts, Bane NOR rail/mobility messages and Vegvesen TrafficInfo records are mirrored into the internal `source_items` ledger when their source contracts permit it. DATEX TravelTime, DATEX Weather, DATEX CCTV, Trafikkdata counters and Entur vehicle positions are explicitly excluded from the editorial source stream and remain telemetry/context tables plus `source_health` only.
 
-Coverage bundles are not a collected source. They are worker-derived article grouping decisions stored in `coverage_bundles` for owner-only Command Center review at `/command/dekning`. They may reference article ids and source labels, but they do not write raw upstream payloads, do not require a source contract, and must not be mirrored into `source_items`.
+Coverage bundles are not a collected source. They are worker-derived article grouping decisions stored as stable bundle rows plus immutable generation-scoped versions, members, and edges for owner-only Command Center review at `/command/dekning`. They may reference article ids and source labels, but they do not write raw upstream payloads, do not require a source contract, and must not be mirrored into `source_items`.
 
-Matcher versions and owner corrections are derived decisions, not collected sources. Shadow edges, evaluation labels and bundle corrections must never be written to `source_items` or used as automatic situation evidence.
+Matcher versions and owner corrections are derived decisions, not collected sources. Shadow edges, evaluation labels, exact-pair split/undo records, and sanitized correction exports must never be written to `source_items`, used as automatic situation evidence, or change source reliability. A correction changes only the effective grouping projection; it cannot activate, verify, dismiss, or otherwise mutate a situation.
 
 ## Sport Dashboard Context
 

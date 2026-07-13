@@ -13,6 +13,12 @@
   DeepSeek run is local/experimental derived analysis rather than live provenance.
 - The exported workspace package is authenticated, persisted for protected re-download, sanitizes attachment paths and includes a checksum manifest; handle it as confidential.
 
+## Coverage Corrections
+
+Coverage split and undo mutations require an authenticated owner, the global API CSRF check, and the explicit `COVERAGE_CORRECTIONS_ENABLED=true` capability. The server writes the internal `users.id` as actor identity; login text is not used as a foreign key. A correction rejects only the selected unordered article pair and cannot generalize to a source, topic, place, or future unrelated article.
+
+Correction telemetry contains the action, bundle/correction identifier, and numeric result counts only. It must not contain article titles, excerpts, URLs, session data, credentials, or the owner's optional reason. The owner-only JSON export similarly omits actor identity and reason, normalizes whitespace, and bounds title/excerpt lengths; it is review material and is never imported automatically. Split/undo does not edit upstream records, `source_items`, situations, or public evidence.
+
 ## Secrets Required For Deployment
 
 `SSH_PRIVATE_KEY`, `NYTT_REPO_DEPLOY_KEY`, `NYTT_POSTGRES_PASSWORD`, `NYTT_SESSION_SECRET`, `NYTT_GITHUB_CLIENT_ID`, `NYTT_GITHUB_CLIENT_SECRET`, `NYTT_SMTP_HOST`, `NYTT_SMTP_FROM`, `NYTT_SMTP_API_KEY`, `NYTT_DATEX_USERNAME`, `NYTT_DATEX_PASSWORD`, `NYTT_RESTIC_REPOSITORY`, `NYTT_RESTIC_PASSWORD`, and `NYTT_RCLONE_CONFIG`.

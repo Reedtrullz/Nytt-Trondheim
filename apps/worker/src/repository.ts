@@ -270,8 +270,9 @@ export class WorkerRepository {
   }
 
   async persistCoverageGeneration(input: PersistCoverageGenerationInput): Promise<string> {
+    let generationId: string;
     try {
-      return await withTransaction(this.pool, async (client) => {
+      generationId = await withTransaction(this.pool, async (client) => {
         const generation = await client.query<{ id: string }>(
           `INSERT INTO coverage_bundle_generations
             (matcher_version, mode, status, started_at, article_count)
@@ -539,6 +540,25 @@ export class WorkerRepository {
       );
       throw error;
     }
+    await this.pruneCoverageGenerations(input.completedAt);
+    return generationId;
+  }
+
+  async pruneCoverageGenerations(now: string): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM coverage_bundle_generations
+       WHERE status = 'completed'
+         AND completed_at < $1::timestamptz - interval '30 days'
+         AND id NOT IN (
+           SELECT generation_id
+           FROM coverage_bundles
+           WHERE state IN ('active', 'shadow') AND generation_id IS NOT NULL
+         )
+         AND id NOT IN (
+           SELECT generation_id FROM coverage_bundle_corrections
+         )`,
+      [now],
+    );
   }
 
   async upsertMorningBrief(brief: MorningBrief): Promise<void> {

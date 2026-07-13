@@ -33,7 +33,11 @@ Article coverage grouping is derived analysis, not upstream evidence. The worker
 
 ### Coverage matcher shadow lane
 
-The worker computes deterministic v1 and v2 coverage analyses from the same geocoded article snapshot. Until normalized generation persistence and parity gates ship, only v1 article metadata and legacy bundle rows are written. V2 contributes bounded comparison metrics only; it cannot create situations, source items, verification or public grouping.
+The worker computes deterministic v1 and v2 coverage analyses from the same geocoded article snapshot. V1 remains the persisted and public projection during the shadow phase. Each successful v2 cycle is additionally stored as one completed normalized shadow generation; a failed candidate transaction leaves the previous successful normalized projection intact and records only a bounded error class.
+
+`coverage_bundles` is the stable bundle identity/current-state row. Immutable generation-specific facts live in `coverage_bundle_versions`, `coverage_bundle_members`, `coverage_bundle_edges`, and `coverage_generation_articles`. The last table records the full analyzed article set, including singleton stories, so a correction can recompute the complete generation instead of only the selected group. Only completed generations are readable. Superseded completed generations older than 30 days are pruned, while current active/shadow generations are preserved.
+
+Owner corrections are immutable exact-pair decisions stored separately from generated membership. Active corrections are applied at projection/recomputation time and are carried into later v2 generations; undo marks a correction reverted rather than editing an old generation. Corrections never mutate articles, source items, situations, or public evidence. Correction records and the generations they reference are excluded from retention pruning so the review history remains available.
 
 The public City Pulse story feed is exposed through `/api/city-pulse/stories`. It reuses the same article filters as `/api/articles`, but returns grouped story cards with member article ids, source labels, bundle metadata and public verification so public pagination and counts can become story-native without duplicating coverage logic in every frontend surface.
 

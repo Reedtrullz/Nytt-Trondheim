@@ -115,6 +115,45 @@ jobs:
             END IF;
           END
           $$;
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+              FROM coverage_bundle_members cbm
+              LEFT JOIN articles a ON a.id = cbm.article_id
+              WHERE a.id IS NULL
+            ) THEN
+              RAISE EXCEPTION 'normalized coverage contains dangling article members';
+            END IF;
+          END
+          $$;
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+              FROM coverage_bundle_versions cbv
+              LEFT JOIN coverage_bundle_members cbm
+                ON cbm.generation_id = cbv.generation_id
+               AND cbm.bundle_id = cbv.bundle_id
+               AND cbm.role = 'primary'
+              GROUP BY cbv.generation_id, cbv.bundle_id
+              HAVING count(cbm.article_id) <> 1
+            ) THEN
+              RAISE EXCEPTION 'normalized coverage contains bundles with invalid primary counts';
+            END IF;
+          END
+          $$;
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+              FROM coverage_bundle_generations
+              WHERE status = 'completed' AND completed_at IS NULL
+            ) THEN
+              RAISE EXCEPTION 'normalized coverage contains incomplete completed generations';
+            END IF;
+          END
+          $$;
           SQL
       - name: Run migration guardrail invariants
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration-invariants.sql

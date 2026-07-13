@@ -123,7 +123,8 @@ describe("coverage generation repository", () => {
 
   it("persists one completed shadow generation in a transaction", async () => {
     const client = transactionClient();
-    const repository = new WorkerRepository(poolReturning(client));
+    const pool = poolReturning(client);
+    const repository = new WorkerRepository(pool);
 
     const id = await repository.persistCoverageGeneration({
       matcherVersion: "v2",
@@ -146,6 +147,10 @@ describe("coverage generation repository", () => {
     ).toBe(true);
     expect(client.queries.at(-1)?.sql).toBe("COMMIT");
     expect(client.release).toHaveBeenCalledOnce();
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("DELETE FROM coverage_bundle_generations"),
+      ["2026-07-12T21:00:00.000Z"],
+    );
   });
 
   it("rolls back and records failure without superseding the prior projection", async () => {
@@ -170,6 +175,22 @@ describe("coverage generation repository", () => {
       expect.arrayContaining(["v2", "shadow", "Error"]),
     );
     expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("prunes old superseded generations while preserving correction-referenced history", async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const repository = new WorkerRepository({ query } as unknown as pg.Pool);
+
+    await repository.pruneCoverageGenerations("2026-07-12T21:00:00.000Z");
+
+    expect(query).toHaveBeenCalledOnce();
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain("DELETE FROM coverage_bundle_generations");
+    expect(sql).toContain("status = 'completed'");
+    expect(sql).toContain("completed_at < $1::timestamptz - interval '30 days'");
+    expect(sql).toContain("state IN ('active', 'shadow')");
+    expect(sql).toContain("SELECT generation_id FROM coverage_bundle_corrections");
+    expect(params).toEqual(["2026-07-12T21:00:00.000Z"]);
   });
 
   it("reuses stable ids one-to-one when at least half the smaller group overlaps", () => {

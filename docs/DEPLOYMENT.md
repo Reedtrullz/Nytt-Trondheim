@@ -304,7 +304,7 @@ Expected results:
 
 ## Coverage Bundle Production Verification
 
-Coverage bundles are derived article-analysis rows for the owner-only Command Center surface. After a CI-verified SHA deploys and the worker has completed at least one cycle, verify live health, authentication behavior, persisted decisions and the browser surface:
+Coverage bundles are derived article-analysis rows for the owner-only Command Center surface. The lifecycle migration is expand-only and CI applies it twice before Docker builds. During the shadow phase, v1 remains public while successful v2 candidates are stored as completed shadow generations; `COVERAGE_CORRECTIONS_ENABLED` stays `false`. After a CI-verified SHA deploys and the worker has completed at least one cycle, verify live health, authentication behavior, persisted decisions and the browser surface:
 
 ```bash
 HEAD_SHA=$(git rev-parse HEAD)
@@ -327,6 +327,38 @@ SELECT id, kind, confidence, reason, array_length(member_article_ids, 1) AS memb
 FROM coverage_bundles
 ORDER BY last_seen_at DESC
 LIMIT 10;
+SELECT id, matcher_version, mode, status, is_current, article_count, bundle_count,
+       edge_count, correction_conflict_count, completed_at, error_class
+FROM coverage_bundle_generations
+ORDER BY created_at DESC
+LIMIT 10;
+WITH latest_shadow AS (
+  SELECT id
+  FROM coverage_bundle_generations
+  WHERE matcher_version='v2' AND mode='shadow' AND status='completed'
+  ORDER BY completed_at DESC, id DESC
+  LIMIT 1
+)
+SELECT
+  (SELECT count(*) FROM coverage_generation_articles cga JOIN latest_shadow g ON g.id=cga.generation_id) AS articles,
+  (SELECT count(*) FROM coverage_bundle_versions cbv JOIN latest_shadow g ON g.id=cbv.generation_id) AS bundles,
+  (SELECT count(*) FROM coverage_bundle_members cbm JOIN latest_shadow g ON g.id=cbm.generation_id) AS members,
+  (SELECT count(*) FROM coverage_bundle_edges cbe JOIN latest_shadow g ON g.id=cbe.generation_id) AS edges;
+SELECT count(*) AS dangling_members
+FROM coverage_bundle_members cbm
+LEFT JOIN articles a ON a.id=cbm.article_id
+WHERE a.id IS NULL;
+SELECT count(*) AS invalid_primary_groups
+FROM (
+  SELECT cbv.generation_id, cbv.bundle_id
+  FROM coverage_bundle_versions cbv
+  LEFT JOIN coverage_bundle_members cbm
+    ON cbm.generation_id=cbv.generation_id
+   AND cbm.bundle_id=cbv.bundle_id
+   AND cbm.role='primary'
+  GROUP BY cbv.generation_id, cbv.bundle_id
+  HAVING count(cbm.article_id) <> 1
+) invalid;
 SELECT count(*) AS accidental_coverage_source_items
 FROM source_items
 WHERE provider='coverage_bundles'
@@ -340,12 +372,25 @@ Expected results:
 - `/health` returns `200` with Postgres-backed `status: ok`.
 - Anonymous `/api/bootstrap` returns `401`; the coverage endpoint is under the same authenticated `/api` boundary.
 - `recent_coverage_bundles` may be zero immediately after deploy if the worker has not yet ingested matching stories, but the query must succeed and `/command/dekning` must show either live rows or an honest empty state.
+- The latest v2 shadow generation must be `completed`; a failed generation must not replace the last successful projection. `dangling_members` and `invalid_primary_groups` must both be zero.
+- In an authenticated owner session, request `/api/operations/coverage-bundles?projection=shadow&limit=30` and require `parity.clean=true`, `summary.integrityErrorCount=0`, and a generation ID matching the latest completed shadow SQL row. Review candidate and correction counts are diagnostics, not promotion approval.
 - `accidental_coverage_source_items` must be zero. Coverage grouping explains feed bundling; it is not upstream provenance.
 - In an authenticated browser session, verify `/`, `/command`, and `/command/dekning`. The home feed should still show existing bundle labels, `/command` should link to `Dekningsgrupper`, and `/command/dekning` should show bundle rows with member stories, signals, near misses and timestamps, or the empty state.
 
-### Coverage matcher v2 Phase 1
+### Coverage matcher v2 lifecycle shadow phase
 
-`npm run check:coverage-matcher` is a mandatory deterministic quality gate. Passing it does not promote v2. Phase 1 keeps v1 as the only persisted/public matcher and records v2 comparison metrics without article text. Normalized shadow generations, seven-cycle parity and owner review are delivered by the lifecycle plan before promotion is possible.
+`npm run check:coverage-matcher` is a mandatory deterministic quality gate. Passing it does not promote v2. V1 remains the public projection while normalized v2 generations are shadow/audit-only. Failed candidate transactions preserve the previous successful projection. Superseded completed generations older than 30 days are pruned after successful generation writes; current active/shadow generations, correction rows, and generations referenced by corrections are preserved. Public promotion still requires the separate seven-generation parity, integrity, owner-review, browser, and rollback gates.
+
+To disable the shadow lane without deleting review history, first return runtime flags to the legacy/disabled settings, then run:
+
+```sql
+UPDATE coverage_bundles SET state='superseded' WHERE state='shadow';
+UPDATE coverage_bundle_generations
+SET status='failed', completed_at=COALESCE(completed_at, now()), error_class='manual_shadow_disable'
+WHERE mode='shadow' AND status='running';
+```
+
+This rollback deliberately does not delete generations or corrections. Completed shadow rows remain available for diagnosis, and active exact-pair corrections continue to constrain later v2 analyses unless explicitly undone by the owner.
 
 ## Rollback
 
