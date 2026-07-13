@@ -6,6 +6,15 @@ import type {
   CityPulseStory,
 } from "./types.js";
 import { isFootballClubBrannContext } from "./incident-text.js";
+import type {
+  ArticleCoverageDecisionSignal,
+  ArticleCoverageDecisionSignalKind,
+} from "./article-coverage-evidence.js";
+
+export type {
+  ArticleCoverageDecisionSignal,
+  ArticleCoverageDecisionSignalKind,
+} from "./article-coverage-evidence.js";
 
 export interface HomeArticleGroup {
   id: string;
@@ -13,24 +22,6 @@ export interface HomeArticleGroup {
   articles: Article[];
   sourceLabels: string[];
   bundle?: ArticleCoverageBundle;
-}
-
-export type ArticleCoverageDecisionSignalKind =
-  | "persisted_bundle"
-  | "situation_id"
-  | "title_similarity"
-  | "near_duplicate"
-  | "generic_place_incident"
-  | "topical_thread"
-  | "cross_source_incident"
-  | "shared_place";
-
-export interface ArticleCoverageDecisionSignal {
-  kind: ArticleCoverageDecisionSignalKind;
-  articleIds: string[];
-  detail?: string;
-  overlap?: number;
-  score?: number;
 }
 
 export type ArticleCoverageNearMissReason =
