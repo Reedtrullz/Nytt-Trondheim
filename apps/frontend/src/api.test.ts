@@ -808,6 +808,80 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("splits and undoes coverage groups with encoded ids and CSRF protection", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("./api.js");
+    const splitInput = {
+      expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+      anchorArticleId: "article-anchor",
+      rejectedArticleIds: ["article-rejected"],
+      reason: "Ulik hendelse",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(
+        okResponse({ corrections: [], removedStoryIds: ["coverage:one"], replacementStories: [] }),
+      )
+      .mockResolvedValueOnce(
+        okResponse({ corrections: [], removedStoryIds: [], replacementStories: [] }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await freshApi.splitCoverageBundle("coverage:one/with spaces", splitInput);
+    await freshApi.undoCoverageCorrection("correction:one/with spaces");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/coverage-bundles/coverage%3Aone%2Fwith%20spaces/corrections/split",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+        body: JSON.stringify(splitInput),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/coverage-bundle-corrections/correction%3Aone%2Fwith%20spaces/undo",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-token" }),
+      }),
+    );
+  });
+
+  it("preserves replacement stories on a stale coverage correction conflict", async () => {
+    vi.resetModules();
+    const { api: freshApi, CoverageCorrectionConflictError: FreshCoverageCorrectionConflictError } =
+      await import("./api.js");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ csrfToken: "csrf-token" }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: "Gruppen ble endret mens du vurderte den.",
+            replacementStories: [],
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const failure = freshApi.splitCoverageBundle("coverage:stale", {
+      expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+      anchorArticleId: "article-anchor",
+      rejectedArticleIds: ["article-rejected"],
+    });
+
+    await expect(failure).rejects.toBeInstanceOf(FreshCoverageCorrectionConflictError);
+    await expect(failure).rejects.toMatchObject({
+      status: 409,
+      replacementStories: [],
+      message: "Gruppen ble endret mens du vurderte den.",
+    });
+  });
+
   it("encodes reserved characters in situation source item paths", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse([]));
     vi.stubGlobal("fetch", fetchMock);

@@ -9,12 +9,15 @@ import type {
   ArticlePage,
   ArticleTopic,
   BootstrapPayload,
+  CityPulseStory,
   CityPulseStoryPage,
   CommandCenterBriefingPayload,
   CommandCenterSpatialAnalyticsPayload,
   CommandCenterSpatialAnalyticsQueryInput,
   CoverageBundlePage,
   CoverageBundleQueryInput,
+  CoverageBundleCorrectionResult,
+  CoverageBundleSplitRequest,
   EmailLoginRequestInput,
   MapFeature,
   NotificationTriggerPage,
@@ -69,6 +72,13 @@ export class ApiError extends Error {
   }
 }
 
+export class CoverageCorrectionConflictError extends ApiError {
+  constructor(readonly replacementStories: CityPulseStory[]) {
+    super("Gruppen ble endret mens du vurderte den.", 409);
+    this.name = "CoverageCorrectionConflictError";
+  }
+}
+
 async function csrfToken(): Promise<string> {
   csrfTokenPromise ??= fetch("/api/session", { credentials: "include" })
     .then(async (response) => {
@@ -105,25 +115,33 @@ async function apiErrorFromResponse(response: Response): Promise<ApiError> {
   return new ApiError(body.error ?? "Forespørselen feilet", response.status, retryAfter);
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+async function requestRaw(url: string, init?: RequestInit): Promise<Response> {
   const unsafe = init?.method && !["GET", "HEAD", "OPTIONS"].includes(init.method);
   const response = await fetch(url, {
+    ...init,
     credentials: "include",
     headers: {
       ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...(unsafe ? { "X-CSRF-Token": await csrfToken() } : {}),
       ...init?.headers,
     },
-    ...init,
   });
   if (response.status === 401) {
     redirectToLogin();
     throw new ApiError("Innlogging kreves", 401);
   }
+  return response;
+}
+
+async function responseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     throw await apiErrorFromResponse(response);
   }
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  return responseJson<T>(await requestRaw(url, init));
 }
 
 async function publicJsonRequest<T>(url: string, init: RequestInit): Promise<T> {
@@ -260,6 +278,24 @@ export const api = {
       `/api/operations/coverage-bundles${search ? `?${search}` : ""}`,
     );
   },
+  splitCoverageBundle: async (bundleId: string, input: CoverageBundleSplitRequest) => {
+    const response = await requestRaw(
+      `/api/coverage-bundles/${encodeURIComponent(bundleId)}/corrections/split`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+    if (response.status === 409) {
+      const body = (await response.json()) as { replacementStories?: CityPulseStory[] };
+      throw new CoverageCorrectionConflictError(
+        Array.isArray(body.replacementStories) ? body.replacementStories : [],
+      );
+    }
+    return responseJson<CoverageBundleCorrectionResult>(response);
+  },
+  undoCoverageCorrection: (correctionId: string) =>
+    request<CoverageBundleCorrectionResult>(
+      `/api/coverage-bundle-corrections/${encodeURIComponent(correctionId)}/undo`,
+      { method: "POST" },
+    ),
   notificationTriggers: (query: NotificationTriggerQueryInput = { limit: 30 }) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
