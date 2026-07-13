@@ -3173,12 +3173,8 @@ describe("private situation API", () => {
       updateCount: 2,
       latestAt: "2026-07-03T09:10:00.000Z",
       coverageBundle: { reason: "Samme hendelse på tvers av kilder" },
-      publicVerification: {
-        label: "Verifisert",
-        officialSources: ["politiloggen"],
-        reportingSources: ["adressa"],
-      },
     });
+    expect(first.body.items[0].publicVerification).toBeUndefined();
     expect(first.body.nextCursor).toBeTruthy();
 
     const second = await agent

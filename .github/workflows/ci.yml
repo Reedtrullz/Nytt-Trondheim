@@ -25,6 +25,8 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm test
+      - name: Check coverage matcher quality
+        run: npm run check:coverage-matcher
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
 

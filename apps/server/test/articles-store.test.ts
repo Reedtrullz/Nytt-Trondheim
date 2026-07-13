@@ -587,7 +587,7 @@ describe("article store", () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
-  it("derives public verification for bundled official-plus-news incident articles", async () => {
+  it("does not derive verification from legacy bundle co-membership without direct edges", async () => {
     const coverageBundle = {
       id: "coverage:incident:lade-vold",
       kind: "incident",
@@ -641,14 +641,7 @@ describe("article store", () => {
 
     expect(page.items).toHaveLength(2);
     for (const article of page.items) {
-      expect(article.publicVerification).toMatchObject({
-        status: "verified",
-        label: "Verifisert",
-        detail: "Bekreftet av Politiloggen og Adresseavisen.",
-        officialSources: ["politiloggen"],
-        reportingSources: ["adressa"],
-        situationId: "politiloggen-lade-vold",
-      });
+      expect(article.publicVerification).toBeUndefined();
     }
     expect(query).toHaveBeenCalledTimes(2);
   });

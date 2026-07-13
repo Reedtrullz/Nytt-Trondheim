@@ -343,6 +343,10 @@ Expected results:
 - `accidental_coverage_source_items` must be zero. Coverage grouping explains feed bundling; it is not upstream provenance.
 - In an authenticated browser session, verify `/`, `/command`, and `/command/dekning`. The home feed should still show existing bundle labels, `/command` should link to `Dekningsgrupper`, and `/command/dekning` should show bundle rows with member stories, signals, near misses and timestamps, or the empty state.
 
+### Coverage matcher v2 Phase 1
+
+`npm run check:coverage-matcher` is a mandatory deterministic quality gate. Passing it does not promote v2. Phase 1 keeps v1 as the only persisted/public matcher and records v2 comparison metrics without article text. Normalized shadow generations, seven-cycle parity and owner review are delivered by the lifecycle plan before promotion is possible.
+
 ## Rollback
 
 The deployment preserves the prior API and worker images as `:previous` before building candidates and does not promote containers if backup verification, migration or canary health fails. If post-promotion validation fails, re-tag `:previous` as `:latest`, restart `app` and `worker`, and restore the latest verified restic snapshot before attempting any incompatible migration recovery.

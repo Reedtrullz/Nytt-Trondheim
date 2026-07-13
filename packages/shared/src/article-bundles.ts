@@ -14,7 +14,6 @@ import {
 import { articleCoverageEdge } from "./article-coverage-evidence.js";
 import type {
   ArticleCoverageDecisionSignal,
-  ArticleCoverageDecisionSignalKind,
   ArticleCoverageEdge,
 } from "./article-coverage-evidence.js";
 
