@@ -9,6 +9,7 @@ import { isFootballClubBrannContext } from "./incident-text.js";
 import type {
   ArticleCoverageDecisionSignal,
   ArticleCoverageDecisionSignalKind,
+  ArticleCoverageEdge,
 } from "./article-coverage-evidence.js";
 
 export type {
@@ -52,6 +53,7 @@ export interface ArticleCoverageAnalysis {
   articles: Article[];
   bundles: ArticleCoverageBundleDecision[];
   nearMisses: ArticleCoverageNearMiss[];
+  edges?: ArticleCoverageEdge[];
 }
 
 export interface CoverageBundleArticleSummary {

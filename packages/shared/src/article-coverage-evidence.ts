@@ -62,6 +62,21 @@ export interface ArticleCoveragePairEvidence {
   evidenceFingerprint: string;
 }
 
+export type ArticleCoverageMatchTier = "strong" | "moderate" | "weak";
+export type ArticleCoverageEdgeKind = "incident" | "topic" | "update";
+
+export interface ArticleCoverageEdge {
+  articleIds: [string, string];
+  tier: ArticleCoverageMatchTier;
+  score: number;
+  kind: ArticleCoverageEdgeKind;
+  signals: ArticleCoverageDecisionSignal[];
+  conflicts: ArticleCoverageConflictSignal[];
+  evidenceFingerprint: string;
+  reviewable: boolean;
+  correctionConflict: boolean;
+}
+
 const stopWords = new Set([
   "alle",
   "and",
@@ -393,5 +408,179 @@ export function articleCoverageEvidence(
       titleBucket: Math.round(titleScore * 20) / 20,
       timeBucketMinutes: Math.floor(timeDistanceMs / 300_000) * 5,
     }),
+  };
+}
+
+function boundedScore(value: number): number {
+  return Math.max(0, Math.min(1, Math.round(value * 1000) / 1000));
+}
+
+function sameBroadCategory(left: Article, right: Article): boolean {
+  if (left.category === right.category) return true;
+  const eventLike = new Set(["Hendelser", "Krim", "Nyheter"]);
+  return eventLike.has(left.category) && eventLike.has(right.category);
+}
+
+function hasGenericIncidentOverlap(left: Article, right: Article): boolean {
+  const incidentPattern =
+    /\b(?:brann\w*|kollisj\w*|kontroll|nødetat\w*|politiet|trussel\w*|ulykke\w*|ungdom\w*|vold\w*)\b/giu;
+  const leftTerms = new Set(normalizedText(left).match(incidentPattern) ?? []);
+  return (normalizedText(right).match(incidentPattern) ?? []).some((term) => leftTerms.has(term));
+}
+
+function hasSportsTopicMatch(
+  left: Article,
+  right: Article,
+  evidence: ArticleCoveragePairEvidence,
+): boolean {
+  if (left.category !== "Sport" || right.category !== "Sport") return false;
+  const resultPattern = /\b(?:kamp\w*|mål\w*|seier\w*|slo|tap\w*|vant|\d+\s*[–-]\s*\d+)\b/iu;
+  return (
+    resultPattern.test(normalizedText(left)) &&
+    resultPattern.test(normalizedText(right)) &&
+    (evidence.positiveIncidentEvidence.includes("shared_specific_place") ||
+      evidence.positiveIncidentEvidence.includes("shared_named_entity") ||
+      evidence.sharedDistinctiveTokenCount >= 2)
+  );
+}
+
+function articlePairSignalsForV2(
+  left: Article,
+  right: Article,
+  evidence: ArticleCoveragePairEvidence,
+): ArticleCoverageDecisionSignal[] {
+  const signals: ArticleCoverageDecisionSignal[] = [];
+  if (left.situationId && left.situationId === right.situationId) {
+    signals.push({
+      kind: "situation_id",
+      articleIds: evidence.articleIds,
+      detail: left.situationId,
+    });
+  }
+  if (evidence.positiveIncidentEvidence.includes("shared_specific_place")) {
+    signals.push({ kind: "shared_place", articleIds: evidence.articleIds });
+  }
+  const body = tokenSimilarity(articleBodyTokens(left), articleBodyTokens(right));
+  if (left.url.length > 0 && left.url === right.url) {
+    signals.push({ kind: "near_duplicate", articleIds: evidence.articleIds, score: 1 });
+  } else if (evidence.titleScore >= 0.65) {
+    signals.push({
+      kind: "title_similarity",
+      articleIds: evidence.articleIds,
+      score: evidence.titleScore,
+    });
+  } else if (body.overlap >= 4 && body.score >= 0.4) {
+    signals.push({
+      kind: "near_duplicate",
+      articleIds: evidence.articleIds,
+      overlap: body.overlap,
+      score: body.score,
+    });
+  }
+  if (hasSportsTopicMatch(left, right, evidence)) {
+    signals.push({ kind: "topical_thread", articleIds: evidence.articleIds });
+  }
+  if (
+    left.source !== right.source &&
+    sameBroadCategory(left, right) &&
+    evidence.positiveIncidentEvidence.includes("shared_specific_place") &&
+    body.overlap >= 1
+  ) {
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: evidence.articleIds,
+      overlap: body.overlap,
+      score: body.score,
+    });
+  } else if (hasGenericIncidentOverlap(left, right)) {
+    signals.push({
+      kind: "generic_place_incident",
+      articleIds: evidence.articleIds,
+      overlap: body.overlap,
+      score: body.score,
+    });
+  }
+  return signals;
+}
+
+function coverageKindForPair(signals: ArticleCoverageDecisionSignal[]): ArticleCoverageEdgeKind {
+  const hasIncident = signals.some((signal) =>
+    ["situation_id", "generic_place_incident", "cross_source_incident", "shared_place"].includes(
+      signal.kind,
+    ),
+  );
+  const hasTopic = signals.some((signal) => signal.kind === "topical_thread");
+  if (hasTopic && !hasIncident) return "topic";
+  if (hasTopic && signals.every((signal) => signal.kind === "topical_thread")) return "topic";
+  if (hasIncident) return "incident";
+  return hasTopic ? "topic" : "update";
+}
+
+export function articleCoverageEdge(
+  left: Article,
+  right: Article,
+): ArticleCoverageEdge | undefined {
+  const evidence = articleCoverageEvidence(left, right, "v2");
+  const signals = articlePairSignalsForV2(left, right, evidence);
+  const kind = coverageKindForPair(signals);
+  const positiveCount = evidence.positiveIncidentEvidence.length;
+  const hasBlockingConflict = evidence.conflicts.length > 0;
+  const textScore = Math.min(
+    0.25,
+    evidence.titleScore * 0.15 + evidence.sharedDistinctiveTokenCount * 0.025,
+  );
+  const situationScore = evidence.positiveIncidentEvidence.includes("same_situation_id") ? 0.7 : 0;
+  const placeScore = evidence.positiveIncidentEvidence.some(
+    (item) => item === "shared_specific_place" || item === "mentioned_specific_place",
+  )
+    ? 0.3
+    : 0;
+  const entityScore = evidence.positiveIncidentEvidence.includes("shared_named_entity") ? 0.2 : 0;
+  const subtypeScore = evidence.positiveIncidentEvidence.includes("compatible_incident_subtype")
+    ? 0.15
+    : 0;
+  const topicScore =
+    kind === "topic" && signals.some((signal) => signal.kind === "topical_thread") ? 0.65 : 0;
+  const duplicateScore = signals.some(
+    (signal) => signal.kind === "near_duplicate" || signal.kind === "title_similarity",
+  )
+    ? 0.55
+    : 0;
+  const crossSourceScore = signals.some((signal) => signal.kind === "cross_source_incident")
+    ? 0.2
+    : 0;
+  const score = boundedScore(
+    situationScore +
+      placeScore +
+      entityScore +
+      subtypeScore +
+      topicScore +
+      duplicateScore +
+      crossSourceScore +
+      textScore,
+  );
+
+  if (signals.length === 0 && score < 0.35) return undefined;
+  let tier: ArticleCoverageMatchTier = "weak";
+  if (
+    !hasBlockingConflict &&
+    score >= 0.85 &&
+    (situationScore > 0 || topicScore > 0 || duplicateScore > 0)
+  ) {
+    tier = "strong";
+  } else if (!hasBlockingConflict && score >= 0.6 && (kind !== "incident" || positiveCount > 0)) {
+    tier = "moderate";
+  }
+
+  return {
+    articleIds: evidence.articleIds,
+    tier,
+    score,
+    kind,
+    signals,
+    conflicts: evidence.conflicts,
+    evidenceFingerprint: evidence.evidenceFingerprint,
+    reviewable: tier === "weak" || hasBlockingConflict,
+    correctionConflict: false,
   };
 }
