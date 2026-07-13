@@ -1106,7 +1106,10 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await expect(lead.getByText(/Kildetillit: Bekreftet/)).toBeVisible();
   await expect(lead.locator(".story-badge-verified")).toHaveCount(0);
   await expect(lead.locator(".story-verification-proof")).toHaveCount(0);
-  await expect(sources).toHaveAttribute("aria-label", "2 saker fra 2 kilder");
+  await expect(sources).toHaveAttribute(
+    "aria-label",
+    "Samlet dekning: 2 saker fra 2 kilder. 1 annen sak fra 1 kilde",
+  );
   await expect(sources.getByText("Sammenfallende dekning")).toBeVisible();
   await expect(sources.getByRole("link", { name: /NRK Trøndelag/ })).toHaveCount(0);
   await expect(sources.getByRole("link", { name: /Politiloggen/ })).toBeVisible();
@@ -1154,7 +1157,7 @@ test("owner splits and restores a grouped Siste nytt card", async ({ page }) => 
   await coverageFixtureControl(page, "reset");
   await page.goto("/");
   const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
-  await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+  await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
   await card.getByRole("button", { name: "Feil gruppering?" }).click();
   await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
   await page.getByRole("button", { name: "Splitt nå" }).click();
@@ -1165,7 +1168,9 @@ test("owner splits and restores a grouped Siste nytt card", async ({ page }) => 
     "Grupperingen er gjenopprettet",
   );
   await expect(
-    page.locator("article", { hasText: "Korrigerbar hovedsak" }).getByText("3 saker fra 3 kilder"),
+    page
+      .locator("article", { hasText: "Korrigerbar hovedsak" })
+      .getByText("2 andre saker fra 2 kilder"),
   ).toBeVisible();
 });
 
@@ -1181,7 +1186,7 @@ test("undo context is dropped after a projection generation change without false
 
   const splitFixtureGroup = async () => {
     const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
-    await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+    await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
     await card.getByRole("button", { name: "Feil gruppering?" }).click();
     await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
     await page.getByRole("button", { name: "Splitt nå" }).click();
@@ -1218,7 +1223,7 @@ test("undo context is dropped across scope and filter changes without false succ
   await coverageFixtureControl(page, "reset");
   await page.goto("/");
   const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
-  await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+  await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
   await card.getByRole("button", { name: "Feil gruppering?" }).click();
   await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
   await page.getByRole("button", { name: "Splitt nå" }).click();
@@ -1341,7 +1346,9 @@ test("grouped cards remain compact and correctable by keyboard at phone width", 
   await page.goto("/");
   const card = page.locator("article", { hasText: "Stor gruppesak" });
   await expect(card.locator(".coverage-source-row")).toHaveCount(2);
-  await expect(card.getByRole("button", { name: "Vis alle 7 saker fra 5 kilder" })).toBeVisible();
+  await expect(
+    card.getByRole("button", { name: "Vis alle 6 andre saker fra 5 kilder" }),
+  ).toBeVisible();
   await card.getByRole("button", { name: "Feil gruppering?" }).focus();
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog");
@@ -1364,8 +1371,8 @@ test("regional grouped coverage keeps feed and active audit membership in parity
   await page.goto("/?scope=trondelag");
   const card = page.locator("article", { hasText: "Stor gruppesak" });
   const countLabel = card.locator(".coverage-source-heading strong");
-  await expect(countLabel).toHaveText("7 saker fra 5 kilder");
-  await card.getByRole("button", { name: "Vis alle 7 saker fra 5 kilder" }).click();
+  await expect(countLabel).toHaveText("6 andre saker fra 5 kilder");
+  await card.getByRole("button", { name: "Vis alle 6 andre saker fra 5 kilder" }).click();
   const primaryArticleId = await card.getAttribute("data-article-id");
   const feedArticleIds = [
     ...(primaryArticleId ? [primaryArticleId] : []),
@@ -1392,7 +1399,7 @@ test("stale grouped correction refreshes current membership without a correction
   await coverageFixtureControl(page, "reset");
   await page.goto("/?scope=trondelag");
   const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
-  await expect(card.getByText("3 saker fra 3 kilder")).toBeVisible();
+  await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
   const home = page.locator("main.home");
   await expect(home).toHaveAttribute("data-generation-id", /.+/);
   const staleGenerationId = await home.getAttribute("data-generation-id");
@@ -1410,7 +1417,9 @@ test("stale grouped correction refreshes current membership without a correction
   );
   await expect(page.locator(".coverage-correction-toast")).toHaveCount(0);
   await expect(
-    page.locator("article", { hasText: "Korrigerbar hovedsak" }).getByText("2 saker fra 2 kilder"),
+    page
+      .locator("article", { hasText: "Korrigerbar hovedsak" })
+      .getByText("1 annen sak fra 1 kilde"),
   ).toBeVisible();
   await expect(page.getByRole("link", { name: "Urelatert støttesak" })).toBeVisible();
   const refreshedGenerationId = await page.locator("main.home").getAttribute("data-generation-id");
