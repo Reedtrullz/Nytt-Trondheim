@@ -470,6 +470,70 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
     provenance: "synthetic",
   },
   {
+    id: "dora-boat-high-detail-near-duplicate",
+    articles: [
+      article("dora-police", {
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Sjø: Trondheim, Dora",
+        excerpt:
+          "Flere vitner meldte om en båtfører med merkelig kjøring. Holdt på å kjøre på grunna og virket beruset. Politiet fikk kontroll på mann og båt på Dora. Mannen blåste over lovlig verdi og fraktes inn til arresten for videre bevissikring. Mannen er i 40-åra.",
+        url: "https://example.test/dora-police",
+        category: "Krim",
+        places: ["Dora", "Trondheim"],
+        situationId: "sanitized-dora-boat",
+        publishedAt: "2026-07-13T19:19:00.000Z",
+      }),
+      article("dora-nrk", {
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Fyllekjøring med båt i Trondheim",
+        excerpt:
+          "Kl. 21.19 melder politiet at de har kontroll på en båtfører som blåste over lovlig verdi på promilletest. Han blir fraktet til arresten for videre bevissikring. Flere vitner skal ha meldt om en båtfører med merkelig kjøring. Føreren skal ha holdt på å kjøre på grunna og virket beruset. Den arresterte er i 40-årene.",
+        url: "https://example.test/dora-nrk",
+        category: "Krim",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-13T19:24:00.000Z",
+      }),
+      article("dora-adressa", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Kjørte båt i fylla - havnet i arresten",
+        excerpt:
+          "Klokken 21.19 melder politiet i Trøndelag om en båtfører som skal ha kjørt på merkelig vis ved Dora i Trondheim. Flere vitner skal ha sett at mannen i 40-årene virket beruset og nesten kjørte på grunna. Da politiet fikk kontroll på både mann og båt blåste han over lovlig verdi og ble fraktet til arresten.",
+        url: "https://example.test/dora-adressa",
+        category: "Krim",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-13T19:23:00.000Z",
+      }),
+      article("other-boat-control", {
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        title: "Politiet kontrollerte båt i Trondheim",
+        excerpt:
+          "En båtfører ble kontrollert etter melding om manglende lanterner. Ingen personer ble pågrepet, og båten kunne fortsette.",
+        url: "https://example.test/other-boat-control",
+        category: "Krim",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-13T19:22:00.000Z",
+      }),
+    ],
+    expectedSamePairs: [
+      ["dora-police", "dora-nrk"],
+      ["dora-police", "dora-adressa"],
+      ["dora-nrk", "dora-adressa"],
+    ],
+    expectedSeparatePairs: [
+      ["dora-police", "other-boat-control"],
+      ["dora-nrk", "other-boat-control"],
+      ["dora-adressa", "other-boat-control"],
+    ],
+    expectedGroups: [["dora-police", "dora-nrk", "dora-adressa"]],
+    expectedVerifiedGroups: [["dora-police", "dora-nrk", "dora-adressa"]],
+    critical: true,
+    provenance: "sanitized-production-shape",
+  },
+  {
     id: "owner-correction-history",
     articles: [
       article("correction-anchor", {

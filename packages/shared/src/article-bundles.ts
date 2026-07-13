@@ -14,7 +14,11 @@ import {
   clusterArticlesByCoverageEdges,
   type CoverageRejectedPair,
 } from "./article-coverage-clustering.js";
-import { articleCoverageEdge } from "./article-coverage-evidence.js";
+import {
+  articleCoverageEdge,
+  articleCoverageEvidence,
+  highDetailNearDuplicatePolicy,
+} from "./article-coverage-evidence.js";
 import type {
   ArticleCoverageDecisionSignal,
   ArticleCoverageEdge,
@@ -538,6 +542,27 @@ function sameBroadCategory(left: Article, right: Article): boolean {
   return eventLike.has(left.category) && eventLike.has(right.category);
 }
 
+function hasHighDetailCrossSourceNearDuplicate(
+  left: Article,
+  right: Article,
+  body: { overlap: number; score: number },
+): boolean {
+  if (left.source === right.source || !sameBroadCategory(left, right)) return false;
+  if (publishedDistanceMs(left, right) > highDetailNearDuplicatePolicy.windowMs) return false;
+  const distinctive = tokenSimilarity(
+    articleDistinctiveIncidentTokens(left),
+    articleDistinctiveIncidentTokens(right),
+  );
+  if (
+    body.overlap < highDetailNearDuplicatePolicy.minBodyOverlap ||
+    body.score < highDetailNearDuplicatePolicy.minBodyScore ||
+    distinctive.overlap < highDetailNearDuplicatePolicy.minDistinctiveOverlap
+  ) {
+    return false;
+  }
+  return articleCoverageEvidence(left, right, "v2").conflicts.length === 0;
+}
+
 function categoriesCompatibleForIncidentSignal(
   left: Article,
   right: Article,
@@ -871,10 +896,11 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
 
   const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
   if (
-    publishedDistanceMs(left, right) <= nearDuplicateTextWindowMs &&
-    body.overlap >= 10 &&
-    body.score >= 0.5 &&
-    sameBroadCategory(left, right)
+    (publishedDistanceMs(left, right) <= nearDuplicateTextWindowMs &&
+      body.overlap >= 10 &&
+      body.score >= 0.5 &&
+      sameBroadCategory(left, right)) ||
+    hasHighDetailCrossSourceNearDuplicate(left, right, body)
   ) {
     signals.push({
       kind: "near_duplicate",
