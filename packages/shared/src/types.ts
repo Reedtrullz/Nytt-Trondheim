@@ -143,12 +143,20 @@ export interface ArticlePublicVerification {
 export type ArticleCoverageBundleKind = "incident" | "topic" | "update";
 export type ArticleCoverageBundleConfidence = "high" | "medium";
 
+export interface CoverageMatchConfidence {
+  tier: "strong" | "moderate";
+  score: number;
+  rationale: string;
+}
+
 export interface ArticleCoverageBundle {
   id: string;
   kind: ArticleCoverageBundleKind;
   confidence: ArticleCoverageBundleConfidence;
   reason: string;
   generatedAt: string;
+  matchConfidence?: CoverageMatchConfidence;
+  matcherVersion?: "v1" | "v2";
 }
 
 export interface EvidenceItem {

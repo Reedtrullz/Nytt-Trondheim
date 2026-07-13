@@ -4,8 +4,14 @@ import type {
   ArticleCoverageBundleConfidence,
   ArticleCoverageBundleKind,
   CityPulseStory,
+  CoverageMatchConfidence,
 } from "./types.js";
 import { isFootballClubBrannContext } from "./incident-text.js";
+import {
+  clusterArticlesByCoverageEdges,
+  type CoverageRejectedPair,
+} from "./article-coverage-clustering.js";
+import { articleCoverageEdge } from "./article-coverage-evidence.js";
 import type {
   ArticleCoverageDecisionSignal,
   ArticleCoverageDecisionSignalKind,
@@ -23,6 +29,7 @@ export interface HomeArticleGroup {
   articles: Article[];
   sourceLabels: string[];
   bundle?: ArticleCoverageBundle;
+  acceptedEdges?: ArticleCoverageEdge[];
 }
 
 export type ArticleCoverageNearMissReason =
@@ -1205,6 +1212,146 @@ export function analyzeArticleCoverage(
     })),
     bundles,
     nearMisses,
+  };
+}
+
+export interface AnalyzeArticleCoverageV2Options {
+  rejectedPairs?: CoverageRejectedPair[];
+}
+
+function preliminaryV2MatchConfidence(group: HomeArticleGroup): CoverageMatchConfidence {
+  const accepted = group.acceptedEdges ?? [];
+  const anchorId = group.primary.id;
+  const admissions = group.articles
+    .filter((article) => article.id !== anchorId)
+    .map((article) => {
+      const connecting = accepted
+        .filter((edge) => edge.articleIds.includes(article.id))
+        .sort((left, right) => right.score - left.score);
+      const anchorEdge = connecting.find((edge) => edge.articleIds.includes(anchorId));
+      return {
+        score: anchorEdge?.score ?? connecting[1]?.score ?? connecting[0]?.score ?? 0,
+        directStrong: anchorEdge?.tier === "strong",
+      };
+    });
+  const strong =
+    admissions.length === group.articles.length - 1 &&
+    admissions.every((admission) => admission.directStrong);
+  return {
+    tier: strong ? "strong" : "moderate",
+    score: Math.min(...admissions.map((admission) => admission.score)),
+    rationale: strong
+      ? "Alle støttesakene har et sterkt direkte treff med hovedsaken."
+      : "Støttesakene er tatt inn gjennom hovedsak eller flertallstreff.",
+  };
+}
+
+function coverageDecisionForV2Group(
+  group: HomeArticleGroup,
+  generatedAt: string,
+  allEdges: ArticleCoverageEdge[],
+): ArticleCoverageBundleDecision | undefined {
+  if (group.articles.length < 2) return undefined;
+  const memberIds = new Set(group.articles.map((article) => article.id));
+  const groupEdges = allEdges.filter((edge) => edge.articleIds.every((id) => memberIds.has(id)));
+  const accepted = groupEdges.filter((edge) => edge.tier !== "weak" && edge.conflicts.length === 0);
+  const matchConfidence = preliminaryV2MatchConfidence({
+    ...group,
+    acceptedEdges: accepted,
+  });
+  const kind = accepted.some((edge) => edge.kind === "incident")
+    ? "incident"
+    : accepted.some((edge) => edge.kind === "topic")
+      ? "topic"
+      : "update";
+  return {
+    id: group.id,
+    kind,
+    confidence: matchConfidence.tier === "strong" ? "high" : "medium",
+    reason:
+      kind === "incident"
+        ? "Samme hendelse"
+        : kind === "topic"
+          ? "Samme nyhetstema"
+          : "Samme publiserte sak",
+    generatedAt,
+    matcherVersion: "v2",
+    matchConfidence,
+    primaryArticleId: group.primary.id,
+    memberArticleIds: group.articles.map((article) => article.id),
+    sourceIds: [...new Set(group.articles.map((article) => article.source))],
+    sourceLabels: [...new Set(group.articles.map((article) => article.sourceLabel))],
+    signals: uniqueSignals(accepted.flatMap((edge) => edge.signals)),
+    nearMisses: groupEdges
+      .filter((edge) => edge.reviewable)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 20)
+      .map((edge) => ({
+        articleIds: edge.articleIds,
+        reason: edge.conflicts.some((conflict) => conflict.kind === "specific_place")
+          ? "conflicting_specific_places"
+          : "low_text_overlap",
+        score: edge.score,
+      })),
+  };
+}
+
+function coverageBundleMetadata(bundle: ArticleCoverageBundleDecision): ArticleCoverageBundle {
+  return {
+    id: bundle.id,
+    kind: bundle.kind,
+    confidence: bundle.confidence,
+    reason: bundle.reason,
+    generatedAt: bundle.generatedAt,
+    matcherVersion: "v2",
+    matchConfidence: bundle.matchConfidence,
+  };
+}
+
+export function analyzeArticleCoverageV2(
+  articles: Article[],
+  generatedAt = new Date().toISOString(),
+  options: AnalyzeArticleCoverageV2Options = {},
+): ArticleCoverageAnalysis {
+  const evaluatedEdges = articles.flatMap((left, index) =>
+    articles.slice(index + 1).flatMap((right) => articleCoverageEdge(left, right) ?? []),
+  );
+  const acceptedEdges = evaluatedEdges.filter(
+    (edge) => edge.tier !== "weak" && edge.conflicts.length === 0 && !edge.reviewable,
+  );
+  const reviewCounts = new Map<string, number>();
+  const correctionConflicts = evaluatedEdges.filter((edge) => edge.correctionConflict);
+  const reviewableEdges = evaluatedEdges
+    .filter((edge) => edge.reviewable && !edge.correctionConflict)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")),
+    )
+    .filter((edge) => {
+      if (edge.articleIds.some((id) => (reviewCounts.get(id) ?? 0) >= 5)) return false;
+      for (const id of edge.articleIds) reviewCounts.set(id, (reviewCounts.get(id) ?? 0) + 1);
+      return true;
+    })
+    .slice(0, 500);
+  const edges = [...acceptedEdges, ...correctionConflicts, ...reviewableEdges];
+  const groups = clusterArticlesByCoverageEdges(articles, edges, {
+    rejectedPairs: options.rejectedPairs ?? [],
+  });
+  const bundles = groups.flatMap(
+    (group) => coverageDecisionForV2Group(group, generatedAt, edges) ?? [],
+  );
+  const bundleByArticleId = new Map(
+    bundles.flatMap((bundle) => bundle.memberArticleIds.map((id) => [id, bundle] as const)),
+  );
+  return {
+    articles: articles.map((article) => {
+      const bundle = bundleByArticleId.get(article.id);
+      return bundle ? { ...article, coverageBundle: coverageBundleMetadata(bundle) } : article;
+    }),
+    bundles,
+    nearMisses: [],
+    edges,
   };
 }
 
