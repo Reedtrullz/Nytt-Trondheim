@@ -171,6 +171,7 @@ type CoverageProjectionMode = "legacy" | "normalized-shadow" | "normalized-activ
 const coverageReadinessDeadlineMs = 1_500;
 const coverageReadinessStatementTimeoutMs = 1_000;
 const coverageReadinessRollbackGraceMs = 250;
+const coverageProjectionSnapshotDeadlineMs = 5_000;
 const coverageProjectionMaxArticleCount = 5_000;
 const coverageProjectionMaxBundleCount = 2_000;
 
@@ -287,6 +288,22 @@ function coverageReadinessQuery(
     values,
     query_timeout: Math.max(1, deadlineAt - Date.now()),
   };
+}
+
+function coverageSnapshotQueryable(
+  client: pg.PoolClient,
+  deadlineAt: number,
+): Pick<pg.PoolClient, "query"> {
+  let queue = Promise.resolve();
+  const query = (text: string, values: unknown[] = []) => {
+    const result = queue.then(() => client.query(coverageReadinessQuery(text, deadlineAt, values)));
+    queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+  return { query } as unknown as Pick<pg.PoolClient, "query">;
 }
 
 async function acquireCoverageReadinessClient(
@@ -7108,7 +7125,7 @@ export class PgStore implements Store {
   private async listActiveCoverageBundlesSnapshot(
     filters: CoverageBundleQueryInput,
   ): Promise<CoverageBundlePage> {
-    const deadlineAt = Date.now() + coverageReadinessDeadlineMs;
+    const deadlineAt = Date.now() + coverageProjectionSnapshotDeadlineMs;
     const client = await acquireCoverageReadinessClient(this.pool, deadlineAt);
     let destroyClient = false;
     try {
@@ -7177,7 +7194,11 @@ export class PgStore implements Store {
         return this.activeCoveragePageFromCache(filters, generation, cache);
       }
 
-      const page = await this.listNormalizedCoverageBundlesUncoalesced(filters, "active", client);
+      const page = await this.listNormalizedCoverageBundlesUncoalesced(
+        filters,
+        "active",
+        coverageSnapshotQueryable(client, deadlineAt),
+      );
       const finalHealthResult = await client.query<CoverageProjectionHealthRow>(
         coverageReadinessQuery(coverageProjectionHealthQueryText, deadlineAt),
       );

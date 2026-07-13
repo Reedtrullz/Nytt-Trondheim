@@ -18,6 +18,7 @@ describe("article store", () => {
     emptyPositiveEvidence?: boolean;
     correctionRejectedArticleId?: "regional-b" | "regional-c";
     corruptAfterBuild?: "integrity" | "parity";
+    stallMaterialization?: boolean;
   }): pg.Pool {
     let healthReadCount = 0;
     const primary: Article = {
@@ -52,7 +53,7 @@ describe("article store", () => {
       },
     ];
     const correctionRejectedArticleId = options?.correctionRejectedArticleId ?? "regional-c";
-    const query = vi.fn(async (input: string | { text: string }) => {
+    const query = vi.fn(async (input: string | { text: string; query_timeout?: number }) => {
       const sql = typeof input === "string" ? input : input.text;
       const normalized = sql.replace(/\s+/g, " ").trim();
       if (
@@ -117,6 +118,13 @@ describe("article store", () => {
         };
       }
       if (normalized.includes("FROM coverage_bundle_versions cbv")) {
+        if (options?.stallMaterialization) {
+          return new Promise<never>((_resolve, reject) => {
+            if (typeof input !== "string" && typeof input.query_timeout === "number") {
+              setTimeout(() => reject(new Error("Query read timeout")), input.query_timeout);
+            }
+          });
+        }
         expect(normalized).toContain(
           "cb.id = cbv.bundle_id AND cb.generation_id = cbv.generation_id",
         );
@@ -448,6 +456,51 @@ describe("article store", () => {
       ),
     ).toHaveLength(1);
     expect(sqlCalls.filter((sql) => sql.startsWith("SELECT a.payload"))).toHaveLength(1);
+  });
+
+  it("gives cold active projection materialization its own bounded deadline", async () => {
+    const pool = normalizedActiveProjectionPool({ corrected: true });
+    const store = normalizedProjectionStore(pool);
+
+    await store.listCoverageBundles({ projection: "active", limit: 30 });
+
+    const queryConfigs = (pool.query as ReturnType<typeof vi.fn>).mock.calls
+      .map(([query]) => (typeof query === "string" ? undefined : query))
+      .filter(
+        (query): query is { text: string; query_timeout: number } =>
+          typeof query?.query_timeout === "number",
+      );
+    const timeouts = queryConfigs.map(({ query_timeout }) => query_timeout);
+
+    expect(Math.max(...timeouts)).toBeGreaterThan(1_500);
+    expect(Math.max(...timeouts)).toBeLessThanOrEqual(5_000);
+    expect(
+      queryConfigs.some(({ text }) =>
+        text.replace(/\s+/g, " ").trim().startsWith("SET LOCAL statement_timeout = '1000ms'"),
+      ),
+    ).toBe(true);
+  });
+
+  it("applies the snapshot deadline to a stalled inner materialization query", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = normalizedProjectionStore(
+        normalizedActiveProjectionPool({ corrected: true, stallMaterialization: true }),
+      );
+      const outcome = Promise.race([
+        store.listCoverageBundles({ projection: "active", limit: 30 }).then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        ),
+        new Promise<string>((resolve) => setTimeout(() => resolve("watchdog"), 5_100)),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(5_100);
+
+      await expect(outcome).resolves.toBe("Query read timeout");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
