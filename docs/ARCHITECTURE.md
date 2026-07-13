@@ -31,6 +31,10 @@ Inbound public records enter the `source_items` ledger before editorial linking 
 
 Article coverage grouping is derived analysis, not upstream evidence. The worker writes the latest observable grouping decisions to `coverage_bundles` after article geocoding and article upsert. Those rows keep bundle kind, confidence, reason, member article ids, source labels, matched signals and near-miss diagnostics for `/command/dekning`; they must never create a `source_items` provider/kind or act as causal situation evidence.
 
+### Coverage matcher shadow lane
+
+The worker computes deterministic v1 and v2 coverage analyses from the same geocoded article snapshot. Until normalized generation persistence and parity gates ship, only v1 article metadata and legacy bundle rows are written. V2 contributes bounded comparison metrics only; it cannot create situations, source items, verification or public grouping.
+
 The public City Pulse story feed is exposed through `/api/city-pulse/stories`. It reuses the same article filters as `/api/articles`, but returns grouped story cards with member article ids, source labels, bundle metadata and public verification so public pagination and counts can become story-native without duplicating coverage logic in every frontend surface.
 
 Source contracts define what each upstream may write before adapter code is enabled. Bane NOR RSS is a phase-1 rail/mobility context source: it may write `source_items` provider `bane_nor`, kind `official_event`, and `source_health` source `bane_nor`, but it must not create `official_events`, `traffic_map_events` or `situations` without a separate promotion plan.

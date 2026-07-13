@@ -22,8 +22,12 @@ import {
   buildWorkerNotificationTriggerPage,
   buildWorkerSpatialNotificationItems,
   collectorRunFromMetric,
+  coverageMatcherVersion,
+  coverageShadowMetrics,
   normalizeDatexSituationEndpoint,
   prepareArticleCoverageAnalysis,
+  prepareArticleCoverageAnalyses,
+  persistPreparedCoverage,
   runWithConcurrency,
   sourceHealthFromDeepSeekAnalysis,
   sourceHealthFromPushDelivery,
@@ -145,6 +149,73 @@ function okXmlResponse(xml: string): Response {
 }
 
 describe("worker lifecycle helpers", () => {
+  it("rejects unsupported coverage matcher versions", () => {
+    expect(coverageMatcherVersion(undefined)).toBe("v1");
+    expect(coverageMatcherVersion("v2")).toBe("v2");
+    expect(() => coverageMatcherVersion("v3")).toThrow("Ugyldig COVERAGE_MATCHER_VERSION");
+  });
+
+  it("computes v2 shadow coverage without changing persisted v1 decisions", async () => {
+    const articles = [
+      newsArticle({
+        id: "coverage-a",
+        title: "Brann i anleggsbrakke",
+        excerpt: "Byggeplass i Nærøysund",
+        places: ["Nærøysund"],
+        url: "https://example.test/coverage-a",
+      }),
+      newsArticle({
+        id: "coverage-b",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Brakkebrann på byggeplass",
+        excerpt: "Nødetatene rykket ut",
+        places: ["Nærøysund"],
+        url: "https://example.test/coverage-b",
+      }),
+    ];
+    const analyses = await prepareArticleCoverageAnalyses(
+      articles,
+      async (items) => items,
+      "2026-07-12T21:00:00.000Z",
+      "v2",
+    );
+    expect(analyses.active.matcherVersion).toBe("v1");
+    expect(analyses.shadow?.matcherVersion).toBe("v2");
+    expect(analyses.shadow).toBeDefined();
+    const shadow = analyses.shadow!;
+    expect(analyses.active.analysis.bundles).not.toBe(shadow.analysis.bundles);
+    const equivalentMemberships = {
+      active: analyses.active,
+      shadow: {
+        matcherVersion: "v2" as const,
+        analysis: {
+          ...analyses.active.analysis,
+          bundles: analyses.active.analysis.bundles.map((bundle) => ({
+            ...bundle,
+            id: `coverage:v2:${bundle.id}`,
+          })),
+        },
+      },
+    };
+    expect(coverageShadowMetrics(equivalentMemberships)?.changedMembershipCount).toBe(0);
+
+    const repository = {
+      upsertArticles: vi.fn(async () => undefined),
+      upsertCoverageBundles: vi.fn(async () => undefined),
+    };
+    await persistPreparedCoverage(repository, analyses, "2026-07-12T21:00:00.000Z");
+    expect(repository.upsertArticles).toHaveBeenCalledWith(analyses.active.analysis.articles);
+    expect(repository.upsertCoverageBundles).toHaveBeenCalledWith(
+      analyses.active.analysis.bundles,
+      "2026-07-12T21:00:00.000Z",
+    );
+    expect(repository.upsertCoverageBundles).not.toHaveBeenCalledWith(
+      shadow.analysis.bundles,
+      expect.any(String),
+    );
+  });
+
   it("bounds concurrent persistence work without dropping queued items", async () => {
     let active = 0;
     let peak = 0;

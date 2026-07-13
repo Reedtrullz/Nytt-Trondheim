@@ -5,6 +5,7 @@ import type {
   AiProcessingRun,
   Article,
   ArticleCoverageAnalysis,
+  ArticleCoverageBundleDecision,
   OfficialEvent,
   PublicTransportServiceAlert,
   NotificationTriggerPage,
@@ -19,6 +20,7 @@ import type {
 } from "@nytt/shared";
 import {
   analyzeArticleCoverage,
+  analyzeArticleCoverageV2,
   buildDatabasePoolOptions,
   buildMorningBrief,
   buildNotificationTriggerPage,
@@ -112,6 +114,113 @@ interface WorkerCollectorTelemetry {
   skipped?: boolean;
 }
 
+export interface PreparedCoverageAnalysis {
+  matcherVersion: "v1" | "v2";
+  analysis: ArticleCoverageAnalysis;
+}
+
+export interface PreparedCoverageAnalyses {
+  active: PreparedCoverageAnalysis;
+  shadow?: PreparedCoverageAnalysis;
+}
+
+export interface CoverageLegacyWriter {
+  upsertArticles(articles: Article[]): Promise<void>;
+  upsertCoverageBundles(bundles: ArticleCoverageBundleDecision[], seenAt: string): Promise<void>;
+}
+
+export function coverageMatcherVersion(value = process.env.COVERAGE_MATCHER_VERSION): "v1" | "v2" {
+  const normalized = value?.trim() || "v1";
+  if (normalized === "v1" || normalized === "v2") return normalized;
+  throw new Error(`Ugyldig COVERAGE_MATCHER_VERSION: ${normalized}`);
+}
+
+export async function prepareArticleCoverageAnalyses(
+  articles: Article[],
+  geocoder: (articles: Article[]) => Promise<Article[]>,
+  generatedAt = new Date().toISOString(),
+  matcherVersion: "v1" | "v2" = "v1",
+): Promise<PreparedCoverageAnalyses> {
+  const geocoded = await geocoder(articles.map(stripArticleCoverageBundle));
+  const clean = geocoded.map(stripArticleCoverageBundle);
+  return {
+    active: { matcherVersion: "v1", analysis: analyzeArticleCoverage(clean, generatedAt) },
+    ...(matcherVersion === "v2"
+      ? {
+          shadow: {
+            matcherVersion: "v2" as const,
+            analysis: analyzeArticleCoverageV2(clean, generatedAt),
+          },
+        }
+      : {}),
+  };
+}
+
+export async function persistPreparedCoverage(
+  repository: CoverageLegacyWriter,
+  analyses: PreparedCoverageAnalyses,
+  seenAt = new Date().toISOString(),
+): Promise<void> {
+  await repository.upsertArticles(analyses.active.analysis.articles);
+  await repository.upsertCoverageBundles(analyses.active.analysis.bundles, seenAt);
+}
+
+export function coverageShadowMetrics(analyses: PreparedCoverageAnalyses) {
+  const shadow = analyses.shadow?.analysis;
+  if (!shadow) return undefined;
+  const activeMembershipByArticle = new Map(
+    analyses.active.analysis.bundles.flatMap((bundle) =>
+      bundle.memberArticleIds.map(
+        (id) => [id, [...bundle.memberArticleIds].sort().join("\u0000")] as const,
+      ),
+    ),
+  );
+  const shadowMembershipByArticle = new Map(
+    shadow.bundles.flatMap((bundle) =>
+      bundle.memberArticleIds.map(
+        (id) => [id, [...bundle.memberArticleIds].sort().join("\u0000")] as const,
+      ),
+    ),
+  );
+  const articleIds = new Set([
+    ...activeMembershipByArticle.keys(),
+    ...shadowMembershipByArticle.keys(),
+  ]);
+  const edges = shadow.edges ?? [];
+  return {
+    activeBundleCount: analyses.active.analysis.bundles.length,
+    shadowBundleCount: shadow.bundles.length,
+    changedMembershipCount: [...articleIds].filter(
+      (id) => activeMembershipByArticle.get(id) !== shadowMembershipByArticle.get(id),
+    ).length,
+    strongEdgeCount: edges.filter((edge) => edge.tier === "strong").length,
+    moderateEdgeCount: edges.filter((edge) => edge.tier === "moderate").length,
+    weakEdgeCount: edges.filter((edge) => edge.tier === "weak").length,
+  };
+}
+
+async function prepareCollectedArticleCoverageAnalyses({
+  articlesForGeocoding,
+  articlesWithoutGeocoding = [],
+  generatedAt = new Date().toISOString(),
+  geocoder = geocodeArticles,
+  matcherVersion = "v1",
+}: {
+  articlesForGeocoding: Article[];
+  articlesWithoutGeocoding?: Article[];
+  generatedAt?: string;
+  geocoder?: typeof geocodeArticles;
+  matcherVersion?: "v1" | "v2";
+}): Promise<PreparedCoverageAnalyses> {
+  const articlesForAnalysis = articlesForGeocoding.map(stripArticleCoverageBundle);
+  const fixedArticlesForAnalysis = articlesWithoutGeocoding.map(stripArticleCoverageBundle);
+  const clean = [
+    ...(await geocoder(articlesForAnalysis)).map(stripArticleCoverageBundle),
+    ...fixedArticlesForAnalysis,
+  ];
+  return prepareArticleCoverageAnalyses(clean, async (items) => items, generatedAt, matcherVersion);
+}
+
 export async function prepareArticleCoverageAnalysis({
   articlesForGeocoding,
   articlesWithoutGeocoding = [],
@@ -123,15 +232,14 @@ export async function prepareArticleCoverageAnalysis({
   generatedAt?: string;
   geocoder?: typeof geocodeArticles;
 }): Promise<ArticleCoverageAnalysis> {
-  const articlesForAnalysis = articlesForGeocoding.map(stripArticleCoverageBundle);
-  const fixedArticlesForAnalysis = articlesWithoutGeocoding.map(stripArticleCoverageBundle);
-  return analyzeArticleCoverage(
-    [
-      ...(await geocoder(articlesForAnalysis)).map(stripArticleCoverageBundle),
-      ...fixedArticlesForAnalysis,
-    ],
-    generatedAt,
-  );
+  return (
+    await prepareCollectedArticleCoverageAnalyses({
+      articlesForGeocoding,
+      articlesWithoutGeocoding,
+      generatedAt,
+      geocoder,
+    })
+  ).active.analysis;
 }
 
 function stripArticleCoverageBundle(article: Article): Article {
@@ -1276,13 +1384,17 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     });
   }
   const coverageGeneratedAt = new Date().toISOString();
-  const coverageAnalysis = await prepareArticleCoverageAnalysis({
+  const coverageAnalyses = await prepareCollectedArticleCoverageAnalyses({
     articlesForGeocoding: articleSets.flat(),
     articlesWithoutGeocoding,
     generatedAt: coverageGeneratedAt,
+    matcherVersion: coverageMatcherVersion(),
   });
-  await repository.upsertArticles(coverageAnalysis.articles);
-  await repository.upsertCoverageBundles(coverageAnalysis.bundles, coverageGeneratedAt);
+  await persistPreparedCoverage(repository, coverageAnalyses, coverageGeneratedAt);
+  const shadowMetrics = coverageShadowMetrics(coverageAnalyses);
+  if (shadowMetrics) {
+    console.log(`[worker] coverage shadow ${JSON.stringify(shadowMetrics)}`);
+  }
   for (const status of await probeOfficialSources()) {
     if (status.source === "politiloggen") continue;
     await repository.setHealth({ ...status, lastCheckedAt: new Date().toISOString(), nextPollAt });
@@ -1503,7 +1615,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const politiloggenSituations = politiloggenSituationsFromThreads(
     politiloggenThreads,
     trackedSituations,
-    coverageAnalysis.articles,
+    coverageAnalyses.active.analysis.articles,
   );
   const activeDatexEventIds = new Set(currentDatexEvents.map((event) => event.id));
   const activePromotableDatexEventIds = promotableDatexEventIds(currentDatexEvents);
@@ -1559,7 +1671,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     sourceHealthFromPushDelivery(pushMetrics, analysis.run.completedAt, nextPollAt),
   );
   console.log(
-    `[worker] stored ${coverageAnalysis.articles.length} articles and ${coverageAnalysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); derived analysis identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief; push ${pushMetrics.configured ? "configured" : "disabled"} ${pushMetrics.sent} sent / ${pushMetrics.failed} failed / ${pushMetrics.skipped} skipped`,
+    `[worker] stored ${coverageAnalyses.active.analysis.articles.length} articles and ${coverageAnalyses.active.analysis.bundles.length} coverage bundles; persisted ${situationsToPersist.length} situations (${officialTrafficSituations.length} from DATEX, ${politiloggenSituations.length} from Politiloggen, ${aiSituationUpdates.length} from AI update hints); derived analysis identified ${analysis.result.clusters.length} validated candidates and ${analysis.result.bundleHints.length} bundle hints; stored ${morningBrief.mode} morning brief; push ${pushMetrics.configured ? "configured" : "disabled"} ${pushMetrics.sent} sent / ${pushMetrics.failed} failed / ${pushMetrics.skipped} skipped`,
   );
   const workerMetrics = buildWorkerCycleMetrics({
     cycleStartedAt,
