@@ -46,10 +46,12 @@
 ### Task 1: Add the expand-only normalized schema
 
 **Files:**
+
 - Modify: `apps/server/src/db/schema.sql:31-57,1361`
 - Test: `.github/workflows/ci.yml`
 
 **Interfaces:**
+
 - Consumes: existing `articles`, `users`, and legacy `coverage_bundles` tables.
 - Produces: `coverage_bundle_generations`, current-state bundle columns, generation-scoped `coverage_bundle_versions`, `coverage_bundle_members`, `coverage_bundle_edges`, and `coverage_bundle_corrections` for Tasks 2-6.
 
@@ -58,21 +60,21 @@
 In the PostGIS migration smoke section of `.github/workflows/ci.yml`, append this SQL after the second `npm run db:migrate`:
 
 ```yaml
-      - name: Verify normalized coverage schema
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nytt_test
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          SELECT to_regclass('public.coverage_bundle_generations') IS NOT NULL AS generations_exists;
-          SELECT to_regclass('public.coverage_bundle_versions') IS NOT NULL AS versions_exists;
-          SELECT to_regclass('public.coverage_bundle_members') IS NOT NULL AS members_exists;
-          SELECT to_regclass('public.coverage_bundle_edges') IS NOT NULL AS edges_exists;
-          SELECT to_regclass('public.coverage_bundle_corrections') IS NOT NULL AS corrections_exists;
-          SELECT count(*) = 7 AS expected_columns
-          FROM information_schema.columns
-          WHERE table_schema='public' AND table_name='coverage_bundles'
-            AND column_name IN ('generation_id','state','matcher_version','match_tier','match_score','match_rationale','first_seen_at');
-          SQL
+- name: Verify normalized coverage schema
+  env:
+    DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nytt_test
+  run: |
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+    SELECT to_regclass('public.coverage_bundle_generations') IS NOT NULL AS generations_exists;
+    SELECT to_regclass('public.coverage_bundle_versions') IS NOT NULL AS versions_exists;
+    SELECT to_regclass('public.coverage_bundle_members') IS NOT NULL AS members_exists;
+    SELECT to_regclass('public.coverage_bundle_edges') IS NOT NULL AS edges_exists;
+    SELECT to_regclass('public.coverage_bundle_corrections') IS NOT NULL AS corrections_exists;
+    SELECT count(*) = 7 AS expected_columns
+    FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='coverage_bundles'
+      AND column_name IN ('generation_id','state','matcher_version','match_tier','match_score','match_rationale','first_seen_at');
+    SQL
 ```
 
 - [ ] **Step 2: Run the migration smoke locally and verify the missing-table failure**
@@ -272,12 +274,14 @@ git commit -m "feat: add coverage lifecycle schema"
 ### Task 2: Persist v2 shadow generations transactionally
 
 **Files:**
+
 - Modify: `packages/shared/src/types.ts:1319-1327`
 - Modify: `apps/worker/src/repository.ts:1-180`
 - Create: `apps/worker/test/coverage-generation-repository.test.ts`
 - Modify: `apps/worker/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `ArticleCoverageAnalysis.edges`, v2 bundle `matchConfidence`, and schema from Task 1.
 - Produces: `persistCoverageGeneration(input): Promise<string>` and `failCoverageGeneration(input): Promise<void>`; Plan 3 reads these generations.
 
@@ -324,33 +328,37 @@ function coverageAnalysisFixture(): ArticleCoverageAnalysis {
   ];
   return {
     articles,
-    bundles: [{
-      id: "coverage:v2:stable",
-      kind: "incident",
-      confidence: "high",
-      reason: "Samme hendelse",
-      generatedAt: "2026-07-12T21:00:00.000Z",
-      matcherVersion: "v2",
-      matchConfidence: { tier: "strong", score: 0.9, rationale: "Sterkt direkte treff." },
-      primaryArticleId: "article-a",
-      memberArticleIds: ["article-a", "article-b"],
-      sourceIds: ["nrk", "adressa"],
-      sourceLabels: ["NRK Trøndelag", "Adresseavisen"],
-      signals: [],
-      nearMisses: [],
-    }],
+    bundles: [
+      {
+        id: "coverage:v2:stable",
+        kind: "incident",
+        confidence: "high",
+        reason: "Samme hendelse",
+        generatedAt: "2026-07-12T21:00:00.000Z",
+        matcherVersion: "v2",
+        matchConfidence: { tier: "strong", score: 0.9, rationale: "Sterkt direkte treff." },
+        primaryArticleId: "article-a",
+        memberArticleIds: ["article-a", "article-b"],
+        sourceIds: ["nrk", "adressa"],
+        sourceLabels: ["NRK Trøndelag", "Adresseavisen"],
+        signals: [],
+        nearMisses: [],
+      },
+    ],
     nearMisses: [],
-    edges: [{
-      articleIds: ["article-a", "article-b"],
-      tier: "strong",
-      score: 0.9,
-      kind: "incident",
-      signals: [],
-      conflicts: [],
-      evidenceFingerprint: "v2:test-edge",
-      reviewable: false,
-      correctionConflict: false,
-    }],
+    edges: [
+      {
+        articleIds: ["article-a", "article-b"],
+        tier: "strong",
+        score: 0.9,
+        kind: "incident",
+        signals: [],
+        conflicts: [],
+        evidenceFingerprint: "v2:test-edge",
+        reviewable: false,
+        correctionConflict: false,
+      },
+    ],
   };
 }
 
@@ -393,8 +401,12 @@ it("persists one completed shadow generation in a transaction", async () => {
   });
   expect(id).toBe("11111111-1111-4111-8111-111111111111");
   expect(client.queries[0]?.sql).toBe("BEGIN");
-  expect(client.queries.some((query) => query.sql.includes("INSERT INTO coverage_bundle_members"))).toBe(true);
-  expect(client.queries.some((query) => query.sql.includes("INSERT INTO coverage_bundle_edges"))).toBe(true);
+  expect(
+    client.queries.some((query) => query.sql.includes("INSERT INTO coverage_bundle_members")),
+  ).toBe(true);
+  expect(
+    client.queries.some((query) => query.sql.includes("INSERT INTO coverage_bundle_edges")),
+  ).toBe(true);
   expect(client.queries.at(-1)?.sql).toBe("COMMIT");
   expect(client.release).toHaveBeenCalledOnce();
 });
@@ -402,13 +414,15 @@ it("persists one completed shadow generation in a transaction", async () => {
 it("rolls back and records failure without changing the prior projection", async () => {
   const client = transactionClient({ failOn: "INSERT INTO coverage_bundle_members" });
   const repository = new WorkerRepository(poolReturning(client));
-  await expect(repository.persistCoverageGeneration({
-    matcherVersion: "v2",
-    mode: "shadow",
-    startedAt: "2026-07-12T20:59:00.000Z",
-    completedAt: "2026-07-12T21:00:00.000Z",
-    analysis: coverageAnalysisFixture(),
-  })).rejects.toThrow("member insert failed");
+  await expect(
+    repository.persistCoverageGeneration({
+      matcherVersion: "v2",
+      mode: "shadow",
+      startedAt: "2026-07-12T20:59:00.000Z",
+      completedAt: "2026-07-12T21:00:00.000Z",
+      analysis: coverageAnalysisFixture(),
+    }),
+  ).rejects.toThrow("member insert failed");
   expect(client.queries.some((query) => query.sql === "ROLLBACK")).toBe(true);
   expect(client.queries.some((query) => query.sql.includes("state='superseded'"))).toBe(false);
   expect(client.release).toHaveBeenCalledOnce();
@@ -446,7 +460,10 @@ export interface PersistCoverageGenerationInput {
   analysis: ArticleCoverageAnalysis;
 }
 
-export async function withTransaction<T>(pool: pg.Pool, work: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+export async function withTransaction<T>(
+  pool: pg.Pool,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -478,10 +495,9 @@ Implement `WorkerRepository.persistCoverageGeneration()` as one transaction:
 Export and unit-test this exact helper contract:
 
 ```ts
-export function reuseCoverageBundleIds<T extends { id: string; kind: ArticleCoverageBundleKind; memberArticleIds: string[] }>(
-  candidates: T[],
-  previous: T[],
-): T[]
+export function reuseCoverageBundleIds<
+  T extends { id: string; kind: ArticleCoverageBundleKind; memberArticleIds: string[] },
+>(candidates: T[], previous: T[]): T[];
 ```
 
 The helper returns cloned candidates and never mutates the analysis object supplied by the shared matcher.
@@ -562,6 +578,7 @@ git commit -m "feat: persist coverage shadow generations"
 ### Task 3: Add normalized list, parity and integrity contracts
 
 **Files:**
+
 - Modify: `packages/shared/src/types.ts`
 - Modify: `packages/shared/src/schemas.ts`
 - Modify: `packages/shared/src/article-bundles.ts`
@@ -569,6 +586,7 @@ git commit -m "feat: persist coverage shadow generations"
 - Modify: `apps/server/test/coverage-bundles-store.test.ts`
 
 **Interfaces:**
+
 - Consumes: normalized tables from Tasks 1-2.
 - Produces: `CoverageGenerationSummary`, expanded `CoverageBundlePage`, `CoverageProjectionParity`, and `listCoverageBundles()` active/shadow filters for Plan 3.
 
@@ -676,7 +694,7 @@ Expose a pure helper:
 export function coverageProjectionParity(
   legacy: Array<{ id: string; primaryArticleId: string; memberArticleIds: string[] }>,
   normalized: Array<{ id: string; primaryArticleId: string; memberArticleIds: string[] }>,
-): CoverageProjectionParity
+): CoverageProjectionParity;
 ```
 
 and unit-test canonical ordering.
@@ -703,12 +721,14 @@ git commit -m "feat: read normalized coverage projections"
 ### Task 4: Add split/undo contracts and correction-aware recomputation
 
 **Files:**
+
 - Modify: `packages/shared/src/types.ts`
 - Modify: `packages/shared/src/schemas.ts`
 - Modify: `packages/shared/src/article-bundles.ts`
 - Create: `packages/shared/test/article-coverage-corrections.test.ts`
 
 **Interfaces:**
+
 - Consumes: `analyzeArticleCoverageV2(..., { rejectedPairs })` from Plan 1.
 - Produces: validated `CoverageBundleSplitRequest`, `CoverageBundleCorrection`, `CoverageBundleCorrectionResult`, and `recomputeCoverageStories()` for Tasks 5-6 and Plan 3.
 
@@ -779,17 +799,32 @@ describe("coverage corrections", () => {
     const analysis = analyzeArticleCoverageV2(articles, "2026-07-12T21:00:00.000Z", {
       rejectedPairs: [{ articleIds: ["speed-a", "threat"], correctionId: "correction-1" }],
     });
-    const threatGroup = analysis.bundles.find((bundle) => bundle.memberArticleIds.includes("threat"));
+    const threatGroup = analysis.bundles.find((bundle) =>
+      bundle.memberArticleIds.includes("threat"),
+    );
     expect(threatGroup?.memberArticleIds).not.toContain("speed-a");
-    expect(analysis.edges?.find((edge) => edge.articleIds.includes("speed-a") && edge.articleIds.includes("threat"))).toMatchObject({
+    expect(
+      analysis.edges?.find(
+        (edge) => edge.articleIds.includes("speed-a") && edge.articleIds.includes("threat"),
+      ),
+    ).toMatchObject({
       reviewable: true,
       correctionConflict: true,
     });
   });
 
   it("regroups after the rejection is removed", () => {
-    const analysis = analyzeArticleCoverageV2(correctionFixtureArticles(), "2026-07-12T21:00:00.000Z", { rejectedPairs: [] });
-    expect(analysis.bundles.some((bundle) => bundle.memberArticleIds.includes("speed-a") && bundle.memberArticleIds.includes("threat"))).toBe(true);
+    const analysis = analyzeArticleCoverageV2(
+      correctionFixtureArticles(),
+      "2026-07-12T21:00:00.000Z",
+      { rejectedPairs: [] },
+    );
+    expect(
+      analysis.bundles.some(
+        (bundle) =>
+          bundle.memberArticleIds.includes("speed-a") && bundle.memberArticleIds.includes("threat"),
+      ),
+    ).toBe(true);
   });
 });
 ```
@@ -856,19 +891,24 @@ export interface CoverageCorrectionExport {
 Add strict schemas:
 
 ```ts
-export const coverageBundleSplitRequestSchema = z.object({
-  expectedGeneratedAt: z.string().datetime(),
-  anchorArticleId: z.string().trim().min(1).max(300),
-  rejectedArticleIds: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
-  reason: z.string().trim().min(1).max(500).optional(),
-}).strict().transform((value) => ({
-  ...value,
-  rejectedArticleIds: [...new Set(value.rejectedArticleIds)].sort(),
-}));
+export const coverageBundleSplitRequestSchema = z
+  .object({
+    expectedGeneratedAt: z.string().datetime(),
+    anchorArticleId: z.string().trim().min(1).max(300),
+    rejectedArticleIds: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
+    reason: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict()
+  .transform((value) => ({
+    ...value,
+    rejectedArticleIds: [...new Set(value.rejectedArticleIds)].sort(),
+  }));
 
-export const coverageCorrectionExportQuerySchema = z.object({
-  sinceDays: z.coerce.number().int().min(1).max(365).default(30),
-}).strict();
+export const coverageCorrectionExportQuerySchema = z
+  .object({
+    sinceDays: z.coerce.number().int().min(1).max(365).default(30),
+  })
+  .strict();
 ```
 
 - [ ] **Step 5: Preserve corrected edges as review candidates**
@@ -906,10 +946,12 @@ git commit -m "feat: add coverage correction contracts"
 ### Task 5: Implement transactional split and undo in the server store
 
 **Files:**
+
 - Modify: `apps/server/src/store.ts:280-350,5530-5665`
 - Create: `apps/server/test/coverage-corrections-store.test.ts`
 
 **Interfaces:**
+
 - Consumes: split/correction contracts and normalized active/shadow projection.
 - Produces: `Store.splitCoverageBundle(bundleId, input, actorId)` and `Store.undoCoverageCorrection(correctionId, actorId)` for Task 6 and Plan 3.
 
@@ -985,25 +1027,48 @@ function coverageCorrectionPool(scenario: CorrectionScenario): pg.Pool {
   ];
   const client = {
     query: vi.fn(async (sql: string) => {
-      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [], rowCount: 0 };
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK")
+        return { rows: [], rowCount: 0 };
       if (sql.includes("FROM coverage_bundles") && sql.includes("FOR UPDATE")) {
         return {
-          rows: [{
-            id: "coverage:v2:speed",
-            generated_at: scenario === "stale" ? "2026-07-12T21:05:00.000Z" : "2026-07-12T21:00:00.000Z",
-            matcher_version: "v2",
-            primary_article_id: "speed-a",
-          }],
+          rows: [
+            {
+              id: "coverage:v2:speed",
+              generated_at:
+                scenario === "stale" ? "2026-07-12T21:05:00.000Z" : "2026-07-12T21:00:00.000Z",
+              matcher_version: "v2",
+              primary_article_id: "speed-a",
+            },
+          ],
           rowCount: 1,
         };
       }
-      if (sql.includes("coverage_bundle_members")) return { rows: articles.map((payload) => ({ payload })), rowCount: articles.length };
+      if (sql.includes("coverage_bundle_members"))
+        return { rows: articles.map((payload) => ({ payload })), rowCount: articles.length };
       if (sql.includes("coverage_bundle_edges")) {
-        return { rows: [{ left_article_id: "speed-a", right_article_id: "threat", evidence_fingerprint: "v2:test-edge" }], rowCount: 1 };
+        return {
+          rows: [
+            {
+              left_article_id: "speed-a",
+              right_article_id: "threat",
+              evidence_fingerprint: "v2:test-edge",
+            },
+          ],
+          rowCount: 1,
+        };
       }
-      if (sql.includes("INSERT INTO coverage_bundle_corrections")) return { rows: scenario === "duplicate" ? [] : [correction], rowCount: scenario === "duplicate" ? 0 : 1 };
-      if (sql.includes("UPDATE coverage_bundle_corrections")) return { rows: [{ ...correction, status: "reverted", reverted_at: "2026-07-12T21:02:00.000Z" }], rowCount: 1 };
-      if (sql.includes("FROM coverage_bundle_corrections")) return { rows: [correction], rowCount: 1 };
+      if (sql.includes("INSERT INTO coverage_bundle_corrections"))
+        return {
+          rows: scenario === "duplicate" ? [] : [correction],
+          rowCount: scenario === "duplicate" ? 0 : 1,
+        };
+      if (sql.includes("UPDATE coverage_bundle_corrections"))
+        return {
+          rows: [{ ...correction, status: "reverted", reverted_at: "2026-07-12T21:02:00.000Z" }],
+          rowCount: 1,
+        };
+      if (sql.includes("FROM coverage_bundle_corrections"))
+        return { rows: [correction], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     }),
     release: vi.fn(),
@@ -1018,14 +1083,22 @@ const undoPoolFixture = () => coverageCorrectionPool("undo");
 
 it("preserves anchor/rejected semantics and returns replacement stories", async () => {
   const store = new PgStore(correctionPoolFixture());
-  const result = await store.splitCoverageBundle("coverage:v2:speed", {
-    expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
-    anchorArticleId: "speed-a",
-    rejectedArticleIds: ["threat"],
-    reason: "Ulik hendelse",
-  }, "owner-user-id");
+  const result = await store.splitCoverageBundle(
+    "coverage:v2:speed",
+    {
+      expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+      anchorArticleId: "speed-a",
+      rejectedArticleIds: ["threat"],
+      reason: "Ulik hendelse",
+    },
+    "owner-user-id",
+  );
   expect(result.corrections).toEqual([
-    expect.objectContaining({ anchorArticleId: "speed-a", rejectedArticleId: "threat", status: "active" }),
+    expect.objectContaining({
+      anchorArticleId: "speed-a",
+      rejectedArticleId: "threat",
+      status: "active",
+    }),
   ]);
   expect(result.removedStoryIds).toEqual(["coverage:v2:speed"]);
   expect(result.replacementStories.length).toBeGreaterThanOrEqual(2);
@@ -1033,15 +1106,24 @@ it("preserves anchor/rejected semantics and returns replacement stories", async 
 
 it("returns the existing active correction for a duplicate split", async () => {
   const store = new PgStore(duplicateCorrectionPoolFixture());
-  const result = await store.splitCoverageBundle("coverage:v2:speed", splitInput(), "owner-user-id");
+  const result = await store.splitCoverageBundle(
+    "coverage:v2:speed",
+    splitInput(),
+    "owner-user-id",
+  );
   expect(result.corrections).toHaveLength(1);
   expect(result.corrections[0]?.id).toBe("existing-correction-id");
 });
 
 it("throws CoverageBundleConflictError with current stories for stale generation", async () => {
   const store = new PgStore(staleGenerationPoolFixture());
-  await expect(store.splitCoverageBundle("coverage:v2:speed", { ...splitInput(), expectedGeneratedAt: "2026-07-12T20:00:00.000Z" }, "owner-user-id"))
-    .rejects.toMatchObject({ statusCode: 409, replacementStories: expect.any(Array) });
+  await expect(
+    store.splitCoverageBundle(
+      "coverage:v2:speed",
+      { ...splitInput(), expectedGeneratedAt: "2026-07-12T20:00:00.000Z" },
+      "owner-user-id",
+    ),
+  ).rejects.toMatchObject({ statusCode: 409, replacementStories: expect.any(Array) });
 });
 
 it("reverts all exact-pair effects for undo", async () => {
@@ -1138,6 +1220,7 @@ git commit -m "feat: split and undo coverage groups"
 ### Task 6: Expose owner/CSRF-protected split and undo APIs
 
 **Files:**
+
 - Modify: `apps/server/src/config.ts`
 - Modify: `packages/shared/src/types.ts`
 - Modify: `apps/server/src/app.ts:1-115,2390-2420`
@@ -1146,6 +1229,7 @@ git commit -m "feat: split and undo coverage groups"
 - Modify: `.env.example`
 
 **Interfaces:**
+
 - Consumes: store methods from Task 5 and Zod schemas from Task 4.
 - Produces: the two approved mutation endpoints plus the owner-only sanitized correction export for Plan 3.
 
@@ -1194,23 +1278,31 @@ describe("coverage bundle corrections API", () => {
   });
 
   it("requires owner and CSRF for split", async () => {
-    await request(app).post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split").send(splitInput()).expect(401);
+    await request(app)
+      .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+      .send(splitInput())
+      .expect(401);
     const { agent } = await ownerAgentWithCoverageCorrections(true);
-    await agent.post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split").send(splitInput()).expect(403);
+    await agent
+      .post("/api/coverage-bundles/coverage%3Av2%3Aspeed/corrections/split")
+      .send(splitInput())
+      .expect(403);
   });
 
   it("splits a current group and returns replacements", async () => {
     vi.spyOn(MemoryStore.prototype, "splitCoverageBundle").mockResolvedValue({
-      corrections: [{
-        id: "correction-1",
-        originalBundleId: "coverage:v2:speed",
-        anchorArticleId: "speed-a",
-        rejectedArticleId: "threat",
-        matcherVersion: "v2",
-        evidenceFingerprint: "v2:test-edge",
-        status: "active",
-        createdAt: "2026-07-12T21:01:00.000Z",
-      }],
+      corrections: [
+        {
+          id: "correction-1",
+          originalBundleId: "coverage:v2:speed",
+          anchorArticleId: "speed-a",
+          rejectedArticleId: "threat",
+          matcherVersion: "v2",
+          evidenceFingerprint: "v2:test-edge",
+          status: "active",
+          createdAt: "2026-07-12T21:01:00.000Z",
+        },
+      ],
       removedStoryIds: ["coverage:v2:speed"],
       replacementStories: [],
     });
@@ -1220,7 +1312,11 @@ describe("coverage bundle corrections API", () => {
       .set("X-CSRF-Token", csrf)
       .send(splitInput())
       .expect(200);
-    expect(response.body).toMatchObject({ corrections: expect.any(Array), removedStoryIds: ["coverage:v2:speed"], replacementStories: expect.any(Array) });
+    expect(response.body).toMatchObject({
+      corrections: expect.any(Array),
+      removedStoryIds: ["coverage:v2:speed"],
+      replacementStories: expect.any(Array),
+    });
   });
 
   it("returns current replacements for stale input", async () => {
@@ -1233,27 +1329,35 @@ describe("coverage bundle corrections API", () => {
       .set("X-CSRF-Token", csrf)
       .send({ ...splitInput(), expectedGeneratedAt: "2026-07-12T20:00:00.000Z" })
       .expect(409);
-    expect(response.body).toMatchObject({ error: "Gruppen ble endret mens du vurderte den.", replacementStories: expect.any(Array) });
+    expect(response.body).toMatchObject({
+      error: "Gruppen ble endret mens du vurderte den.",
+      replacementStories: expect.any(Array),
+    });
   });
 
   it("undoes an active correction", async () => {
     vi.spyOn(MemoryStore.prototype, "undoCoverageCorrection").mockResolvedValue({
-      corrections: [{
-        id: "correction-1",
-        originalBundleId: "coverage:v2:speed",
-        anchorArticleId: "speed-a",
-        rejectedArticleId: "threat",
-        matcherVersion: "v2",
-        evidenceFingerprint: "v2:test-edge",
-        status: "reverted",
-        createdAt: "2026-07-12T21:01:00.000Z",
-        revertedAt: "2026-07-12T21:02:00.000Z",
-      }],
+      corrections: [
+        {
+          id: "correction-1",
+          originalBundleId: "coverage:v2:speed",
+          anchorArticleId: "speed-a",
+          rejectedArticleId: "threat",
+          matcherVersion: "v2",
+          evidenceFingerprint: "v2:test-edge",
+          status: "reverted",
+          createdAt: "2026-07-12T21:01:00.000Z",
+          revertedAt: "2026-07-12T21:02:00.000Z",
+        },
+      ],
       removedStoryIds: ["coverage:v2:speed"],
       replacementStories: [],
     });
     const { agent, csrf } = await ownerAgentWithCoverageCorrections(true);
-    const response = await agent.post("/api/coverage-bundle-corrections/correction-1/undo").set("X-CSRF-Token", csrf).expect(200);
+    const response = await agent
+      .post("/api/coverage-bundle-corrections/correction-1/undo")
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
     expect(response.body.corrections[0]).toMatchObject({ id: "correction-1", status: "reverted" });
   });
 
@@ -1264,7 +1368,9 @@ describe("coverage bundle corrections API", () => {
       rows: [],
     });
     const { agent } = await ownerAgentWithCoverageCorrections(true);
-    const response = await agent.get("/api/operations/coverage-corrections/export?sinceDays=30").expect(200);
+    const response = await agent
+      .get("/api/operations/coverage-corrections/export?sinceDays=30")
+      .expect(200);
     expect(response.headers["content-disposition"]).toContain("coverage-corrections-v1.json");
     expect(response.body).toMatchObject({ schemaVersion: 1, rows: expect.any(Array) });
     expect(JSON.stringify(response.body)).not.toContain("Ulik hendelse");
@@ -1323,23 +1429,31 @@ app.post(
         return void res.status(503).json({ error: "Korrigering av grupper er ikke aktivert." });
       }
       const input = coverageBundleSplitRequestSchema.parse(req.body);
-      const result = await store.splitCoverageBundle(String(req.params.bundleId), input, req.user!.id);
-      console.info(JSON.stringify({
-        event: "coverage_correction",
-        action: "split",
-        bundleId: String(req.params.bundleId),
-        correctionCount: result.corrections.length,
-        replacementStoryCount: result.replacementStories.length,
-      }));
+      const result = await store.splitCoverageBundle(
+        String(req.params.bundleId),
+        input,
+        req.user!.id,
+      );
+      console.info(
+        JSON.stringify({
+          event: "coverage_correction",
+          action: "split",
+          bundleId: String(req.params.bundleId),
+          correctionCount: result.corrections.length,
+          replacementStoryCount: result.replacementStories.length,
+        }),
+      );
       res.json(result);
     } catch (error) {
       if (error instanceof CoverageBundleConflictError) {
-        console.info(JSON.stringify({
-          event: "coverage_correction",
-          action: "split_conflict",
-          bundleId: String(req.params.bundleId),
-          replacementStoryCount: error.replacementStories.length,
-        }));
+        console.info(
+          JSON.stringify({
+            event: "coverage_correction",
+            action: "split_conflict",
+            bundleId: String(req.params.bundleId),
+            replacementStoryCount: error.replacementStories.length,
+          }),
+        );
         return void res.status(409).json({
           error: "Gruppen ble endret mens du vurderte den.",
           replacementStories: error.replacementStories,
@@ -1358,13 +1472,18 @@ app.post(
       if (config.coverageCorrectionsEnabled !== true) {
         return void res.status(503).json({ error: "Korrigering av grupper er ikke aktivert." });
       }
-      const result = await store.undoCoverageCorrection(String(req.params.correctionId), req.user!.id);
-      console.info(JSON.stringify({
-        event: "coverage_correction",
-        action: "undo",
-        correctionId: String(req.params.correctionId),
-        replacementStoryCount: result.replacementStories.length,
-      }));
+      const result = await store.undoCoverageCorrection(
+        String(req.params.correctionId),
+        req.user!.id,
+      );
+      console.info(
+        JSON.stringify({
+          event: "coverage_correction",
+          action: "undo",
+          correctionId: String(req.params.correctionId),
+          replacementStoryCount: result.replacementStories.length,
+        }),
+      );
       res.json(result);
     } catch (error) {
       next(error);
@@ -1409,6 +1528,7 @@ git commit -m "feat: expose owner coverage corrections"
 ### Task 7: Add retention, integrity gates and lifecycle documentation
 
 **Files:**
+
 - Modify: `apps/worker/src/repository.ts`
 - Modify: `apps/worker/test/coverage-generation-repository.test.ts`
 - Modify: `.github/workflows/ci.yml`
@@ -1418,6 +1538,7 @@ git commit -m "feat: expose owner coverage corrections"
 - Modify: `docs/SOURCES.md`
 
 **Interfaces:**
+
 - Consumes: normalized schema and generation persistence.
 - Produces: bounded historical retention, migration/integrity CI gates and the execution contract for Plan 3.
 
@@ -1430,7 +1551,9 @@ it("prunes completed superseded generations older than 30 days but preserves cor
   const client = transactionClient();
   const repository = new WorkerRepository(poolReturning(client));
   await repository.pruneCoverageGenerations("2026-07-12T21:00:00.000Z");
-  const prune = client.queries.find((query) => query.sql.includes("DELETE FROM coverage_bundle_generations"));
+  const prune = client.queries.find((query) =>
+    query.sql.includes("DELETE FROM coverage_bundle_generations"),
+  );
   expect(prune?.sql).toContain("status = 'completed'");
   expect(prune?.sql).toContain("completed_at < $1::timestamptz - interval '30 days'");
   expect(prune?.sql).not.toContain("coverage_bundle_corrections");

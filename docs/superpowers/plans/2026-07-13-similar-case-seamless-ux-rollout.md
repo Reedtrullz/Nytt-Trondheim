@@ -55,11 +55,13 @@
 ### Task 1: Add typed correction clients and pure story replacement
 
 **Files:**
+
 - Modify: `apps/frontend/src/api.ts:1-110,250-280`
 - Create: `apps/frontend/src/coverageStoryUpdates.ts`
 - Create: `apps/frontend/src/coverageStoryUpdates.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CoverageBundleSplitRequest`, `CoverageBundleCorrectionResult`, `CityPulseStory`, and existing CSRF-aware `request()`.
 - Produces: `api.splitCoverageBundle()`, `api.undoCoverageCorrection()`, `CoverageCorrectionConflictError`, and `replaceCoverageStories()` for Tasks 3-4.
 
@@ -98,7 +100,11 @@ function story(id: string, latestAt: string): CityPulseStory {
 describe("replaceCoverageStories", () => {
   it("replaces only removed stories and preserves deterministic order", () => {
     const result = replaceCoverageStories(
-      [story("newest", "2026-07-12T21:00:00.000Z"), story("group", "2026-07-12T20:00:00.000Z"), story("old", "2026-07-12T19:00:00.000Z")],
+      [
+        story("newest", "2026-07-12T21:00:00.000Z"),
+        story("group", "2026-07-12T20:00:00.000Z"),
+        story("old", "2026-07-12T19:00:00.000Z"),
+      ],
       ["group"],
       [story("split-a", "2026-07-12T20:00:00.000Z"), story("split-b", "2026-07-12T19:59:00.000Z")],
     );
@@ -106,8 +112,16 @@ describe("replaceCoverageStories", () => {
   });
 
   it("is idempotent when a replacement is replayed", () => {
-    const first = replaceCoverageStories([story("group", "2026-07-12T20:00:00.000Z")], ["group"], [story("split", "2026-07-12T20:00:00.000Z")]);
-    const second = replaceCoverageStories(first, ["group"], [story("split", "2026-07-12T20:00:00.000Z")]);
+    const first = replaceCoverageStories(
+      [story("group", "2026-07-12T20:00:00.000Z")],
+      ["group"],
+      [story("split", "2026-07-12T20:00:00.000Z")],
+    );
+    const second = replaceCoverageStories(
+      first,
+      ["group"],
+      [story("split", "2026-07-12T20:00:00.000Z")],
+    );
     expect(second).toEqual(first);
   });
 });
@@ -235,6 +249,7 @@ git commit -m "feat: add coverage correction client"
 ### Task 2: Build the compact grouped-source component
 
 **Files:**
+
 - Create: `apps/frontend/src/components/news/CoverageSourceCluster.tsx`
 - Create: `apps/frontend/src/components/news/CoverageSourceCluster.test.tsx`
 - Create: `apps/frontend/src/test-fixtures/homeStoryCards.ts`
@@ -245,6 +260,7 @@ git commit -m "feat: add coverage correction client"
 - Modify: `apps/frontend/src/styles.css:1802-1845,1969-1990,14000-14030`
 
 **Interfaces:**
+
 - Consumes: `HomeStoryCard.group`, `matchConfidence`, safe external URLs and existing time formatting.
 - Produces: `CoverageSourceCluster({ card, canCorrect, onCorrect })`, explicit `articleCount`, `sourceCount`, and `matchRationale` card fields for Task 3.
 
@@ -314,7 +330,9 @@ import { clusteredHomeStoryCard } from "../../test-fixtures/homeStoryCards.js";
 describe("CoverageSourceCluster", () => {
   it("shows explicit article/source counts and only two supporting rows by default", () => {
     const card = clusteredHomeStoryCard({ articleCount: 7, sourceCount: 5 });
-    const html = renderToStaticMarkup(<CoverageSourceCluster card={card} canCorrect onCorrect={vi.fn()} />);
+    const html = renderToStaticMarkup(
+      <CoverageSourceCluster card={card} canCorrect onCorrect={vi.fn()} />,
+    );
     expect(html).toContain("7 saker fra 5 kilder");
     expect(html).toContain("Vis alle 7 saker fra 5 kilder");
     expect((html.match(/class=\"coverage-source-row/g) ?? []).length).toBe(2);
@@ -323,7 +341,13 @@ describe("CoverageSourceCluster", () => {
   });
 
   it("does not expose the correction action without owner capability", () => {
-    const html = renderToStaticMarkup(<CoverageSourceCluster card={clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 })} canCorrect={false} onCorrect={vi.fn()} />);
+    const html = renderToStaticMarkup(
+      <CoverageSourceCluster
+        card={clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 })}
+        canCorrect={false}
+        onCorrect={vi.fn()}
+      />,
+    );
     expect(html).not.toContain("Feil gruppering?");
   });
 });
@@ -362,7 +386,12 @@ export function coverageMatchExplanation(card: HomeStoryCard): string {
   const signals = card.group.acceptedEdges?.flatMap((edge) => edge.signals) ?? [];
   if (card.cardKind === "tema") return "Felles tema og kamp";
   if (signals.some((signal) => signal.kind === "situation_id")) return "Samme offisielle hendelse";
-  if (signals.some((signal) => signal.kind === "shared_place" || signal.kind === "generic_place_incident")) return "Felles sted og hendelsestype";
+  if (
+    signals.some(
+      (signal) => signal.kind === "shared_place" || signal.kind === "generic_place_incident",
+    )
+  )
+    return "Felles sted og hendelsestype";
   if (signals.some((signal) => signal.kind === "near_duplicate")) return "Samme publiserte sak";
   return card.matchRationale ?? "Sammenfallende dekning";
 }
@@ -411,27 +440,45 @@ export function CoverageSourceCluster({
           const href = safeExternalUrl(article.url);
           const content = (
             <>
-              <b>{article.sourceLabel} · {sourceTime(article.publishedAt)}</b>
+              <b>
+                {article.sourceLabel} · {sourceTime(article.publishedAt)}
+              </b>
               <small>{article.title}</small>
             </>
           );
           return href ? (
-            <a className="coverage-source-row" href={href} key={article.id} target="_blank" rel="noreferrer noopener">
+            <a
+              className="coverage-source-row"
+              href={href}
+              key={article.id}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
               {content}
             </a>
           ) : (
-            <span className="coverage-source-row" key={article.id}>{content}</span>
+            <span className="coverage-source-row" key={article.id}>
+              {content}
+            </span>
           );
         })}
       </div>
       <div className="coverage-source-actions">
         {supporting.length > 2 ? (
-          <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
             {expanded ? "Vis færre saker" : `Vis alle ${countLabel}`}
           </button>
         ) : null}
         {canCorrect ? (
-          <button type="button" className="coverage-correction-open" onClick={() => onCorrect(card)}>
+          <button
+            type="button"
+            className="coverage-correction-open"
+            onClick={() => onCorrect(card)}
+          >
             Feil gruppering?
           </button>
         ) : null}
@@ -498,6 +545,7 @@ git commit -m "feat: compact grouped news cards"
 ### Task 3: Add immediate split, stale refresh and undo on Siste nytt
 
 **Files:**
+
 - Create: `apps/frontend/src/components/news/CoverageCorrectionDialog.tsx`
 - Create: `apps/frontend/src/components/news/CoverageCorrectionDialog.test.tsx`
 - Modify: `apps/frontend/src/pages/HomePage.tsx:1627-2110,2200-2320`
@@ -505,6 +553,7 @@ git commit -m "feat: compact grouped news cards"
 - Modify: `apps/frontend/src/styles.css`
 
 **Interfaces:**
+
 - Consumes: API and replacement helper from Task 1; compact component callback from Task 2.
 - Produces: immediate owner split/undo with `CorrectionUndoState`, preserved scroll/focus and ARIA announcements.
 
@@ -521,7 +570,13 @@ import { clusteredHomeStoryCard } from "../../test-fixtures/homeStoryCards.js";
 describe("CoverageCorrectionDialog", () => {
   it("renders anchor, selectable supporting stories and bounded reason", () => {
     const html = renderToStaticMarkup(
-      <CoverageCorrectionDialog card={clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 })} pending={false} error={undefined} onCancel={vi.fn()} onConfirm={vi.fn()} />,
+      <CoverageCorrectionDialog
+        card={clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 })}
+        pending={false}
+        error={undefined}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
     );
     expect(html).toContain('role="dialog"');
     expect(html).toContain("Behold som hovedsak");
@@ -532,7 +587,13 @@ describe("CoverageCorrectionDialog", () => {
 
   it("disables confirmation while pending", () => {
     const html = renderToStaticMarkup(
-      <CoverageCorrectionDialog card={clusteredHomeStoryCard({ articleCount: 2, sourceCount: 2 })} pending error={undefined} onCancel={vi.fn()} onConfirm={vi.fn()} />,
+      <CoverageCorrectionDialog
+        card={clusteredHomeStoryCard({ articleCount: 2, sourceCount: 2 })}
+        pending
+        error={undefined}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
     );
     expect(html).toContain("Splitter…");
     expect(html).toContain("disabled");
@@ -588,9 +649,11 @@ export function CoverageCorrectionDialog({
       return;
     }
     if (event.key !== "Tab") return;
-    const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), textarea:not([disabled])',
-    ) ?? [])];
+    const controls = [
+      ...(dialogRef.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), input:not([disabled]), textarea:not([disabled])",
+      ) ?? []),
+    ];
     if (controls.length === 0) return;
     const first = controls[0]!;
     const last = controls.at(-1)!;
@@ -630,7 +693,9 @@ export function CoverageCorrectionDialog({
           <p id={descriptionId}>Velg sakene som ikke hører sammen med hovedsaken.</p>
           <div className="coverage-correction-anchor">
             <span>Behold som hovedsak</span>
-            <strong>{card.primary.sourceLabel}: {card.primary.title}</strong>
+            <strong>
+              {card.primary.sourceLabel}: {card.primary.title}
+            </strong>
           </div>
           <fieldset disabled={pending}>
             <legend>Skill ut</legend>
@@ -640,12 +705,14 @@ export function CoverageCorrectionDialog({
                   ref={index === 0 ? firstCheckboxRef : undefined}
                   type="checkbox"
                   checked={selectedIds.has(article.id)}
-                  onChange={(event) => setSelectedIds((current) => {
-                    const next = new Set(current);
-                    if (event.target.checked) next.add(article.id);
-                    else next.delete(article.id);
-                    return next;
-                  })}
+                  onChange={(event) =>
+                    setSelectedIds((current) => {
+                      const next = new Set(current);
+                      if (event.target.checked) next.add(article.id);
+                      else next.delete(article.id);
+                      return next;
+                    })
+                  }
                 />
                 <span>{article.sourceLabel}</span>
                 <strong>{article.title}</strong>
@@ -654,11 +721,18 @@ export function CoverageCorrectionDialog({
           </fieldset>
           <label>
             Årsak (valgfritt)
-            <textarea maxLength={500} value={reason} disabled={pending} onChange={(event) => setReason(event.target.value)} />
+            <textarea
+              maxLength={500}
+              value={reason}
+              disabled={pending}
+              onChange={(event) => setReason(event.target.value)}
+            />
           </label>
           {error ? <p role="alert">{error}</p> : null}
           <div className="coverage-correction-actions">
-            <button type="button" disabled={pending} onClick={onCancel}>Avbryt</button>
+            <button type="button" disabled={pending} onClick={onCancel}>
+              Avbryt
+            </button>
             <button type="submit" disabled={pending || selectedIds.size === 0}>
               {pending ? "Splitter…" : "Splitt nå"}
             </button>
@@ -715,8 +789,15 @@ Render the undo toast as `role="status"` with a real `Angre` button.
 Because the project uses static rendering, export pure reducers:
 
 ```ts
-export function coverageSplitState(current: CityPulseStory[], result: CoverageBundleCorrectionResult): CityPulseStory[];
-export function coverageConflictState(current: CityPulseStory[], removedStoryId: string, replacements: CityPulseStory[]): CityPulseStory[];
+export function coverageSplitState(
+  current: CityPulseStory[],
+  result: CoverageBundleCorrectionResult,
+): CityPulseStory[];
+export function coverageConflictState(
+  current: CityPulseStory[],
+  removedStoryId: string,
+  replacements: CityPulseStory[],
+): CityPulseStory[];
 ```
 
 Test immediate replacement, stale replacement, undo replacement, explicit announcement strings, owner-only action and no change to save state.
@@ -742,12 +823,14 @@ git commit -m "feat: split grouped stories immediately"
 ### Task 4: Turn `/command/dekning` into an actionable quality workspace
 
 **Files:**
+
 - Modify: `packages/shared/src/article-bundles.ts`
 - Modify: `apps/frontend/src/pages/CoverageBundlesPage.tsx`
 - Modify: `apps/frontend/src/pages/CoverageBundlesPage.test.tsx`
 - Modify: `apps/frontend/src/styles.css:5015-5335,13017-13590`
 
 **Interfaces:**
+
 - Consumes: normalized `CoverageBundlePage`, parity, edges, corrections and split/undo APIs.
 - Produces: active-first filters, bounded candidate disclosure, integrity/parity warnings, split/undo controls and owner review explanations.
 
@@ -801,7 +884,7 @@ export function groupedCoverageReviewCandidates(bundle: CoverageBundleListItem) 
   for (const candidate of bundle.reviewCandidates) {
     const reason = candidate.correctionConflict
       ? "correction_conflict"
-      : candidate.conflicts[0]?.kind ?? candidate.tier;
+      : (candidate.conflicts[0]?.kind ?? candidate.tier);
     grouped.set(reason, [...(grouped.get(reason) ?? []), candidate]);
   }
   return [...grouped.entries()].map(([reason, candidates]) => ({
@@ -843,6 +926,7 @@ git commit -m "feat: make coverage audit actionable"
 ### Task 5: Serve the normalized active projection with fail-safe fallback
 
 **Files:**
+
 - Modify: `apps/server/src/config.ts`
 - Modify: `apps/server/test/config.test.ts`
 - Modify: `apps/server/src/store.ts:1294-1335,5518-5528`
@@ -853,6 +937,7 @@ git commit -m "feat: make coverage audit actionable"
 - Modify: `.env.example`
 
 **Interfaces:**
+
 - Consumes: normalized generation/member/edge tables and correction projection from Plan 2.
 - Produces: validated `coverageProjectionMode`, normalized `listCityPulseStories()`, projection metadata and legacy fallback for rollout.
 
@@ -879,22 +964,68 @@ function normalizedActiveProjectionPool(): pg.Pool {
   };
   const articles = [
     primary,
-    { ...primary, id: "regional-b", source: "adressa", sourceLabel: "Adresseavisen", url: "https://example.test/regional-b", publishedAt: "2026-07-12T20:59:00.000Z" },
-    { ...primary, id: "regional-c", source: "nidaros", sourceLabel: "Nidaros", url: "https://example.test/regional-c", publishedAt: "2026-07-12T20:58:00.000Z" },
+    {
+      ...primary,
+      id: "regional-b",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      url: "https://example.test/regional-b",
+      publishedAt: "2026-07-12T20:59:00.000Z",
+    },
+    {
+      ...primary,
+      id: "regional-c",
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      url: "https://example.test/regional-c",
+      publishedAt: "2026-07-12T20:58:00.000Z",
+    },
   ];
   return {
     query: vi.fn(async (sql: string) => {
       const normalized = sql.replace(/\s+/g, " ").trim();
-      if (normalized.includes("FROM coverage_bundle_generations") && normalized.includes("is_current")) {
-        return { rows: [{ id: "11111111-1111-4111-8111-111111111111", matcher_version: "v2", completed_at: "2026-07-12T21:01:00.000Z" }], rowCount: 1 };
+      if (
+        normalized.includes("FROM coverage_bundle_generations") &&
+        normalized.includes("is_current")
+      ) {
+        return {
+          rows: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              matcher_version: "v2",
+              completed_at: "2026-07-12T21:01:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
       }
       if (normalized.includes("FROM coverage_bundle_members")) {
-        return { rows: articles.map((payload, index) => ({ bundle_id: "coverage:v2:regional", role: index === 0 ? "primary" : "supporting", payload })), rowCount: 3 };
+        return {
+          rows: articles.map((payload, index) => ({
+            bundle_id: "coverage:v2:regional",
+            role: index === 0 ? "primary" : "supporting",
+            payload,
+          })),
+          rowCount: 3,
+        };
       }
       if (normalized.includes("FROM coverage_bundle_edges")) return { rows: [], rowCount: 0 };
       if (normalized.includes("FROM coverage_bundle_corrections")) return { rows: [], rowCount: 0 };
       if (normalized.includes("FROM coverage_bundles")) {
-        return { rows: [{ id: "coverage:v2:regional", kind: "incident", primary_article_id: "regional-a", generated_at: "2026-07-12T21:00:00.000Z", match_tier: "strong", match_score: 0.9, match_rationale: "Sterkt direkte treff." }], rowCount: 1 };
+        return {
+          rows: [
+            {
+              id: "coverage:v2:regional",
+              kind: "incident",
+              primary_article_id: "regional-a",
+              generated_at: "2026-07-12T21:00:00.000Z",
+              match_tier: "strong",
+              match_score: 0.9,
+              match_rationale: "Sterkt direkte treff.",
+            },
+          ],
+          rowCount: 1,
+        };
       }
       return { rows: [], rowCount: 0 };
     }),
@@ -913,14 +1044,21 @@ function noActiveGenerationPool(): pg.Pool {
 it("builds city pulse stories from the latest completed active normalized generation", async () => {
   const store = new PgStore(normalizedActiveProjectionPool());
   const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
-  expect(page.projection).toMatchObject({ mode: "normalized", matcherVersion: "v2", parityClean: true });
+  expect(page.projection).toMatchObject({
+    mode: "normalized",
+    matcherVersion: "v2",
+    parityClean: true,
+  });
   expect(page.items.find((story) => story.id === "coverage:v2:regional")?.articles).toHaveLength(3);
 });
 
 it("falls back to legacy stories when no completed active normalized generation exists", async () => {
   const store = new PgStore(noActiveGenerationPool());
   const page = await store.listCityPulseStories({ scope: "trondelag", limit: 40 }, "Reedtrullz");
-  expect(page.projection).toMatchObject({ mode: "legacy", fallbackReason: "no_completed_active_generation" });
+  expect(page.projection).toMatchObject({
+    mode: "legacy",
+    fallbackReason: "no_completed_active_generation",
+  });
   expect(page.items).toEqual(expect.any(Array));
 });
 
@@ -954,10 +1092,16 @@ coverageCorrectionsEnabled?: boolean;
 `coverageCorrectionsEnabled` already exists from the lifecycle plan. Parse the projection mode in `loadConfig()` and use `config.coverageProjectionMode ?? "legacy"` at runtime:
 
 ```ts
-function coverageProjectionModeFromEnvironment(): "legacy" | "normalized-shadow" | "normalized-active" {
+function coverageProjectionModeFromEnvironment():
+  | "legacy"
+  | "normalized-shadow"
+  | "normalized-active" {
   const value = process.env.COVERAGE_PROJECTION_MODE?.trim() ?? "legacy";
-  if (value === "legacy" || value === "normalized-shadow" || value === "normalized-active") return value;
-  throw new Error("COVERAGE_PROJECTION_MODE must be legacy, normalized-shadow or normalized-active");
+  if (value === "legacy" || value === "normalized-shadow" || value === "normalized-active")
+    return value;
+  throw new Error(
+    "COVERAGE_PROJECTION_MODE must be legacy, normalized-shadow or normalized-active",
+  );
 }
 ```
 
@@ -1022,10 +1166,12 @@ git commit -m "feat: serve normalized coverage projection"
 ### Task 6: Add authenticated desktop, phone and keyboard end-to-end coverage
 
 **Files:**
+
 - Modify: `e2e/app.spec.ts`
 - Modify: `playwright.config.ts` only if the existing project lacks a 390px project.
 
 **Interfaces:**
+
 - Consumes: correction UI, owner dev-auth bypass and normalized fixture data.
 - Produces: automated acceptance proof for compact cards, split, stale conflict, undo, keyboard access and regional parity.
 
@@ -1049,14 +1195,18 @@ test("owner splits and restores a grouped Siste nytt card", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Urelatert støttesak" })).toBeVisible();
   await page.getByRole("button", { name: "Angre" }).click();
   await expect(page.getByRole("status")).toContainText("Grupperingen er gjenopprettet");
-  await expect(page.locator("article", { hasText: "Korrigerbar hovedsak" }).getByText("3 saker fra 3 kilder")).toBeVisible();
+  await expect(
+    page.locator("article", { hasText: "Korrigerbar hovedsak" }).getByText("3 saker fra 3 kilder"),
+  ).toBeVisible();
 });
 ```
 
 - [ ] **Step 3: Write 390px compact-card and keyboard E2E**
 
 ```ts
-test("grouped cards remain compact and correctable by keyboard at phone width", async ({ page }) => {
+test("grouped cards remain compact and correctable by keyboard at phone width", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   const card = page.locator("article", { hasText: "Stor gruppesak" });
@@ -1103,6 +1253,7 @@ git commit -m "test: cover grouped story corrections"
 ### Task 7: Gate shadow review, promotion and rollback
 
 **Files:**
+
 - Modify: `apps/worker/src/index.ts`
 - Modify: `apps/worker/test/index.test.ts`
 - Modify: `docker-compose.yml`
@@ -1115,6 +1266,7 @@ git commit -m "test: cover grouped story corrections"
 - Modify: `docs/SOURCES.md`
 
 **Interfaces:**
+
 - Consumes: `COVERAGE_PROJECTION_MODE`, generation/parity/integrity queries, matcher quality command and E2E proof.
 - Produces: fail-closed promotion/rollback gates and one-release legacy retention contract.
 
@@ -1218,10 +1370,10 @@ Add API tests and Ansible assertions for both modes. Rollback changes projection
 Ensure CI runs:
 
 ```yaml
-      - run: npm run check:coverage-matcher
-      - run: npm test
-      - run: npm run build
-      - run: npm run test:e2e
+- run: npm run check:coverage-matcher
+- run: npm test
+- run: npm run build
+- run: npm run test:e2e
 ```
 
 Keep twice-applied migration and Docker API/worker builds. Add a PostgreSQL smoke that promotes a fixture shadow generation to active, reads identical story/audit membership, applies a split, applies undo, and confirms the previous projection remains readable.

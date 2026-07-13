@@ -47,12 +47,14 @@
 ### Task 1: Add the labelled corpus and evaluator contracts
 
 **Files:**
+
 - Create: `packages/shared/test/fixtures/article-coverage-golden.ts`
 - Create: `packages/shared/src/article-coverage-evaluator.ts`
 - Create: `packages/shared/test/article-coverage-evaluator.test.ts`
 - Modify: `packages/shared/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: existing `Article`, `ArticleCoverageBundleDecision`, and `ArticlePublicVerification` types.
 - Produces: `ArticleCoverageGoldenCase`, `ArticleCoverageEvaluation`, and `evaluateArticleCoverageCorpus(cases, analyze)` for Tasks 3, 4 and 6.
 
@@ -263,7 +265,8 @@ export function evaluateArticleCoverageCorpus(
     }
 
     expectedGroupedArticles += new Set(fixture.expectedGroups.flat()).size;
-    observedGroupedArticles += new Set(first.bundles.flatMap((bundle) => bundle.memberArticleIds)).size;
+    observedGroupedArticles += new Set(first.bundles.flatMap((bundle) => bundle.memberArticleIds))
+      .size;
 
     const observedVerified = verifiedGroupKeys(first);
     const expectedVerified = new Set(fixture.expectedVerifiedGroups.map(groupKey));
@@ -477,12 +480,14 @@ git commit -m "test: add coverage matching golden corpus"
 ### Task 2: Extract positive incident evidence and conflict signals
 
 **Files:**
+
 - Create: `packages/shared/src/article-coverage-evidence.ts`
 - Create: `packages/shared/test/article-coverage-evidence.test.ts`
 - Modify: `packages/shared/src/article-bundles.ts:100-705`
 - Modify: `packages/shared/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: existing token, place, topic and incident helpers moved from `article-bundles.ts` without behavior changes for v1.
 - Produces: `articleCoverageEvidence(left, right, matcherVersion): ArticleCoveragePairEvidence`, `ArticleCoverageConflictSignal`, `ArticleIncidentSubtype`, and positive-evidence predicates for Task 3.
 
@@ -658,12 +663,18 @@ function normalizedText(article: Article): string {
 
 export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype {
   const text = normalizedText(article);
-  if (/\b(byggeplass|anleggsbrakke|brakke(?:brann|n)?|anlegg)\b/u.test(text)) return "construction_fire";
-  if (/\b(matlag\w*|stekt\w*|komfyr\w*|middag|fjordland|plast(?:en)?)\b/u.test(text)) return "cooking_smoke";
-  if (/\b(bilbrann|kjøretøy\w*\s+br(?:ann|enner)|bil\w*\s+br(?:ann|enner))\b/u.test(text)) return "vehicle_fire";
-  if (/\b(skogbrann|gressbrann|lyngbrann|vegetasjon\w*\s+br(?:ann|enner))\b/u.test(text)) return "vegetation_fire";
-  if (/\b(bygningsbrann|husbrann|leilighet\w*\s+br(?:ann|enner)|garasjebrann)\b/u.test(text)) return "building_fire";
-  if (/\b(kollisjon|trafikkulykke|påkjør\w*|kjørte\s+(?:av|ut))\b/u.test(text)) return "traffic_collision";
+  if (/\b(byggeplass|anleggsbrakke|brakke(?:brann|n)?|anlegg)\b/u.test(text))
+    return "construction_fire";
+  if (/\b(matlag\w*|stekt\w*|komfyr\w*|middag|fjordland|plast(?:en)?)\b/u.test(text))
+    return "cooking_smoke";
+  if (/\b(bilbrann|kjøretøy\w*\s+br(?:ann|enner)|bil\w*\s+br(?:ann|enner))\b/u.test(text))
+    return "vehicle_fire";
+  if (/\b(skogbrann|gressbrann|lyngbrann|vegetasjon\w*\s+br(?:ann|enner))\b/u.test(text))
+    return "vegetation_fire";
+  if (/\b(bygningsbrann|husbrann|leilighet\w*\s+br(?:ann|enner)|garasjebrann)\b/u.test(text))
+    return "building_fire";
+  if (/\b(kollisjon|trafikkulykke|påkjør\w*|kjørte\s+(?:av|ut))\b/u.test(text))
+    return "traffic_collision";
   if (/\b(trussel\w*|vold\w*|pågrepet)\b/u.test(text)) return "threat_or_violence";
   if (/\b(ordensforstyrrelse|bortvis\w*|slagsm[åa]l\w*)\b/u.test(text)) return "public_order";
   return "unknown";
@@ -699,8 +710,12 @@ const namedEntityStopTokens = new Set([
 ]);
 
 function hasSharedSpecificPlace(left: Article, right: Article): boolean {
-  const rightPlaces = new Set(articlePlaceTokens(right).filter((token) => !genericPlaceTokens.has(token)));
-  return articlePlaceTokens(left).some((token) => !genericPlaceTokens.has(token) && rightPlaces.has(token));
+  const rightPlaces = new Set(
+    articlePlaceTokens(right).filter((token) => !genericPlaceTokens.has(token)),
+  );
+  return articlePlaceTokens(left).some(
+    (token) => !genericPlaceTokens.has(token) && rightPlaces.has(token),
+  );
 }
 
 function hasSharedNamedEntity(left: Article, right: Article): boolean {
@@ -710,9 +725,12 @@ function hasSharedNamedEntity(left: Article, right: Article): boolean {
 
 function articleNamedEntityTokens(article: Article): string[] {
   const text = `${article.title} ${article.excerpt}`;
-  const candidates = text.match(/\b[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}(?:\s+[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}){0,2}\b/gu) ?? [];
+  const candidates =
+    text.match(/\b[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}(?:\s+[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}){0,2}\b/gu) ??
+    [];
   return [...new Set(candidates.map(normalizeToken))].filter(
-    (token) => token.length >= 4 && !genericPlaceTokens.has(token) && !namedEntityStopTokens.has(token),
+    (token) =>
+      token.length >= 4 && !genericPlaceTokens.has(token) && !namedEntityStopTokens.has(token),
   );
 }
 
@@ -725,7 +743,10 @@ function bodyTokenSimilarity(left: Article, right: Article) {
 }
 
 function distinctiveTokenSimilarity(left: Article, right: Article) {
-  return tokenSimilarity(articleDistinctiveIncidentTokens(left), articleDistinctiveIncidentTokens(right));
+  return tokenSimilarity(
+    articleDistinctiveIncidentTokens(left),
+    articleDistinctiveIncidentTokens(right),
+  );
 }
 
 function titleTokenSimilarity(left: Article, right: Article) {
@@ -767,18 +788,29 @@ export function articleCoverageEvidence(
     conflicts.push({ kind: "specific_place", articleIds, detail: "Ulike spesifikke steder" });
   }
   if (incompatibleSubtypes.has(subtypePair(leftSubtype, rightSubtype))) {
-    conflicts.push({ kind: "incident_subtype", articleIds, detail: `${leftSubtype}/${rightSubtype}` });
+    conflicts.push({
+      kind: "incident_subtype",
+      articleIds,
+      detail: `${leftSubtype}/${rightSubtype}`,
+    });
   }
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
-    conflicts.push({ kind: "situation_id", articleIds, detail: `${left.situationId}/${right.situationId}` });
+    conflicts.push({
+      kind: "situation_id",
+      articleIds,
+      detail: `${left.situationId}/${right.situationId}`,
+    });
   }
 
   const positiveIncidentEvidence: PositiveIncidentEvidence[] = [];
-  if (left.situationId && left.situationId === right.situationId) positiveIncidentEvidence.push("same_situation_id");
+  if (left.situationId && left.situationId === right.situationId)
+    positiveIncidentEvidence.push("same_situation_id");
   if (hasSharedSpecificPlace(left, right)) positiveIncidentEvidence.push("shared_specific_place");
-  if (hasSpecificPlaceMention(left, right)) positiveIncidentEvidence.push("mentioned_specific_place");
+  if (hasSpecificPlaceMention(left, right))
+    positiveIncidentEvidence.push("mentioned_specific_place");
   if (hasSharedNamedEntity(left, right)) positiveIncidentEvidence.push("shared_named_entity");
-  if (subtypesCompatible(leftSubtype, rightSubtype)) positiveIncidentEvidence.push("compatible_incident_subtype");
+  if (subtypesCompatible(leftSubtype, rightSubtype))
+    positiveIncidentEvidence.push("compatible_incident_subtype");
 
   const body = bodyTokenSimilarity(left, right);
   const distinctive = distinctiveTokenSimilarity(left, right);
@@ -831,11 +863,13 @@ git commit -m "refactor: extract coverage pair evidence"
 ### Task 3: Score strong, moderate and weak v2 edges
 
 **Files:**
+
 - Modify: `packages/shared/src/article-coverage-evidence.ts`
 - Modify: `packages/shared/test/article-coverage-evidence.test.ts`
 - Modify: `packages/shared/src/article-bundles.ts:1-95`
 
 **Interfaces:**
+
 - Consumes: `ArticleCoveragePairEvidence` from Task 2.
 - Produces: `ArticleCoverageEdge`, `ArticleCoverageMatchTier`, `articleCoverageEdge(left, right)`, and `ArticleCoverageAnalysis.edges` for Tasks 4-6 and Plan 2.
 
@@ -848,8 +882,18 @@ import { articleCoverageEdge } from "../src/index.js";
 
 it("scores a shared official situation as strong", () => {
   const edge = articleCoverageEdge(
-    article("official", { source: "politiloggen", sourceLabel: "Politiloggen", situationId: "incident-1", places: ["Lade"] }),
-    article("news", { source: "adressa", sourceLabel: "Adresseavisen", situationId: "incident-1", places: ["Lade"] }),
+    article("official", {
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      situationId: "incident-1",
+      places: ["Lade"],
+    }),
+    article("news", {
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      situationId: "incident-1",
+      places: ["Lade"],
+    }),
   );
   expect(edge).toMatchObject({ tier: "strong", kind: "incident" });
   expect(edge?.score).toBeGreaterThanOrEqual(0.85);
@@ -857,8 +901,16 @@ it("scores a shared official situation as strong", () => {
 
 it("scores compatible shared-place coverage as moderate", () => {
   const edge = articleCoverageEdge(
-    article("fire-a", { title: "Brann i anleggsbrakke", excerpt: "Brakke brant i Nærøysund", places: ["Nærøysund"] }),
-    article("fire-b", { title: "Nødetatene til brakkebrann", excerpt: "Byggeplassen i Nærøysund", places: ["Nærøysund"] }),
+    article("fire-a", {
+      title: "Brann i anleggsbrakke",
+      excerpt: "Brakke brant i Nærøysund",
+      places: ["Nærøysund"],
+    }),
+    article("fire-b", {
+      title: "Nødetatene til brakkebrann",
+      excerpt: "Byggeplassen i Nærøysund",
+      places: ["Nærøysund"],
+    }),
   );
   expect(edge).toMatchObject({ tier: "moderate", kind: "incident" });
   expect(edge?.score).toBeGreaterThanOrEqual(0.6);
@@ -866,8 +918,16 @@ it("scores compatible shared-place coverage as moderate", () => {
 
 it("keeps text-only generic incident overlap weak", () => {
   const edge = articleCoverageEdge(
-    article("generic-a", { title: "Politiet har kontroll", excerpt: "Ungdom var involvert", places: ["Trøndelag"] }),
-    article("generic-b", { title: "Politiet fikk kontroll", excerpt: "Ungdom tok kontakt", places: ["Trøndelag"] }),
+    article("generic-a", {
+      title: "Politiet har kontroll",
+      excerpt: "Ungdom var involvert",
+      places: ["Trøndelag"],
+    }),
+    article("generic-b", {
+      title: "Politiet fikk kontroll",
+      excerpt: "Ungdom tok kontakt",
+      places: ["Trøndelag"],
+    }),
   );
   expect(edge?.tier).toBe("weak");
 });
@@ -907,25 +967,56 @@ function boundedScore(value: number): number {
   return Math.max(0, Math.min(1, Math.round(value * 1000) / 1000));
 }
 
-export function articleCoverageEdge(left: Article, right: Article): ArticleCoverageEdge | undefined {
+export function articleCoverageEdge(
+  left: Article,
+  right: Article,
+): ArticleCoverageEdge | undefined {
   const evidence = articleCoverageEvidence(left, right, "v2");
   const signals = articlePairSignalsForV2(left, right);
   const kind = coverageKindForPair(left, right, signals);
   const positiveCount = evidence.positiveIncidentEvidence.length;
   const hasBlockingConflict = evidence.conflicts.length > 0;
-  const textScore = Math.min(0.25, evidence.titleScore * 0.15 + evidence.sharedDistinctiveTokenCount * 0.025);
+  const textScore = Math.min(
+    0.25,
+    evidence.titleScore * 0.15 + evidence.sharedDistinctiveTokenCount * 0.025,
+  );
   const situationScore = evidence.positiveIncidentEvidence.includes("same_situation_id") ? 0.7 : 0;
-  const placeScore = evidence.positiveIncidentEvidence.some((item) => item === "shared_specific_place" || item === "mentioned_specific_place") ? 0.3 : 0;
+  const placeScore = evidence.positiveIncidentEvidence.some(
+    (item) => item === "shared_specific_place" || item === "mentioned_specific_place",
+  )
+    ? 0.3
+    : 0;
   const entityScore = evidence.positiveIncidentEvidence.includes("shared_named_entity") ? 0.2 : 0;
-  const subtypeScore = evidence.positiveIncidentEvidence.includes("compatible_incident_subtype") ? 0.15 : 0;
-  const topicScore = kind === "topic" && signals.some((signal) => signal.kind === "topical_thread") ? 0.65 : 0;
-  const duplicateScore = signals.some((signal) => signal.kind === "near_duplicate" || signal.kind === "title_similarity") ? 0.55 : 0;
-  const score = boundedScore(situationScore + placeScore + entityScore + subtypeScore + topicScore + duplicateScore + textScore);
+  const subtypeScore = evidence.positiveIncidentEvidence.includes("compatible_incident_subtype")
+    ? 0.15
+    : 0;
+  const topicScore =
+    kind === "topic" && signals.some((signal) => signal.kind === "topical_thread") ? 0.65 : 0;
+  const duplicateScore = signals.some(
+    (signal) => signal.kind === "near_duplicate" || signal.kind === "title_similarity",
+  )
+    ? 0.55
+    : 0;
+  const score = boundedScore(
+    situationScore +
+      placeScore +
+      entityScore +
+      subtypeScore +
+      topicScore +
+      duplicateScore +
+      textScore,
+  );
 
   if (signals.length === 0 && score < 0.35) return undefined;
   let tier: ArticleCoverageMatchTier = "weak";
-  if (!hasBlockingConflict && score >= 0.85 && (situationScore > 0 || topicScore > 0 || duplicateScore > 0)) tier = "strong";
-  else if (!hasBlockingConflict && score >= 0.6 && (kind !== "incident" || positiveCount > 0)) tier = "moderate";
+  if (
+    !hasBlockingConflict &&
+    score >= 0.85 &&
+    (situationScore > 0 || topicScore > 0 || duplicateScore > 0)
+  )
+    tier = "strong";
+  else if (!hasBlockingConflict && score >= 0.6 && (kind !== "incident" || positiveCount > 0))
+    tier = "moderate";
 
   return {
     articleIds: evidence.articleIds,
@@ -954,7 +1045,9 @@ function coverageKindForPair(
   signals: ArticleCoverageDecisionSignal[],
 ): ArticleCoverageEdgeKind {
   const hasIncident = signals.some((signal) =>
-    ["situation_id", "generic_place_incident", "cross_source_incident", "shared_place"].includes(signal.kind),
+    ["situation_id", "generic_place_incident", "cross_source_incident", "shared_place"].includes(
+      signal.kind,
+    ),
   );
   const hasTopic = signals.some((signal) => signal.kind === "topical_thread");
   if (hasTopic && !hasIncident) return "topic";
@@ -996,6 +1089,7 @@ git commit -m "feat: score coverage match edges"
 ### Task 4: Replace single-link v2 grouping with constrained clustering
 
 **Files:**
+
 - Create: `packages/shared/src/article-coverage-clustering.ts`
 - Create: `packages/shared/test/article-coverage-clustering.test.ts`
 - Modify: `packages/shared/src/types.ts:143-155`
@@ -1003,6 +1097,7 @@ git commit -m "feat: score coverage match edges"
 - Modify: `packages/shared/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `ArticleCoverageEdge` and deterministic article ordering from Tasks 2-3.
 - Produces: `clusterArticlesByCoverageEdges(articles, edges, options)`, `CoverageRejectedPair`, `analyzeArticleCoverageV2()`, and group match confidence for Plans 2-3.
 
@@ -1030,7 +1125,12 @@ function article(id: string, publishedAt: string): Article {
   };
 }
 
-function edge(left: string, right: string, tier: "strong" | "moderate" | "weak", score: number): ArticleCoverageEdge {
+function edge(
+  left: string,
+  right: string,
+  tier: "strong" | "moderate" | "weak",
+  score: number,
+): ArticleCoverageEdge {
   return {
     articleIds: [left, right].sort() as [string, string],
     tier,
@@ -1055,7 +1155,11 @@ describe("constrained coverage clustering", () => {
   it("does not merge components through one moderate bridge", () => {
     const groups = clusterArticlesByCoverageEdges(
       articles,
-      [edge("a", "b", "strong", 0.9), edge("c", "bridge", "strong", 0.9), edge("b", "bridge", "moderate", 0.65)],
+      [
+        edge("a", "b", "strong", 0.9),
+        edge("c", "bridge", "strong", 0.9),
+        edge("b", "bridge", "moderate", 0.65),
+      ],
       { rejectedPairs: [] },
     );
     expect(groups.map((group) => group.articles.map((item) => item.id).sort())).toEqual([
@@ -1067,7 +1171,11 @@ describe("constrained coverage clustering", () => {
   it("admits a moderate member with two-member quorum", () => {
     const groups = clusterArticlesByCoverageEdges(
       articles.slice(0, 3),
-      [edge("a", "b", "strong", 0.9), edge("a", "c", "moderate", 0.64), edge("b", "c", "moderate", 0.62)],
+      [
+        edge("a", "b", "strong", 0.9),
+        edge("a", "c", "moderate", 0.64),
+        edge("b", "c", "moderate", 0.62),
+      ],
       { rejectedPairs: [] },
     );
     expect(groups[0]?.articles.map((item) => item.id).sort()).toEqual(["a", "b", "c"]);
@@ -1079,15 +1187,35 @@ describe("constrained coverage clustering", () => {
       [edge("a", "b", "strong", 0.9), edge("b", "c", "strong", 0.9)],
       { rejectedPairs: [{ articleIds: ["a", "c"], correctionId: "correction-1" }] },
     );
-    expect(groups.every((group) => !(group.articles.some((item) => item.id === "a") && group.articles.some((item) => item.id === "c")))).toBe(true);
+    expect(
+      groups.every(
+        (group) =>
+          !(
+            group.articles.some((item) => item.id === "a") &&
+            group.articles.some((item) => item.id === "c")
+          ),
+      ),
+    ).toBe(true);
   });
 
   it("is invariant to input order", () => {
-    const edges = [edge("a", "b", "strong", 0.9), edge("a", "c", "moderate", 0.7), edge("b", "c", "moderate", 0.68)];
-    const forward = clusterArticlesByCoverageEdges(articles.slice(0, 3), edges, { rejectedPairs: [] });
-    const reverse = clusterArticlesByCoverageEdges([...articles.slice(0, 3)].reverse(), [...edges].reverse(), { rejectedPairs: [] });
+    const edges = [
+      edge("a", "b", "strong", 0.9),
+      edge("a", "c", "moderate", 0.7),
+      edge("b", "c", "moderate", 0.68),
+    ];
+    const forward = clusterArticlesByCoverageEdges(articles.slice(0, 3), edges, {
+      rejectedPairs: [],
+    });
+    const reverse = clusterArticlesByCoverageEdges(
+      [...articles.slice(0, 3)].reverse(),
+      [...edges].reverse(),
+      { rejectedPairs: [] },
+    );
     expect(forward.map((group) => group.id)).toEqual(reverse.map((group) => group.id));
-    expect(forward.map((group) => group.articles.map((item) => item.id))).toEqual(reverse.map((group) => group.articles.map((item) => item.id)));
+    expect(forward.map((group) => group.articles.map((item) => item.id))).toEqual(
+      reverse.map((group) => group.articles.map((item) => item.id)),
+    );
   });
 });
 ```
@@ -1128,7 +1256,8 @@ function articleOrder(left: Article, right: Article): number {
 
 function stableGroupId(articles: Article[]): string {
   const oldest = [...articles].sort(
-    (left, right) => left.publishedAt.localeCompare(right.publishedAt) || left.id.localeCompare(right.id),
+    (left, right) =>
+      left.publishedAt.localeCompare(right.publishedAt) || left.id.localeCompare(right.id),
   )[0]!;
   let hash = 2166136261;
   for (const char of oldest.id) {
@@ -1149,15 +1278,26 @@ export function clusterArticlesByCoverageEdges(
     edges.filter((edge) => edge.conflicts.length > 0).map((edge) => pairKey(...edge.articleIds)),
   );
   const acceptedEdges = edges
-    .filter((edge) => edge.tier !== "weak" && edge.conflicts.length === 0 && !rejected.has(pairKey(...edge.articleIds)))
-    .sort((left, right) => right.score - left.score || pairKey(...left.articleIds).localeCompare(pairKey(...right.articleIds)));
+    .filter(
+      (edge) =>
+        edge.tier !== "weak" &&
+        edge.conflicts.length === 0 &&
+        !rejected.has(pairKey(...edge.articleIds)),
+    )
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        pairKey(...left.articleIds).localeCompare(pairKey(...right.articleIds)),
+    );
   const groups: string[][] = [];
 
   for (const edge of acceptedEdges.filter((item) => item.tier === "strong")) {
     const matching = groups.filter((group) => edge.articleIds.some((id) => group.includes(id)));
     const candidate = [...new Set([...edge.articleIds, ...matching.flat()])];
     const containsBlockedPair = candidate.some((left, index) =>
-      candidate.slice(index + 1).some((right) => rejected.has(pairKey(left, right)) || blocked.has(pairKey(left, right))),
+      candidate
+        .slice(index + 1)
+        .some((right) => rejected.has(pairKey(left, right)) || blocked.has(pairKey(left, right))),
     );
     if (containsBlockedPair) continue;
     for (const group of matching) groups.splice(groups.indexOf(group), 1);
@@ -1169,14 +1309,19 @@ export function clusterArticlesByCoverageEdges(
     const candidates = groups.filter((group) => {
       const sortedMembers = group.map((id) => articlesById.get(id)!).sort(articleOrder);
       const anchor = sortedMembers[0]!;
-      const connecting = acceptedEdges.filter((edge) => edge.articleIds.includes(article.id) && edge.articleIds.some((id) => group.includes(id)));
+      const connecting = acceptedEdges.filter(
+        (edge) =>
+          edge.articleIds.includes(article.id) && edge.articleIds.some((id) => group.includes(id)),
+      );
       const anchorMatch = connecting.some((edge) => edge.articleIds.includes(anchor.id));
       return anchorMatch || connecting.length >= 2;
     });
     if (candidates.length === 1) {
       const candidate = [...candidates[0]!, article.id];
       const conflict = candidate.some((left, index) =>
-        candidate.slice(index + 1).some((right) => rejected.has(pairKey(left, right)) || blocked.has(pairKey(left, right))),
+        candidate
+          .slice(index + 1)
+          .some((right) => rejected.has(pairKey(left, right)) || blocked.has(pairKey(left, right))),
       );
       if (!conflict) candidates[0]!.push(article.id);
     } else {
@@ -1191,7 +1336,9 @@ export function clusterArticlesByCoverageEdges(
       primary: members[0]!,
       articles: members,
       sourceLabels: [...new Set(members.map((item) => item.sourceLabel))],
-      acceptedEdges: acceptedEdges.filter((edge) => edge.articleIds.every((id) => members.some((item) => item.id === id))),
+      acceptedEdges: acceptedEdges.filter((edge) =>
+        edge.articleIds.every((id) => members.some((item) => item.id === id)),
+      ),
     }))
     .sort((left, right) => articleOrder(left.primary, right.primary));
 }
@@ -1242,7 +1389,11 @@ export function analyzeArticleCoverageV2(
   const reviewCounts = new Map<string, number>();
   const reviewableEdges = evaluatedEdges
     .filter((edge) => edge.reviewable)
-    .sort((left, right) => right.score - left.score || left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")),
+    )
     .filter((edge) => {
       if (edge.articleIds.some((id) => (reviewCounts.get(id) ?? 0) >= 5)) return false;
       for (const id of edge.articleIds) reviewCounts.set(id, (reviewCounts.get(id) ?? 0) + 1);
@@ -1253,8 +1404,12 @@ export function analyzeArticleCoverageV2(
   const groups = clusterArticlesByCoverageEdges(articles, edges, {
     rejectedPairs: options.rejectedPairs ?? [],
   });
-  const bundles = groups.flatMap((group) => coverageDecisionForV2Group(group, generatedAt, edges) ?? []);
-  const bundleByArticleId = new Map(bundles.flatMap((bundle) => bundle.memberArticleIds.map((id) => [id, bundle] as const)));
+  const bundles = groups.flatMap(
+    (group) => coverageDecisionForV2Group(group, generatedAt, edges) ?? [],
+  );
+  const bundleByArticleId = new Map(
+    bundles.flatMap((bundle) => bundle.memberArticleIds.map((id) => [id, bundle] as const)),
+  );
   return {
     articles: articles.map((article) => {
       const bundle = bundleByArticleId.get(article.id);
@@ -1276,9 +1431,16 @@ function preliminaryV2MatchConfidence(group: HomeArticleGroup): CoverageMatchCon
   const accepted = group.acceptedEdges ?? [];
   const anchorEdges = group.articles
     .filter((article) => article.id !== group.primary.id)
-    .map((article) => accepted.find((edge) => edge.articleIds.includes(group.primary.id) && edge.articleIds.includes(article.id)))
+    .map((article) =>
+      accepted.find(
+        (edge) =>
+          edge.articleIds.includes(group.primary.id) && edge.articleIds.includes(article.id),
+      ),
+    )
     .filter((edge): edge is ArticleCoverageEdge => Boolean(edge));
-  const strong = anchorEdges.length === group.articles.length - 1 && anchorEdges.every((edge) => edge.tier === "strong");
+  const strong =
+    anchorEdges.length === group.articles.length - 1 &&
+    anchorEdges.every((edge) => edge.tier === "strong");
   const score = Math.min(...anchorEdges.map((edge) => edge.score));
   return {
     tier: strong ? "strong" : "moderate",
@@ -1308,7 +1470,12 @@ function coverageDecisionForV2Group(
     id: group.id,
     kind,
     confidence: matchConfidence.tier === "strong" ? "high" : "medium",
-    reason: kind === "incident" ? "Samme hendelse" : kind === "topic" ? "Samme nyhetstema" : "Samme publiserte sak",
+    reason:
+      kind === "incident"
+        ? "Samme hendelse"
+        : kind === "topic"
+          ? "Samme nyhetstema"
+          : "Samme publiserte sak",
     generatedAt,
     matcherVersion: "v2",
     matchConfidence,
@@ -1366,6 +1533,7 @@ git commit -m "feat: constrain coverage clustering"
 ### Task 5: Separate match confidence, source trust and direct verification
 
 **Files:**
+
 - Modify: `packages/shared/src/types.ts:130-160`
 - Modify: `packages/shared/src/article-bundles.ts:1094-1215`
 - Modify: `packages/shared/src/public-verification.ts:46-78`
@@ -1376,6 +1544,7 @@ git commit -m "feat: constrain coverage clustering"
 - Modify: `apps/frontend/src/homeStoryCards.test.ts`
 
 **Interfaces:**
+
 - Consumes: accepted group edges from Task 4 and existing `SourceConfidenceSummary`.
 - Produces: `CoverageMatchConfidence`, `CoverageTrustSummary`, `ArticleCoverageBundle.matchConfidence`, and edge-aware `derivePublicVerificationForArticleGroup(group)` for Plans 2-3.
 
@@ -1386,8 +1555,22 @@ Add to `packages/shared/test/article-coverage-analysis.test.ts`:
 ```ts
 it("keeps multi-source moderate groups distinct from strong match confidence", () => {
   const analysis = analyzeArticleCoverageV2([
-    article({ id: "left", source: "nrk", sourceLabel: "NRK Trøndelag", places: ["Nærøysund"], title: "Brann i anleggsbrakke", excerpt: "Byggeplass i Nærøysund" }),
-    article({ id: "right", source: "adressa", sourceLabel: "Adresseavisen", places: ["Nærøysund"], title: "Brakkebrann på byggeplass", excerpt: "Nødetatene rykket ut" }),
+    article({
+      id: "left",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      places: ["Nærøysund"],
+      title: "Brann i anleggsbrakke",
+      excerpt: "Byggeplass i Nærøysund",
+    }),
+    article({
+      id: "right",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      places: ["Nærøysund"],
+      title: "Brakkebrann på byggeplass",
+      excerpt: "Nødetatene rykket ut",
+    }),
   ]);
   expect(analysis.bundles[0]?.matchConfidence).toMatchObject({ tier: "moderate" });
   expect(analysis.bundles[0]?.confidence).toBe("medium");
@@ -1400,21 +1583,28 @@ Replace the first verification test in `packages/shared/test/public-verification
 it("derives verification only from a direct strong official-to-newsroom incident edge", () => {
   const articles = [
     article({ id: "news", source: "adressa", sourceLabel: "Adresseavisen" }),
-    article({ id: "official", source: "politiloggen", sourceLabel: "Politiloggen", situationId: "incident-1" }),
+    article({
+      id: "official",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      situationId: "incident-1",
+    }),
   ];
   const verification = derivePublicVerificationForArticleGroup({
     ...group(articles),
-    acceptedEdges: [{
-      articleIds: ["news", "official"],
-      tier: "strong",
-      score: 0.95,
-      kind: "incident",
-      signals: [],
-      conflicts: [],
-      evidenceFingerprint: "v2:direct",
-      reviewable: false,
-      correctionConflict: false,
-    }],
+    acceptedEdges: [
+      {
+        articleIds: ["news", "official"],
+        tier: "strong",
+        score: 0.95,
+        kind: "incident",
+        signals: [],
+        conflicts: [],
+        evidenceFingerprint: "v2:direct",
+        reviewable: false,
+        correctionConflict: false,
+      },
+    ],
   });
   expect(verification?.label).toBe("Verifisert");
 });
@@ -1427,17 +1617,19 @@ it("does not verify official and newsroom co-members connected only through anot
   ];
   const verification = derivePublicVerificationForArticleGroup({
     ...group(articles),
-    acceptedEdges: [{
-      articleIds: ["news", "bridge"],
-      tier: "strong",
-      score: 0.9,
-      kind: "incident",
-      signals: [],
-      conflicts: [],
-      evidenceFingerprint: "v2:bridge",
-      reviewable: false,
-      correctionConflict: false,
-    }],
+    acceptedEdges: [
+      {
+        articleIds: ["news", "bridge"],
+        tier: "strong",
+        score: 0.9,
+        kind: "incident",
+        signals: [],
+        conflicts: [],
+        evidenceFingerprint: "v2:bridge",
+        reviewable: false,
+        correctionConflict: false,
+      },
+    ],
   });
   expect(verification).toBeUndefined();
 });
@@ -1480,7 +1672,8 @@ function v2GroupMatchConfidence(group: HomeArticleGroup): CoverageMatchConfidenc
         .filter((edge) => edge.articleIds.includes(article.id))
         .sort((left, right) => right.score - left.score);
       const anchorEdge = connecting.find((edge) => edge.articleIds.includes(anchorId));
-      if (anchorEdge) return { score: anchorEdge.score, directStrong: anchorEdge.tier === "strong" };
+      if (anchorEdge)
+        return { score: anchorEdge.score, directStrong: anchorEdge.tier === "strong" };
       const quorumEdge = connecting[1];
       return { score: quorumEdge?.score ?? 0, directStrong: false };
     });
@@ -1510,8 +1703,10 @@ const directStrongEdge = group.acceptedEdges?.find((edge) => {
   if (members.some((article) => !article)) return false;
   const [left, right] = members as [Article, Article];
   return (
-    (isOfficialPublicVerificationSource(left.source) && isNewsroomPublicVerificationSource(right.source)) ||
-    (isOfficialPublicVerificationSource(right.source) && isNewsroomPublicVerificationSource(left.source))
+    (isOfficialPublicVerificationSource(left.source) &&
+      isNewsroomPublicVerificationSource(right.source)) ||
+    (isOfficialPublicVerificationSource(right.source) &&
+      isNewsroomPublicVerificationSource(left.source))
   );
 });
 if (!directStrongEdge) return undefined;
@@ -1528,24 +1723,26 @@ Update `verifiedGroupKeys()` in `article-coverage-evaluator.ts` to build each gr
 ```ts
 function verifiedGroupKeys(analysis: ArticleCoverageAnalysis): Set<string> {
   const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
-  return new Set(analysis.bundles.flatMap((bundle) => {
-    const articles = bundle.memberArticleIds.flatMap((id) => articlesById.get(id) ?? []);
-    if (articles.length !== bundle.memberArticleIds.length) return [];
-    const memberIds = new Set(bundle.memberArticleIds);
-    const group = {
-      id: bundle.id,
-      primary: articlesById.get(bundle.primaryArticleId)!,
-      articles,
-      sourceLabels: bundle.sourceLabels,
-      bundle,
-      acceptedEdges: (analysis.edges ?? []).filter(
-        (edge) => edge.tier !== "weak" && edge.articleIds.every((id) => memberIds.has(id)),
-      ),
-    };
-    return derivePublicVerificationForArticleGroup(group)
-      ? [groupKey(bundle.memberArticleIds)]
-      : [];
-  }));
+  return new Set(
+    analysis.bundles.flatMap((bundle) => {
+      const articles = bundle.memberArticleIds.flatMap((id) => articlesById.get(id) ?? []);
+      if (articles.length !== bundle.memberArticleIds.length) return [];
+      const memberIds = new Set(bundle.memberArticleIds);
+      const group = {
+        id: bundle.id,
+        primary: articlesById.get(bundle.primaryArticleId)!,
+        articles,
+        sourceLabels: bundle.sourceLabels,
+        bundle,
+        acceptedEdges: (analysis.edges ?? []).filter(
+          (edge) => edge.tier !== "weak" && edge.articleIds.every((id) => memberIds.has(id)),
+        ),
+      };
+      return derivePublicVerificationForArticleGroup(group)
+        ? [groupKey(bundle.memberArticleIds)]
+        : [];
+    }),
+  );
 }
 ```
 
@@ -1571,6 +1768,7 @@ git commit -m "fix: separate coverage match and source trust"
 ### Task 6: Compute v2 shadow analysis without changing v1 persistence
 
 **Files:**
+
 - Modify: `apps/worker/src/index.ts:100-145,1260-1310`
 - Modify: `apps/worker/test/index.test.ts`
 - Modify: `.env.example`
@@ -1578,6 +1776,7 @@ git commit -m "fix: separate coverage match and source trust"
 - Modify: `docs/SOURCES.md`
 
 **Interfaces:**
+
 - Consumes: `analyzeArticleCoverageV2()` and v1 `prepareArticleCoverageAnalysis()`.
 - Produces: `prepareArticleCoverageAnalyses()` returning `{ active, shadow? }`; no repository signature changes in this plan.
 
@@ -1588,8 +1787,20 @@ Add to `apps/worker/test/index.test.ts`:
 ```ts
 it("computes v2 shadow coverage without changing persisted v1 decisions", async () => {
   const articles = [
-    newsArticle({ id: "coverage-a", title: "Brann i anleggsbrakke", excerpt: "Byggeplass i Nærøysund", places: ["Nærøysund"] }),
-    newsArticle({ id: "coverage-b", source: "adressa", sourceLabel: "Adresseavisen", title: "Brakkebrann på byggeplass", excerpt: "Nødetatene rykket ut", places: ["Nærøysund"] }),
+    newsArticle({
+      id: "coverage-a",
+      title: "Brann i anleggsbrakke",
+      excerpt: "Byggeplass i Nærøysund",
+      places: ["Nærøysund"],
+    }),
+    newsArticle({
+      id: "coverage-b",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Brakkebrann på byggeplass",
+      excerpt: "Nødetatene rykket ut",
+      places: ["Nærøysund"],
+    }),
   ];
   const analyses = await prepareArticleCoverageAnalyses(
     articles,
@@ -1608,9 +1819,18 @@ it("computes v2 shadow coverage without changing persisted v1 decisions", async 
     upsertCoverageBundles: vi.fn(async () => undefined),
   };
   await persistPreparedCoverage(repository, analyses);
-  expect(repository.upsertArticles).toHaveBeenCalledWith(analyses.active.analysis.articles, expect.any(String));
-  expect(repository.upsertCoverageBundles).toHaveBeenCalledWith(analyses.active.analysis.bundles, expect.any(String));
-  expect(repository.upsertCoverageBundles).not.toHaveBeenCalledWith(shadow.analysis.bundles, expect.any(String));
+  expect(repository.upsertArticles).toHaveBeenCalledWith(
+    analyses.active.analysis.articles,
+    expect.any(String),
+  );
+  expect(repository.upsertCoverageBundles).toHaveBeenCalledWith(
+    analyses.active.analysis.bundles,
+    expect.any(String),
+  );
+  expect(repository.upsertCoverageBundles).not.toHaveBeenCalledWith(
+    shadow.analysis.bundles,
+    expect.any(String),
+  );
 });
 ```
 
@@ -1653,7 +1873,12 @@ export async function prepareArticleCoverageAnalyses(
   return {
     active: { matcherVersion: "v1", analysis: analyzeArticleCoverage(clean, generatedAt) },
     ...(matcherVersion === "v2"
-      ? { shadow: { matcherVersion: "v2" as const, analysis: analyzeArticleCoverageV2(clean, generatedAt) } }
+      ? {
+          shadow: {
+            matcherVersion: "v2" as const,
+            analysis: analyzeArticleCoverageV2(clean, generatedAt),
+          },
+        }
       : {}),
   };
 }
@@ -1716,12 +1941,14 @@ git commit -m "feat: run coverage matcher v2 in shadow"
 ### Task 7: Add the corpus command and complete the Phase 1 gate
 
 **Files:**
+
 - Create: `packages/shared/test/article-coverage-golden.test.ts`
 - Modify: `package.json`
 - Modify: `.github/workflows/ci.yml`
 - Modify: `docs/DEPLOYMENT.md`
 
 **Interfaces:**
+
 - Consumes: golden corpus and `analyzeArticleCoverageV2()`.
 - Produces: `npm run check:coverage-matcher`, a deterministic CI gate required by Plans 2-3.
 
@@ -1774,8 +2001,8 @@ Add to root `package.json` scripts:
 Add after the unit-test step in `.github/workflows/ci.yml`:
 
 ```yaml
-      - name: Check coverage matcher quality
-        run: npm run check:coverage-matcher
+- name: Check coverage matcher quality
+  run: npm run check:coverage-matcher
 ```
 
 - [ ] **Step 4: Document the Phase 1 promotion non-claim**
