@@ -1935,10 +1935,160 @@ a.coverage-source-row:focus-visible {
   font-weight: 700;
 }
 
+.coverage-correction-backdrop {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow-y: auto;
+  background: rgb(8 18 30 / 68%);
+}
+
+.coverage-correction-dialog {
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100dvh - 40px));
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 24px 80px rgb(8 18 30 / 32%);
+}
+
+.coverage-correction-dialog form {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.coverage-correction-dialog h2,
+.coverage-correction-dialog p {
+  margin: 0;
+}
+
+.coverage-correction-anchor {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--green);
+  background: color-mix(in srgb, var(--paper) 88%, var(--green) 12%);
+}
+
+.coverage-correction-anchor span,
+.coverage-correction-dialog legend,
+.coverage-correction-reason {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.coverage-correction-dialog fieldset {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.coverage-correction-dialog fieldset label {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 0.28fr) minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.coverage-correction-dialog fieldset input {
+  margin-top: 2px;
+}
+
+.coverage-correction-dialog fieldset span {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.coverage-correction-dialog fieldset strong {
+  min-width: 0;
+  font-size: 13px;
+}
+
+.coverage-correction-reason {
+  display: grid;
+  gap: 5px;
+}
+
+.coverage-correction-reason textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.coverage-correction-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.coverage-correction-toast {
+  position: fixed;
+  z-index: 1100;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: min(440px, calc(100vw - 40px));
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 0 12px 34px rgb(8 18 30 / 28%);
+}
+
+.coverage-correction-toast button {
+  border-color: currentColor;
+  color: inherit;
+}
+
 @media (max-width: 520px) {
   .coverage-source-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
+  }
+
+  .coverage-correction-backdrop {
+    place-items: end center;
+    padding: 0;
+  }
+
+  .coverage-correction-dialog {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: 12px 12px 0 0;
+  }
+
+  .coverage-correction-dialog form {
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .coverage-correction-dialog fieldset label {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .coverage-correction-dialog fieldset strong {
+    grid-column: 2;
+  }
+
+  .coverage-correction-toast {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    max-width: none;
   }
 }
 

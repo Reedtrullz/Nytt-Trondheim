@@ -4289,24 +4289,32 @@ export class MemoryStore implements Store {
     if (!correction) {
       throw Object.assign(new Error("Korrigeringen finnes ikke."), { status: 404 });
     }
+    const rejectedPairs = () =>
+      this.coverageCorrections
+        .filter(({ status }) => status === "active")
+        .map(({ id, anchorArticleId, rejectedArticleId }) => ({
+          articleIds: [anchorArticleId, rejectedArticleId] as [string, string],
+          correctionId: id,
+        }));
+    const affected = new Set([correction.anchorArticleId, correction.rejectedArticleId]);
+    const removedStoryIds = recomputeCoverageStories(
+      this.articles,
+      rejectedPairs(),
+      this.coverageShadowGeneratedAt,
+    )
+      .filter(({ articleIds }) => articleIds.some((id) => affected.has(id)))
+      .map(({ id }) => id);
     if (correction.status === "active") {
       correction.status = "reverted";
       correction.revertedAt = new Date().toISOString();
       correction.revertedBy = actorId;
     }
-    const rejectedPairs = this.coverageCorrections
-      .filter(({ status }) => status === "active")
-      .map(({ id, anchorArticleId, rejectedArticleId }) => ({
-        articleIds: [anchorArticleId, rejectedArticleId] as [string, string],
-        correctionId: id,
-      }));
-    const affected = new Set([correction.anchorArticleId, correction.rejectedArticleId]);
     return {
       corrections: [clone(correction)],
-      removedStoryIds: [],
+      removedStoryIds,
       replacementStories: recomputeCoverageStories(
         this.articles,
-        rejectedPairs,
+        rejectedPairs(),
         this.coverageShadowGeneratedAt,
       ).filter(({ articleIds }) => articleIds.some((id) => affected.has(id))),
     };

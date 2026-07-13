@@ -1,0 +1,55 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import { CoverageCorrectionDialog } from "./CoverageCorrectionDialog.js";
+import { clusteredHomeStoryCard } from "../../test-fixtures/homeStoryCards.js";
+
+describe("CoverageCorrectionDialog", () => {
+  it("renders anchor, selectable supporting stories, and a bounded optional reason", () => {
+    const html = renderToStaticMarkup(
+      <CoverageCorrectionDialog
+        card={clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 })}
+        pending={false}
+        error={undefined}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain("Behold som hovedsak");
+    expect((html.match(/type="checkbox"/g) ?? []).length).toBe(2);
+    expect(html).toContain('maxLength="500"');
+    expect(html).toContain("Splitt nå");
+  });
+
+  it("disables all mutation controls while pending", () => {
+    const html = renderToStaticMarkup(
+      <CoverageCorrectionDialog
+        card={clusteredHomeStoryCard({ articleCount: 2, sourceCount: 2 })}
+        pending
+        error={undefined}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("Splitter…");
+    expect(html).toContain("disabled");
+  });
+
+  it("renders an actionable error without closing the dialog", () => {
+    const html = renderToStaticMarkup(
+      <CoverageCorrectionDialog
+        card={clusteredHomeStoryCard({ articleCount: 2, sourceCount: 2 })}
+        pending={false}
+        error="Kunne ikke splitte gruppen."
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Kunne ikke splitte gruppen.");
+  });
+});

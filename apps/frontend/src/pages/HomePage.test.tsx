@@ -29,6 +29,10 @@ import {
   channelStoryCountsForCards,
   cityPulseDataForCurrentFeed,
   cityPulseLatestTimestamp,
+  coverageConflictState,
+  coverageSplitAnnouncement,
+  coverageSplitState,
+  coverageUndoAnnouncement,
   mergeCityPulseStoryLists,
   morningBriefFreshness,
   rankHomeStoryCardsForPublicFeed,
@@ -429,6 +433,37 @@ describe("articlesFromCityPulseStoryPage", () => {
         latestAt: laterArticle.publishedAt,
       },
     ]);
+  });
+
+  it("replaces only the affected story after split or stale refresh", () => {
+    const replacement = {
+      ...bootstrapStory,
+      id: "story-split",
+      latestAt: "2026-07-02T07:06:00.000Z",
+    } satisfies CityPulseStory;
+    const untouched = {
+      ...bootstrapStory,
+      id: "story-untouched",
+      latestAt: "2026-07-02T06:00:00.000Z",
+    } satisfies CityPulseStory;
+
+    expect(
+      coverageSplitState([bootstrapStory, untouched], {
+        corrections: [],
+        removedStoryIds: [bootstrapStory.id],
+        replacementStories: [replacement],
+      }).map(({ id }) => id),
+    ).toEqual(["story-split", "story-untouched"]);
+    expect(
+      coverageConflictState([bootstrapStory, untouched], bootstrapStory.id, [replacement]).map(
+        ({ id }) => id,
+      ),
+    ).toEqual(["story-split", "story-untouched"]);
+  });
+
+  it("uses concise live-region announcements for split and undo", () => {
+    expect(coverageSplitAnnouncement(2)).toBe("Gruppen er splittet i 2 saker.");
+    expect(coverageUndoAnnouncement).toBe("Grupperingen er gjenopprettet.");
   });
 });
 

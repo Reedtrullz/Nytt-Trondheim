@@ -180,6 +180,9 @@ describe("coverage correction store", () => {
 
     const undone = await store.undoCoverageCorrection(split.corrections[0]!.id, "owner-user-id");
     expect(undone.corrections[0]).toMatchObject({ status: "reverted" });
+    expect(new Set(undone.removedStoryIds)).toEqual(
+      new Set(split.replacementStories.map(({ id }) => id)),
+    );
     expect(
       undone.replacementStories.some(
         ({ articleIds }) => articleIds.includes("speed-a") && articleIds.includes("threat"),

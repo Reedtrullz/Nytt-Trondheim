@@ -231,15 +231,17 @@ function HomeRoute({
   loading,
   error,
   canSave,
+  canCorrect,
   onRetry,
 }: {
   data?: BootstrapPayload;
   loading: boolean;
   error?: string;
   canSave: boolean;
+  canCorrect: boolean;
   onRetry: () => void;
 }) {
-  if (data) return <HomePage initialData={data} canSave={canSave} />;
+  if (data) return <HomePage initialData={data} canSave={canSave} canCorrect={canCorrect} />;
   if (loading) return <LoadingPage message="Henter siste nytt..." />;
   return (
     <main className="fatal-error" role="alert">
@@ -334,6 +336,7 @@ function AuthenticatedApp() {
                   loading={bootstrapLoading}
                   error={bootstrapError}
                   canSave={isOwner}
+                  canCorrect={isOwner && session.capabilities?.coverageCorrections === true}
                   onRetry={() => setAttempt((value) => value + 1)}
                 />
               }

@@ -14,6 +14,8 @@ import {
   publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
+  type CoverageBundleCorrectionResult,
+  type CoverageBundleSplitRequest,
   type CityPulseStory,
   type CityPulseStoryPage,
   type HomeSituationSummary,
@@ -23,8 +25,9 @@ import {
   type SourceConfidenceSummary,
   type SourceHealth,
 } from "@nytt/shared";
-import { api } from "../api.js";
+import { api, CoverageCorrectionConflictError } from "../api.js";
 import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
+import { CoverageCorrectionDialog } from "../components/news/CoverageCorrectionDialog.js";
 import { CoverageSourceCluster } from "../components/news/CoverageSourceCluster.js";
 import {
   articleCategories,
@@ -71,6 +74,7 @@ import {
   type HomeStoryVerification,
 } from "../homeStoryCards.js";
 import { publicSourceHealthSummary } from "../freshness.js";
+import { replaceCoverageStories } from "../coverageStoryUpdates.js";
 import { newsMapClusterSummary, type NewsMapClusterSummary } from "../newsMapClusters.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 import { situationTimeMeta } from "../situationTime.js";
@@ -534,16 +538,24 @@ function LeadStory({
   saving,
   onSave,
   canSave,
+  canCorrect,
+  onCorrect,
 }: {
   card: HomeStoryCard;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
   canSave: boolean;
+  canCorrect: boolean;
+  onCorrect: (card: HomeStoryCard) => void;
 }) {
   const article = card.primary;
   const articleUrl = safeExternalUrl(article.url);
   return (
-    <article className={`lead-story${article.imageUrl ? "" : " text-only"}`}>
+    <article
+      id={`story-${card.id}`}
+      className={`lead-story${article.imageUrl ? "" : " text-only"}`}
+      tabIndex={-1}
+    >
       {article.imageUrl ? <img src={article.imageUrl} alt="" /> : null}
       <div className="lead-copy">
         <div className="story-kicker">
@@ -581,7 +593,7 @@ function LeadStory({
           ))}
         </div>
         <StoryVerificationProof verification={card.verification} />
-        <CoverageSourceCluster card={card} canCorrect={false} onCorrect={() => undefined} />
+        <CoverageSourceCluster card={card} canCorrect={canCorrect} onCorrect={onCorrect} />
         <div className="lead-footer">
           <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
           {articleUrl ? (
@@ -823,18 +835,26 @@ function StoryCard({
   saving,
   onSave,
   canSave,
+  canCorrect,
+  onCorrect,
 }: {
   card: HomeStoryCard;
   saving: boolean;
   onSave: (id: string, saved: boolean) => Promise<void>;
   canSave: boolean;
+  canCorrect: boolean;
+  onCorrect: (card: HomeStoryCard) => void;
 }) {
   const article = card.primary;
   const articleUrl = safeExternalUrl(article.url);
   const count = card.sourceCount > 1 ? card.sourceCount : card.updateCount;
   const countLabel = card.sourceCount > 1 ? "kilder" : "oppdateringer";
   return (
-    <article className={`story-card story-card-${article.category.toLowerCase()}`}>
+    <article
+      id={`story-${card.id}`}
+      className={`story-card story-card-${article.category.toLowerCase()}`}
+      tabIndex={-1}
+    >
       <div className="story-card-main">
         <div className="story-card-kicker">
           <p className="metadata compact">
@@ -881,7 +901,7 @@ function StoryCard({
           ))}
         </div>
         <StoryVerificationProof verification={card.verification} />
-        <CoverageSourceCluster card={card} canCorrect={false} onCorrect={() => undefined} />
+        <CoverageSourceCluster card={card} canCorrect={canCorrect} onCorrect={onCorrect} />
       </div>
       <div className="story-card-side">
         {card.isClustered ? (
@@ -1474,6 +1494,27 @@ export function mergeCityPulseStoryLists(
   );
 }
 
+export function coverageSplitState(
+  current: CityPulseStory[],
+  result: CoverageBundleCorrectionResult,
+): CityPulseStory[] {
+  return replaceCoverageStories(current, result.removedStoryIds, result.replacementStories);
+}
+
+export function coverageConflictState(
+  current: CityPulseStory[],
+  removedStoryId: string,
+  replacementStories: CityPulseStory[],
+): CityPulseStory[] {
+  return replaceCoverageStories(current, [removedStoryId], replacementStories);
+}
+
+export function coverageSplitAnnouncement(replacementStoryCount: number): string {
+  return `Gruppen er splittet i ${replacementStoryCount} saker.`;
+}
+
+export const coverageUndoAnnouncement = "Grupperingen er gjenopprettet.";
+
 function cityPulseStoryWithArticle(
   story: CityPulseStory,
   articleId: string,
@@ -1578,14 +1619,22 @@ interface SavedOverride {
   saved: boolean;
 }
 
+interface CorrectionUndoState {
+  correctionIds: string[];
+  beforeStories: CityPulseStory[];
+  message: string;
+}
+
 const savedOverrideTtlMs = 60_000;
 
 export function HomePage({
   initialData,
   canSave = true,
+  canCorrect = false,
 }: {
   initialData: BootstrapPayload;
   canSave?: boolean;
+  canCorrect?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
@@ -1610,6 +1659,13 @@ export function HomePage({
     cityPulseLatestTimestamp(initialData),
   );
   const [savingArticleIds, setSavingArticleIds] = useState<Set<string>>(() => new Set());
+  const [correctingCard, setCorrectingCard] = useState<HomeStoryCard>();
+  const [correctionPending, setCorrectionPending] = useState(false);
+  const [correctionError, setCorrectionError] = useState<string>();
+  const [correctionAnnouncement, setCorrectionAnnouncement] = useState("");
+  const [undoState, setUndoState] = useState<CorrectionUndoState>();
+  const [undoPending, setUndoPending] = useState(false);
+  const correctionOriginRef = useRef<HTMLElement | null>(null);
   const savingArticleIdsRef = useRef<Set<string>>(new Set());
   const articleSavedOverridesRef = useRef<Map<string, SavedOverride>>(new Map());
   const cityPulseRefreshRunningRef = useRef(false);
@@ -2029,6 +2085,118 @@ export function HomePage({
     }
   }
 
+  function applyCoverageStories(nextStories: CityPulseStory[]) {
+    setStories(nextStories);
+    setArticles(articlesFromCityPulseStories(nextStories));
+  }
+
+  function focusCoverageStories(storyIds: string[], scrollY: number) {
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY, left: window.scrollX, behavior: "auto" });
+      for (const storyId of storyIds) {
+        const target = document.getElementById(`story-${storyId}`);
+        if (!target) continue;
+        target.focus({ preventScroll: true });
+        break;
+      }
+    });
+  }
+
+  function openCoverageCorrection(card: HomeStoryCard) {
+    if (!canCorrect || !card.group.bundle) return;
+    correctionOriginRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setCorrectionError(undefined);
+    setCorrectingCard(card);
+  }
+
+  function closeCoverageCorrection() {
+    if (correctionPending) return;
+    setCorrectionError(undefined);
+    setCorrectingCard(undefined);
+    window.requestAnimationFrame(() => {
+      correctionOriginRef.current?.focus({ preventScroll: true });
+      correctionOriginRef.current = null;
+    });
+  }
+
+  async function handleCoverageSplit(input: CoverageBundleSplitRequest) {
+    const card = correctingCard;
+    if (!card?.group.bundle || correctionPending) return;
+    const scrollY = window.scrollY;
+    const beforeStories = stories.filter(({ id }) => id === card.id);
+    setCorrectionAnnouncement("");
+    setCorrectionError(undefined);
+    setCorrectionPending(true);
+    try {
+      const result = await api.splitCoverageBundle(card.group.bundle.id, input);
+      const nextStories = coverageSplitState(stories, result);
+      applyCoverageStories(nextStories);
+      setCorrectingCard(undefined);
+      correctionOriginRef.current = null;
+      const message = coverageSplitAnnouncement(result.replacementStories.length);
+      setCorrectionAnnouncement(message);
+      setUndoState({
+        correctionIds: result.corrections.map(({ id }) => id),
+        beforeStories,
+        message,
+      });
+      focusCoverageStories(
+        result.replacementStories.map(({ id }) => id),
+        scrollY,
+      );
+    } catch (reason) {
+      if (reason instanceof CoverageCorrectionConflictError) {
+        const nextStories = coverageConflictState(stories, card.id, reason.replacementStories);
+        applyCoverageStories(nextStories);
+        setCorrectingCard(undefined);
+        correctionOriginRef.current = null;
+        setUndoState(undefined);
+        setCorrectionAnnouncement("Gruppen ble oppdatert før endringen kunne lagres.");
+        focusCoverageStories(
+          reason.replacementStories.map(({ id }) => id),
+          scrollY,
+        );
+      } else {
+        setCorrectionError(
+          reason instanceof Error ? reason.message : "Kunne ikke splitte gruppen.",
+        );
+      }
+    } finally {
+      setCorrectionPending(false);
+    }
+  }
+
+  async function handleCoverageUndo() {
+    if (!undoState || undoPending) return;
+    const scrollY = window.scrollY;
+    setCorrectionAnnouncement("");
+    setUndoPending(true);
+    try {
+      let nextStories = stories;
+      let replacementStoryIds: string[] = [];
+      for (const correctionId of undoState.correctionIds) {
+        const result = await api.undoCoverageCorrection(correctionId);
+        nextStories = coverageSplitState(nextStories, result);
+        replacementStoryIds = result.replacementStories.map(({ id }) => id);
+      }
+      applyCoverageStories(nextStories);
+      setUndoState(undefined);
+      setCorrectionAnnouncement(coverageUndoAnnouncement);
+      focusCoverageStories(replacementStoryIds, scrollY);
+    } catch {
+      setUndoState((current) =>
+        current
+          ? { ...current, message: "Kunne ikke angre hele endringen. Oppdater siden." }
+          : current,
+      );
+      setCorrectionAnnouncement("Kunne ikke angre hele endringen. Oppdater siden.");
+      void refreshCityPulse();
+    } finally {
+      setUndoPending(false);
+    }
+  }
+
   async function loadMore() {
     if (!nextCursor) return;
     const requestId = loadMoreRequestIdRef.current + 1;
@@ -2072,6 +2240,17 @@ export function HomePage({
 
   return (
     <main className="home">
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {undoState ? "" : correctionAnnouncement}
+      </p>
+      {undoState ? (
+        <div className="coverage-correction-toast" role="status" aria-atomic="true">
+          <span>{undoState.message}</span>
+          <button type="button" disabled={undoPending} onClick={() => void handleCoverageUndo()}>
+            {undoPending ? "Angrer…" : "Angre"}
+          </button>
+        </div>
+      ) : null}
       <div className="view-controls">
         <div className="scope-switch" aria-label="Geografisk visning">
           <button
@@ -2242,6 +2421,8 @@ export function HomePage({
               saving={savingArticleIds.has(leadCard.primary.id)}
               onSave={updateSaved}
               canSave={canSave}
+              canCorrect={canCorrect}
+              onCorrect={openCoverageCorrection}
             />
           ) : null}
           {!loading && !leadCard ? (
@@ -2255,6 +2436,8 @@ export function HomePage({
                 saving={savingArticleIds.has(card.primary.id)}
                 onSave={updateSaved}
                 canSave={canSave}
+                canCorrect={canCorrect}
+                onCorrect={openCoverageCorrection}
               />
             ))}
           </div>
@@ -2275,6 +2458,15 @@ export function HomePage({
           data={cityPulseData}
         />
       </div>
+      {correctingCard ? (
+        <CoverageCorrectionDialog
+          card={correctingCard}
+          pending={correctionPending}
+          error={correctionError}
+          onCancel={closeCoverageCorrection}
+          onConfirm={(input) => void handleCoverageSplit(input)}
+        />
+      ) : null}
     </main>
   );
 }

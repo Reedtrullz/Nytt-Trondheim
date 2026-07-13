@@ -70,7 +70,7 @@ export function CoverageSourceCluster({
             {expanded ? "Vis færre saker" : `Vis alle ${countLabel}`}
           </button>
         ) : null}
-        {canCorrect ? (
+        {canCorrect && card.group.bundle ? (
           <button
             type="button"
             className="coverage-correction-open"
