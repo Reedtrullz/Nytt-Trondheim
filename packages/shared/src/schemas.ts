@@ -658,6 +658,33 @@ export const coverageBundleQuerySchema = z.object({
 
 export type CoverageBundleQueryInput = z.input<typeof coverageBundleQuerySchema>;
 
+export const coverageBundleSplitRequestSchema = z
+  .object({
+    expectedGeneratedAt: z.string().datetime({ offset: true }),
+    anchorArticleId: z.string().trim().min(1).max(300),
+    rejectedArticleIds: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
+    reason: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!value.rejectedArticleIds.includes(value.anchorArticleId)) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rejectedArticleIds"],
+      message: "anchorArticleId cannot also be rejected",
+    });
+  })
+  .transform((value) => ({
+    ...value,
+    rejectedArticleIds: [...new Set(value.rejectedArticleIds)].sort(),
+  }));
+
+export const coverageCorrectionExportQuerySchema = z
+  .object({
+    sinceDays: z.coerce.number().int().min(1).max(365).default(30),
+  })
+  .strict();
+
 export const sourceItemQuerySchema = z.object({
   provider: sourceIdSchema.optional(),
   kind: sourceItemKindSchema.optional(),

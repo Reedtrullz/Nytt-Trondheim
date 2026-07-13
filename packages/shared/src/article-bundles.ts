@@ -1339,7 +1339,9 @@ function coverageDecisionForV2Group(
   if (group.articles.length < 2) return undefined;
   const memberIds = new Set(group.articles.map((article) => article.id));
   const groupEdges = allEdges.filter((edge) => edge.articleIds.every((id) => memberIds.has(id)));
-  const accepted = groupEdges.filter((edge) => edge.tier !== "weak" && edge.conflicts.length === 0);
+  const accepted = groupEdges.filter(
+    (edge) => edge.tier !== "weak" && edge.conflicts.length === 0 && !edge.reviewable,
+  );
   const matchConfidence = v2GroupMatchConfidence({
     ...group,
     acceptedEdges: accepted,
@@ -1398,9 +1400,22 @@ export function analyzeArticleCoverageV2(
   generatedAt = new Date().toISOString(),
   options: AnalyzeArticleCoverageV2Options = {},
 ): ArticleCoverageAnalysis {
-  const evaluatedEdges = articles.flatMap((left, index) =>
-    articles.slice(index + 1).flatMap((right) => articleCoverageEdge(left, right) ?? []),
+  const rejectedPairKeys = new Set(
+    (options.rejectedPairs ?? []).map(({ articleIds }) => [...articleIds].sort().join("\0")),
   );
+  const evaluatedEdges = articles
+    .flatMap((left, index) =>
+      articles.slice(index + 1).flatMap((right) => articleCoverageEdge(left, right) ?? []),
+    )
+    .map((edge) =>
+      rejectedPairKeys.has([...edge.articleIds].sort().join("\0"))
+        ? {
+            ...edge,
+            reviewable: true,
+            correctionConflict: edge.tier === "strong" || edge.tier === "moderate",
+          }
+        : edge,
+    );
   const acceptedEdges = evaluatedEdges.filter(
     (edge) => edge.tier !== "weak" && edge.conflicts.length === 0 && !edge.reviewable,
   );
@@ -1438,6 +1453,44 @@ export function analyzeArticleCoverageV2(
     nearMisses: [],
     edges,
   };
+}
+
+export function recomputeCoverageStories(
+  articles: Article[],
+  rejectedPairs: CoverageRejectedPair[],
+  generatedAt = new Date().toISOString(),
+): CityPulseStory[] {
+  const analysis = analyzeArticleCoverageV2(articles, generatedAt, { rejectedPairs });
+  const articlesById = new Map(analysis.articles.map((article) => [article.id, article]));
+  const groupedArticleIds = new Set(
+    analysis.bundles.flatMap(({ memberArticleIds }) => memberArticleIds),
+  );
+  const groupedStories = analysis.bundles.map((bundle) => {
+    const members = bundle.memberArticleIds
+      .map((id) => articlesById.get(id))
+      .filter((article): article is Article => Boolean(article));
+    const primary = articlesById.get(bundle.primaryArticleId) ?? members[0]!;
+    return cityPulseStoryFromGroup({
+      id: bundle.id,
+      primary,
+      articles: members,
+      sourceLabels: bundle.sourceLabels,
+      bundle,
+    });
+  });
+  const singletonStories = analysis.articles
+    .filter(({ id }) => !groupedArticleIds.has(id))
+    .map((article) =>
+      cityPulseStoryFromGroup({
+        id: article.id,
+        primary: article,
+        articles: [article],
+        sourceLabels: [article.sourceLabel],
+      }),
+    );
+  return [...groupedStories, ...singletonStories].sort(
+    (left, right) => right.latestAt.localeCompare(left.latestAt) || right.id.localeCompare(left.id),
+  );
 }
 
 export function annotateArticleCoverageBundles(

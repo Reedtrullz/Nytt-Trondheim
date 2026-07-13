@@ -165,6 +165,49 @@ export interface CoverageProjectionParity {
   clean: boolean;
 }
 
+export interface CoverageBundleSplitRequest {
+  expectedGeneratedAt: string;
+  anchorArticleId: string;
+  rejectedArticleIds: string[];
+  reason?: string;
+}
+
+export interface CoverageBundleCorrection {
+  id: string;
+  originalBundleId: string;
+  anchorArticleId: string;
+  rejectedArticleId: string;
+  matcherVersion: "v1" | "v2";
+  evidenceFingerprint: string;
+  status: "active" | "reverted";
+  createdAt: string;
+  revertedAt?: string;
+}
+
+export interface CoverageBundleCorrectionResult {
+  corrections: CoverageBundleCorrection[];
+  removedStoryIds: string[];
+  replacementStories: CityPulseStory[];
+}
+
+export interface CoverageCorrectionExportRow {
+  correctionId: string;
+  label: "separate";
+  articleIds: [string, string];
+  sources: [SourceId, SourceId];
+  normalizedTitles: [string, string];
+  normalizedExcerpts: [string, string];
+  matcherVersion: "v1" | "v2";
+  evidenceFingerprint: string;
+  createdAt: string;
+}
+
+export interface CoverageCorrectionExport {
+  schemaVersion: 1;
+  generatedAt: string;
+  rows: CoverageCorrectionExportRow[];
+}
+
 export interface CoverageMatchConfidence {
   tier: "strong" | "moderate";
   score: number;
