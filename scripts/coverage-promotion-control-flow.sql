@@ -50,11 +50,11 @@ INSERT INTO coverage_bundles
 VALUES
   ('ci-promotion-dropped-history','incident','high','Historical only',now(),now(),
    'ci-promotion-a',ARRAY['ci-promotion-a','ci-promotion-b'],ARRAY['nrk','adressa'],
-   ARRAY['NRK','Adresseavisen'],'{}','legacy','v1','00000000-0000-4000-8000-000000000811',
+   ARRAY['NRK','Adresseavisen'],'{}','superseded','v1','00000000-0000-4000-8000-000000000811',
    NULL,NULL,NULL,NULL,NULL),
   ('ci-promotion-paired-legacy','incident','high','Paired current',now(),now(),
    'ci-promotion-a',ARRAY['ci-promotion-a','ci-promotion-b'],ARRAY['nrk','adressa'],
-   ARRAY['NRK','Adresseavisen'],'{}','legacy','v1','00000000-0000-4000-8000-000000000817',
+   ARRAY['NRK','Adresseavisen'],'{}','superseded','v1','00000000-0000-4000-8000-000000000817',
    NULL,NULL,NULL,NULL,NULL),
   ('ci-promotion-normalized','incident','high','Paired current',now(),now(),
    'ci-promotion-a',ARRAY['ci-promotion-a','ci-promotion-b'],ARRAY['nrk','adressa'],
@@ -124,7 +124,8 @@ BEGIN
     SELECT ARRAY(SELECT DISTINCT unnest(member_article_ids) ORDER BY 1) members,
            primary_article_id
     FROM coverage_bundles
-    WHERE legacy_generation_id=reviewed_generation_id AND state='legacy' AND matcher_version='v1'
+    WHERE legacy_generation_id=reviewed_generation_id
+      AND state='superseded' AND matcher_version='v1'
   ), normalized AS (
     SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) members,
            cbv.primary_article_id

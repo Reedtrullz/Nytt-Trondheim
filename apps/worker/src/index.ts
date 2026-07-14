@@ -141,7 +141,7 @@ export interface CoverageLegacyWriter {
     startedAt: string;
     completedAt: string;
     analysis: ArticleCoverageAnalysis;
-    legacyBundles: ArticleCoverageBundleDecision[];
+    publicLegacyBundles: ArticleCoverageBundleDecision[];
     correctionRevisionSnapshot?: number;
     correctionConflictCount?: number;
     activeVolumeGuard?: CoverageActiveVolumeGuard;
@@ -264,7 +264,7 @@ export async function persistPreparedCoverage(
     startedAt,
     completedAt: seenAt,
     analysis: analyses.shadow.analysis,
-    legacyBundles: analyses.active.analysis.bundles,
+    publicLegacyBundles: analyses.active.analysis.bundles,
     correctionRevisionSnapshot: analyses.shadow.correctionDiagnostics?.revision ?? 0,
     correctionConflictCount: analyses.shadow.correctionDiagnostics?.conflictCount ?? 0,
     ...(activeVolumeGuard ? { activeVolumeGuard } : {}),

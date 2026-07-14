@@ -801,15 +801,17 @@ export function CoverageBundlesDashboard({
       {!parityClean || !integrityClean ? (
         <section className="coverage-workspace-alert" role="alert">
           <strong>Dataintegritet krever gjennomgang</strong>
-          {!parityClean ? <p>Skyggevisningen avviker fra dagens publiserte grupper</p> : null}
+          {!parityClean ? (
+            <p>Lagringskontrollen fant avvik mellom de to representasjonene.</p>
+          ) : null}
           {!integrityClean ? (
             <p>{page.summary.integrityErrorCount} integritetsfeil i utvalget.</p>
           ) : null}
         </section>
       ) : page.parity ? (
         <section className="coverage-workspace-ready" aria-label="Projeksjonsstatus">
-          <strong>Offentlig projeksjon samsvarer</strong>
-          <span>Ingen medlems- eller primæravvik i sammenligningen.</span>
+          <strong>Lagringskontroll bestått</strong>
+          <span>Samme medlemskap og hovedsak er lagret i begge representasjonene.</span>
         </section>
       ) : null}
       <section className="coverage-bundles-summary" aria-label="Dekningsoppsummering">

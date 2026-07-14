@@ -59,7 +59,7 @@ BEGIN
            primary_article_id
     FROM coverage_bundles
     WHERE legacy_generation_id=reviewed_generation_id
-      AND state='legacy' AND matcher_version='v1'
+      AND state='superseded' AND matcher_version='v1'
   ), normalized AS (
     SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) AS members,
            cbv.primary_article_id

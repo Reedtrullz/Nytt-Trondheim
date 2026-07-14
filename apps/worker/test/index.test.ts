@@ -208,7 +208,7 @@ describe("worker lifecycle helpers", () => {
     );
   });
 
-  it("hands paired v1 decisions to the locked v2 persistence transaction", async () => {
+  it("hands public v1 decisions and the v2 candidate to the locked persistence transaction", async () => {
     const articles = [
       newsArticle({
         id: "coverage-a",
@@ -278,7 +278,7 @@ describe("worker lifecycle helpers", () => {
       startedAt: "2026-07-12T20:59:59.000Z",
       completedAt: "2026-07-12T21:00:00.000Z",
       analysis: shadow.analysis,
-      legacyBundles: analyses.active.analysis.bundles,
+      publicLegacyBundles: analyses.active.analysis.bundles,
       correctionRevisionSnapshot: 0,
       correctionConflictCount: 0,
     });

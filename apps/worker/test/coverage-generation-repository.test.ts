@@ -146,7 +146,7 @@ describe("coverage generation repository", () => {
       analysis: coverageAnalysisFixture(),
       correctionRevisionSnapshot: 7,
       correctionConflictCount: 1,
-      legacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
+      publicLegacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
         ...bundle,
         id: "coverage:v1:paired",
         matcherVersion: "v1" as const,
@@ -180,19 +180,32 @@ describe("coverage generation repository", () => {
     expect(completedGeneration?.sql).toContain("health_outcome='healthy'");
     expect(completedGeneration?.params).toEqual(expect.arrayContaining([7, 1]));
     const lockIndex = client.queries.findIndex(({ sql }) => sql.includes("pg_advisory_xact_lock"));
-    const legacyIndex = client.queries.findIndex(
+    const publicLegacy = client.queries.find(
       ({ sql, params }) =>
         sql.includes("INSERT INTO coverage_bundles") &&
-        sql.includes("legacy_generation_id") &&
+        sql.includes("NULL,'legacy','v1',$14") &&
+        params?.[0] === "coverage:v1:paired",
+    );
+    expect(publicLegacy?.params?.[13]).toBeNull();
+    const pairedLegacyIndex = client.queries.findIndex(
+      ({ sql, params }) =>
+        sql.includes("INSERT INTO coverage_bundles") &&
+        sql.includes("NULL,'superseded','v1',$14") &&
+        String(params?.[0]).startsWith("coverage:paired:11111111-1111-4111-8111-111111111111:") &&
         params?.includes("11111111-1111-4111-8111-111111111111"),
     );
-    expect(legacyIndex).toBeGreaterThan(lockIndex);
+    expect(pairedLegacyIndex).toBeGreaterThan(lockIndex);
+    const healthQuery = client.queries.find(({ sql }) => sql.includes("AS parity_clean"));
+    expect(healthQuery?.sql).toContain("cb.state='superseded'");
     expect(client.queries.at(-1)?.sql).toBe("COMMIT");
     expect(client.release).toHaveBeenCalledOnce();
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("DELETE FROM coverage_bundle_generations"),
       ["2026-07-12T21:00:00.000Z"],
     );
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining("paired.state='superseded'"), [
+      "2026-07-12T21:00:00.000Z",
+    ]);
   });
 
   it("rolls back and records failure without superseding the prior projection", async () => {
@@ -207,7 +220,7 @@ describe("coverage generation repository", () => {
         startedAt: "2026-07-12T20:59:00.000Z",
         completedAt: "2026-07-12T21:00:00.000Z",
         analysis: coverageAnalysisFixture(),
-        legacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
+        publicLegacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
           ...bundle,
           id: "coverage:v1:paired",
           matcherVersion: "v1" as const,
@@ -256,7 +269,7 @@ describe("coverage generation repository", () => {
         startedAt: "2026-07-12T20:59:00.000Z",
         completedAt: "2026-07-12T21:00:00.000Z",
         analysis: coverageAnalysisFixture(),
-        legacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
+        publicLegacyBundles: coverageAnalysisFixture().bundles.map((bundle) => ({
           ...bundle,
           id: "coverage:v1:paired",
           matcherVersion: "v1" as const,
@@ -310,7 +323,7 @@ describe("coverage generation repository", () => {
           startedAt: "2026-07-12T20:59:00.000Z",
           completedAt: "2026-07-12T21:00:00.000Z",
           analysis,
-          legacyBundles: [],
+          publicLegacyBundles: [],
           activeVolumeGuard: {
             minimumArticleCount: 1,
             minimumPreviousRatio: 0.5,

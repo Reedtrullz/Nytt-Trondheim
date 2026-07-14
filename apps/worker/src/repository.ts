@@ -44,7 +44,7 @@ export interface PersistCoverageGenerationInput {
   startedAt: string;
   completedAt: string;
   analysis: ArticleCoverageAnalysis;
-  legacyBundles: ArticleCoverageBundleDecision[];
+  publicLegacyBundles: ArticleCoverageBundleDecision[];
   correctionRevisionSnapshot?: number;
   correctionConflictCount?: number;
   activeVolumeGuard?: {
@@ -137,6 +137,39 @@ async function upsertLegacyCoverageBundles(
      SET legacy_revision=legacy_revision+1, updated_at=now()
      WHERE projection='active'`,
   );
+}
+
+async function insertPairedLegacyCoverageBundles(
+  queryable: Queryable,
+  bundles: ArticleCoverageBundleDecision[],
+  seenAt: string,
+  generationId: string,
+): Promise<void> {
+  for (const bundle of bundles) {
+    await queryable.query(
+      `INSERT INTO coverage_bundles
+        (id, kind, confidence, reason, generated_at, last_seen_at, primary_article_id,
+         member_article_ids, source_ids, source_labels, signals, near_misses, payload,
+         generation_id, state, matcher_version, legacy_generation_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,'superseded','v1',$14)`,
+      [
+        `coverage:paired:${generationId}:${bundle.id}`,
+        bundle.kind,
+        bundle.confidence,
+        bundle.reason,
+        bundle.generatedAt,
+        seenAt,
+        bundle.primaryArticleId,
+        bundle.memberArticleIds,
+        bundle.sourceIds,
+        bundle.sourceLabels,
+        JSON.stringify(bundle.signals),
+        JSON.stringify(bundle.nearMisses),
+        JSON.stringify(bundle),
+        generationId,
+      ],
+    );
+  }
 }
 
 type CoverageBundleIdentity = {
@@ -443,9 +476,30 @@ export class WorkerRepository {
         const generationId = generation.rows[0]?.id;
         if (!generationId) throw new Error("Coverage generation insert returned no id");
 
+        for (const bundle of input.analysis.bundles) {
+          if (bundle.memberArticleIds.length < 2) {
+            throw new Error(`Coverage bundle ${bundle.id} has fewer than two members`);
+          }
+          if (!bundle.memberArticleIds.includes(bundle.primaryArticleId)) {
+            throw new Error(`Coverage bundle ${bundle.id} has no primary member`);
+          }
+          if (!bundle.matchConfidence) {
+            throw new Error(`Coverage bundle ${bundle.id} has no match confidence`);
+          }
+        }
+
+        // Keep the user-facing v1 projection independent from the legacy-shaped serialization
+        // used to prove that the normalized v2 rows round-trip without loss. Matcher changes are
+        // owner-review diagnostics, not storage-parity failures.
         await upsertLegacyCoverageBundles(
           client,
-          input.legacyBundles,
+          input.publicLegacyBundles,
+          input.completedAt,
+          null,
+        );
+        await insertPairedLegacyCoverageBundles(
+          client,
+          input.analysis.bundles,
           input.completedAt,
           generationId,
         );
@@ -467,15 +521,6 @@ export class WorkerRepository {
           );
         }
         for (const bundle of input.analysis.bundles) {
-          if (bundle.memberArticleIds.length < 2) {
-            throw new Error(`Coverage bundle ${bundle.id} has fewer than two members`);
-          }
-          if (!bundle.memberArticleIds.includes(bundle.primaryArticleId)) {
-            throw new Error(`Coverage bundle ${bundle.id} has no primary member`);
-          }
-          if (!bundle.matchConfidence) {
-            throw new Error(`Coverage bundle ${bundle.id} has no match confidence`);
-          }
           if (bundle.memberArticleIds.some((id) => !storedIds.has(id))) {
             throw new Error(`Coverage bundle ${bundle.id} references an unstored article`);
           }
@@ -667,7 +712,8 @@ export class WorkerRepository {
              SELECT ARRAY(SELECT DISTINCT unnest(cb.member_article_ids) ORDER BY 1) AS members,
                     cb.primary_article_id
              FROM coverage_bundles cb
-             WHERE cb.legacy_generation_id=$1 AND cb.state='legacy' AND cb.matcher_version='v1'
+             WHERE cb.legacy_generation_id=$1 AND cb.state='superseded'
+               AND cb.matcher_version='v1'
            ), normalized AS (
              SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) AS members,
                     cbv.primary_article_id
@@ -786,17 +832,28 @@ export class WorkerRepository {
 
   async pruneCoverageGenerations(now: string): Promise<void> {
     await this.pool.query(
-      `DELETE FROM coverage_bundle_generations
-       WHERE status = 'completed'
-         AND completed_at < $1::timestamptz - interval '30 days'
-         AND id NOT IN (
-           SELECT generation_id
-           FROM coverage_bundles
-           WHERE state IN ('active', 'shadow') AND generation_id IS NOT NULL
-         )
-         AND id NOT IN (
-           SELECT generation_id FROM coverage_bundle_corrections
-         )`,
+      `WITH prunable AS MATERIALIZED (
+         SELECT id
+         FROM coverage_bundle_generations
+         WHERE status = 'completed'
+           AND completed_at < $1::timestamptz - interval '30 days'
+           AND id NOT IN (
+             SELECT generation_id
+             FROM coverage_bundles
+             WHERE state IN ('active', 'shadow') AND generation_id IS NOT NULL
+           )
+           AND id NOT IN (
+             SELECT generation_id FROM coverage_bundle_corrections
+           )
+       ), deleted_paired AS (
+         DELETE FROM coverage_bundles paired
+         USING prunable
+         WHERE paired.state='superseded' AND paired.matcher_version='v1'
+           AND paired.legacy_generation_id=prunable.id
+       )
+       DELETE FROM coverage_bundle_generations generation
+       USING prunable
+       WHERE generation.id=prunable.id`,
       [now],
     );
   }

@@ -65,7 +65,7 @@ async function persistActiveGeneration(input: {
     startedAt: new Date(Date.parse(input.completedAt) - 1_000).toISOString(),
     completedAt: input.completedAt,
     analysis,
-    legacyBundles,
+    publicLegacyBundles: legacyBundles,
     activeVolumeGuard: {
       minimumArticleCount: 1,
       minimumPreviousRatio: 0.5,
@@ -137,7 +137,7 @@ try {
         legacy_generation_id)
      VALUES
        ('ci-pgstore-legacy','incident','high','Paired legacy snapshot',$2,$2,$3,$4,$5,$6,
-        '{}'::jsonb,'legacy','v1',$1)`,
+        '{}'::jsonb,'superseded','v1',$1)`,
     [
       generationId,
       "2026-07-13T08:02:00.000Z",
@@ -192,7 +192,7 @@ try {
       startedAt: "2026-07-13T08:02:30.000Z",
       completedAt: "2026-07-13T08:03:00.000Z",
       analysis: invalidV2Analysis,
-      legacyBundles: [legacyMutation],
+      publicLegacyBundles: [legacyMutation],
     }),
     /fewer than two members/,
   );
@@ -367,7 +367,7 @@ try {
        ('ci-pgstore-reused','incident','high','Current reused stable row',$2,$2,$3,$4,$5,$6,
         '{}'::jsonb,$1,'shadow','v2','strong',0.9,'Current reused stable row',$2,NULL),
        ('ci-pgstore-reused-legacy-old','incident','high','Old paired legacy',$7,$7,$3,$8,$9,$10,
-        '{}'::jsonb,NULL,'legacy','v1',NULL,NULL,NULL,NULL,$11)`,
+        '{}'::jsonb,NULL,'superseded','v1',NULL,NULL,NULL,NULL,$11)`,
     [
       currentShadowGenerationId,
       "2026-07-13T08:05:00.000Z",
@@ -487,7 +487,9 @@ try {
     `SELECT id::text FROM coverage_bundle_generations WHERE is_current`,
   );
   const dirtyAnalysis: ArticleCoverageAnalysis = {
-    articles: [articleA, articleB],
+    // The duplicate snapshot identity forces the generation/article count integrity guard to fail
+    // without conflating an intentional v1/v2 matcher difference with storage parity.
+    articles: [articleA, articleB, articleA],
     bundles: [
       {
         id: "ci-dirty-candidate-v2",
@@ -535,7 +537,7 @@ try {
       startedAt: "2026-07-13T08:06:59.000Z",
       completedAt: "2026-07-13T08:07:00.000Z",
       analysis: dirtyAnalysis,
-      legacyBundles: [dirtyLegacy],
+      publicLegacyBundles: [dirtyLegacy],
     }),
     /failed parity or integrity validation/,
   );
@@ -729,8 +731,9 @@ try {
   const legacy = await store.listCoverageBundles({ projection: "legacy", limit: 20 });
   assert.equal(
     legacy.items.some(({ id }) => id === "ci-pgstore-legacy"),
-    true,
+    false,
   );
+  assert.equal(legacy.items.length > 0, true);
   console.log(
     `coverage worker atomicity, dirty-candidate quarantine, current-generation corrections, ` +
       `and bounded projection performance smoke passed (${Math.round(elapsedMs)}ms, ` +
