@@ -8,6 +8,8 @@ export type ArticleIncidentSubtype =
   | "vegetation_fire"
   | "construction_fire"
   | "cooking_smoke"
+  | "storage_burglary"
+  | "shop_theft"
   | "traffic_collision"
   | "public_order"
   | "threat_or_violence"
@@ -49,6 +51,7 @@ export type PositiveIncidentEvidence =
   | "mentioned_specific_place"
   | "shared_named_entity"
   | "shared_fatal_traffic_fingerprint"
+  | "shared_property_crime_event"
   | "shared_city_incident_fingerprint"
   | "shared_exact_event_fingerprint"
   | "compatible_incident_subtype";
@@ -254,6 +257,10 @@ export const entityBackedNotificationFollowUpPolicy = {
   windowMs: 24 * 60 * 60 * 1000,
 } as const;
 
+export const propertyCrimeEventPolicy = {
+  windowMs: 3 * 60 * 60 * 1000,
+} as const;
+
 interface CityIncidentFingerprintRule {
   windowMs: number;
   minBodyOverlap: number;
@@ -261,7 +268,28 @@ interface CityIncidentFingerprintRule {
   requiredSharedTokenFamilies: RegExp[];
 }
 
+const storageUnitPattern =
+  /(?:^|[^\p{L}\p{N}_])(?:sykkel|lager|butikk)?bod(?:en|er|ene)?(?![\p{L}\p{N}_])/u;
+
 const cityIncidentFingerprintRules = new Map<string, CityIncidentFingerprintRule>([
+  [
+    "property:storage-burglary",
+    {
+      windowMs: 3 * 60 * 60 * 1000,
+      minBodyOverlap: 3,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\bsykl\w*\b/u, /\bsamei\w*\b/u],
+    },
+  ],
+  [
+    "property:shop-theft",
+    {
+      windowMs: 2 * 60 * 60 * 1000,
+      minBodyOverlap: 3,
+      minDistinctiveOverlap: 2,
+      requiredSharedTokenFamilies: [/\bfrokost\w*\b/u, /\bingrediens\w*\b/u],
+    },
+  ],
   [
     "fire:construction",
     {
@@ -632,6 +660,17 @@ function hasSharedNamedEntity(left: Article, right: Article): boolean {
 
 export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype {
   const text = normalizedText(article);
+  if (
+    /\b(?:innbrudd\w*|br[øo]t\s+seg\s+inn|brutt\s+seg\s+inn|tyveri\w*|stj(?:e|å|a)l\w*)\b/u.test(
+      text,
+    ) &&
+    storageUnitPattern.test(text)
+  ) {
+    return "storage_burglary";
+  }
+  if (/\b(?:tyveri\w*|tyv\w*|stj(?:e|å|a)l\w*)\b/u.test(text) && /\bbutikk\w*\b/u.test(text)) {
+    return "shop_theft";
+  }
   const hasActiveFire = /\b(?:[\p{L}]+brann(?:en|er)?|brann(?:en|er)?|brant|brenner)\b/u.test(text);
   const hasFireOrSmoke = hasActiveFire || /\brøyk\w*\b/u.test(text);
   if (
@@ -688,6 +727,10 @@ export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype
 function articleCityIncidentFingerprint(article: Article): string | undefined {
   const text = normalizedText(article);
   switch (articleIncidentSubtype(article)) {
+    case "storage_burglary":
+      return "property:storage-burglary";
+    case "shop_theft":
+      return "property:shop-theft";
     case "construction_fire":
       return "fire:construction";
     case "cooking_smoke":
@@ -731,10 +774,206 @@ function subtypePair(left: ArticleIncidentSubtype, right: ArticleIncidentSubtype
   return [left, right].sort().join("\u0000");
 }
 
+type PropertyCrimeEvidenceRelation = "not_applicable" | "compatible" | "unmatched";
+
+const propertyCrimeSubtypes = new Set<ArticleIncidentSubtype>(["shop_theft", "storage_burglary"]);
+
+function hasMixedPropertyCrimeSubtypes(
+  left: ArticleIncidentSubtype,
+  right: ArticleIncidentSubtype,
+): boolean {
+  return subtypePair(left, right) === "shop_theft\u0000storage_burglary";
+}
+
+function articleReportedClockMinutes(article: Article): Set<number> {
+  const minutes = new Set<number>();
+  for (const match of normalizedText(article).matchAll(
+    /(?:^|[^\p{L}\p{N}_])kl(?:okken|\.)?\s*([01]?\d|2[0-3])[.:]([0-5]\d)(?![\p{L}\p{N}_])/giu,
+  )) {
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    minutes.add(hour * 60 + minute);
+  }
+  return minutes;
+}
+
+function hasSharedReportedClockMinute(left: Article, right: Article): boolean {
+  const rightMinutes = articleReportedClockMinutes(right);
+  return [...articleReportedClockMinutes(left)].some((minute) => rightMinutes.has(minute));
+}
+
+const propertyCrimeDetailFamilyPatterns: Array<[string, RegExp]> = [
+  ["bicycle", /(?:^|[^\p{L}\p{N}_])syk(?:kel|l)\w*/u],
+  ["housing-association", /(?:^|[^\p{L}\p{N}_])(?:samei|borettslag)\w*/u],
+  ["breakfast-purpose", /(?:^|[^\p{L}\p{N}_])(?:frokost|ingrediens)\w*/u],
+  [
+    "electronics",
+    /(?:^|[^\p{L}\p{N}_])(?:datamaskin|elektronikk|laptop|mobiltelefon|nettbrett|pc)(?![\p{L}\p{N}_])/u,
+  ],
+  ["jewelry", /(?:^|[^\p{L}\p{N}_])(?:gullsmed|smykk)\w*/u],
+  ["cash", /(?:^|[^\p{L}\p{N}_])(?:kontant|penger)\w*/u],
+  ["tools", /(?:^|[^\p{L}\p{N}_])verktøy\w*/u],
+  ["clothing", /(?:^|[^\p{L}\p{N}_])(?:klær|klesplagg)\w*/u],
+  ["medication", /(?:^|[^\p{L}\p{N}_])(?:legemiddel|medisin)\w*/u],
+  [
+    "alcohol-or-tobacco",
+    /(?:^|[^\p{L}\p{N}_])(?:alkohol|sigarett|tobakk|vin|øl)(?![\p{L}\p{N}_])/u,
+  ],
+];
+
+function propertyCrimeDetailFamilies(article: Article): Set<string> {
+  const text = normalizedText(article);
+  const families = new Set(
+    propertyCrimeDetailFamilyPatterns.flatMap(([family, pattern]) =>
+      pattern.test(text) ? [family] : [],
+    ),
+  );
+  for (const match of text.matchAll(
+    /(?:^|[^\p{L}\p{N}_])([1-9]\d)\s*[-–]?\s*(?:årene|åring)(?![\p{L}\p{N}_])/gu,
+  )) {
+    families.add(`age:${match[1]}`);
+  }
+  return families;
+}
+
+function sharedPropertyCrimeDetailFamilies(left: Article, right: Article): Set<string> {
+  const rightDetails = propertyCrimeDetailFamilies(right);
+  return new Set(
+    [...propertyCrimeDetailFamilies(left)].filter((detail) => rightDetails.has(detail)),
+  );
+}
+
+function hasExplicitSharedPropertyCrimeIdentity(
+  left: Article,
+  right: Article,
+  timeDistanceMs: number,
+): boolean {
+  if (!Number.isFinite(timeDistanceMs)) return false;
+  if (
+    left.situationId &&
+    left.situationId === right.situationId &&
+    timeDistanceMs <= officialSituationWindowMs
+  ) {
+    return true;
+  }
+  if (left.url.length > 0 && left.url === right.url && timeDistanceMs <= nearDuplicateWindowMs) {
+    return true;
+  }
+  if (sharedExactEventFingerprints(left, right).length > 0) return true;
+  return Boolean(
+    left.source !== right.source &&
+    timeDistanceMs <= nearDuplicateWindowMs &&
+    normalizeText(left.title).length > 0 &&
+    normalizeText(left.title) === normalizeText(right.title) &&
+    normalizeText(left.excerpt).length > 0 &&
+    normalizeText(left.excerpt) === normalizeText(right.excerpt),
+  );
+}
+
+function propertyCrimeEvidenceRelation(
+  left: Article,
+  right: Article,
+  leftSubtype: ArticleIncidentSubtype,
+  rightSubtype: ArticleIncidentSubtype,
+  timeDistanceMs: number,
+): PropertyCrimeEvidenceRelation {
+  if (!propertyCrimeSubtypes.has(leftSubtype) || !propertyCrimeSubtypes.has(rightSubtype)) {
+    return "not_applicable";
+  }
+
+  if (hasExplicitSharedPropertyCrimeIdentity(left, right, timeDistanceMs)) return "compatible";
+
+  const sameSubtype = leftSubtype === rightSubtype;
+  // Same-source updates may still enter one bundle through independently corroborated
+  // cross-source edges, but their generic wording is not a direct event identity signal.
+  if (sameSubtype && left.source === right.source) return "not_applicable";
+
+  if (
+    left.source === right.source ||
+    !Number.isFinite(timeDistanceMs) ||
+    timeDistanceMs > propertyCrimeEventPolicy.windowMs ||
+    hasConflictingSpecificPlaces(left, right)
+  ) {
+    return "unmatched";
+  }
+
+  const sharedPlaceEvidence =
+    hasSharedSpecificPlace(left, right) || hasSpecificPlaceMention(left, right);
+  const sharedClock = hasSharedReportedClockMinute(left, right);
+  const sharedEntity = hasSharedNamedEntity(left, right);
+  const sharedDetailCount = sharedPropertyCrimeDetailFamilies(left, right).size;
+  if (
+    (sharedPlaceEvidence && sharedClock) ||
+    ((sharedPlaceEvidence || sharedEntity) && sharedDetailCount >= 1) ||
+    (sharedClock && sharedDetailCount >= 1)
+  ) {
+    return "compatible";
+  }
+
+  if (sameSubtype) {
+    const leftFingerprint = articleCityIncidentFingerprint(left);
+    const rightFingerprint = articleCityIncidentFingerprint(right);
+    const body = tokenSimilarity(articleBodyTokens(left), articleBodyTokens(right));
+    const distinctive = tokenSimilarity(
+      articleDistinctiveIncidentTokens(left),
+      articleDistinctiveIncidentTokens(right),
+    );
+    if (
+      eligibleSharedCityIncidentFingerprint(
+        left,
+        right,
+        leftFingerprint && leftFingerprint === rightFingerprint ? leftFingerprint : undefined,
+        timeDistanceMs,
+        body.overlap,
+        distinctive.overlap,
+      )
+    ) {
+      return "compatible";
+    }
+  }
+  return "unmatched";
+}
+
+export function isPropertyCrimeCoveragePair(left: Article, right: Article): boolean {
+  return (
+    propertyCrimeSubtypes.has(articleIncidentSubtype(left)) &&
+    propertyCrimeSubtypes.has(articleIncidentSubtype(right))
+  );
+}
+
+export function isMixedPropertyCrimeCoveragePair(left: Article, right: Article): boolean {
+  return hasMixedPropertyCrimeSubtypes(articleIncidentSubtype(left), articleIncidentSubtype(right));
+}
+
+export function isPropertyCrimeEventMatch(left: Article, right: Article): boolean {
+  return (
+    propertyCrimeEvidenceRelation(
+      left,
+      right,
+      articleIncidentSubtype(left),
+      articleIncidentSubtype(right),
+      Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt)),
+    ) === "compatible"
+  );
+}
+
+export function propertyCrimeEvidenceConflicts(left: Article, right: Article): boolean {
+  return (
+    propertyCrimeEvidenceRelation(
+      left,
+      right,
+      articleIncidentSubtype(left),
+      articleIncidentSubtype(right),
+      Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt)),
+    ) === "unmatched"
+  );
+}
+
 function subtypesConflict(left: ArticleIncidentSubtype, right: ArticleIncidentSubtype): boolean {
   if (left === "unknown" || right === "unknown" || left === right) return false;
   if (fireSubtypes.has(left) && fireSubtypes.has(right)) return true;
-  return subtypePair(left, right) === "public_order\u0000threat_or_violence";
+  const pair = subtypePair(left, right);
+  return pair === "public_order\u0000threat_or_violence";
 }
 
 function eligibleSharedCityIncidentFingerprint(
@@ -804,6 +1043,13 @@ export function articleCoverageEvidence(
   );
   const titleScore = tokenSimilarity(articleTitleTokens(left), articleTitleTokens(right)).score;
   const timeDistanceMs = Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt));
+  const propertyCrimeRelation = propertyCrimeEvidenceRelation(
+    left,
+    right,
+    leftSubtype,
+    rightSubtype,
+    timeDistanceMs,
+  );
   const fatalTrafficFollowUp = isFatalTrafficIncidentFollowUpWithinDistance(
     left,
     right,
@@ -824,7 +1070,7 @@ export function articleCoverageEvidence(
   if (hasConflictingSpecificPlaces(left, right) && !fatalTrafficFollowUp) {
     conflicts.push({ kind: "specific_place", articleIds, detail: "Ulike spesifikke steder" });
   }
-  if (subtypesConflict(leftSubtype, rightSubtype)) {
+  if (subtypesConflict(leftSubtype, rightSubtype) || propertyCrimeRelation === "unmatched") {
     conflicts.push({
       kind: "incident_subtype",
       articleIds,
@@ -855,13 +1101,19 @@ export function articleCoverageEvidence(
   if (fatalTrafficFollowUp) {
     positiveIncidentEvidence.push("shared_fatal_traffic_fingerprint");
   }
+  if (propertyCrimeRelation === "compatible") {
+    positiveIncidentEvidence.push("shared_property_crime_event");
+  }
   if (sharedCityIncidentFingerprint) {
     positiveIncidentEvidence.push("shared_city_incident_fingerprint");
   }
   if (sharedExactFingerprints.length > 0) {
     positiveIncidentEvidence.push("shared_exact_event_fingerprint");
   }
-  if (subtypesCompatible(leftSubtype, rightSubtype)) {
+  if (
+    (subtypesCompatible(leftSubtype, rightSubtype) && propertyCrimeRelation !== "unmatched") ||
+    propertyCrimeRelation === "compatible"
+  ) {
     positiveIncidentEvidence.push("compatible_incident_subtype");
   }
 
@@ -1126,6 +1378,13 @@ function articlePairSignalsForV2(
       detail: evidence.sharedExactEventFingerprints.join(", "),
     });
   }
+  if (evidence.positiveIncidentEvidence.includes("shared_property_crime_event")) {
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: evidence.articleIds,
+      detail: "property:crime",
+    });
+  }
   const body = { overlap: evidence.sharedBodyTokenCount, score: evidence.bodyScore };
   const sameUrl = left.url.length > 0 && left.url === right.url;
   if (sameUrl) {
@@ -1240,6 +1499,12 @@ function automaticEvidenceEligible(
   highDetailNearDuplicate: boolean,
   detailedExactCrossSourceCopy: boolean,
 ): boolean {
+  if (evidence.positiveIncidentEvidence.includes("shared_property_crime_event")) {
+    return true;
+  }
+  if (isPropertyCrimeCoveragePair(left, right) && !isPropertyCrimeEventMatch(left, right)) {
+    return false;
+  }
   if (evidence.positiveIncidentEvidence.includes("shared_exact_event_fingerprint")) {
     return true;
   }
@@ -1350,6 +1615,11 @@ export function articleCoverageEdge(
   const subtypeScore = evidence.positiveIncidentEvidence.includes("compatible_incident_subtype")
     ? 0.25
     : 0;
+  const propertyCrimeScore = evidence.positiveIncidentEvidence.includes(
+    "shared_property_crime_event",
+  )
+    ? 0.4
+    : 0;
   const cityFingerprintScore = cityFingerprintEligible(left, right, evidence) ? 0.35 : 0;
   const fatalTrafficScore = evidence.positiveIncidentEvidence.includes(
     "shared_fatal_traffic_fingerprint",
@@ -1376,6 +1646,7 @@ export function articleCoverageEdge(
       placeScore +
       entityScore +
       subtypeScore +
+      propertyCrimeScore +
       cityFingerprintScore +
       fatalTrafficScore +
       exactEventScore +
@@ -1385,7 +1656,7 @@ export function articleCoverageEdge(
       textScore,
   );
 
-  if (signals.length === 0 && score < 0.35) return undefined;
+  if (signals.length === 0 && score < 0.35 && !hasBlockingConflict) return undefined;
   let tier: ArticleCoverageMatchTier = "weak";
   if (
     !hasBlockingConflict &&

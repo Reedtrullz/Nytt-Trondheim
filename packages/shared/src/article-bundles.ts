@@ -19,6 +19,9 @@ import {
   isEntityBackedNotificationFailureFollowUp,
   isFatalTrafficIncidentFollowUp,
   isHighDetailCrossSourceNearDuplicate,
+  isPropertyCrimeCoveragePair,
+  isPropertyCrimeEventMatch,
+  propertyCrimeEvidenceConflicts,
   sharedExactEventFingerprints,
 } from "./article-coverage-evidence.js";
 import type {
@@ -742,9 +745,10 @@ function compatibleDifferentSituationSignal(
 
 function articlesConflict(left: Article, right: Article): boolean {
   if (isFatalTrafficIncidentFollowUp(left, right)) return false;
+  if (propertyCrimeEvidenceConflicts(left, right)) return true;
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
     if (compatibleDifferentSituationSignal(left, right)) return false;
-    return !coverageBundlesCompatible(left, right);
+    return true;
   }
   return hasConflictingSpecificPlaces(left, right) && hasSharedIncidentSignal(left, right);
 }
@@ -832,14 +836,6 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
   if (left.situationId && right.situationId) {
     const compatibleSignal = compatibleDifferentSituationSignal(left, right);
     if (compatibleSignal) return [...signals, compatibleSignal];
-    if (coverageBundlesCompatible(left, right)) {
-      signals.push({
-        kind: "persisted_bundle",
-        articleIds: [left.id, right.id],
-        detail: left.coverageBundle?.id,
-      });
-      return signals;
-    }
     return [];
   }
   if (isFatalTrafficIncidentFollowUp(left, right)) {
@@ -879,13 +875,22 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
       },
     ];
   }
-  if (coverageBundlesCompatible(left, right)) {
-    signals.push({
-      kind: "persisted_bundle",
-      articleIds: [left.id, right.id],
-      detail: left.coverageBundle?.id,
-    });
-    return signals;
+  if (isPropertyCrimeCoveragePair(left, right)) {
+    if (propertyCrimeEvidenceConflicts(left, right)) return [];
+    if (isPropertyCrimeEventMatch(left, right)) {
+      const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
+      return [
+        ...signals,
+        {
+          kind: "cross_source_incident",
+          articleIds: [left.id, right.id],
+          detail: "property:crime",
+          overlap: body.overlap,
+          score: body.score,
+        },
+      ];
+    }
+    return [];
   }
   if (publishedDistanceMs(left, right) > maxGroupAgeMs) return [];
 
@@ -1146,7 +1151,9 @@ export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
     });
   });
 
-  return groups.sort((left, right) => sortArticles(left.primary, right.primary));
+  return normalizeHomeGroupsForServing(
+    groups.sort((left, right) => sortArticles(left.primary, right.primary)),
+  );
 }
 
 export function cityPulseStoryFromGroup(group: HomeArticleGroup): CityPulseStory {
@@ -1169,56 +1176,11 @@ export function buildCityPulseStories(articles: Article[]): CityPulseStory[] {
   return groupHomeArticles(articles).map(cityPulseStoryFromGroup);
 }
 
-function coverageBundlesCompatible(left: Article, right: Article): boolean {
-  const bundleId = left.coverageBundle?.id;
-  if (!bundleId || bundleId !== right.coverageBundle?.id) return false;
-  if (bundleId.startsWith("coverage:situation:")) return true;
-  if (publishedDistanceMs(left, right) > maxGroupAgeMs) return false;
-  return sameBroadCategory(left, right) || left.coverageBundle?.kind === right.coverageBundle?.kind;
-}
-
 function stableBundleArticleId(articles: Article[]): string {
   return [...articles].sort(
     (left, right) =>
       left.publishedAt.localeCompare(right.publishedAt) || left.id.localeCompare(right.id),
   )[0]!.id;
-}
-
-function reusableCoverageBundleId(articles: Article[]): string | undefined {
-  const candidates = new Map<
-    string,
-    { id: string; generatedAt: string; memberCount: number; articles: Article[] }
-  >();
-
-  for (const article of articles) {
-    const bundle = article.coverageBundle;
-    if (!bundle?.id || bundle.id.startsWith("coverage:situation:")) continue;
-    const candidate = candidates.get(bundle.id) ?? {
-      id: bundle.id,
-      generatedAt: bundle.generatedAt,
-      memberCount: 0,
-      articles: [],
-    };
-    candidate.memberCount += 1;
-    candidate.articles.push(article);
-    if (bundle.generatedAt < candidate.generatedAt) candidate.generatedAt = bundle.generatedAt;
-    candidates.set(bundle.id, candidate);
-  }
-
-  return [...candidates.values()]
-    .filter((candidate) =>
-      candidate.articles.every((left, leftIndex) =>
-        candidate.articles
-          .slice(leftIndex + 1)
-          .every((right) => !coverageBundlesStale(left, right)),
-      ),
-    )
-    .sort(
-      (left, right) =>
-        right.memberCount - left.memberCount ||
-        left.generatedAt.localeCompare(right.generatedAt) ||
-        left.id.localeCompare(right.id),
-    )[0]?.id;
 }
 
 function hashBundleParts(parts: string[]): string {
@@ -1229,6 +1191,183 @@ function hashBundleParts(parts: string[]): string {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(36).padStart(7, "0");
+}
+
+function groupMembershipKey(group: HomeArticleGroup): string {
+  return group.articles
+    .map(({ id }) => id)
+    .sort()
+    .join("\u0000");
+}
+
+function naturalCoverageBundleId(articles: Article[]): string {
+  const situationId = articles.find((article) => article.situationId)?.situationId;
+  if (situationId) return `coverage:situation:${situationId}`;
+  return `coverage:${hashBundleParts([stableBundleArticleId(articles)])}`;
+}
+
+function remappedCoverageBundleId(
+  naturalId: string,
+  memberArticleIds: string[],
+  attempt: number,
+): string {
+  return `coverage:${hashBundleParts([
+    "split",
+    naturalId,
+    ...memberArticleIds.sort(),
+    String(attempt),
+  ])}`;
+}
+
+function coverageBundleIdsForGroups(
+  groups: HomeArticleGroup[],
+  options: { preservePersistedIdsForSituationGroups?: boolean } = {},
+): Map<string, string> {
+  const candidates = groups
+    .filter(({ articles }) => articles.length >= 2)
+    .map((group) => {
+      const claims = new Map<string, { articleCount: number; articles: Article[] }>();
+      for (const article of group.articles) {
+        const id = article.coverageBundle?.id;
+        if (!id) continue;
+        const claim = claims.get(id) ?? { articleCount: 0, articles: [] };
+        claim.articleCount += 1;
+        claim.articles.push(article);
+        claims.set(id, claim);
+      }
+      return {
+        group,
+        groupKey: groupMembershipKey(group),
+        naturalId: naturalCoverageBundleId(group.articles),
+        claims: [...claims].filter(([, claim]) =>
+          claim.articles.every((left, leftIndex) =>
+            claim.articles
+              .slice(leftIndex + 1)
+              .every((right) => !coverageBundlesStale(left, right)),
+          ),
+        ),
+      };
+    });
+  const previousIds = new Set(candidates.flatMap(({ claims }) => claims.map(([id]) => id)));
+  const assignedIds = new Map<string, string>();
+  const usedIds = new Set<string>();
+
+  if (!options.preservePersistedIdsForSituationGroups) {
+    for (const candidate of [...candidates]
+      .filter(({ naturalId }) => naturalId.startsWith("coverage:situation:"))
+      .sort((left, right) => left.groupKey.localeCompare(right.groupKey))) {
+      let id = candidate.naturalId;
+      let attempt = 0;
+      while (usedIds.has(id)) {
+        id = remappedCoverageBundleId(
+          candidate.naturalId,
+          candidate.group.articles.map(({ id: articleId }) => articleId),
+          attempt,
+        );
+        attempt += 1;
+      }
+      assignedIds.set(candidate.groupKey, id);
+      usedIds.add(id);
+    }
+  }
+
+  const claimOptions = candidates.flatMap((candidate) =>
+    candidate.claims.map(([previousId, claim]) => ({
+      candidate,
+      previousId,
+      sharedCount: claim.articleCount,
+    })),
+  );
+  const availablePreviousIds = new Set([...previousIds].filter((id) => !usedIds.has(id)));
+  const assign = (groupKey: string, previousId: string) => {
+    if (
+      assignedIds.has(groupKey) ||
+      usedIds.has(previousId) ||
+      !availablePreviousIds.has(previousId)
+    ) {
+      return;
+    }
+    assignedIds.set(groupKey, previousId);
+    usedIds.add(previousId);
+    availablePreviousIds.delete(previousId);
+  };
+
+  [...claimOptions]
+    .filter(({ candidate, previousId }) => candidate.naturalId === previousId)
+    .sort((left, right) => left.candidate.groupKey.localeCompare(right.candidate.groupKey))
+    .forEach(({ candidate, previousId }) => assign(candidate.groupKey, previousId));
+  [...claimOptions]
+    .sort(
+      (left, right) =>
+        right.sharedCount - left.sharedCount ||
+        left.previousId.localeCompare(right.previousId) ||
+        left.candidate.groupKey.localeCompare(right.candidate.groupKey),
+    )
+    .forEach(({ candidate, previousId }) => assign(candidate.groupKey, previousId));
+
+  for (const candidate of [...candidates].sort((left, right) =>
+    left.groupKey.localeCompare(right.groupKey),
+  )) {
+    if (assignedIds.has(candidate.groupKey)) continue;
+    let id = candidate.naturalId;
+    let attempt = 0;
+    while (usedIds.has(id) || previousIds.has(id)) {
+      id = remappedCoverageBundleId(
+        candidate.naturalId,
+        candidate.group.articles.map(({ id: articleId }) => articleId),
+        attempt,
+      );
+      attempt += 1;
+    }
+    assignedIds.set(candidate.groupKey, id);
+    usedIds.add(id);
+  }
+
+  if (new Set(assignedIds.values()).size !== assignedIds.size) {
+    throw new Error("Coverage bundle identity assignment produced duplicate IDs");
+  }
+  return assignedIds;
+}
+
+function normalizeHomeGroupsForServing(groups: HomeArticleGroup[]): HomeArticleGroup[] {
+  const bundleIds = coverageBundleIdsForGroups(groups, {
+    preservePersistedIdsForSituationGroups: true,
+  });
+  return groups.map((group) => {
+    if (group.articles.length === 1) {
+      const article = { ...group.primary, coverageBundle: undefined };
+      return {
+        ...group,
+        id: article.situationId ? `situation:${article.situationId}` : `article:${article.id}`,
+        primary: article,
+        articles: [article],
+        bundle: undefined,
+      };
+    }
+
+    const persistedBundle =
+      group.bundle ?? group.articles.find(({ coverageBundle }) => coverageBundle)?.coverageBundle;
+    if (!persistedBundle) return group;
+    const assignedId = bundleIds.get(groupMembershipKey(group));
+    if (!assignedId) {
+      throw new Error("Persisted coverage group is missing an assigned identity");
+    }
+    const articles = group.articles.map((article) =>
+      article.coverageBundle
+        ? {
+            ...article,
+            coverageBundle: { ...article.coverageBundle, id: assignedId },
+          }
+        : article,
+    );
+    return {
+      ...group,
+      id: assignedId,
+      primary: articles.find(({ id }) => id === group.primary.id) ?? articles[0]!,
+      articles,
+      bundle: { ...persistedBundle, id: assignedId },
+    };
+  });
 }
 
 function groupKind(articles: Article[]): ArticleCoverageBundleKind {
@@ -1257,23 +1396,16 @@ function groupReason(kind: ArticleCoverageBundleKind, articles: Article[]): stri
   return "Oppdateringer fra samme kilde";
 }
 
-function coverageBundleId(articles: Article[]): string {
-  const situationId = articles.find((article) => article.situationId)?.situationId;
-  if (situationId) return `coverage:situation:${situationId}`;
-  const reusableId = reusableCoverageBundleId(articles);
-  if (reusableId) return reusableId;
-  const anchor = stableBundleArticleId(articles);
-  return `coverage:${hashBundleParts([anchor])}`;
-}
-
 function coverageBundleForGroup(
   articles: Article[],
   generatedAt: string,
+  id: string | undefined,
 ): ArticleCoverageBundle | undefined {
   if (articles.length < 2) return undefined;
+  if (!id) throw new Error("Coverage bundle group is missing an assigned identity");
   const kind = groupKind(articles);
   return {
-    id: coverageBundleId(articles),
+    id,
     kind,
     confidence: groupConfidence(articles),
     reason: groupReason(kind, articles),
@@ -1293,8 +1425,9 @@ function coverageDecisionForGroup(
   group: HomeArticleGroup,
   generatedAt: string,
   nearMisses: ArticleCoverageNearMiss[],
+  id: string | undefined,
 ): ArticleCoverageBundleDecision | undefined {
-  const bundle = coverageBundleForGroup(group.articles, generatedAt);
+  const bundle = coverageBundleForGroup(group.articles, generatedAt, id);
   if (!bundle) return undefined;
   const groupArticleIds = new Set(group.articles.map((article) => article.id));
   const signals = group.articles.flatMap((left, leftIndex) =>
@@ -1329,8 +1462,15 @@ export function analyzeArticleCoverage(
 ): ArticleCoverageAnalysis {
   const groups = groupHomeArticles(articles);
   const nearMisses = allNearMisses(articles);
+  const bundleIds = coverageBundleIdsForGroups(groups);
   const bundles = groups.flatMap(
-    (group) => coverageDecisionForGroup(group, generatedAt, nearMisses) ?? [],
+    (group) =>
+      coverageDecisionForGroup(
+        group,
+        generatedAt,
+        nearMisses,
+        bundleIds.get(groupMembershipKey(group)),
+      ) ?? [],
   );
   const bundleByArticleId = new Map<string, ArticleCoverageBundle>();
 
@@ -1494,7 +1634,18 @@ export function analyzeArticleCoverageV2(
   const edges = [...acceptedEdges, ...correctionConflicts, ...reviewableEdges].sort((left, right) =>
     left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")),
   );
-  const groups = clusterArticlesByCoverageEdges(articles, edges, {
+  const blockingConflictEdges = evaluatedEdges.filter((edge) => edge.conflicts.length > 0);
+  const clusteringEdges = [
+    ...new Map(
+      [...acceptedEdges, ...correctionConflicts, ...blockingConflictEdges].map((edge) => [
+        edge.articleIds.join("\u0000"),
+        edge,
+      ]),
+    ).values(),
+  ].sort((left, right) =>
+    left.articleIds.join("\u0000").localeCompare(right.articleIds.join("\u0000")),
+  );
+  const groups = clusterArticlesByCoverageEdges(articles, clusteringEdges, {
     rejectedPairs: options.rejectedPairs ?? [],
   });
   const bundles = groups.flatMap(
@@ -1506,7 +1657,9 @@ export function analyzeArticleCoverageV2(
   return {
     articles: articles.map((article) => {
       const bundle = bundleByArticleId.get(article.id);
-      return bundle ? { ...article, coverageBundle: coverageBundleMetadata(bundle) } : article;
+      return bundle
+        ? { ...article, coverageBundle: coverageBundleMetadata(bundle) }
+        : { ...article, coverageBundle: undefined };
     }),
     bundles,
     nearMisses: [],

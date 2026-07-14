@@ -178,6 +178,20 @@ type CoverageBundleIdentity = {
   memberArticleIds: string[];
 };
 
+function coverageBundleIdentityKey(bundle: CoverageBundleIdentity): string {
+  return `${bundle.id}\u0000${bundle.kind}\u0000${[...bundle.memberArticleIds].sort().join("\u0000")}`;
+}
+
+function remappedCoverageBundleId(bundle: CoverageBundleIdentity, attempt: number): string {
+  const value = `split\u0000${coverageBundleIdentityKey(bundle)}\u0000${attempt}`;
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `coverage:v2:${(hash >>> 0).toString(36).padStart(7, "0")}`;
+}
+
 export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
   candidates: T[],
   previous: CoverageBundleIdentity[],
@@ -190,7 +204,9 @@ export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
   candidates: T[],
   previous: CoverageBundleIdentity[],
 ): T[] {
-  const availablePrevious = new Set(previous.map(({ id }) => id));
+  const previousIds = new Set(previous.map(({ id }) => id));
+  const candidateKeys = candidates.map(coverageBundleIdentityKey);
+  const availablePrevious = new Set(previousIds);
   const assignments = new Map<number, string>();
   const options = candidates
     .flatMap((candidate, candidateIndex) =>
@@ -202,29 +218,80 @@ export function reuseCoverageBundleIds<T extends CoverageBundleIdentity>(
           Math.min(candidate.memberArticleIds.length, prior.memberArticleIds.length) / 2,
         );
         return sharedCount >= threshold
-          ? [{ candidateIndex, previousId: prior.id, sharedCount }]
+          ? [
+              {
+                candidateIndex,
+                candidateKey: candidateKeys[candidateIndex]!,
+                previousId: prior.id,
+                sharedCount,
+              },
+            ]
           : [];
       }),
     )
-    .sort(
-      (left, right) =>
-        right.sharedCount - left.sharedCount ||
-        left.previousId.localeCompare(right.previousId) ||
-        left.candidateIndex - right.candidateIndex,
-    );
+    .sort((left, right) => left.candidateKey.localeCompare(right.candidateKey));
 
-  for (const option of options) {
+  for (const option of options.filter(
+    ({ candidateIndex, previousId }) => candidates[candidateIndex]!.id === previousId,
+  )) {
+    if (assignments.has(option.candidateIndex) || !availablePrevious.has(option.previousId)) {
+      continue;
+    }
+    assignments.set(option.candidateIndex, option.previousId);
+    availablePrevious.delete(option.previousId);
+  }
+
+  for (const option of [...options].sort(
+    (left, right) =>
+      right.sharedCount - left.sharedCount ||
+      left.previousId.localeCompare(right.previousId) ||
+      left.candidateKey.localeCompare(right.candidateKey),
+  )) {
     if (assignments.has(option.candidateIndex) || !availablePrevious.has(option.previousId))
       continue;
     assignments.set(option.candidateIndex, option.previousId);
     availablePrevious.delete(option.previousId);
   }
 
-  return candidates.map((candidate, index) => ({
+  const finalIds = new Map<number, string>();
+  const usedIds = new Set<string>();
+  [...assignments]
+    .sort(([leftIndex], [rightIndex]) =>
+      candidateKeys[leftIndex]!.localeCompare(candidateKeys[rightIndex]!),
+    )
+    .forEach(([candidateIndex, id]) => {
+      finalIds.set(candidateIndex, id);
+      usedIds.add(id);
+    });
+
+  candidates
+    .map((candidate, candidateIndex) => ({
+      candidate,
+      candidateIndex,
+      candidateKey: candidateKeys[candidateIndex]!,
+    }))
+    .filter(({ candidateIndex }) => !finalIds.has(candidateIndex))
+    .sort((left, right) => left.candidateKey.localeCompare(right.candidateKey))
+    .forEach(({ candidate, candidateIndex }) => {
+      let id = candidate.id;
+      let attempt = 0;
+      while (usedIds.has(id) || previousIds.has(id)) {
+        id = remappedCoverageBundleId(candidate, attempt);
+        attempt += 1;
+      }
+      finalIds.set(candidateIndex, id);
+      usedIds.add(id);
+    });
+
+  const remapped = candidates.map((candidate, index) => ({
     ...candidate,
     memberArticleIds: [...candidate.memberArticleIds],
-    id: assignments.get(index) ?? candidate.id,
+    id: finalIds.get(index)!,
   }));
+  if (new Set(remapped.map(({ id }) => id)).size !== remapped.length) {
+    throw new Error("Coverage bundle ID remapping produced duplicate IDs");
+  }
+  return remapped;
 }
 
 function morningBriefStorageId(generatedAt: string): string {
@@ -559,6 +626,11 @@ export class WorkerRepository {
             memberArticleIds,
           })),
         );
+        if (new Set(bundles.map(({ id }) => id)).size !== bundles.length) {
+          throw new Error(
+            "Coverage generation contains duplicate bundle IDs after stable-ID reuse",
+          );
+        }
 
         if (previousGenerationId) {
           await client.query(

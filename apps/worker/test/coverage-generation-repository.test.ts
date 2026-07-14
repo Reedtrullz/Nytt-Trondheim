@@ -362,7 +362,7 @@ describe("coverage generation repository", () => {
         {
           id: "coverage:v2:new-b",
           kind: "incident" as const,
-          memberArticleIds: ["a", "b"],
+          memberArticleIds: ["d", "e"],
         },
       ],
       [
@@ -375,5 +375,87 @@ describe("coverage generation repository", () => {
     );
 
     expect(remapped.map(({ id }) => id)).toEqual(["coverage:v2:stable", "coverage:v2:new-b"]);
+  });
+
+  it("reserves exact natural-id continuity before overlap reuse across split groups", () => {
+    const storage = {
+      id: "coverage:v2:1ixu0fj",
+      kind: "incident" as const,
+      memberArticleIds: [
+        "storage-nidaros-follow-up",
+        "storage-nidaros",
+        "storage-adressa",
+        "storage-nrk",
+        "storage-police",
+      ],
+    };
+    const shop = {
+      id: "coverage:v2:0ffmu4a",
+      kind: "incident" as const,
+      memberArticleIds: ["shop-nidaros", "shop-nrk", "shop-adressa", "shop-police"],
+    };
+    const previous = [
+      {
+        id: "coverage:v2:0ffmu4a",
+        kind: "incident" as const,
+        memberArticleIds: [...storage.memberArticleIds, ...shop.memberArticleIds],
+      },
+    ];
+
+    const remap = (candidates: (typeof storage)[]) =>
+      new Map(
+        reuseCoverageBundleIds(candidates, previous).map(({ id, memberArticleIds }) => [
+          [...memberArticleIds].sort().join("\0"),
+          id,
+        ]),
+      );
+    const forward = remap([storage, shop]);
+    const reversed = remap([shop, storage]);
+
+    expect(reversed).toEqual(forward);
+    expect(new Set(forward.values()).size).toBe(2);
+    expect(forward.get([...storage.memberArticleIds].sort().join("\0"))).toBe(
+      "coverage:v2:1ixu0fj",
+    );
+    expect(forward.get([...shop.memberArticleIds].sort().join("\0"))).toBe("coverage:v2:0ffmu4a");
+  });
+
+  it("assigns a manual prior id once to the strongest-overlap split component", () => {
+    const candidates = [
+      {
+        id: "coverage:v2:storage-natural",
+        kind: "incident" as const,
+        memberArticleIds: ["storage-a", "storage-b", "storage-c", "storage-d", "storage-e"],
+      },
+      {
+        id: "coverage:v2:shop-natural",
+        kind: "incident" as const,
+        memberArticleIds: ["shop-a", "shop-b", "shop-c", "shop-d"],
+      },
+    ];
+    const previous = [
+      {
+        id: "coverage:v2:manual-prior",
+        kind: "incident" as const,
+        memberArticleIds: candidates.flatMap(({ memberArticleIds }) => memberArticleIds),
+      },
+    ];
+    const byMembers = (items: typeof candidates) =>
+      new Map(
+        reuseCoverageBundleIds(items, previous).map(({ id, memberArticleIds }) => [
+          [...memberArticleIds].sort().join("\0"),
+          id,
+        ]),
+      );
+
+    const forward = byMembers(candidates);
+    expect(byMembers([...candidates].reverse())).toEqual(forward);
+    expect(new Set(forward.values()).size).toBe(2);
+    expect(forward.get([...candidates[0]!.memberArticleIds].sort().join("\0"))).toBe(
+      "coverage:v2:manual-prior",
+    );
+    expect(forward.get([...candidates[1]!.memberArticleIds].sort().join("\0"))).toBe(
+      "coverage:v2:shop-natural",
+    );
   });
 });

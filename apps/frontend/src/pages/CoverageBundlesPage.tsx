@@ -109,6 +109,7 @@ const positiveEvidenceLabels: Record<PositiveIncidentEvidence, string> = {
   mentioned_specific_place: "Nevnt spesifikt sted",
   shared_named_entity: "Delt navngitt entitet",
   shared_fatal_traffic_fingerprint: "Delt fingeravtrykk for dødsulykke",
+  shared_property_crime_event: "Delt hendelsesidentitet for vinningskriminalitet",
   shared_city_incident_fingerprint: "Delt hendelsesfingeravtrykk",
   shared_exact_event_fingerprint: "Delt eksakt hendelsesfingeravtrykk",
   compatible_incident_subtype: "Forenlig hendelsestype",
