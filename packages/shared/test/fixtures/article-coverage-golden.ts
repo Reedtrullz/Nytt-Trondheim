@@ -866,4 +866,47 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
     critical: true,
     provenance: "owner-correction",
   },
+  {
+    id: "delayed-regulatory-follow-up-with-dotted-organization",
+    articles: [
+      article("dahls-nidaros", {
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        title: "Varslet ikke om årelang feil: – Vi ser alvorlig på det",
+        excerpt:
+          "E.C. Dahls bryggeri har holdt på i Trondheim siden 1856. Nå får de kraftig refs av myndighetene.",
+        category: "Nyheter",
+        places: ["Lade", "Trondheim"],
+        publishedAt: "2026-07-13T22:06:00.000Z",
+      }),
+      article("dahls-adressa", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Bryggeritabbe hos E.C. Dahls – har ikke renset på flere år",
+        excerpt:
+          "Da renseanlegget sluttet å virke, sa ikke E.C. Dahls ifra. Det reagerer Statsforvalteren på.",
+        category: "Nyheter",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-14T10:17:16.000Z",
+      }),
+      article("dahls-product-news", {
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "E.C. Dahls lanserer nytt sommerøl",
+        excerpt: "Bryggeriet inviterer til smaking av årets nyhet i Trondheim.",
+        category: "Nyheter",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-14T09:30:00.000Z",
+      }),
+    ],
+    expectedSamePairs: [["dahls-nidaros", "dahls-adressa"]],
+    expectedSeparatePairs: [
+      ["dahls-nidaros", "dahls-product-news"],
+      ["dahls-adressa", "dahls-product-news"],
+    ],
+    expectedGroups: [["dahls-nidaros", "dahls-adressa"]],
+    expectedVerifiedGroups: [],
+    critical: true,
+    provenance: "sanitized-production-shape",
+  },
 ];

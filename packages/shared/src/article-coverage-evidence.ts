@@ -250,6 +250,10 @@ export const fatalTrafficFollowUpPolicy = {
   windowMs: 8 * 60 * 60 * 1000,
 } as const;
 
+export const entityBackedNotificationFollowUpPolicy = {
+  windowMs: 24 * 60 * 60 * 1000,
+} as const;
+
 interface CityIncidentFingerprintRule {
   windowMs: number;
   minBodyOverlap: number;
@@ -575,12 +579,15 @@ function hasConflictingSpecificPlaces(left: Article, right: Article): boolean {
 
 function articleNamedEntityTokens(article: Article): string[] {
   const text = `${article.title}. ${article.excerpt}`;
-  const matches = [
+  const dottedOrganizationCandidates = [
+    ...text.matchAll(/\b(?:[\p{Lu}ÆØÅ]\.){2,}\s*[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}\b/gu),
+  ].map((match) => normalizeToken(match[0]));
+  const capitalizedPhraseMatches = [
     ...text.matchAll(
       /\b[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}(?:\s+[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}){0,2}\b/gu,
     ),
   ];
-  const candidates = matches.flatMap((match) => {
+  const capitalizedPhraseCandidates = capitalizedPhraseMatches.flatMap((match) => {
     const candidate = match[0];
     const normalizedCandidate = normalizeToken(candidate);
     const index = match.index ?? 0;
@@ -594,6 +601,7 @@ function articleNamedEntityTokens(article: Article): string[] {
     }
     return [normalizedCandidate];
   });
+  const candidates = [...dottedOrganizationCandidates, ...capitalizedPhraseCandidates];
   const declaredPlaces = new Set(
     [article.location?.label, ...article.places]
       .filter((place): place is string => Boolean(place))
@@ -897,6 +905,36 @@ function sameBroadCategory(left: Article, right: Article): boolean {
   return eventLike.has(left.category) && eventLike.has(right.category);
 }
 
+function hasNotificationFailureLanguage(article: Article): boolean {
+  return /\b(?:varslet?\s+ikke|ikke\s+varslet?|sa\s+ikke\b.{0,80}\bifra|unnlot\s+å\s+(?:varsle|melde)|meldte\s+ikke\s+fra|ikke\s+meldt\s+fra)\b/u.test(
+    normalizedText(article),
+  );
+}
+
+function hasAuthorityResponseLanguage(article: Article): boolean {
+  return /\b(?:alvorlig\w*|kritikk\w*|myndighet\w*|reager\w*|refs\w*|statsforvalter\w*|tilsyn\w*)\b/u.test(
+    normalizedText(article),
+  );
+}
+
+export function isEntityBackedNotificationFailureFollowUp(left: Article, right: Article): boolean {
+  const timeDistanceMs = Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt));
+  return Boolean(
+    left.source !== right.source &&
+    sameBroadCategory(left, right) &&
+    Number.isFinite(timeDistanceMs) &&
+    timeDistanceMs <= entityBackedNotificationFollowUpPolicy.windowMs &&
+    !(left.situationId && right.situationId && left.situationId !== right.situationId) &&
+    !hasConflictingSpecificPlaces(left, right) &&
+    !subtypesConflict(articleIncidentSubtype(left), articleIncidentSubtype(right)) &&
+    hasSharedNamedEntity(left, right) &&
+    hasNotificationFailureLanguage(left) &&
+    hasNotificationFailureLanguage(right) &&
+    hasAuthorityResponseLanguage(left) &&
+    hasAuthorityResponseLanguage(right),
+  );
+}
+
 function trafficCategoriesCompatible(left: Article, right: Article): boolean {
   if (left.category === right.category) return true;
   return (
@@ -1119,6 +1157,13 @@ function articlePairSignalsForV2(
   if (hasSportsTopicMatch(left, right, evidence)) {
     signals.push({ kind: "topical_thread", articleIds: evidence.articleIds });
   }
+  if (isEntityBackedNotificationFailureFollowUp(left, right)) {
+    signals.push({
+      kind: "topical_thread",
+      articleIds: evidence.articleIds,
+      detail: "entity_notification_failure_follow_up",
+    });
+  }
   if (
     left.source !== right.source &&
     sameBroadCategory(left, right) &&
@@ -1225,7 +1270,18 @@ function automaticEvidenceEligible(
   }
   if (cityFingerprintEligible(left, right, evidence)) return true;
   if (kind === "topic") {
-    return hasSignal(signals, "topical_thread") && evidence.timeDistanceMs <= topicalThreadWindowMs;
+    const entityBackedNotificationFollowUp = signals.some(
+      (signal) =>
+        signal.kind === "topical_thread" &&
+        signal.detail === "entity_notification_failure_follow_up",
+    );
+    return (
+      hasSignal(signals, "topical_thread") &&
+      evidence.timeDistanceMs <=
+        (entityBackedNotificationFollowUp
+          ? entityBackedNotificationFollowUpPolicy.windowMs
+          : topicalThreadWindowMs)
+    );
   }
   if (kind === "incident") {
     return (
