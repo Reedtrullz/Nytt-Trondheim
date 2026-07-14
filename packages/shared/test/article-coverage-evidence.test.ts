@@ -43,6 +43,154 @@ describe("v2 pair evidence", () => {
     );
   });
 
+  it("does not count a locality twice as both place and named-entity evidence", () => {
+    const left = article("malvik-property", {
+      source: "malviknytt",
+      sourceLabel: "Malviknytt",
+      title: "Solgt for åtte millioner – Se eiendomsoverdragelsene her",
+      excerpt: "Her er oversikten over de siste eiendomsoverdragelsene i Malvik.",
+      category: "Nyheter",
+      places: ["Malvik"],
+    });
+    const right = article("malvik-business", {
+      source: "malviknytt",
+      sourceLabel: "Malviknytt",
+      title: "Næringslivet blomstrer: Disse startet nye bedrifter i Malvik",
+      excerpt: "Her er oversikten over de nyregistrerte selskapene i Malvik.",
+      category: "Nyheter",
+      places: ["Malvik"],
+      publishedAt: "2026-07-12T20:30:00.000Z",
+    });
+
+    const evidence = articleCoverageEvidence(left, right, "v2");
+    expect(evidence.positiveIncidentEvidence).toContain("shared_specific_place");
+    expect(evidence.positiveIncidentEvidence).not.toContain("shared_named_entity");
+    expect(articleCoverageEdge(left, right)?.tier).toBe("weak");
+  });
+
+  it("keeps unrelated same-area stories weak even inside the place window", () => {
+    const edge = articleCoverageEdge(
+      article("roros-driving", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Fikk melding om «vinglebil»",
+        excerpt: "Politiet kontrollerte en bil ved Haltdalen nær Røros.",
+        category: "Krim",
+        places: ["Røros"],
+      }),
+      article("roros-waffles", {
+        source: "retten",
+        sourceLabel: "Arbeidets Rett",
+        title: "Over 30 år med vafler i Tufta – Nå deler de på dugnaden",
+        excerpt: "Frivillige holder liv i en sommertradisjon på Røros.",
+        category: "Nyheter",
+        places: ["Røros"],
+        publishedAt: "2026-07-12T19:30:00.000Z",
+      }),
+    );
+
+    expect(edge?.tier).toBe("weak");
+  });
+
+  it("does not treat a regional authority as a specific shared place", () => {
+    const evidence = articleCoverageEvidence(
+      article("heim-road", {
+        source: "avisa_st",
+        sourceLabel: "Avisa Sør-Trøndelag",
+        title: "Stenger fylkesvei og innstiller bussruter",
+        excerpt: "Hellandsjøveien i Heim blir stengt i august.",
+        category: "Transport",
+        places: ["Trøndelag", "Trøndelag fylkeskommune"],
+      }),
+      article("hoylandet-road", {
+        source: "ytringen",
+        sourceLabel: "Ytringen",
+        title: "Stenger veien for all trafikk inntil en uke",
+        excerpt: "Skrøyvdalsvegen i Høylandet blir stengt i juli.",
+        category: "Transport",
+        places: ["Trøndelag", "Trøndelag fylkeskommune"],
+        publishedAt: "2026-07-12T19:30:00.000Z",
+      }),
+      "v2",
+    );
+
+    expect(evidence.positiveIncidentEvidence).not.toContain("shared_specific_place");
+    expect(evidence.positiveIncidentEvidence).not.toContain("shared_named_entity");
+  });
+
+  it("separates distinct traffic controls in one municipality", () => {
+    const edge = articleCoverageEdge(
+      article("orkland-night-control", {
+        title: "Trafikkontroll i Orkland",
+        excerpt: "En kontroll i 40-sone ga åtte forelegg og ett førerkortbeslag.",
+        category: "Krim",
+        places: ["Orkland"],
+      }),
+      article("orkland-day-control", {
+        title: "14 fikk bot",
+        excerpt: "En fartskontroll i 80-sone ga 14 forelegg. Høyeste fart var 114 km/t.",
+        category: "Krim",
+        places: ["Orkland"],
+        publishedAt: "2026-07-12T11:20:00.000Z",
+      }),
+    );
+
+    expect(edge?.tier).toBe("weak");
+  });
+
+  it("still admits corroborated cross-source coverage at one place", () => {
+    const edge = articleCoverageEdge(
+      article("pool-local", {
+        source: "innherred",
+        sourceLabel: "Innherred",
+        title: "– Ikke noe fullgodt tilbud",
+        excerpt: "Bassenget i Trønderhallen i Levanger holder stengt etter en rørsprekk.",
+        category: "Nyheter",
+        places: ["Levanger"],
+      }),
+      article("pool-nrk", {
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Sprekk i vannrør stenger svømmehall i Levanger",
+        excerpt: "Trønderhallen holder bassenget stengt på grunn av et ødelagt vannrør.",
+        category: "Nyheter",
+        places: ["Levanger"],
+        publishedAt: "2026-07-12T19:00:00.000Z",
+      }),
+    );
+
+    expect(edge?.tier).toMatch(/strong|moderate/);
+  });
+
+  it("admits a detailed exact cross-source copy despite generic incident wording", () => {
+    const edge = articleCoverageEdge(
+      article("gas-shower-local", {
+        source: "namdalsavisa",
+        sourceLabel: "Namdalsavisa",
+        title: "Gassdusj eksploderte – politiet jakter på årsaken",
+        excerpt:
+          "Politiet er i gang med å finne årsaken til at en gassdusj eksploderte. En kvinne fikk brannskader i ulykka.",
+        category: "Nyheter",
+        places: [],
+      }),
+      article("gas-shower-wire", {
+        source: "t_a",
+        sourceLabel: "Trønder-Avisa",
+        title: "Gassdusj eksploderte – politiet jakter på årsaken",
+        excerpt:
+          "Politiet er i gang med å finne årsaken til at en gassdusj eksploderte. En kvinne fikk brannskader i ulykka.",
+        category: "Nyheter",
+        places: [],
+        publishedAt: "2026-07-12T16:00:00.000Z",
+      }),
+    );
+
+    expect(edge?.signals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "near_duplicate" })]),
+    );
+    expect(edge?.tier).toMatch(/strong|moderate/);
+  });
+
   it("distinguishes construction fire from cooking smoke", () => {
     const evidence = articleCoverageEvidence(
       article("construction", {
@@ -131,12 +279,12 @@ describe("v2 pair evidence", () => {
     const edge = articleCoverageEdge(
       article("fire-a", {
         title: "Brann i anleggsbrakke",
-        excerpt: "Brakke brant i Nærøysund",
+        excerpt: "Sveising antente isolasjon i brakka i Nærøysund",
         places: ["Nærøysund"],
       }),
       article("fire-b", {
         title: "Nødetatene til brakkebrann",
-        excerpt: "Byggeplassen i Nærøysund",
+        excerpt: "Isolasjon tok fyr etter sveising på byggeplassen i Nærøysund",
         places: ["Nærøysund"],
       }),
     );
@@ -242,6 +390,7 @@ describe("v2 pair evidence", () => {
         ...eligibleShape,
         source: "adressa",
         sourceLabel: "Adresseavisen",
+        excerpt: "Isolasjon tok fyr ved havna etter en ukjent hendelse.",
         publishedAt: "2026-07-12T17:59:00.000Z",
       }),
     );
@@ -589,7 +738,7 @@ describe("v2 pair evidence", () => {
     expect(outside?.tier).toBe("weak");
   });
 
-  it("caps specific-place incident evidence at twelve hours", () => {
+  it("caps place-led automatic evidence at two hours", () => {
     const inside = articleCoverageEdge(
       article("place-current", {
         title: "Brann i anleggsbrakke på Lade",
@@ -602,7 +751,7 @@ describe("v2 pair evidence", () => {
         title: "Anleggsbrakke brant på Lade",
         excerpt: "Isolasjon tok fyr etter sveising.",
         places: ["Lade"],
-        publishedAt: "2026-07-12T09:01:00.000Z",
+        publishedAt: "2026-07-12T18:01:00.000Z",
       }),
     );
     const outside = articleCoverageEdge(
@@ -617,7 +766,7 @@ describe("v2 pair evidence", () => {
         title: "Anleggsbrakke brant på Lade",
         excerpt: "Isolasjon tok fyr etter sveising.",
         places: ["Lade"],
-        publishedAt: "2026-07-12T06:59:00.000Z",
+        publishedAt: "2026-07-12T17:59:00.000Z",
       }),
     );
 
