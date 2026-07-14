@@ -228,7 +228,9 @@ interface FatalTrafficArticleFingerprint {
 const fatalTrafficFingerprintCache = new WeakMap<Article, FatalTrafficArticleFingerprint>();
 
 const officialSituationWindowMs = 72 * 60 * 60 * 1000;
-const specificPlaceWindowMs = 12 * 60 * 60 * 1000;
+// A locality is corroborating context, not an event identifier. Beyond two hours, a place must be
+// backed by a stronger signal such as an exact entity, a topic fingerprint, or near-duplicate text.
+const specificPlaceWindowMs = 2 * 60 * 60 * 1000;
 const namedEntityWindowMs = 8 * 60 * 60 * 1000;
 const nearDuplicateWindowMs = 24 * 60 * 60 * 1000;
 const topicalThreadWindowMs = 12 * 60 * 60 * 1000;
@@ -480,7 +482,8 @@ function articlePlaceTokens(article: Article): string[] {
           (place) =>
             place.length > 0 &&
             !genericPlaceTokens.has(place) &&
-            !nonIncidentPlaceTokens.has(place),
+            !nonIncidentPlaceTokens.has(place) &&
+            !/\bfylkeskommune$/u.test(place),
         ),
     ),
   ];
@@ -535,10 +538,19 @@ function articleNamedEntityTokens(article: Article): string[] {
     }
     return [normalizedCandidate];
   });
+  const declaredPlaces = new Set(
+    [article.location?.label, ...article.places]
+      .filter((place): place is string => Boolean(place))
+      .map(canonicalPlace),
+  );
   return [...new Set(candidates)].filter((token) => {
     if (token.length < 4 || genericPlaceTokens.has(token) || namedEntityStopTokens.has(token)) {
       return false;
     }
+    // Place extraction frequently repeats a municipality as a capitalized entity in the story.
+    // Counting the same value as both place and named-entity evidence makes locality alone look
+    // like two independent signals and caused unrelated same-area stories to auto-group.
+    if (declaredPlaces.has(token) || /\bfylkeskommune$/u.test(token)) return false;
     const parts = token.split(" ");
     return parts.some(
       (part) =>
@@ -924,6 +936,25 @@ function isHighDetailCrossSourceNearDuplicateFromEvidence(
   );
 }
 
+function isDetailedExactCrossSourceCopyFromEvidence(
+  left: Article,
+  right: Article,
+  evidence: ArticleCoveragePairEvidence,
+): boolean {
+  const leftExcerpt = normalizeText(left.excerpt);
+  return Boolean(
+    left.source !== right.source &&
+    evidence.conflicts.length === 0 &&
+    evidence.timeDistanceMs <= nearDuplicateWindowMs &&
+    normalizeText(left.title).length > 0 &&
+    normalizeText(left.title) === normalizeText(right.title) &&
+    leftExcerpt.length > 0 &&
+    leftExcerpt === normalizeText(right.excerpt) &&
+    evidence.bodyScore === 1 &&
+    evidence.sharedDistinctiveTokenCount >= 5,
+  );
+}
+
 export function isHighDetailCrossSourceNearDuplicate(left: Article, right: Article): boolean {
   return isHighDetailCrossSourceNearDuplicateFromEvidence(
     left,
@@ -960,6 +991,7 @@ function articlePairSignalsForV2(
   right: Article,
   evidence: ArticleCoveragePairEvidence,
   highDetailNearDuplicate: boolean,
+  detailedExactCrossSourceCopy: boolean,
 ): ArticleCoverageDecisionSignal[] {
   const signals: ArticleCoverageDecisionSignal[] = [];
   if (left.situationId && left.situationId === right.situationId) {
@@ -980,19 +1012,24 @@ function articlePairSignalsForV2(
     });
   }
   const body = { overlap: evidence.sharedBodyTokenCount, score: evidence.bodyScore };
-  if (left.url.length > 0 && left.url === right.url) {
+  const sameUrl = left.url.length > 0 && left.url === right.url;
+  if (sameUrl) {
     signals.push({ kind: "near_duplicate", articleIds: evidence.articleIds, score: 1 });
-  } else if (evidence.titleScore >= 0.65) {
+  }
+  if (evidence.titleScore >= 0.65) {
     signals.push({
       kind: "title_similarity",
       articleIds: evidence.articleIds,
       score: evidence.titleScore,
     });
-  } else if (
-    highDetailNearDuplicate ||
-    (normalizeText(left.excerpt).length > 0 &&
-      normalizeText(left.excerpt) === normalizeText(right.excerpt)) ||
-    (body.overlap >= 6 && body.score >= 0.6)
+  }
+  if (
+    !sameUrl &&
+    (highDetailNearDuplicate ||
+      detailedExactCrossSourceCopy ||
+      (normalizeText(left.excerpt).length > 0 &&
+        normalizeText(left.excerpt) === normalizeText(right.excerpt)) ||
+      (body.overlap >= 6 && body.score >= 0.6))
   ) {
     signals.push({
       kind: "near_duplicate",
@@ -1008,7 +1045,8 @@ function articlePairSignalsForV2(
     left.source !== right.source &&
     sameBroadCategory(left, right) &&
     evidence.positiveIncidentEvidence.includes("shared_specific_place") &&
-    body.overlap >= 1
+    evidence.timeDistanceMs <= specificPlaceWindowMs &&
+    body.overlap >= 4
   ) {
     signals.push({
       kind: "cross_source_incident",
@@ -1042,9 +1080,7 @@ function coverageKindForPair(
   const hasIncident =
     evidence.incidentSubtypes.some((subtype) => subtype !== "unknown") ||
     signals.some((signal) =>
-      ["situation_id", "generic_place_incident", "cross_source_incident", "shared_place"].includes(
-        signal.kind,
-      ),
+      ["situation_id", "generic_place_incident", "cross_source_incident"].includes(signal.kind),
     );
   const hasTopic = signals.some((signal) => signal.kind === "topical_thread");
   if (hasTopic && !hasIncident) return "topic";
@@ -1079,6 +1115,7 @@ function automaticEvidenceEligible(
   signals: ArticleCoverageDecisionSignal[],
   kind: ArticleCoverageEdgeKind,
   highDetailNearDuplicate: boolean,
+  detailedExactCrossSourceCopy: boolean,
 ): boolean {
   if (evidence.positiveIncidentEvidence.includes("shared_fatal_traffic_fingerprint")) {
     return true;
@@ -1110,7 +1147,10 @@ function automaticEvidenceEligible(
     return hasSignal(signals, "topical_thread") && evidence.timeDistanceMs <= topicalThreadWindowMs;
   }
   if (kind === "incident") {
-    return hasSignal(signals, "near_duplicate") && highDetailNearDuplicate;
+    return (
+      hasSignal(signals, "near_duplicate") &&
+      (highDetailNearDuplicate || detailedExactCrossSourceCopy)
+    );
   }
   if (
     left.url.length > 0 &&
@@ -1135,7 +1175,18 @@ export function articleCoverageEdge(
     right,
     evidence,
   );
-  const signals = articlePairSignalsForV2(left, right, evidence, highDetailNearDuplicate);
+  const detailedExactCrossSourceCopy = isDetailedExactCrossSourceCopyFromEvidence(
+    left,
+    right,
+    evidence,
+  );
+  const signals = articlePairSignalsForV2(
+    left,
+    right,
+    evidence,
+    highDetailNearDuplicate,
+    detailedExactCrossSourceCopy,
+  );
   const kind = coverageKindForPair(signals, evidence);
   const automaticEvidence = automaticEvidenceEligible(
     left,
@@ -1144,6 +1195,7 @@ export function articleCoverageEdge(
     signals,
     kind,
     highDetailNearDuplicate,
+    detailedExactCrossSourceCopy,
   );
   const positiveCount = evidence.positiveIncidentEvidence.length;
   const hasBlockingConflict = evidence.conflicts.length > 0;
@@ -1159,7 +1211,7 @@ export function articleCoverageEdge(
     : 0;
   const entityScore = evidence.positiveIncidentEvidence.includes("shared_named_entity") ? 0.2 : 0;
   const subtypeScore = evidence.positiveIncidentEvidence.includes("compatible_incident_subtype")
-    ? 0.15
+    ? 0.25
     : 0;
   const cityFingerprintScore = cityFingerprintEligible(left, right, evidence) ? 0.35 : 0;
   const fatalTrafficScore = evidence.positiveIncidentEvidence.includes(
@@ -1203,7 +1255,10 @@ export function articleCoverageEdge(
     !hasBlockingConflict &&
     automaticEvidence &&
     score >= 0.6 &&
-    (kind !== "incident" || positiveCount > 0 || highDetailNearDuplicate)
+    (kind !== "incident" ||
+      positiveCount > 0 ||
+      highDetailNearDuplicate ||
+      detailedExactCrossSourceCopy)
   ) {
     tier = "moderate";
   }
