@@ -1,12 +1,12 @@
 # Siste nytt quality audit and delivery record
 
-**Status:** Wave 1 deployed; Rotvoll, ingestion-integrity, and UI-state waves active
+**Status:** Waves 1–2 deployed; ingestion-integrity and UI-state waves active
 
 **Started:** 2026-07-14
 
 **Baseline:** `origin/main` at `e7b8f20dd20db1f7dc949c1c7f28143dea392e3b`
 
-**Current deployed baseline:** `ad2b4f4aa4c90466f5935f27c6fc0e408d314609`
+**Current deployed baseline:** `2c4a35bc3c2d74f90cbb946761790648a6fd1915`
 
 **Production:** `https://nytt.reidar.tech`
 
@@ -59,7 +59,7 @@ legacy fallback paths unless identity is arbitrated globally.
 **Required gate:** a production-shaped case must have zero cross-event bridge membership in both
 legacy and v2, without widening generic time or place windows.
 
-### Important — one Rotvoll collision is split into two cards
+### Resolved Important — one Rotvoll collision was split into two cards
 
 Four reports at 17:25 local time describe five people involved, no reported injuries, and the
 Haakon VIIs gate/Rotvoll area:
@@ -73,8 +73,10 @@ Legacy shows two adjacent two-source cards. Shadow v2 groups only Adressa and Ni
 comparison blocks the Politiloggen article because its structured label is broader/different even
 though the text names the precise location. Generic NRK copy remains a singleton.
 
-**Required gate:** add positive high-information collision evidence and explicit place hierarchy;
-do not weaken specific-place conflicts globally.
+**Release proof:** PR `#31` merged as exact main `2c4a35bc3c2d74f90cbb946761790648a6fd1915`.
+PR CI `29371289064`, exact-main CI `29371578900`, and deploy `29371880892` passed. After the
+fresh promoted worker cycle, authenticated production showed one Rotvoll card containing the four
+exact production records from NRK, Politiloggen, and Adresseavisen, with no duplicate card.
 
 ### Important — fresh 390 px Siste nytt overflows horizontally
 
@@ -362,6 +364,31 @@ changed.
   returned the expected NRK Trondheim article. This scope-dependent cross-event merge is not
   claimed fixed by the Rotvoll candidate and remains a Critical follow-up.
 
+### Exact-identity candidate for the scope-dependent Namdalseid false merge
+
+- The destructive boundary precedes the matcher: `articleDedupeKey` used source, normalized title,
+  and published hour as hard identity. Two distinct URLs could therefore resolve to one stored ID;
+  the later record could inherit the older article's URL and situation linkage before legacy/v2
+  analysis. Scope filtering then hid or exposed the contaminating record, producing different
+  public grouping topology for the same event.
+- Alternatives considered: hardcode the Namdalseid pair, tighten the title/time tuple, or separate
+  durable identity from similarity. The candidate uses the smallest safe part of the third option:
+  source + canonical URL is hard identity, matching the existing media source contracts. Headline
+  and time remain matcher evidence rather than destructive storage identity.
+- TDD RED used production IDs `nrk-95293370d71dbc53` and `nrk-f31a5b03caaf7b65` with the same
+  generic source/title/hour but different canonical URLs, scopes, places, and ingresses. Baseline
+  retained only the first ID (`1` failed, `45` passed). GREEN retains both and still collapses
+  duplicate snapshot rows sharing one canonical URL (`47/47`).
+- The critical Rotvoll corpus now includes the Namdalseid record as a strict negative against all
+  four Rotvoll members. Legacy/v2 golden and permutation proof passes; the complete matcher gate is
+  `79/79`. Full worker proof is `26/26` files and `296/296` tests after a local shared build. Full
+  repository Vitest is `132/132` files and `1261/1261` tests; full Playwright/accessibility is `149`
+  passed with `1` intentional skip. Typecheck, lint, format, production build, diff check, and the
+  production dependency audit with `0` vulnerabilities pass.
+- This changes no matcher threshold, time window, place hierarchy, situation activation rule,
+  projection mode, correction capability, or database schema. Existing rows migrate lazily as the
+  successful source cycle re-ingests their canonical URLs.
+
 ## Visual evidence
 
 - Desktop baseline:
@@ -379,10 +406,9 @@ changed.
 
 - The original Critical theft bridge and 390 px overflow are fixed in the authenticated deployed
   readback. This does not prove every property-crime topology or responsive state is correct.
-- The Rotvoll collision remains two adjacent public cards until this candidate is deployed. The
-  21:06 shadow generation likewise keeps NRK + Politiloggen separate from Adresseavisen updates and
-  reports the cross-edge as a specific-place conflict; no production-fix claim is made for that
-  wave.
+- The Rotvoll collision is fixed on the authenticated deployed readback, but the unscoped
+  Namdalseid contamination remains until the identity candidate is reviewed, shipped, and proven
+  after a fresh worker generation.
 - No projection-promotion claim is made.
 - No correction-path readiness claim is made while production corrections are disabled.
 - Green health endpoints do not contradict the visible wrong merge or mobile overflow.
@@ -398,7 +424,7 @@ changed.
 
 ## Recommended next action
 
-Complete the Rotvoll release gates and independent diff review, then ship it before reconstructing
-the ingestion-integrity wave without weakening place conflicts or projection controls.
-After each merge, require exact-main CI/deploy proof, a fresh worker generation, and authenticated
-desktop/mobile readback of the original production example.
+Complete the canonical-URL identity candidate's full repository gates and independent diff review,
+then ship it without combining the broader timestamp/extraction changes preserved in the dirty
+ingestion worktree. Require exact-main CI/deploy proof, a fresh worker generation, and authenticated
+scoped plus unscoped readback of the Rotvoll/Namdalseid production records.

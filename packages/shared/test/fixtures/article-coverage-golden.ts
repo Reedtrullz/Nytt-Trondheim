@@ -327,13 +327,27 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
         places: ["Rotvoll", "Trondheim"],
         publishedAt: "2026-07-14T15:27:30.000Z",
       }),
+      article("nrk-f31a5b03caaf7b65", {
+        title: "Trafikkuhell i Trøndelag",
+        excerpt:
+          "Nødetatene rykket ut til et annet trafikkuhell på E6 i Namdalseid. Hendelsen har ingen tilknytning til ulykken i Trondheim.",
+        url: "https://www.nrk.no/trondelag/trafikkuhell-i-namdalseid-1.17958200",
+        category: "Transport",
+        places: ["Namdalseid"],
+        publishedAt: "2026-07-14T15:58:00.000Z",
+      }),
     ],
     expectedSamePairs: [
       ["rotvoll-nrk", "rotvoll-police"],
       ["rotvoll-police", "rotvoll-adressa"],
       ["rotvoll-adressa", "rotvoll-nidaros"],
     ],
-    expectedSeparatePairs: [],
+    expectedSeparatePairs: [
+      ["nrk-f31a5b03caaf7b65", "rotvoll-nrk"],
+      ["nrk-f31a5b03caaf7b65", "rotvoll-police"],
+      ["nrk-f31a5b03caaf7b65", "rotvoll-adressa"],
+      ["nrk-f31a5b03caaf7b65", "rotvoll-nidaros"],
+    ],
     expectedGroups: [["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"]],
     expectedVerifiedGroups: [
       ["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"],

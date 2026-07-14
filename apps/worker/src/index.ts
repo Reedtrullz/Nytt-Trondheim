@@ -1564,7 +1564,7 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
     // Retained rows are eligibility input, not evidence that the source returned them again.
     recordCollected: (articles) => repository.recordArticleSourceItems(articles),
     // Keep raw upstream IDs in the source ledger; only the FK-backed coverage snapshot should
-    // adopt the canonical identity already stored under URL/title-hour dedupe rules.
+    // adopt the canonical identity already stored under source + canonical URL rules.
     canonicalize: (articles) => repository.canonicalizeCoverageArticles(articles),
   });
   const coverageCompletedAt = new Date().toISOString();
