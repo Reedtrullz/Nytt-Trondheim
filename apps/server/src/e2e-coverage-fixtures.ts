@@ -16,7 +16,12 @@ export function e2eCoverageFixtureArticles(advanced = false): Article[] {
       id: `e2e-large-${index + 1}`,
       source,
       sourceLabel,
-      title: index === 0 ? "Stor gruppesak" : `Støttesak ${index}`,
+      title:
+        index === 0
+          ? "Stor gruppesak"
+          : index === 1
+            ? "Brøt seg inn og raserte flere boder i sameie: – Jeg er sjokkert"
+            : `Støttesak ${index}`,
       excerpt: "Sanitert E2E-innhold om samme kamp på Lerkendal.",
       url: `https://example.test/e2e-large-${index + 1}`,
       publishedAt: new Date(Date.parse(fixtureCompletedAt) - index * 60_000).toISOString(),

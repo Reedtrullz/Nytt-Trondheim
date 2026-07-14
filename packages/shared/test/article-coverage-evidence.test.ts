@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Article } from "../src/index.js";
 import {
+  analyzeArticleCoverage,
+  analyzeArticleCoverageV2,
   articleCoverageEdge,
   articleCoverageEvidence,
   articleIncidentSubtype,
+  isPropertyCrimeEventMatch,
+  propertyCrimeEventPolicy,
 } from "../src/index.js";
 
 function article(id: string, overrides: Partial<Article>): Article {
@@ -416,6 +420,410 @@ describe("v2 pair evidence", () => {
       );
       expect(edge?.tier ?? "weak").toBe("weak");
     }
+  });
+
+  it("does not use generic shop and food tokens as a fingerprint for separate thefts", () => {
+    const left = article("shop-byasen", {
+      title: "Tyv tatt i butikk",
+      excerpt: "Politiet rykket ut etter tyveri fra butikk. En mann stjal matvarer og ost.",
+      category: "Krim",
+      places: ["Trondheim"],
+    });
+    const right = article("shop-heimdal", {
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Politiet rykket ut",
+      excerpt: "En tyv stjal matvarer og kjøtt fra butikk. Politiet fikk kontroll på mannen.",
+      category: "Krim",
+      places: ["Trondheim"],
+      publishedAt: "2026-07-12T19:30:00.000Z",
+    });
+
+    const evidence = articleCoverageEvidence(left, right, "v2");
+    expect(evidence.incidentSubtypes).toEqual(["shop_theft", "shop_theft"]);
+    expect(evidence.sharedCityIncidentFingerprint).toBeUndefined();
+    expect(articleCoverageEdge(left, right)?.tier).toBe("weak");
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      expect(analyze([left, right], "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+      expect(analyze([right, left], "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+    }
+  });
+
+  it("does not use generic storage-unit wording as same-city event identity", () => {
+    const left = article("generic-storage-left", {
+      source: "nrk",
+      title: "Innbrudd i flere boder",
+      excerpt: "Politiet rykket ut etter tyveri fra boder. En mann tok med seg varer.",
+      category: "Krim",
+      places: ["Trondheim"],
+    });
+    const right = article("generic-storage-right", {
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Tyveri fra bod i Trondheim",
+      excerpt: "En mann brøt seg inn i en bod og tok varer. Politiet etterforsker saken.",
+      category: "Krim",
+      places: ["Trondheim"],
+      publishedAt: "2026-07-12T19:30:00.000Z",
+    });
+
+    expect(
+      articleCoverageEvidence(left, right, "v2").sharedCityIncidentFingerprint,
+    ).toBeUndefined();
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      expect(analyze([left, right], "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+      expect(analyze([right, left], "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+    }
+  });
+
+  it("keeps same-source same-subtype updates eligible through canonical URL continuity", () => {
+    const left = article("storage-update-left", {
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      title: "Oppdatering: Innbrudd i boder",
+      excerpt: "Politiet etterforsker tyveri fra flere boder.",
+      category: "Krim",
+      places: ["Trondheim"],
+    });
+    const right = article("storage-update-right", {
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      title: "Oppdatering: Innbrudd i boder",
+      excerpt: "Saken er oppdatert etter tyveri fra flere boder.",
+      category: "Krim",
+      places: ["Trondheim"],
+      publishedAt: "2026-07-12T19:40:00.000Z",
+      url: left.url,
+    });
+
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      for (const ordered of [
+        [left, right],
+        [right, left],
+      ]) {
+        expect(analyze(ordered, "2026-07-12T21:00:00.000Z").bundles).toHaveLength(1);
+      }
+    }
+  });
+
+  it("keeps same-source property reports with only identical boilerplate separate", () => {
+    const left = article("storage-boilerplate-left", {
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      title: "Innbrudd i flere boder på Moholt",
+      excerpt: "Politiet etterforsker tyveri fra flere boder på Moholt.",
+      category: "Krim",
+      places: ["Moholt", "Trondheim"],
+    });
+    const right = article("storage-boilerplate-right", {
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      title: left.title,
+      excerpt: left.excerpt,
+      category: "Krim",
+      places: ["Moholt", "Trondheim"],
+      publishedAt: "2026-07-12T19:40:00.000Z",
+    });
+
+    expect(left.url).not.toBe(right.url);
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      expect(analyze([left, right], "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+      expect(analyze([right, left], "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+    }
+  });
+
+  it("does not read the bod prefix in Bodø as a storage unit", () => {
+    expect(
+      articleIncidentSubtype(
+        article("bodo-theft", {
+          title: "Tyveri i Bodø",
+          excerpt: "Politiet etterforsker et tyveri i Bodø.",
+          category: "Krim",
+          places: ["Bodø"],
+        }),
+      ),
+    ).toBe("unknown");
+  });
+
+  it("recognizes common storage-unit compounds without place-name special cases", () => {
+    for (const storageUnit of ["sykkelbod", "lagerbod", "butikkbod"]) {
+      expect(
+        articleIncidentSubtype(
+          article("compound-" + storageUnit, {
+            title: "Innbrudd i " + storageUnit,
+            excerpt: "Politiet etterforsker tyveri fra en " + storageUnit + ".",
+            category: "Krim",
+            places: ["Trondheim"],
+          }),
+        ),
+      ).toBe("storage_burglary");
+    }
+  });
+
+  it("admits mixed property-crime angles through explicit independent anchors", () => {
+    const mixedPair = (
+      suffix: string,
+      shopOverrides: Partial<Article>,
+      storageOverrides: Partial<Article>,
+    ) =>
+      [
+        article("shop-" + suffix, {
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          title: "Tyveri fra butikk",
+          excerpt: "Elektronikk ble stjålet fra butikken.",
+          category: "Krim",
+          places: ["Trondheim"],
+          ...shopOverrides,
+        }),
+        article("storage-" + suffix, {
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Innbrudd i bod",
+          excerpt: "Elektronikk ble stjålet fra boden.",
+          category: "Krim",
+          places: ["Trondheim"],
+          publishedAt: "2026-07-12T19:55:00.000Z",
+          ...storageOverrides,
+        }),
+      ] as const;
+
+    const cases = [
+      mixedPair("place-detail", { places: ["Heimdal"] }, { places: ["Heimdal"] }),
+      mixedPair(
+        "entity-detail",
+        { excerpt: "Elektronikk ble stjålet fra butikken på Solsiden." },
+        { excerpt: "Elektronikk ble stjålet fra boden ved Solsiden." },
+      ),
+      mixedPair(
+        "clock-detail",
+        { excerpt: "Klokken 03.12 ble elektronikk stjålet fra butikken." },
+        { excerpt: "Klokken 03.12 ble elektronikk stjålet fra boden." },
+      ),
+    ];
+
+    for (const [shopAngle, storageAngle] of cases) {
+      expect(isPropertyCrimeEventMatch(shopAngle, storageAngle)).toBe(true);
+      expect(
+        articleCoverageEvidence(shopAngle, storageAngle, "v2").positiveIncidentEvidence,
+      ).toContain("shared_property_crime_event");
+      expect(articleCoverageEdge(shopAngle, storageAngle)?.tier).toBe("moderate");
+    }
+  });
+
+  it("does not admit mixed property crimes from details without an event anchor", () => {
+    const pairs = [
+      [
+        article("unanchored-shop-objects", {
+          source: "nrk",
+          title: "Tyveri fra butikk",
+          excerpt: "Elektronikk og en sykkel ble stjålet fra butikken.",
+          category: "Krim",
+          places: ["Trondheim"],
+        }),
+        article("unanchored-storage-objects", {
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Innbrudd i bod",
+          excerpt: "Elektronikk og en sykkel ble stjålet fra boden.",
+          category: "Krim",
+          places: ["Trondheim"],
+          publishedAt: "2026-07-12T19:55:00.000Z",
+        }),
+      ],
+      [
+        article("unanchored-shop-age", {
+          source: "nrk",
+          title: "Tyveri fra butikk",
+          excerpt: "En mann i 40-årene stjal elektronikk fra butikken.",
+          category: "Krim",
+          places: ["Trondheim"],
+        }),
+        article("unanchored-storage-age", {
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Innbrudd i bod",
+          excerpt: "En mann i 40-årene stjal elektronikk fra boden.",
+          category: "Krim",
+          places: ["Trondheim"],
+          publishedAt: "2026-07-12T18:00:00.000Z",
+        }),
+      ],
+    ] as const;
+
+    for (const pair of pairs) {
+      expect(isPropertyCrimeEventMatch(...pair)).toBe(false);
+      for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+        expect(analyze(pair, "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+      }
+    }
+  });
+
+  it("preserves explicit URL and official-situation identity for mixed property angles", () => {
+    const sharedUrl = "https://example.test/property-live";
+    const pairs = [
+      [
+        article("identity-url-shop", {
+          source: "nrk",
+          title: "Tyveri fra butikk",
+          excerpt: "Politiet etterforsker saken.",
+          category: "Krim",
+          places: ["Trondheim"],
+          url: sharedUrl,
+        }),
+        article("identity-url-storage", {
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          title: "Innbrudd i bod",
+          excerpt: "Politiet etterforsker saken.",
+          category: "Krim",
+          places: ["Trondheim"],
+          url: sharedUrl,
+          publishedAt: "2026-07-12T19:55:00.000Z",
+        }),
+      ],
+      [
+        article("identity-situation-shop", {
+          source: "nrk",
+          title: "Tyveri fra butikk",
+          excerpt: "Politiet etterforsker saken.",
+          category: "Krim",
+          places: ["Trondheim"],
+          situationId: "property-official-thread",
+        }),
+        article("identity-situation-storage", {
+          source: "politiloggen",
+          sourceLabel: "Politiloggen",
+          title: "Innbrudd i bod",
+          excerpt: "Politiet etterforsker saken.",
+          category: "Hendelser",
+          places: ["Trondheim"],
+          situationId: "property-official-thread",
+          publishedAt: "2026-07-12T19:55:00.000Z",
+        }),
+      ],
+    ] as const;
+
+    for (const pair of pairs) {
+      expect(isPropertyCrimeEventMatch(...pair)).toBe(true);
+      expect(articleCoverageEvidence(...pair, "v2").conflicts).toEqual([]);
+      for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+        expect(analyze(pair, "2026-07-12T21:00:00.000Z").bundles).toHaveLength(1);
+      }
+    }
+  });
+
+  it("does not count generic property or food terms as independent event details", () => {
+    const shopAngle = article("generic-shop-angle", {
+      source: "nrk",
+      title: "Tyveri fra butikk",
+      excerpt: "En mann stjal matvarer fra en butikk etter melding til politiet.",
+      category: "Krim",
+      places: ["Trondheim"],
+    });
+    const storageAngle = article("generic-storage-angle", {
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Tyveri fra bod",
+      excerpt: "En mann stjal matvarer fra en bod etter melding til politiet.",
+      category: "Krim",
+      places: ["Trondheim"],
+      publishedAt: "2026-07-12T19:55:00.000Z",
+    });
+
+    expect(isPropertyCrimeEventMatch(shopAngle, storageAngle)).toBe(false);
+    expect(
+      articleCoverageEvidence(shopAngle, storageAngle, "v2").positiveIncidentEvidence,
+    ).not.toContain("shared_property_crime_event");
+    expect(articleCoverageEdge(shopAngle, storageAngle)?.tier ?? "weak").toBe("weak");
+  });
+
+  it("does not promote shared police boilerplate into independent property-crime details", () => {
+    const pair = [
+      article("boilerplate-shop", {
+        source: "nrk",
+        title: "Tyveri fra butikk",
+        excerpt: "Ingen er pågrepet. En ukjent gjerningsperson stjal elektronikk fra en butikk.",
+        category: "Krim",
+        places: ["Trondheim"],
+      }),
+      article("boilerplate-storage", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Tyveri fra bod",
+        excerpt: "Ingen er pågrepet. En ukjent gjerningsperson stjal elektronikk fra en bod.",
+        category: "Krim",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-12T19:55:00.000Z",
+      }),
+    ] as const;
+
+    expect(isPropertyCrimeEventMatch(...pair)).toBe(false);
+    expect(articleCoverageEdge(...pair)?.tier ?? "weak").toBe("weak");
+  });
+
+  it("does not treat a repeated place plus generic property wording as one event", () => {
+    const pair = [
+      article("same-place-shop", {
+        source: "nrk",
+        title: "Tyveri fra butikk på Heimdal",
+        excerpt: "Ingen er pågrepet etter tyveriet. Politiet etterforsker saken.",
+        category: "Krim",
+        places: ["Heimdal", "Trondheim"],
+      }),
+      article("same-place-storage", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Innbrudd i bod på Heimdal",
+        excerpt: "Ingen er pågrepet etter tyveriet. Politiet etterforsker saken.",
+        category: "Krim",
+        places: ["Heimdal", "Trondheim"],
+        publishedAt: "2026-07-12T19:55:00.000Z",
+      }),
+    ] as const;
+
+    expect(isPropertyCrimeEventMatch(...pair)).toBe(false);
+    const evidence = articleCoverageEvidence(...pair, "v2");
+    expect(evidence.positiveIncidentEvidence).not.toContain("shared_property_crime_event");
+    expect(evidence.conflicts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "incident_subtype" })]),
+    );
+    expect(articleCoverageEdge(...pair)).toMatchObject({ tier: "weak", reviewable: true });
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      expect(analyze(pair, "2026-07-12T21:00:00.000Z").bundles).toEqual([]);
+    }
+  });
+
+  it("bounds mixed property-crime admission by source independence and three hours", () => {
+    const shopAngle = article("bounded-shop", {
+      source: "nrk",
+      title: "Tyveri fra butikk",
+      excerpt: "Klokken 03.12 ble elektronikk og en sykkel stjålet fra butikken.",
+      category: "Krim",
+      places: ["Trondheim"],
+    });
+    const storageAngle = article("bounded-storage", {
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Innbrudd i bod",
+      excerpt: "Klokken 03.12 ble elektronikk og en sykkel stjålet fra boden.",
+      category: "Krim",
+      places: ["Trondheim"],
+      publishedAt: new Date(
+        Date.parse(shopAngle.publishedAt) - propertyCrimeEventPolicy.windowMs,
+      ).toISOString(),
+    });
+
+    expect(isPropertyCrimeEventMatch(shopAngle, storageAngle)).toBe(true);
+    expect(isPropertyCrimeEventMatch(shopAngle, { ...storageAngle, source: "nrk" })).toBe(false);
+    expect(
+      isPropertyCrimeEventMatch(shopAngle, {
+        ...storageAngle,
+        publishedAt: new Date(
+          Date.parse(shopAngle.publishedAt) - propertyCrimeEventPolicy.windowMs - 1,
+        ).toISOString(),
+      }),
+    ).toBe(false);
   });
 
   it("rejects a gameable city fight made only from common incident wording", () => {

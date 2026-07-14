@@ -1544,6 +1544,10 @@ button {
   gap: 44px;
 }
 
+.news-section {
+  min-width: 0;
+}
+
 .news-section h1 {
   margin: 0;
   font: 46px/1.05 var(--serif);
@@ -1909,6 +1913,13 @@ a.coverage-source-row:focus-visible {
   color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.coverage-source-list[data-expanded="true"] .coverage-source-row small {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .coverage-source-actions {
@@ -13536,7 +13547,10 @@ button.journey-context-chip {
     order: 4;
   }
 
-  .home-grid,
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .city-pulse-summary-grid,
   .morning-brief,
   .situation-banner,

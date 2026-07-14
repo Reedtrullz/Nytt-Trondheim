@@ -970,7 +970,7 @@ describe("home article grouping", () => {
     expect(expandedBundleId).toBe(firstBundleId);
   });
 
-  it("uses persisted coverage bundle ids as the strongest grouping key", () => {
+  it("does not use persisted coverage bundle ids as grouping evidence", () => {
     const bundle = {
       id: "coverage:topic:manual",
       kind: "topic" as const,
@@ -1003,13 +1003,17 @@ describe("home article grouping", () => {
       }),
     ]);
 
-    expect(groups).toHaveLength(1);
-    expect(groups[0]?.id).toBe("coverage:topic:manual");
-    expect(groups[0]?.bundle?.reason).toBe("Samme nyhetstema");
-    expect(groups[0]?.articles.map((item) => item.id)).toEqual([
-      "topic-follow-up",
-      "topic-analysis",
+    expect(groups).toHaveLength(2);
+    expect(groups.map(({ id }) => id).sort()).toEqual([
+      "article:topic-analysis",
+      "article:topic-follow-up",
     ]);
+    expect(groups.every(({ bundle }) => bundle === undefined)).toBe(true);
+    expect(
+      groups.every(({ articles }) =>
+        articles.every(({ coverageBundle }) => coverageBundle === undefined),
+      ),
+    ).toBe(true);
   });
 
   it("does not let stale persisted bundle ids overmerge distant articles", () => {

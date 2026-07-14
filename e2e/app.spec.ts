@@ -1344,11 +1344,39 @@ test("grouped cards remain compact and correctable by keyboard at phone width", 
   await coverageFixtureControl(page, "reset");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
+  await expect(page.locator(".news-section")).toHaveCSS("min-width", "0px");
   const card = page.locator("article", { hasText: "Stor gruppesak" });
+  const longSupportingTitle = card.getByText(
+    "Brøt seg inn og raserte flere boder i sameie: – Jeg er sjokkert",
+    { exact: true },
+  );
   await expect(card.locator(".coverage-source-row")).toHaveCount(2);
-  await expect(
-    card.getByRole("button", { name: "Vis alle 6 andre saker fra 5 kilder" }),
-  ).toBeVisible();
+  await expect(longSupportingTitle).toHaveCSS("white-space", "nowrap");
+  await expectNoHorizontalPageOverflow(page);
+  const showAll = card.getByRole("button", { name: "Vis alle 6 andre saker fra 5 kilder" });
+  await expect(showAll).toBeVisible();
+  await showAll.focus();
+  await expect(showAll).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(card.locator(".coverage-source-row")).toHaveCount(6);
+  await expectNoHorizontalPageOverflow(page);
+  await expect(card.locator(".coverage-source-list")).toHaveAttribute("data-expanded", "true");
+  await expect(longSupportingTitle).toHaveCSS("white-space", "normal");
+  const expandedTitleMetrics = await longSupportingTitle.evaluate((node) => {
+    const styles = getComputedStyle(node);
+    return {
+      height: node.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(styles.lineHeight),
+    };
+  });
+  expect(expandedTitleMetrics.height).toBeGreaterThan(expandedTitleMetrics.lineHeight * 1.5);
+  const showLess = card.getByRole("button", { name: "Vis færre saker" });
+  await showLess.focus();
+  await expect(showLess).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(card.locator(".coverage-source-row")).toHaveCount(2);
+  await expect(longSupportingTitle).toHaveCSS("white-space", "nowrap");
+  await expectNoHorizontalPageOverflow(page);
   await card.getByRole("button", { name: "Feil gruppering?" }).focus();
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog");
