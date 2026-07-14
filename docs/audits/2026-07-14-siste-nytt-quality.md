@@ -308,6 +308,26 @@ changed.
   `1` intentional skip, root typecheck, ESLint, Prettier, production build, `git diff --check`, and
   production dependency audit with `0` vulnerabilities.
 
+## Wave 2 release readback and apostrophe hotfix
+
+- PR `#29` merged to `main` as `dff03160f139fa690abe9af61096011e2b95cf9f`. PR CI run
+  `29364889915`, exact-main CI run `29365238141`, and deploy run `29365557315` passed. The deploy
+  retained `legacy` projection, disabled corrections, promoted API and worker, and accepted a fresh
+  completed worker cycle after 25 bounded retries.
+- Authenticated production readback after that fresh cycle still showed the Rotvoll collision as
+  two adjacent cards. This blocks a production-fix claim despite the green deploy.
+- The visible Adresseavisen ingress uses the real spelling `Haakon VII’s gate` with a typographic
+  apostrophe. The candidate fixture had simplified it to `Haakon VIIs gate`, and the road extractor
+  therefore omitted the production road token and the Politiloggen-to-Adresseavisen bridge.
+- Replacing the fixture value with the exact production spelling reproduced RED on deployed main:
+  the focused test lost `shared_high_information_traffic_collision`. The hotfix accepts ASCII or
+  typographic apostrophes only between a Roman road-name numeral and genitive `s`; all existing
+  exact-road, clock, participant, source, and incident controls remain unchanged.
+- Hotfix gates: focused Rotvoll `1/1`, canonical matcher `79/79`, root unit/integration `132` files
+  and `1,260/1,260` tests, full browser/accessibility `149` passed with `1` intentional skip, root
+  typecheck, ESLint, Prettier, production build, `git diff --check`, and production dependency audit
+  with `0` vulnerabilities.
+
 ## Visual evidence
 
 - Desktop baseline:
