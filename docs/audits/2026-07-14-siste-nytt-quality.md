@@ -1,6 +1,6 @@
 # Siste nytt quality audit and delivery record
 
-**Status:** Wave 1 PR-ready; CI, deploy, and live readback pending
+**Status:** Wave 1 merged; bounded worker-readiness rollout follow-up active
 
 **Started:** 2026-07-14
 
@@ -233,6 +233,24 @@ boundaries when adding capture/revision and editorial fields.
 - A stress run that executed the full unit suite concurrently with other gates produced one
   transient existing rate-limit test failure (`Parse Error`, then `404`). The focused retry and a
   serial full-suite rerun both passed; no matcher or UI failure was involved.
+
+## Wave 1 release execution
+
+- PR `#26` merged to `main` as `a6c104cb189f460d125190d8ae2df108d682b669`.
+- PR CI run `29356539224` and exact-main CI run `29356936042` both passed typecheck, tests,
+  matcher quality, build, audit, PostGIS migration smoke, Docker build, and the full browser and
+  accessibility suite.
+- Deploy run `29357270812` built the candidate, passed canary health, promoted API and worker, and
+  passed production health plus worker stability. It then exhausted the bounded wait for a worker
+  cycle started after promotion and restored the previous API and worker images. Rollback health
+  passed; the Wave 1 code was therefore not left deployed.
+- The authenticated operations dashboard subsequently showed a healthy completed worker cycle at
+  20:31 with duration 343 seconds, zero parse failures, and worker freshness `OK`. The deploy guard
+  allowed only 18 ten-second polls after its separate startup checks and expired at 20:31:45,
+  seconds before or around that normal production-sized completion.
+- Follow-up policy: retain all crash, restart, health, timestamp, and rollback assertions; widen
+  only the completed-cycle poll budget from 18 to 30 bounded attempts. Do not weaken the required
+  post-promotion cycle identity or source-health gates.
 
 ## Visual evidence
 
