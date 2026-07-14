@@ -272,6 +272,42 @@ boundaries when adding capture/revision and editorial fields.
   full browser/accessibility `149` passed with `1` intentional skip, typecheck, ESLint, Prettier,
   production build, `git diff --check`, and production dependency audit with `0` vulnerabilities.
 
+## UI failure-state release execution
+
+- PR `#28` merged to `main` as `9c803933e627112ccb86965620e98b7fc9b5f607`.
+- Exact-main CI run `29362326016` and deploy run `29362672278` passed.
+- Authenticated 390 px production fault injection proved the filtered-feed HTTP failure renders the
+  error state without an empty-result claim or loading residue; document and body widths were both
+  `390` px. The test changed browser network behavior only and did not mutate production data.
+
+## Wave 2 candidate — Rotvoll collision recall
+
+Status: release candidate on exact `origin/main`; no active projection or correction setting is
+changed.
+
+- Add a cross-source high-information traffic-collision fingerprint with a two-hour publication
+  window. Both reports must independently contain collision language, the same normalized exact
+  road, the same explicit reported incident clock, and the same explicit involved-person count.
+- Normalize the observed `Haakon VIIs gate` / `Håkon VIIs gate` spelling inside road evidence; do
+  not equate `Lade` and `Rotvoll`. Only the complete fingerprint can override their otherwise
+  blocking structured-place conflict.
+- Make any mutually present but mismatching road, clock, or participant evidence blocking even
+  when another fingerprint field is absent. This prevents a sparse contradictory report from
+  entering through generic similarity paths.
+- Align v2 collision vocabulary with legacy for `trafikkuhell` and contextual `sammenstøt` or bare
+  `ulykke`. Bare `ulykke` requires transport, vehicle, road, or traffic context; an identically
+  timed workplace accident does not satisfy the fingerprint.
+- Keep the rule cross-source and fail closed when a road, clock, participant count, compatible
+  category, publication bound, or situation identity is missing or incompatible.
+- RED provenance: the production-shaped fixture initially had six false-negative within-event
+  pairs and three false-positive control pairs. The candidate groups the four sanitized NRK,
+  Politiloggen, Adresseavisen, and Nidaros reports while keeping different-road, different-clock,
+  different-count, same-source, and workplace-accident controls separate.
+- Fresh exact-main release gates: focused Rotvoll `1/1`, canonical matcher `79/79`, root
+  unit/integration `132` files and `1,260/1,260` tests, full browser/accessibility `149` passed with
+  `1` intentional skip, root typecheck, ESLint, Prettier, production build, `git diff --check`, and
+  production dependency audit with `0` vulnerabilities.
+
 ## Visual evidence
 
 - Desktop baseline:
@@ -289,15 +325,16 @@ boundaries when adding capture/revision and editorial fields.
 
 - The original Critical theft bridge and 390 px overflow are fixed in the authenticated deployed
   readback. This does not prove every property-crime topology or responsive state is correct.
-- The Rotvoll collision remains two adjacent public cards. The 21:06 shadow generation likewise
-  keeps NRK + Politiloggen separate from Adresseavisen updates and reports the cross-edge as a
-  specific-place conflict; no production-fix claim is made for that wave.
+- The Rotvoll collision remains two adjacent public cards until this candidate is deployed. The
+  21:06 shadow generation likewise keeps NRK + Politiloggen separate from Adresseavisen updates and
+  reports the cross-edge as a specific-place conflict; no production-fix claim is made for that
+  wave.
 - No projection-promotion claim is made.
 - No correction-path readiness claim is made while production corrections are disabled.
 - Green health endpoints do not contradict the visible wrong merge or mobile overflow.
 - The expanded corpus includes the new theft topology but still does not cover extraction quality
   or editorial copy quality.
-- The 109 labels are correlated examples from a small topology corpus, not 109 independent
+- The 127 Wave 2 labels are correlated examples from a small topology corpus, not 127 independent
   production events and not promotion evidence for matcher v2.
 - The production worker strips incoming bundle metadata before analysis. Direct-analyzer ID tests
   prove deterministic one-to-one handling, but do not by themselves prove that a fresh deployed
@@ -307,7 +344,7 @@ boundaries when adding capture/revision and editorial fields.
 
 ## Recommended next action
 
-Ship the independently green UI failure-state fix, then complete the production-shaped Rotvoll
-recall and ingestion-integrity waves without weakening place conflicts or projection controls.
+Complete the Rotvoll release gates and independent diff review, then ship it before reconstructing
+the ingestion-integrity wave without weakening place conflicts or projection controls.
 After each merge, require exact-main CI/deploy proof, a fresh worker generation, and authenticated
 desktop/mobile readback of the original production example.

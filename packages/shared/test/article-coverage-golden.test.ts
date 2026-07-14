@@ -12,6 +12,7 @@ import {
   groupHomeArticles,
   highDetailNearDuplicatePolicy,
   isFatalTrafficIncidentFollowUp,
+  isHighInformationTrafficCollisionMatch,
   isEntityBackedNotificationFailureFollowUp,
   isHighDetailCrossSourceNearDuplicate,
 } from "../src/index.js";
@@ -204,6 +205,86 @@ describe("coverage matcher golden corpus", () => {
         ).toISOString(),
       }),
     ).toBe(false);
+  });
+
+  it("groups the Rotvoll collision only on the exact street, clock and participant fingerprint", () => {
+    const fixture = articleCoverageGoldenCases.find(
+      ({ id }) => id === "rotvoll-collision-exact-street-clock-and-participants",
+    );
+    expect(fixture).toBeDefined();
+    const expectedMembers = ["rotvoll-adressa", "rotvoll-nidaros", "rotvoll-nrk", "rotvoll-police"];
+    const negativeIds = ["other-road-same-facts", "rotvoll-other-clock", "rotvoll-other-count"];
+    const permutations = [
+      fixture!.articles,
+      [...fixture!.articles].reverse(),
+      [...fixture!.articles.slice(3), ...fixture!.articles.slice(0, 3)],
+    ];
+
+    const articlesById = new Map(fixture!.articles.map((article) => [article.id, article]));
+    const conflictingLocalities = articleCoverageEvidence(
+      articlesById.get("rotvoll-police")!,
+      articlesById.get("rotvoll-adressa")!,
+      "v2",
+    );
+    expect(conflictingLocalities.positiveIncidentEvidence).toContain(
+      "shared_high_information_traffic_collision",
+    );
+    expect(conflictingLocalities.conflicts).not.toContainEqual(
+      expect.objectContaining({ kind: "specific_place" }),
+    );
+
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      for (const articles of permutations) {
+        const bundles = analyze(articles, "2026-07-14T17:00:00.000Z").bundles;
+        expect(bundles.map(({ memberArticleIds }) => [...memberArticleIds].sort())).toContainEqual(
+          expectedMembers,
+        );
+        expect(
+          bundles.some(({ memberArticleIds }) =>
+            negativeIds.some(
+              (negativeId) =>
+                memberArticleIds.includes(negativeId) &&
+                expectedMembers.some((memberId) => memberArticleIds.includes(memberId)),
+            ),
+          ),
+        ).toBe(false);
+      }
+    }
+
+    const newsroom = articlesById.get("rotvoll-nrk")!;
+    const police = articlesById.get("rotvoll-police")!;
+    expect(isHighInformationTrafficCollisionMatch(newsroom, police)).toBe(true);
+    expect(
+      isHighInformationTrafficCollisionMatch(newsroom, { ...police, source: newsroom.source }),
+    ).toBe(false);
+    expect(
+      isHighInformationTrafficCollisionMatch(newsroom, {
+        ...police,
+        title: "Fem personer involvert i ulykke på arbeidsplass",
+        excerpt:
+          "Arbeidsulykken i Haakon VIIs gate ble meldt klokken 17.25. Fem personer var involvert i arbeidet.",
+        category: "Nyheter",
+      }),
+    ).toBe(false);
+
+    const sparseDifferentRoad = articleCoverageEvidence(
+      newsroom,
+      {
+        ...police,
+        excerpt:
+          "Melding om sammenstøt mellom to biler i Innherredsveien kl. 17:25. Ingen er meldt skadet.",
+      },
+      "v2",
+    );
+    expect(sparseDifferentRoad.positiveIncidentEvidence).not.toContain(
+      "shared_high_information_traffic_collision",
+    );
+    expect(sparseDifferentRoad.conflicts).toContainEqual(
+      expect.objectContaining({
+        kind: "incident_subtype",
+        detail: "traffic_collision_fingerprint",
+      }),
+    );
   });
 
   it("groups the current sparse production reports in both legacy and v2", () => {

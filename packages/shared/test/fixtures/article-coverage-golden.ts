@@ -285,6 +285,107 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
     provenance: "sanitized-production-shape",
   },
   {
+    id: "rotvoll-collision-exact-street-clock-and-participants",
+    articles: [
+      article("rotvoll-nrk", {
+        title: "Trafikkuhell i Trondheim",
+        excerpt:
+          "Fem personer er involvert i et trafikkuhell i Haakon VIIs gate. Politiet fikk meldingen klokken 17.25.",
+        category: "Transport",
+        places: ["Lade", "Trondheim"],
+        publishedAt: "2026-07-14T15:28:00.000Z",
+      }),
+      article("rotvoll-police", {
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Trafikk: Trondheim, Lade",
+        excerpt:
+          "Melding om sammenstøt mellom to biler i Håkon VIIs gate kl. 17:25. Fem personer var involvert, ingen meldt skadet.",
+        category: "Hendelser",
+        places: ["Lade", "Trondheim"],
+        situationId: "politiloggen-sanitized-rotvoll",
+        publishedAt: "2026-07-14T15:25:00.000Z",
+      }),
+      article("rotvoll-adressa", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Fem personer involvert i ulykke",
+        excerpt:
+          "Ulykken mellom to biler i Haakon VIIs gate ble meldt klokken 17.25. Fem personer var involvert, men ingen ble skadet.",
+        category: "Nyheter",
+        places: ["Rotvoll", "Trondheim"],
+        publishedAt: "2026-07-14T15:27:00.000Z",
+      }),
+      article("rotvoll-nidaros", {
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        title: "Trafikkulykke: – Begge har gjort galt",
+        excerpt:
+          "Fem personer var involvert ved sammenstøtet i Håkon VIIs gate. Meldingen kom kl. 17.25.",
+        category: "Transport",
+        places: ["Trondheim"],
+        publishedAt: "2026-07-14T15:27:30.000Z",
+      }),
+      article("rotvoll-other-clock", {
+        source: "avisa_st",
+        sourceLabel: "Avisa Sør-Trøndelag",
+        title: "Fem involvert i et annet trafikkuhell",
+        excerpt:
+          "Fem personer var involvert i trafikkuhellet i Haakon VIIs gate. Politiet fikk melding klokken 18.05.",
+        category: "Transport",
+        places: ["Rotvoll", "Trondheim"],
+        publishedAt: "2026-07-14T16:06:00.000Z",
+      }),
+      article("rotvoll-other-count", {
+        source: "tronderbladet",
+        sourceLabel: "Trønderbladet",
+        title: "Fire personer i sammenstøt",
+        excerpt:
+          "Fire personer var involvert i sammenstøtet mellom biler i Håkon VIIs gate klokken 17.25.",
+        category: "Transport",
+        places: ["Rotvoll", "Trondheim"],
+        publishedAt: "2026-07-14T15:29:00.000Z",
+      }),
+      article("other-road-same-facts", {
+        source: "t_a",
+        sourceLabel: "Trønder-Avisa",
+        title: "Fem personer i trafikkulykke",
+        excerpt: "Fem personer var involvert i trafikkulykken i Innherredsveien klokken 17.25.",
+        category: "Transport",
+        places: ["Strindheim", "Trondheim"],
+        publishedAt: "2026-07-14T15:26:00.000Z",
+      }),
+    ],
+    expectedSamePairs: [
+      ["rotvoll-nrk", "rotvoll-police"],
+      ["rotvoll-nrk", "rotvoll-adressa"],
+      ["rotvoll-nrk", "rotvoll-nidaros"],
+      ["rotvoll-police", "rotvoll-adressa"],
+      ["rotvoll-police", "rotvoll-nidaros"],
+      ["rotvoll-adressa", "rotvoll-nidaros"],
+    ],
+    expectedSeparatePairs: [
+      ["rotvoll-nrk", "rotvoll-other-clock"],
+      ["rotvoll-police", "rotvoll-other-clock"],
+      ["rotvoll-adressa", "rotvoll-other-clock"],
+      ["rotvoll-nidaros", "rotvoll-other-clock"],
+      ["rotvoll-nrk", "rotvoll-other-count"],
+      ["rotvoll-police", "rotvoll-other-count"],
+      ["rotvoll-adressa", "rotvoll-other-count"],
+      ["rotvoll-nidaros", "rotvoll-other-count"],
+      ["rotvoll-nrk", "other-road-same-facts"],
+      ["rotvoll-police", "other-road-same-facts"],
+      ["rotvoll-adressa", "other-road-same-facts"],
+      ["rotvoll-nidaros", "other-road-same-facts"],
+    ],
+    expectedGroups: [["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"]],
+    expectedVerifiedGroups: [
+      ["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"],
+    ],
+    critical: true,
+    provenance: "sanitized-production-shape",
+  },
+  {
     id: "moholt-storage-burglary-versus-oya-shop-theft",
     articles: [
       article("storage-nidaros-follow-up", {
