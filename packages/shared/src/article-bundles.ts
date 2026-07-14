@@ -16,6 +16,7 @@ import {
 } from "./article-coverage-clustering.js";
 import {
   articleCoverageEdge,
+  isEntityBackedNotificationFailureFollowUp,
   isFatalTrafficIncidentFollowUp,
   isHighDetailCrossSourceNearDuplicate,
   sharedExactEventFingerprints,
@@ -923,6 +924,17 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
 
   const genericSignals = genericPlaceIncidentSignals(left, right, body);
   if (genericSignals.length > 0) return [...signals, ...genericSignals];
+
+  if (isEntityBackedNotificationFailureFollowUp(left, right)) {
+    signals.push({
+      kind: "topical_thread",
+      articleIds: [left.id, right.id],
+      detail: "entity_notification_failure_follow_up",
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
+  }
 
   if (hasTopicalThreadMatch(left, right, body)) {
     signals.push({

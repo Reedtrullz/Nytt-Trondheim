@@ -3,10 +3,12 @@ import {
   analyzeArticleCoverage,
   analyzeArticleCoverageV2,
   articleCoverageEvidence,
+  entityBackedNotificationFollowUpPolicy,
   evaluateArticleCoverageCorpus,
   fatalTrafficFollowUpPolicy,
   highDetailNearDuplicatePolicy,
   isFatalTrafficIncidentFollowUp,
+  isEntityBackedNotificationFailureFollowUp,
   isHighDetailCrossSourceNearDuplicate,
 } from "../src/index.js";
 import { articleCoverageGoldenCases } from "./fixtures/article-coverage-golden.js";
@@ -180,6 +182,44 @@ describe("coverage matcher golden corpus", () => {
         );
         expect(groups).toContainEqual([...expectedMembers].sort());
       }
+    }
+  });
+
+  it("groups a delayed regulatory follow-up without grouping unrelated company news", () => {
+    const fixture = articleCoverageGoldenCases.find(
+      ({ id }) => id === "delayed-regulatory-follow-up-with-dotted-organization",
+    );
+    expect(fixture).toBeDefined();
+
+    const regulatoryPair = fixture!.articles.filter(({ id }) => id !== "dahls-product-news");
+    const evidence = articleCoverageEvidence(regulatoryPair[0]!, regulatoryPair[1]!, "v2");
+    expect(evidence.positiveIncidentEvidence).toContain("shared_named_entity");
+    expect(isEntityBackedNotificationFailureFollowUp(regulatoryPair[0]!, regulatoryPair[1]!)).toBe(
+      true,
+    );
+    expect(
+      isEntityBackedNotificationFailureFollowUp(regulatoryPair[0]!, {
+        ...regulatoryPair[1]!,
+        source: regulatoryPair[0]!.source,
+      }),
+    ).toBe(false);
+    expect(
+      isEntityBackedNotificationFailureFollowUp(regulatoryPair[0]!, {
+        ...regulatoryPair[1]!,
+        publishedAt: new Date(
+          Date.parse(regulatoryPair[0]!.publishedAt) +
+            entityBackedNotificationFollowUpPolicy.windowMs +
+            1,
+        ).toISOString(),
+      }),
+    ).toBe(false);
+
+    for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+      const groups = analyze(fixture!.articles, "2026-07-14T11:00:00.000Z").bundles.map(
+        ({ memberArticleIds }) => [...memberArticleIds].sort(),
+      );
+      expect(groups).toContainEqual(["dahls-adressa", "dahls-nidaros"]);
+      expect(groups.some((ids) => ids.includes("dahls-product-news"))).toBe(false);
     }
   });
 });
