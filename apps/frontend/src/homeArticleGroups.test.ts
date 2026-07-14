@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import { annotateArticleCoverageBundles, groupHomeArticles } from "./homeArticleGroups.js";
 
 function article(overrides: Partial<Article> = {}): Article {
+  const id = overrides.id ?? "article-1";
   return {
-    id: "article-1",
+    id,
     source: "nrk",
     sourceLabel: "NRK Trøndelag",
     title: "Tente på antibac i Trondheim",
     excerpt: "En mann i 50-åra spruta antibac på bakken og tente på det på Torvet i Trondheim.",
-    url: "https://example.test/article",
+    url: `https://example.test/${id}`,
     publishedAt: "2026-06-15T20:12:00.000Z",
     scope: "trondheim",
     category: "Hendelser",

@@ -861,6 +861,12 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
   ) {
     return [];
   }
+  if (
+    sameCanonicalUrl(left, right) &&
+    publishedDistanceMs(left, right) <= nearDuplicateTextWindowMs
+  ) {
+    return [...signals, { kind: "near_duplicate", articleIds: [left.id, right.id], score: 1 }];
+  }
   const exactEventFingerprints = sharedExactEventFingerprints(left, right);
   if (exactEventFingerprints.length > 0) {
     return [
@@ -899,7 +905,8 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
 
   const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
   if (
-    (publishedDistanceMs(left, right) <= nearDuplicateTextWindowMs &&
+    (left.source !== right.source &&
+      publishedDistanceMs(left, right) <= nearDuplicateTextWindowMs &&
       body.overlap >= 10 &&
       body.score >= 0.5 &&
       sameBroadCategory(left, right)) ||
