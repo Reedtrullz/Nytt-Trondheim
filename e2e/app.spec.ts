@@ -6349,6 +6349,19 @@ test("owner manages private situation workspace and creates an export", async ({
   await expect(page.getByText("Arbeidsmappen er eksportert.")).toBeVisible();
 });
 
+test("command center stays inside the phone viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/command");
+
+  const heading = page.getByRole("heading", { name: "Kommandosenter" });
+  await expect(heading).toBeVisible();
+  const fontSize = await heading.evaluate((node) =>
+    Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  expect(fontSize).toBeLessThanOrEqual(42);
+  await expectNoHorizontalPageOverflow(page);
+});
+
 test("owner can open the real situation index and operations status", async ({ page }) => {
   await page.goto("/");
   await page
