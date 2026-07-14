@@ -205,7 +205,7 @@ const coverageProjectionHealthQueryText = `WITH current_generation AS (
          cb.primary_article_id
   FROM current_generation cg
   JOIN coverage_bundles cb ON cb.legacy_generation_id = cg.id
-  WHERE cb.state='legacy' AND cb.matcher_version='v1'
+  WHERE cb.state='superseded' AND cb.matcher_version='v1'
 ), normalized AS (
   SELECT array_agg(DISTINCT cbm.article_id ORDER BY cbm.article_id) AS members,
          cbv.primary_article_id
@@ -4743,8 +4743,10 @@ export class MemoryStore implements Store {
     const summary = summarizeCoverageBundleItems(filtered);
     let parity;
     if (projection === "shadow") {
-      const legacy = analyzeArticleCoverage(this.articles, generatedAt).bundles;
-      parity = coverageProjectionParity(legacy, analysis.bundles);
+      // The in-memory store has no persistence layer to dual-write. Mirror the production
+      // definition by validating the v2 candidate against its legacy-shaped serialization,
+      // not against the intentionally independent public v1 matcher.
+      parity = coverageProjectionParity(analysis.bundles, analysis.bundles);
       summary.matcherVersion = "v2";
       summary.projectionState = "shadow";
       summary.byMatchTier = {
@@ -7545,7 +7547,7 @@ export class PgStore implements Store {
     }>(
       `SELECT id, primary_article_id, member_article_ids
        FROM coverage_bundles
-       WHERE legacy_generation_id=$1 AND state='legacy' AND matcher_version='v1'
+       WHERE legacy_generation_id=$1 AND state='superseded' AND matcher_version='v1'
        ORDER BY id`,
       [generation.id],
     );

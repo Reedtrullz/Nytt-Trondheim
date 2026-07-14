@@ -244,7 +244,7 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Til vurdering");
     expect(html).toContain("Aktive korrigeringer");
     expect(html).toContain("Dataintegritet");
-    expect(html).toContain("Offentlig projeksjon samsvarer");
+    expect(html).toContain("Lagringskontroll bestått");
     expect(html).toContain("Svakeste godkjente treff");
     expect(html).toContain("Vis 1 nesten-treff");
     expect(html).toContain("Splitt gruppe");
@@ -350,9 +350,9 @@ describe("CoverageBundlesDashboard", () => {
     );
 
     expect(html).toContain('role="alert"');
-    expect(html).toContain("Skyggevisningen avviker fra dagens publiserte grupper");
+    expect(html).toContain("Lagringskontrollen fant avvik mellom de to representasjonene");
     expect(html).toContain("missing-article-id");
-    expect(html).not.toContain("Offentlig projeksjon samsvarer");
+    expect(html).not.toContain("Lagringskontroll bestått");
   });
 
   it("keeps correction history read-only when corrections are disabled", () => {

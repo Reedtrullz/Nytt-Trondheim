@@ -499,6 +499,7 @@ describe("coverage bundle store", () => {
         const normalized = config.text.replace(/\s+/g, " ").trim();
         if (!normalized.startsWith("WITH current_generation")) return { rows: [] };
         expect(normalized).toContain("legacy_generation_id = cg.id");
+        expect(normalized).toContain("cb.state='superseded'");
         expect(normalized).toContain("cg.is_current");
         expect(normalized).toContain("cg.matcher_version='v2'");
         expect(normalized).toContain("stable.state='active'");

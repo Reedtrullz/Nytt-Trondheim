@@ -59,6 +59,7 @@ describe("deployment playbook Entur verification", () => {
     expect(promotionContract).toContain("GET DIAGNOSTICS activated_bundle_count = ROW_COUNT");
     expect(promotionContract).toContain("RAISE EXCEPTION");
     expect(promotionContract).toContain("legacy_generation_id=reviewed_generation_id");
+    expect(promotionContract).toContain("state='superseded' AND matcher_version='v1'");
     expect(promotionContract).not.toContain('test "$promoted_count" -eq 1');
     expect(promotionSql.indexOf("GET DIAGNOSTICS promoted_count = ROW_COUNT")).toBeLessThan(
       promotionSql.indexOf("SET is_current=false"),
