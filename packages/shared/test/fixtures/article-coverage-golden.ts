@@ -311,7 +311,7 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
         sourceLabel: "Adresseavisen",
         title: "Fem personer involvert i ulykke",
         excerpt:
-          "Ulykken mellom to biler i Haakon VIIs gate ble meldt klokken 17.25. Fem personer var involvert, men ingen ble skadet.",
+          "Ulykken mellom to biler i Haakon VII’s gate ble meldt klokken 17.25. Fem personer var involvert, men ingen ble skadet.",
         category: "Nyheter",
         places: ["Rotvoll", "Trondheim"],
         publishedAt: "2026-07-14T15:27:00.000Z",

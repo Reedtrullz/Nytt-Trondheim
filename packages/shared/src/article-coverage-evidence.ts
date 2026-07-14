@@ -684,7 +684,7 @@ function hasSharedNamedEntity(left: Article, right: Article): boolean {
 function canonicalTrafficRoad(value: string): string {
   return normalizeToken(value)
     .replace(/^håkon\b/u, "haakon")
-    .replace(/\bvii(?:s)?\b/u, "viis")
+    .replace(/\bvii(?:['’]?s)?\b/u, "viis")
     .replace(/\s+(?:gata|gaten)$/u, " gate")
     .replace(/(?:gata|gaten)$/u, "gate")
     .replace(/\s+(?:veien|vegen)$/u, " vei")
@@ -695,7 +695,7 @@ function articleTrafficRoads(article: Article): Set<string> {
   const text = `${article.title}. ${article.excerpt}`;
   const roads = new Set<string>();
   for (const match of text.matchAll(
-    /\b([\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*(?:\s+(?:[IVXLCDM]+s?|[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*)){0,3}\s+(?:gate|gata|gaten|vei|veien|veg|vegen))\b/gu,
+    /\b([\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*(?:\s+(?:[IVXLCDM]+(?:['’]s)?|[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*)){0,3}\s+(?:gate|gata|gaten|vei|veien|veg|vegen))\b/gu,
   )) {
     if (match[1]) roads.add(canonicalTrafficRoad(match[1]));
   }
