@@ -389,6 +389,40 @@ changed.
   projection mode, correction capability, or database schema. Existing rows migrate lazily as the
   successful source cycle re-ingests their canonical URLs.
 
+### Exact-identity release and live readback
+
+- PR `#32` merged to `main` as `acac3f63ac98e07c0566a4a491740abac95f978d`. PR CI run
+  `29374304051`, exact-main CI run `29374630748`, and deploy run `29374911886` passed.
+- The deploy retained `legacy` projection, disabled corrections, ran matcher `v2` in shadow,
+  passed canary and health checks, accepted a fresh worker cycle with `7` retries left, and ended
+  with `ok=53 changed=11 unreachable=0 failed=0 skipped=2`.
+- Authenticated production readback after the fresh generation showed the Rotvoll bundle as the
+  expected four articles from three sources. The unscoped `limit=50` response separately returned
+  Namdalseid as singleton `article:nrk-f31a5b03caaf7b65`, with its own canonical NRK URL,
+  `trondelag` scope, no situation ID, and no Rotvoll member IDs. The scope-dependent cross-event
+  contamination is therefore live-closed.
+
+## Source-clock and structural-health candidate
+
+- Baseline collectors replaced invalid RSS, municipal, and Politiloggen publication timestamps
+  with collection time. That can reorder old records as new and lets untimestamped Politiloggen
+  corrections change the latest lifecycle state. Several structurally empty HTTP `200` responses
+  also returned an empty success and could report a broken source shape as healthy.
+- TDD RED reproduced ten failures across RSS, public front pages, Trondheim kommune, and
+  Politiloggen: invented current clocks, retained untimestamped records, accepted empty or malformed
+  successful payloads, and applied an untimestamped resolution message.
+- The candidate admits only parseable upstream timestamps. Mixed responses skip individual
+  unusable records while preserving independently valid records. A source degrades only when a
+  successful response has no recognizable candidates or no usable timestamp. Politiloggen HTTP
+  `204` remains the explicit empty-snapshot success; a `200` must contain a non-empty
+  `messageThreads` array with at least one usable timestamped thread.
+- GREEN proof: focused collector/Politiloggen `40/40`, complete worker `26/26` files and `307/307`
+  tests, matcher gate `79/79`, and full repository Vitest `132/132` files and `1272/1272` tests.
+  Full browser/accessibility E2E passed `149` tests with `1` intentional skip across desktop and
+  mobile in `3.8m`. Root typecheck, ESLint, Prettier, production build, `git diff --check`, and
+  production dependency audit with `0` vulnerabilities pass. This candidate changes no matcher,
+  activation, schema, projection, correction, or disappearance semantics.
+
 ## Visual evidence
 
 - Desktop baseline:
@@ -406,9 +440,8 @@ changed.
 
 - The original Critical theft bridge and 390 px overflow are fixed in the authenticated deployed
   readback. This does not prove every property-crime topology or responsive state is correct.
-- The Rotvoll collision is fixed on the authenticated deployed readback, but the unscoped
-  Namdalseid contamination remains until the identity candidate is reviewed, shipped, and proven
-  after a fresh worker generation.
+- The Rotvoll collision and unscoped Namdalseid contamination are fixed on authenticated deployed
+  readback. This does not prove every same-title or same-hour topology is correct.
 - No projection-promotion claim is made.
 - No correction-path readiness claim is made while production corrections are disabled.
 - Green health endpoints do not contradict the visible wrong merge or mobile overflow.
@@ -424,7 +457,6 @@ changed.
 
 ## Recommended next action
 
-Complete the canonical-URL identity candidate's full repository gates and independent diff review,
-then ship it without combining the broader timestamp/extraction changes preserved in the dirty
-ingestion worktree. Require exact-main CI/deploy proof, a fresh worker generation, and authenticated
-scoped plus unscoped readback of the Rotvoll/Namdalseid production records.
+Ship the fully gated source-clock candidate as a narrow worker/source-contract change. Require
+exact-main CI/deploy proof, a fresh completed worker cycle, authenticated source-health readback,
+and article-clock sanity checks before claiming the integrity boundary fixed in production.

@@ -268,6 +268,8 @@ describe("RSS collection policy", () => {
     const unsafeRss = `<?xml version="1.0"?><rss><channel>
       <item><title>Brann i Trondheim sentrum</title><description>Nødetatene er varslet.</description>
       <link>javascript:alert(1)</link><pubDate>Tue, 26 May 2026 12:00:00 GMT</pubDate></item>
+      <item><title>Vannlekkasje i Trondheim sentrum</title><description>Kommunen arbeider på stedet.</description>
+      <link>https://example.test/trygg</link><pubDate>Tue, 26 May 2026 12:15:00 GMT</pubDate></item>
     </channel></rss>`;
 
     const articles = await collectRss(
@@ -275,7 +277,8 @@ describe("RSS collection policy", () => {
       async () => new Response(unsafeRss, { status: 200 }),
     );
 
-    expect(articles).toEqual([]);
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toBe("https://example.test/trygg");
   });
 
   it("degrades malformed successful RSS responses instead of reporting an empty healthy feed", async () => {
@@ -287,11 +290,23 @@ describe("RSS collection policy", () => {
     ).rejects.toThrow(/RSS-format/);
   });
 
-  it("resolves relative feed links and tolerates invalid publication dates per item", async () => {
+  it("degrades empty successful RSS responses instead of reporting a healthy empty feed", async () => {
+    await expect(
+      collectRss(
+        { id: "vg", label: "VG", url: "https://example.test/rss" },
+        async () =>
+          new Response("<rss><channel><title>VG</title></channel></rss>", { status: 200 }),
+      ),
+    ).rejects.toThrow(/ingen oppføringer/i);
+  });
+
+  it("skips an invalid publication timestamp while retaining valid feed items", async () => {
     let requestInit: RequestInit | undefined;
     const relativeRss = `<?xml version="1.0"?><rss><channel>
       <item><title>Brann i Trondheim sentrum</title><description>Nødetatene er varslet.</description>
       <link>/nyheter/brann</link><pubDate>ikke en dato</pubDate></item>
+      <item><title>Vannlekkasje i Trondheim sentrum</title><description>Kommunen arbeider på stedet.</description>
+      <link>/nyheter/vannlekkasje</link><pubDate>Tue, 26 May 2026 12:15:00 GMT</pubDate></item>
     </channel></rss>`;
 
     const articles = await collectRss(
@@ -303,10 +318,71 @@ describe("RSS collection policy", () => {
     );
 
     expect(articles).toHaveLength(1);
-    expect(articles[0]?.url).toBe("https://example.test/nyheter/brann");
-    expect(Number.isNaN(Date.parse(articles[0]?.publishedAt ?? ""))).toBe(false);
+    expect(articles[0]?.url).toBe("https://example.test/nyheter/vannlekkasje");
+    expect(articles[0]?.publishedAt).toBe("2026-05-26T12:15:00.000Z");
     expect(requestInit?.signal).toBeTruthy();
     expect(new Headers(requestInit?.headers).get("User-Agent")).toContain("NyttTrondheim");
+  });
+
+  it("degrades a feed when every candidate has an unusable timestamp", async () => {
+    const invalidTimestampRss = `<?xml version="1.0"?><rss><channel>
+      <item><title>Brann i Trondheim sentrum</title><description>Nødetatene er varslet.</description>
+      <link>/nyheter/brann</link><pubDate>ikke en dato</pubDate></item>
+    </channel></rss>`;
+
+    await expect(
+      collectRss(
+        { id: "nrk", label: "NRK Trøndelag", url: "https://example.test/rss/feed.xml" },
+        async () => new Response(invalidTimestampRss, { status: 200 }),
+      ),
+    ).rejects.toThrow(/ingen brukbare tidsstempler/i);
+  });
+
+  it("degrades empty frontpages and frontpages with only untimestamped candidates", async () => {
+    const source = {
+      id: "nidaros" as const,
+      label: "Nidaros",
+      url: "https://www.nidaros.no/",
+      detailFetchLimit: 0,
+      retainRegionalUnmatched: true,
+    };
+
+    await expect(
+      collectFrontpage(source, async () => new Response("<html><main>Tom forside</main></html>")),
+    ).rejects.toThrow(/ingen artikkelkandidater/i);
+
+    await expect(
+      collectFrontpage(
+        source,
+        async () =>
+          new Response(
+            '<a href="/hendelse/s/30-113-99999">Dette er en lang nok tittel om Trondheim</a>',
+          ),
+      ),
+    ).rejects.toThrow(/ingen brukbare tidsstempler/i);
+  });
+
+  it("skips an untimestamped frontpage candidate while retaining a timestamped one", async () => {
+    const html = `<html><head>
+      <script type="application/ld+json">[
+        {"@type":"NewsArticle","headline":"Brann i Trondheim sentrum","url":"/uten-tid"},
+        {"@type":"NewsArticle","headline":"Vannlekkasje i Trondheim sentrum","url":"/med-tid","datePublished":"2026-05-26T12:15:00Z"}
+      ]</script>
+    </head></html>`;
+    const articles = await collectFrontpage(
+      {
+        id: "nidaros",
+        label: "Nidaros",
+        url: "https://www.nidaros.no/",
+        detailFetchLimit: 0,
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(html),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toBe("https://www.nidaros.no/med-tid");
+    expect(articles[0]?.publishedAt).toBe("2026-05-26T12:15:00.000Z");
   });
 
   it("canonicalUrl allows only http and https schemes", () => {
@@ -358,6 +434,37 @@ describe("RSS collection policy", () => {
     await expect(
       collectMunicipality(async () => new Response("<main>Ingen artikkelkort</main>")),
     ).rejects.toThrow(/artikkelkort/);
+  });
+
+  it("does not invent municipal publication time when detail metadata is unusable", async () => {
+    const listing = `
+      <article class="card"><a href="/aktuelt/uten-tid/">Brann i Trondheim sentrum</a></article>
+    `;
+
+    await expect(
+      collectMunicipality(
+        async (url) =>
+          new Response(String(url).includes("/uten-tid/") ? "<html>Ingen dato</html>" : listing),
+      ),
+    ).rejects.toThrow(/ingen brukbare tidsstempler/i);
+  });
+
+  it("skips an untimestamped municipal card while retaining a timestamped card", async () => {
+    const listing = `
+      <article class="card"><a href="/aktuelt/uten-tid/">Brann i Trondheim sentrum</a></article>
+      <article class="card"><a href="/aktuelt/med-tid/">Vannlekkasje i Trondheim sentrum</a></article>
+    `;
+    const validDetail = '<meta property="article:published_time" content="26.05.2026 13:15:00">';
+    const articles = await collectMunicipality(async (url) => {
+      const value = String(url);
+      if (value.includes("/med-tid/")) return new Response(validDetail);
+      if (value.includes("/uten-tid/")) return new Response("<html>Ingen dato</html>");
+      return new Response(listing);
+    });
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toBe("https://www.trondheim.kommune.no/aktuelt/med-tid/");
+    expect(articles[0]?.publishedAt).toBe("2026-05-26T11:15:00.000Z");
   });
 });
 
