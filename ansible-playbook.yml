@@ -622,9 +622,9 @@
             executable: /bin/bash
           register: promoted_worker_cycle
           until: promoted_worker_cycle.rc == 0
-          # A production-sized v2 shadow analysis is CPU-bound and can take more than three
-          # minutes. Keep this bounded, but allow the promoted worker to finish one real cycle.
-          retries: 18
+          # A production-sized v2 shadow cycle has been observed at 343 seconds after promotion.
+          # Keep this bounded, but allow one real cycle plus provider and SSH polling jitter.
+          retries: 30
           delay: 10
           changed_when: false
 

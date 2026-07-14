@@ -267,7 +267,8 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toContain("cycle_completed_at >= :'candidate_promotion_started_at'::timestamptz");
     expect(task).toContain("register: promoted_worker_cycle");
     expect(task).toContain("until: promoted_worker_cycle.rc == 0");
-    expect(task).toContain("retries: 18");
+    expect(task).toContain("retries: 30");
+    expect(task).toContain("343 seconds");
     expect(task).toContain("candidate_promotion_started_at.stdout");
     expect(task).toContain("- name: Verify traffic source health after candidate promotion");
     expect(task).toContain("FROM source_health");
