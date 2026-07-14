@@ -2232,16 +2232,12 @@ function mergeSituation(existing: Situation | undefined, incoming: Situation): S
 }
 
 export function articleDedupeKey(article: Article): string {
-  const normalizedTitle = article.title
-    .normalize("NFKD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLocaleLowerCase("nb")
-    .replaceAll(/[^a-z0-9]+/g, " ")
-    .trim();
-  const publishedHour = article.publishedAt.slice(0, 13);
-  return createHash("sha256")
-    .update(`${article.source}:${normalizedTitle}:${publishedHour}`)
+  // Headlines and publication hours are similarity evidence, not durable identity: publishers
+  // routinely reuse generic headlines for unrelated incidents in the same hour.
+  const digest = createHash("sha256")
+    .update(`article-url-v2\0${article.source}\0${article.url}`)
     .digest("hex");
+  return `article-url-v2:${digest}`;
 }
 
 function sourceItemHash(parts: unknown[]): string {
