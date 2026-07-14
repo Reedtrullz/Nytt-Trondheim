@@ -290,7 +290,7 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
       article("rotvoll-nrk", {
         title: "Trafikkuhell i Trondheim",
         excerpt:
-          "Fem personer er involvert i et trafikkuhell i Haakon VIIs gate. Politiet fikk meldingen klokken 17.25.",
+          "Nødetatene rykker ut til Lade i Trondheim etter melding om trafikkuhell. Det skriver politiet kl. 17.25. Fem personer skal være involvert og de blir alle sjekket av helsepersonell på stedet.",
         category: "Transport",
         places: ["Lade", "Trondheim"],
         publishedAt: "2026-07-14T15:28:00.000Z",
@@ -300,7 +300,7 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
         sourceLabel: "Politiloggen",
         title: "Trafikk: Trondheim, Lade",
         excerpt:
-          "Melding om sammenstøt mellom to biler i Håkon VIIs gate kl. 17:25. Fem personer var involvert, ingen meldt skadet.",
+          "Nødetatene rykker ut til Haakon VII,s gate ved rundkjøringen til Rotvoll etter melding om trafikkuhell. 5 personer involvert, ikke meldt om personskade. Ulykken framstår ikke som alvorlig.",
         category: "Hendelser",
         places: ["Lade", "Trondheim"],
         situationId: "politiloggen-sanitized-rotvoll",
@@ -309,6 +309,7 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
       article("rotvoll-adressa", {
         source: "adressa",
         sourceLabel: "Adresseavisen",
+        url: "https://www.adressa.no/nyhetsstudio/i/7pBg7v/fem-personer-involvert-i-ulykke",
         title: "Fem personer involvert i ulykke",
         excerpt:
           "Ulykken mellom to biler i Haakon VII’s gate ble meldt klokken 17.25. Fem personer var involvert, men ingen ble skadet.",
@@ -317,16 +318,62 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
         publishedAt: "2026-07-14T15:27:00.000Z",
       }),
       article("rotvoll-nidaros", {
-        source: "nidaros",
-        sourceLabel: "Nidaros",
-        title: "Trafikkulykke: – Begge har gjort galt",
-        excerpt:
-          "Fem personer var involvert ved sammenstøtet i Håkon VIIs gate. Meldingen kom kl. 17.25.",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        url: "https://www.adressa.no/nyheter/i/7pBg7v/fem-personer-involvert-i-ulykke",
+        title: "Fem personer involvert i ulykke: – Begge biler hadde skyld",
+        excerpt: "Fem personer var involvert i en trafikkulykke i Trondheim tirsdag ettermiddag.",
         category: "Transport",
-        places: ["Trondheim"],
+        places: ["Rotvoll", "Trondheim"],
         publishedAt: "2026-07-14T15:27:30.000Z",
       }),
-      article("rotvoll-other-clock", {
+    ],
+    expectedSamePairs: [
+      ["rotvoll-nrk", "rotvoll-police"],
+      ["rotvoll-police", "rotvoll-adressa"],
+      ["rotvoll-adressa", "rotvoll-nidaros"],
+    ],
+    expectedSeparatePairs: [],
+    expectedGroups: [["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"]],
+    expectedVerifiedGroups: [
+      ["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"],
+    ],
+    critical: true,
+    provenance: "sanitized-production-shape",
+  },
+  {
+    id: "rotvoll-collision-strict-negative-controls",
+    articles: [
+      article("rotvoll-control-nrk", {
+        title: "Trafikkuhell i Trondheim",
+        excerpt:
+          "Nødetatene rykker ut til Lade i Trondheim etter melding om trafikkuhell. Det skriver politiet kl. 17.25. Fem personer skal være involvert.",
+        category: "Transport",
+        places: ["Lade", "Trondheim"],
+        publishedAt: "2026-07-14T15:28:00.000Z",
+      }),
+      article("rotvoll-control-police", {
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Trafikk: Trondheim, Lade",
+        excerpt:
+          "Nødetatene rykker ut til Haakon VII,s gate ved rundkjøringen til Rotvoll etter melding om trafikkuhell. 5 personer involvert, ikke meldt om personskade.",
+        category: "Transport",
+        places: ["Lade", "Trondheim"],
+        situationId: "politiloggen-rotvoll-control",
+        publishedAt: "2026-07-14T15:25:20.201Z",
+      }),
+      article("rotvoll-control-adressa", {
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Fem personer involvert i ulykke",
+        excerpt:
+          "Ulykken mellom to biler i Haakon VII’s gate ble meldt klokken 17.25. Fem personer var involvert, men ingen ble skadet.",
+        category: "Transport",
+        places: ["Rotvoll", "Trondheim"],
+        publishedAt: "2026-07-14T15:27:48.000Z",
+      }),
+      article("rotvoll-control-other-clock", {
         source: "avisa_st",
         sourceLabel: "Avisa Sør-Trøndelag",
         title: "Fem involvert i et annet trafikkuhell",
@@ -336,7 +383,7 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
         places: ["Rotvoll", "Trondheim"],
         publishedAt: "2026-07-14T16:06:00.000Z",
       }),
-      article("rotvoll-other-count", {
+      article("rotvoll-control-other-count", {
         source: "tronderbladet",
         sourceLabel: "Trønderbladet",
         title: "Fire personer i sammenstøt",
@@ -346,7 +393,7 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
         places: ["Rotvoll", "Trondheim"],
         publishedAt: "2026-07-14T15:29:00.000Z",
       }),
-      article("other-road-same-facts", {
+      article("rotvoll-control-other-road", {
         source: "t_a",
         sourceLabel: "Trønder-Avisa",
         title: "Fem personer i trafikkulykke",
@@ -357,30 +404,23 @@ export const articleCoverageGoldenCases: ArticleCoverageGoldenCase[] = [
       }),
     ],
     expectedSamePairs: [
-      ["rotvoll-nrk", "rotvoll-police"],
-      ["rotvoll-nrk", "rotvoll-adressa"],
-      ["rotvoll-nrk", "rotvoll-nidaros"],
-      ["rotvoll-police", "rotvoll-adressa"],
-      ["rotvoll-police", "rotvoll-nidaros"],
-      ["rotvoll-adressa", "rotvoll-nidaros"],
+      ["rotvoll-control-nrk", "rotvoll-control-police"],
+      ["rotvoll-control-police", "rotvoll-control-adressa"],
     ],
     expectedSeparatePairs: [
-      ["rotvoll-nrk", "rotvoll-other-clock"],
-      ["rotvoll-police", "rotvoll-other-clock"],
-      ["rotvoll-adressa", "rotvoll-other-clock"],
-      ["rotvoll-nidaros", "rotvoll-other-clock"],
-      ["rotvoll-nrk", "rotvoll-other-count"],
-      ["rotvoll-police", "rotvoll-other-count"],
-      ["rotvoll-adressa", "rotvoll-other-count"],
-      ["rotvoll-nidaros", "rotvoll-other-count"],
-      ["rotvoll-nrk", "other-road-same-facts"],
-      ["rotvoll-police", "other-road-same-facts"],
-      ["rotvoll-adressa", "other-road-same-facts"],
-      ["rotvoll-nidaros", "other-road-same-facts"],
+      ["rotvoll-control-nrk", "rotvoll-control-other-clock"],
+      ["rotvoll-control-police", "rotvoll-control-other-clock"],
+      ["rotvoll-control-adressa", "rotvoll-control-other-clock"],
+      ["rotvoll-control-nrk", "rotvoll-control-other-count"],
+      ["rotvoll-control-police", "rotvoll-control-other-count"],
+      ["rotvoll-control-adressa", "rotvoll-control-other-count"],
+      ["rotvoll-control-nrk", "rotvoll-control-other-road"],
+      ["rotvoll-control-police", "rotvoll-control-other-road"],
+      ["rotvoll-control-adressa", "rotvoll-control-other-road"],
     ],
-    expectedGroups: [["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"]],
+    expectedGroups: [["rotvoll-control-nrk", "rotvoll-control-police", "rotvoll-control-adressa"]],
     expectedVerifiedGroups: [
-      ["rotvoll-nrk", "rotvoll-police", "rotvoll-adressa", "rotvoll-nidaros"],
+      ["rotvoll-control-nrk", "rotvoll-control-police", "rotvoll-control-adressa"],
     ],
     critical: true,
     provenance: "sanitized-production-shape",

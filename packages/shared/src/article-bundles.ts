@@ -22,7 +22,9 @@ import {
   isHighInformationTrafficCollisionMatch,
   isPropertyCrimeCoveragePair,
   isPropertyCrimeEventMatch,
+  isTrafficCollisionArticle,
   propertyCrimeEvidenceConflicts,
+  samePublisherStoryUrl,
   sharedExactEventFingerprints,
   trafficCollisionEvidenceConflicts,
 } from "./article-coverage-evidence.js";
@@ -564,7 +566,7 @@ function categoriesCompatibleForIncidentSignal(
 }
 
 function sameCanonicalUrl(left: Article, right: Article): boolean {
-  return left.url.length > 0 && left.url === right.url;
+  return samePublisherStoryUrl(left, right);
 }
 
 function articleText(article: Article): string {
@@ -1090,7 +1092,23 @@ function bundleFor(articles: Article[]): ArticleCoverageBundle | undefined {
 }
 
 function articleFitsGroup(article: Article, group: HomeArticleGroup, memo: GroupPairMemo): boolean {
-  if (group.articles.some((existing) => memoizedArticlesConflict(article, existing, memo))) {
+  const hasPairConflict = group.articles.some((existing) =>
+    memoizedArticlesConflict(article, existing, memo),
+  );
+  if (
+    hasPairConflict &&
+    groupsConflict(
+      {
+        id: groupId(article),
+        primary: article,
+        articles: [article],
+        sourceLabels: [article.sourceLabel],
+        bundle: article.coverageBundle,
+      },
+      group,
+      memo,
+    )
+  ) {
     return false;
   }
   return group.articles.some((existing) => memoizedArticlesSimilar(article, existing, memo));
@@ -1101,9 +1119,32 @@ function groupsConflict(
   right: HomeArticleGroup,
   memo: GroupPairMemo,
 ): boolean {
-  return left.articles.some((leftArticle) =>
+  const hasConflict = left.articles.some((leftArticle) =>
     right.articles.some((rightArticle) =>
       memoizedArticlesConflict(leftArticle, rightArticle, memo),
+    ),
+  );
+  if (!hasConflict) return false;
+
+  const hasExactTrafficBridge = left.articles.some((leftArticle) =>
+    right.articles.some((rightArticle) =>
+      isHighInformationTrafficCollisionMatch(leftArticle, rightArticle),
+    ),
+  );
+  if (!hasExactTrafficBridge) return true;
+
+  const allArticles = [...left.articles, ...right.articles];
+  if (!allArticles.every(isTrafficCollisionArticle)) return true;
+  return left.articles.some((leftArticle) =>
+    right.articles.some(
+      (rightArticle) =>
+        trafficCollisionEvidenceConflicts(leftArticle, rightArticle) ||
+        propertyCrimeEvidenceConflicts(leftArticle, rightArticle) ||
+        Boolean(
+          leftArticle.situationId &&
+          rightArticle.situationId &&
+          leftArticle.situationId !== rightArticle.situationId,
+        ),
     ),
   );
 }
@@ -1125,8 +1166,19 @@ function mergeCandidateGroups(
   memo: GroupPairMemo,
 ): HomeArticleGroup[] {
   const mergeableGroups: HomeArticleGroup[] = [];
-  for (const candidate of candidateGroups) {
-    if (mergeableGroups.some((existing) => groupsConflict(existing, candidate, memo))) continue;
+  const orderedCandidates = [...candidateGroups].sort(
+    (left, right) =>
+      Number(right.articles.some((existing) => sameCanonicalUrl(article, existing))) -
+      Number(left.articles.some((existing) => sameCanonicalUrl(article, existing))),
+  );
+  for (const candidate of orderedCandidates) {
+    if (
+      mergeableGroups.some((existing) =>
+        groupsConflict({ ...existing, articles: [article, ...existing.articles] }, candidate, memo),
+      )
+    ) {
+      continue;
+    }
     mergeableGroups.push(candidate);
   }
   return mergeableGroups;

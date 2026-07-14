@@ -328,6 +328,40 @@ changed.
   typecheck, ESLint, Prettier, production build, `git diff --check`, and production dependency audit
   with `0` vulnerabilities.
 
+### Exact-payload follow-up after PR #30
+
+- PR `#30` merged as `721c6a7b1d7d6a7b63a4206cb6367ec1a6b4395d`. PR CI run
+  `29367614193`, exact-main CI run `29368042871`, and deploy run `29368385596` all passed. The
+  deploy kept `legacy`, corrections disabled, matcher `v2` in shadow, passed canary and production
+  health, accepted a fresh worker cycle with `8` retries left, and ended with
+  `ok=53 changed=11 unreachable=0 failed=0 skipped=2`.
+- A fresh authenticated production tab still showed the same two Rotvoll cards after that worker
+  cycle. The authenticated `scope=trondheim` story payload then proved that the stored
+  Politiloggen excerpt is `Haakon VII,s gate` and contains no textual clock. Its authoritative
+  `17:25` is represented by the Politiloggen publication timestamp. The previous sanitized fixture
+  had incorrectly supplied both a conventional genitive and an explicit clock.
+- The corrected production-shaped fixture now contains the four exact topology roles: sparse NRK
+  copy with explicit `17.25` and five people at Lade; official Politiloggen copy with
+  `Haakon VII,s gate`, five people, a Politiloggen situation ID, and publication minute `17:25`;
+  the Adresseavisen news-studio report with `Haakon VII’s gate`; and the sparse Adresseavisen
+  follow-up sharing publisher story key `/i/7pBg7v/`.
+- The follow-up candidate accepts the observed comma-genitive road spelling, uses the Oslo-local
+  publication minute only for official Politiloggen situation records when their text has no
+  clock, and adds an official collision-companion edge only when clock, participant count, place,
+  category, source, and publication window agree. An exact road+clock+count bridge may resolve a
+  group-level Lade/Rotvoll label conflict only when every member is a traffic-collision report and
+  no pair has a road, clock, participant, property-crime, or situation-ID conflict.
+- RED reproduced with the exact stored payload. GREEN is focused Rotvoll `1/1`, the full golden
+  file `18/18`, and root unit/integration `132` files and `1,260/1,260` tests. Root typecheck,
+  ESLint, Prettier, production build, `git diff --check`, and production dependency audit with
+  `0` vulnerabilities also pass. Full browser/accessibility E2E passed `149` tests with `1`
+  intentional skip in `3.9m` across desktop and mobile projects.
+- Separate ingestion-integrity finding: an authenticated unscoped `limit=50` story payload grouped
+  the later NRK Namdalseid collision `nrk-f31a5b03caaf7b65` with
+  `politiloggen-261sx6` under the Rotvoll situation bundle, while the Trondheim-scoped payload
+  returned the expected NRK Trondheim article. This scope-dependent cross-event merge is not
+  claimed fixed by the Rotvoll candidate and remains a Critical follow-up.
+
 ## Visual evidence
 
 - Desktop baseline:

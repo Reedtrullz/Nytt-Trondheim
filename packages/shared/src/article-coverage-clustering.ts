@@ -1,5 +1,9 @@
 import type { HomeArticleGroup } from "./article-bundles.js";
-import type { ArticleCoverageEdge } from "./article-coverage-evidence.js";
+import {
+  isTrafficCollisionArticle,
+  trafficCollisionEvidenceConflicts,
+  type ArticleCoverageEdge,
+} from "./article-coverage-evidence.js";
 import type { Article } from "./types.js";
 
 export interface CoverageRejectedPair {
@@ -39,9 +43,7 @@ export function clusterArticlesByCoverageEdges(
 ): HomeArticleGroup[] {
   const articlesById = new Map(articles.map((article) => [article.id, article]));
   const rejected = new Set(options.rejectedPairs.map((pair) => pairKey(...pair.articleIds)));
-  const blocked = new Set(
-    edges.filter((edge) => edge.conflicts.length > 0).map((edge) => pairKey(...edge.articleIds)),
-  );
+  const edgeByPair = new Map(edges.map((edge) => [pairKey(...edge.articleIds), edge]));
   const acceptedEdges = edges
     .filter(
       (edge) =>
@@ -56,15 +58,40 @@ export function clusterArticlesByCoverageEdges(
     );
   const groups: string[][] = [];
 
+  const containsBlockingPair = (candidate: string[]): boolean => {
+    const candidateSet = new Set(candidate);
+    const hasExactTrafficBridge = acceptedEdges.some(
+      (edge) =>
+        edge.signals.some(
+          (signal) => signal.detail === "traffic_collision:road_clock_participants",
+        ) && edge.articleIds.every((id) => candidateSet.has(id)),
+    );
+    const allTrafficCollisions = candidate.every((id) =>
+      isTrafficCollisionArticle(articlesById.get(id)!),
+    );
+    return candidate.some((left, index) =>
+      candidate.slice(index + 1).some((right) => {
+        const key = pairKey(left, right);
+        if (rejected.has(key)) return true;
+        const edge = edgeByPair.get(key);
+        if (!edge || edge.conflicts.length === 0) return false;
+        if (
+          hasExactTrafficBridge &&
+          allTrafficCollisions &&
+          edge.conflicts.every(({ kind }) => kind === "specific_place") &&
+          !trafficCollisionEvidenceConflicts(articlesById.get(left)!, articlesById.get(right)!)
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    );
+  };
+
   for (const edge of acceptedEdges.filter((item) => item.tier === "strong")) {
     const matching = groups.filter((group) => edge.articleIds.some((id) => group.includes(id)));
     const candidate = [...new Set([...edge.articleIds, ...matching.flat()])];
-    const containsBlockedPair = candidate.some((left, index) =>
-      candidate
-        .slice(index + 1)
-        .some((right) => rejected.has(pairKey(left, right)) || blocked.has(pairKey(left, right))),
-    );
-    if (containsBlockedPair) continue;
+    if (containsBlockingPair(candidate)) continue;
     for (const group of matching) groups.splice(groups.indexOf(group), 1);
     groups.push(candidate);
   }
@@ -83,12 +110,7 @@ export function clusterArticlesByCoverageEdges(
     });
     if (candidates.length === 1) {
       const candidate = [...candidates[0]!, article.id];
-      const conflict = candidate.some((left, index) =>
-        candidate
-          .slice(index + 1)
-          .some((right) => rejected.has(pairKey(left, right)) || blocked.has(pairKey(left, right))),
-      );
-      if (!conflict) candidates[0]!.push(article.id);
+      if (!containsBlockingPair(candidate)) candidates[0]!.push(article.id);
     } else {
       groups.push([article.id]);
     }

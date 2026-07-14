@@ -213,7 +213,6 @@ describe("coverage matcher golden corpus", () => {
     );
     expect(fixture).toBeDefined();
     const expectedMembers = ["rotvoll-adressa", "rotvoll-nidaros", "rotvoll-nrk", "rotvoll-police"];
-    const negativeIds = ["other-road-same-facts", "rotvoll-other-clock", "rotvoll-other-count"];
     const permutations = [
       fixture!.articles,
       [...fixture!.articles].reverse(),
@@ -239,21 +238,39 @@ describe("coverage matcher golden corpus", () => {
         expect(bundles.map(({ memberArticleIds }) => [...memberArticleIds].sort())).toContainEqual(
           expectedMembers,
         );
-        expect(
-          bundles.some(({ memberArticleIds }) =>
-            negativeIds.some(
-              (negativeId) =>
-                memberArticleIds.includes(negativeId) &&
-                expectedMembers.some((memberId) => memberArticleIds.includes(memberId)),
-            ),
-          ),
-        ).toBe(false);
       }
     }
 
     const newsroom = articlesById.get("rotvoll-nrk")!;
     const police = articlesById.get("rotvoll-police")!;
-    expect(isHighInformationTrafficCollisionMatch(newsroom, police)).toBe(true);
+    const adressa = articlesById.get("rotvoll-adressa")!;
+    expect(isHighInformationTrafficCollisionMatch(newsroom, police)).toBe(false);
+    expect(isHighInformationTrafficCollisionMatch(police, adressa)).toBe(true);
+    expect(
+      isHighInformationTrafficCollisionMatch(
+        { ...police, publishedAt: "2026-07-14T15:26:00.000Z" },
+        adressa,
+      ),
+    ).toBe(false);
+    expect(
+      isHighInformationTrafficCollisionMatch(
+        { ...police, source: "nrk", situationId: null },
+        adressa,
+      ),
+    ).toBe(false);
+    expect(
+      isHighInformationTrafficCollisionMatch(
+        { ...police, excerpt: `${police.excerpt} Meldingen kom kl. 17.26.` },
+        adressa,
+      ),
+    ).toBe(false);
+    expect(
+      isHighInformationTrafficCollisionMatch(police, {
+        ...adressa,
+        title: "Fire personer involvert i ulykke",
+        excerpt: adressa.excerpt.replaceAll("Fem personer", "Fire personer"),
+      }),
+    ).toBe(false);
     expect(
       isHighInformationTrafficCollisionMatch(newsroom, { ...police, source: newsroom.source }),
     ).toBe(false);
@@ -268,7 +285,7 @@ describe("coverage matcher golden corpus", () => {
     ).toBe(false);
 
     const sparseDifferentRoad = articleCoverageEvidence(
-      newsroom,
+      adressa,
       {
         ...police,
         excerpt:

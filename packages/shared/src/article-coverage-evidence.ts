@@ -50,6 +50,7 @@ export type PositiveIncidentEvidence =
   | "shared_specific_place"
   | "mentioned_specific_place"
   | "shared_named_entity"
+  | "shared_official_traffic_collision_companion"
   | "shared_high_information_traffic_collision"
   | "shared_fatal_traffic_fingerprint"
   | "shared_property_crime_event"
@@ -476,6 +477,24 @@ function normalizeToken(value: string): string {
   return normalizeText(value).replace(/\s+/g, " ");
 }
 
+function publisherStoryUrlKey(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    const storyId = url.pathname.match(/\/i\/([^/]+)(?:\/|$)/u)?.[1];
+    if (!storyId) return undefined;
+    return `${url.hostname.replace(/^www\./u, "")}:${storyId}`;
+  } catch {
+    return undefined;
+  }
+}
+
+export function samePublisherStoryUrl(left: Article, right: Article): boolean {
+  if (left.url.length === 0 || right.url.length === 0) return false;
+  if (left.url === right.url) return true;
+  const leftStoryKey = publisherStoryUrlKey(left.url);
+  return leftStoryKey !== undefined && leftStoryKey === publisherStoryUrlKey(right.url);
+}
+
 function tokens(value: string): Set<string> {
   const normalized = normalizeText(value);
   if (!normalized) return new Set();
@@ -684,7 +703,7 @@ function hasSharedNamedEntity(left: Article, right: Article): boolean {
 function canonicalTrafficRoad(value: string): string {
   return normalizeToken(value)
     .replace(/^håkon\b/u, "haakon")
-    .replace(/\bvii(?:['’]?s)?\b/u, "viis")
+    .replace(/\bvii(?:\s+s|s)?\b/u, "viis")
     .replace(/\s+(?:gata|gaten)$/u, " gate")
     .replace(/(?:gata|gaten)$/u, "gate")
     .replace(/\s+(?:veien|vegen)$/u, " vei")
@@ -695,7 +714,7 @@ function articleTrafficRoads(article: Article): Set<string> {
   const text = `${article.title}. ${article.excerpt}`;
   const roads = new Set<string>();
   for (const match of text.matchAll(
-    /\b([\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*(?:\s+(?:[IVXLCDM]+(?:['’]s)?|[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*)){0,3}\s+(?:gate|gata|gaten|vei|veien|veg|vegen))\b/gu,
+    /\b([\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*(?:\s+(?:[IVXLCDM]+(?:[,'’]?s)?|[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*)){0,3}\s+(?:gate|gata|gaten|vei|veien|veg|vegen))\b/gu,
   )) {
     if (match[1]) roads.add(canonicalTrafficRoad(match[1]));
   }
@@ -720,6 +739,10 @@ function hasTrafficCollisionLanguage(article: Article): boolean {
     article.category === "Transport" ||
     /\b(?:bil\w*|kjøretøy\w*|trafikk\w*|veg\w*|vei\w*)\b/u.test(text);
   return Boolean(trafficContext && /\b(?:sammenstøt\w*|ulykk\w*)\b/u.test(text));
+}
+
+export function isTrafficCollisionArticle(article: Article): boolean {
+  return hasTrafficCollisionLanguage(article);
 }
 
 export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype {
@@ -849,6 +872,28 @@ function hasMixedPropertyCrimeSubtypes(
   return subtypePair(left, right) === "shop_theft\u0000storage_burglary";
 }
 
+const osloClockFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Oslo",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function officialPolitiloggenClockMinute(article: Article): number | undefined {
+  if (article.source !== "politiloggen" || !article.situationId?.startsWith("politiloggen-")) {
+    return undefined;
+  }
+  const publishedAt = new Date(article.publishedAt);
+  if (Number.isNaN(publishedAt.getTime())) return undefined;
+  const parts = new Map(
+    osloClockFormatter.formatToParts(publishedAt).map(({ type, value }) => [type, value]),
+  );
+  const hour = Number(parts.get("hour"));
+  const minute = Number(parts.get("minute"));
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return undefined;
+  return hour * 60 + minute;
+}
+
 function articleReportedClockMinutes(article: Article): Set<number> {
   const minutes = new Set<number>();
   for (const match of normalizedText(article).matchAll(
@@ -857,6 +902,10 @@ function articleReportedClockMinutes(article: Article): Set<number> {
     const hour = Number(match[1]);
     const minute = Number(match[2]);
     minutes.add(hour * 60 + minute);
+  }
+  if (minutes.size === 0) {
+    const officialMinute = officialPolitiloggenClockMinute(article);
+    if (officialMinute !== undefined) minutes.add(officialMinute);
   }
   return minutes;
 }
@@ -987,6 +1036,38 @@ export function isHighInformationTrafficCollisionMatch(left: Article, right: Art
       Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt)),
     ) === "compatible"
   );
+}
+
+export function isOfficialTrafficCollisionCompanionMatch(left: Article, right: Article): boolean {
+  const leftFingerprint = highInformationTrafficCollisionFingerprint(left);
+  const rightFingerprint = highInformationTrafficCollisionFingerprint(right);
+  const official = [left, right].find(
+    (article) =>
+      article.source === "politiloggen" && article.situationId?.startsWith("politiloggen-"),
+  );
+  if (
+    !official ||
+    left.source === right.source ||
+    !leftFingerprint.trafficCollision ||
+    !rightFingerprint.trafficCollision ||
+    !trafficCategoriesCompatible(left, right) ||
+    Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt)) >
+      highInformationTrafficCollisionPolicy.windowMs ||
+    descriptorSetsMismatch(leftFingerprint.roads, rightFingerprint.roads) ||
+    descriptorSetsMismatch(
+      leftFingerprint.reportedClockMinutes,
+      rightFingerprint.reportedClockMinutes,
+    ) ||
+    descriptorSetsMismatch(
+      leftFingerprint.involvedPersonCounts,
+      rightFingerprint.involvedPersonCounts,
+    ) ||
+    !hasSetOverlap(leftFingerprint.reportedClockMinutes, rightFingerprint.reportedClockMinutes) ||
+    !hasSetOverlap(leftFingerprint.involvedPersonCounts, rightFingerprint.involvedPersonCounts)
+  ) {
+    return false;
+  }
+  return hasSharedSpecificPlace(left, right) || hasSpecificPlaceMention(left, right);
 }
 
 export function trafficCollisionEvidenceConflicts(left: Article, right: Article): boolean {
@@ -1258,6 +1339,7 @@ export function articleCoverageEvidence(
     right,
     timeDistanceMs,
   );
+  const officialTrafficCollisionCompanion = isOfficialTrafficCollisionCompanionMatch(left, right);
   const sharedCityIncidentFingerprintCandidate =
     leftFingerprint && leftFingerprint === rightFingerprint ? leftFingerprint : undefined;
   const sharedCityIncidentFingerprint = eligibleSharedCityIncidentFingerprint(
@@ -1316,6 +1398,9 @@ export function articleCoverageEvidence(
   }
   if (highInformationTrafficCollision === "compatible") {
     positiveIncidentEvidence.push("shared_high_information_traffic_collision");
+  }
+  if (officialTrafficCollisionCompanion) {
+    positiveIncidentEvidence.push("shared_official_traffic_collision_companion");
   }
   if (propertyCrimeRelation === "compatible") {
     positiveIncidentEvidence.push("shared_property_crime_event");
@@ -1594,6 +1679,13 @@ function articlePairSignalsForV2(
       detail: "traffic_collision:road_clock_participants",
     });
   }
+  if (evidence.positiveIncidentEvidence.includes("shared_official_traffic_collision_companion")) {
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: evidence.articleIds,
+      detail: "traffic_collision:official_clock_participants",
+    });
+  }
   if (evidence.sharedExactEventFingerprints.length > 0) {
     signals.push({
       kind: "cross_source_incident",
@@ -1609,7 +1701,7 @@ function articlePairSignalsForV2(
     });
   }
   const body = { overlap: evidence.sharedBodyTokenCount, score: evidence.bodyScore };
-  const sameUrl = left.url.length > 0 && left.url === right.url;
+  const sameUrl = samePublisherStoryUrl(left, right);
   if (sameUrl) {
     signals.push({ kind: "near_duplicate", articleIds: evidence.articleIds, score: 1 });
   }
@@ -1734,6 +1826,9 @@ function automaticEvidenceEligible(
   if (evidence.positiveIncidentEvidence.includes("shared_high_information_traffic_collision")) {
     return true;
   }
+  if (evidence.positiveIncidentEvidence.includes("shared_official_traffic_collision_companion")) {
+    return true;
+  }
   if (evidence.positiveIncidentEvidence.includes("shared_fatal_traffic_fingerprint")) {
     return true;
   }
@@ -1780,11 +1875,7 @@ function automaticEvidenceEligible(
       (highDetailNearDuplicate || detailedExactCrossSourceCopy)
     );
   }
-  if (
-    left.url.length > 0 &&
-    left.url === right.url &&
-    evidence.timeDistanceMs <= nearDuplicateWindowMs
-  ) {
+  if (samePublisherStoryUrl(left, right) && evidence.timeDistanceMs <= nearDuplicateWindowMs) {
     return true;
   }
   return (
@@ -1857,6 +1948,11 @@ export function articleCoverageEdge(
   )
     ? 0.65
     : 0;
+  const officialTrafficCollisionCompanionScore = evidence.positiveIncidentEvidence.includes(
+    "shared_official_traffic_collision_companion",
+  )
+    ? 0.65
+    : 0;
   const exactEventScore = evidence.positiveIncidentEvidence.includes(
     "shared_exact_event_fingerprint",
   )
@@ -1881,6 +1977,7 @@ export function articleCoverageEdge(
       cityFingerprintScore +
       fatalTrafficScore +
       highInformationTrafficCollisionScore +
+      officialTrafficCollisionCompanionScore +
       exactEventScore +
       topicScore +
       duplicateScore +
@@ -1899,6 +1996,7 @@ export function articleCoverageEdge(
       duplicateScore > 0 ||
       fatalTrafficScore > 0 ||
       highInformationTrafficCollisionScore > 0 ||
+      officialTrafficCollisionCompanionScore > 0 ||
       exactEventScore > 0)
   ) {
     tier = "strong";
