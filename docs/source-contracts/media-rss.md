@@ -18,6 +18,9 @@
 ## Identity and Retention
 
 - Durable upstream identity: canonical article URL plus source-local IDs when available.
+- Every admitted article must have a parseable upstream publication timestamp. Missing or invalid
+  timestamps are not replaced with collection time; unusable items are skipped, and a feed whose
+  candidate items are all unusable must degrade source health.
 - Raw payload retention: limited public feed/article fields only; never credentials, cookies or paywalled body text.
 - Avisa Sør-Trøndelag uses RSS `https://www.avisa-st.no/rss`; public feed categories may be used for Trondheim/Trøndelag relevance and place hints, but full article bodies are not retained.
 - Ytringen uses public Atom `https://ytringen.no/atom.xml`.
@@ -27,4 +30,8 @@
 ## Verification
 
 - Unit tests must cover relevance filtering, dedupe and non-Trondheim exclusion.
+- A successful HTTP response with no RSS/Atom entries, the wrong document structure, or no usable
+  candidate timestamp must fail the collection so source health cannot report it as healthy.
+- Mixed feeds skip individual malformed items while retaining valid, independently timestamped
+  items.
 - Source audit should show source health and source-item counts without exposing raw payloads.

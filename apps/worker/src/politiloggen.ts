@@ -99,21 +99,28 @@ function normalizeThread(value: unknown): PolitiloggenThread | undefined {
   };
 }
 
-function toIso(value: string | null | undefined, fallback?: string): string {
+function toIso(value: string | null | undefined): string | undefined {
   const parsed = value ? Date.parse(value) : Number.NaN;
   if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
-  if (fallback) return fallback;
-  return new Date().toISOString();
+  return undefined;
+}
+
+function threadPublishedAt(thread: PolitiloggenThread): string | undefined {
+  const threadTimestamp = toIso(thread.createdOn);
+  if (threadTimestamp) return threadTimestamp;
+  return (thread.messages ?? [])
+    .filter((message) => message.type !== "Removed")
+    .flatMap((message) => {
+      const timestamp = toIso(message.createdOn);
+      return timestamp ? [timestamp] : [];
+    })
+    .sort((left, right) => left.localeCompare(right))[0];
 }
 
 function orderedMessages(thread: PolitiloggenThread): PolitiloggenThreadMessage[] {
   return [...(thread.messages ?? [])]
-    .filter((message) => message.type !== "Removed")
-    .sort((left, right) =>
-      toIso(left.createdOn, toIso(thread.createdOn)).localeCompare(
-        toIso(right.createdOn, toIso(thread.createdOn)),
-      ),
-    );
+    .filter((message) => message.type !== "Removed" && toIso(message.createdOn) !== undefined)
+    .sort((left, right) => toIso(left.createdOn)!.localeCompare(toIso(right.createdOn)!));
 }
 
 function compact(values: Array<string | undefined>): string[] {
@@ -191,7 +198,8 @@ function shouldPromoteThread(
 
 function articleForThread(thread: PolitiloggenThread): Article | undefined {
   if (!thread.id) return undefined;
-  const firstMessageAt = orderedMessages(thread)[0]?.createdOn;
+  const publishedAt = threadPublishedAt(thread);
+  if (!publishedAt) return undefined;
   const title = titleForThread(thread);
   const excerpt = excerptForThread(thread);
   const category = categoryForThread(thread);
@@ -202,7 +210,7 @@ function articleForThread(thread: PolitiloggenThread): Article | undefined {
     title,
     excerpt,
     url: sourceUrl(thread),
-    publishedAt: toIso(thread.createdOn, toIso(firstMessageAt)),
+    publishedAt,
     scope: "trondheim",
     category,
     topics: articleTopics(`${thread.category ?? ""} ${title} ${excerpt}`, category),
@@ -226,12 +234,21 @@ export async function collectPolitiloggen(
   if (!response.ok) throw new Error(`Politiloggen returned HTTP ${response.status}`);
 
   const payload = (await response.json()) as unknown;
-  const rawThreads =
-    isRecord(payload) && Array.isArray(payload.messageThreads) ? payload.messageThreads : [];
-  const threads = rawThreads.flatMap((thread) => {
+  if (!isRecord(payload) || !Array.isArray(payload.messageThreads)) {
+    throw new Error("Politiloggen 200-svar mangler messageThreads-array");
+  }
+  const rawThreads = payload.messageThreads;
+  if (rawThreads.length === 0) {
+    throw new Error("Politiloggen returnerte tomt 200-svar; forventet 204 for tomt øyeblikksbilde");
+  }
+  const normalizedThreads = rawThreads.flatMap((thread) => {
     const normalized = normalizeThread(thread);
     return normalized ? [normalized] : [];
   });
+  const threads = normalizedThreads.filter((thread) => threadPublishedAt(thread));
+  if (threads.length === 0) {
+    throw new Error("Politiloggen-svaret har ingen brukbare tidsstempler");
+  }
   return {
     threads,
     articles: threads.flatMap((thread) => {
@@ -248,38 +265,50 @@ function evidenceForThread(
   thread: PolitiloggenThread,
   extractedAt: string,
 ): EvidenceItem[] {
-  return orderedMessages(thread).map((message) => ({
-    id: createHash("sha1")
-      .update(
-        `${id}:politiloggen-evidence:${message.id ?? message.createdOn ?? message.text ?? ""}`,
-      )
-      .digest("hex")
-      .slice(0, 18),
-    situationId: id,
-    source: "politiloggen",
-    sourceLabel: "Politiloggen",
-    sourceUrl: sourceUrl(thread),
-    supportingSnippet: message.text ?? "",
-    claim: titleForThread(thread),
-    claimType: "official_police_log",
-    provenance: "official",
-    confidence: 1,
-    extractedAt,
-    publishedAt: toIso(message.createdOn, toIso(thread.createdOn)),
-  }));
+  return orderedMessages(thread).flatMap((message) => {
+    const publishedAt = toIso(message.createdOn);
+    if (!publishedAt) return [];
+    return [
+      {
+        id: createHash("sha1")
+          .update(
+            `${id}:politiloggen-evidence:${message.id ?? message.createdOn ?? message.text ?? ""}`,
+          )
+          .digest("hex")
+          .slice(0, 18),
+        situationId: id,
+        source: "politiloggen" as const,
+        sourceLabel: "Politiloggen",
+        sourceUrl: sourceUrl(thread),
+        supportingSnippet: message.text ?? "",
+        claim: titleForThread(thread),
+        claimType: "official_police_log" as const,
+        provenance: "official" as const,
+        confidence: 1,
+        extractedAt,
+        publishedAt,
+      },
+    ];
+  });
 }
 
 function timelineForThread(id: string, thread: PolitiloggenThread): Situation["timeline"] {
-  return orderedMessages(thread).map((message) => ({
-    id: `timeline-politiloggen-${message.id ?? createHash("sha1").update(`${id}:${message.text}`).digest("hex").slice(0, 12)}`,
-    situationId: id,
-    timestamp: toIso(message.createdOn, toIso(thread.createdOn)),
-    title: `Politiloggen: ${thread.category ?? "Oppdatering"}`,
-    detail: message.text ?? "",
-    sourceLabel: "Politiloggen",
-    sourceUrl: sourceUrl(thread),
-    official: true,
-  }));
+  return orderedMessages(thread).flatMap((message) => {
+    const timestamp = toIso(message.createdOn);
+    if (!timestamp) return [];
+    return [
+      {
+        id: `timeline-politiloggen-${message.id ?? createHash("sha1").update(`${id}:${message.text}`).digest("hex").slice(0, 12)}`,
+        situationId: id,
+        timestamp,
+        title: `Politiloggen: ${thread.category ?? "Oppdatering"}`,
+        detail: message.text ?? "",
+        sourceLabel: "Politiloggen",
+        sourceUrl: sourceUrl(thread),
+        official: true,
+      },
+    ];
+  });
 }
 
 function featureForArticle(id: string, article: Article | undefined): MapFeature[] {
@@ -322,6 +351,8 @@ export function politiloggenSituationsFromThreads(
 
   return threads.flatMap((thread) => {
     if (!thread.id) return [];
+    const sourceCreatedAt = threadPublishedAt(thread);
+    if (!sourceCreatedAt) return [];
     const incidentSignature = `politiloggen:${thread.id}`;
     const existing = existingBySignature.get(incidentSignature);
     if (!thread.isActive && !existing) return [];
@@ -334,13 +365,14 @@ export function politiloggenSituationsFromThreads(
     const promotable = shouldPromoteThread(thread, type, article);
     if (!promotable && !existing) return [];
     const latestMessageAt = orderedMessages(thread)
-      .map((message) => toIso(message.createdOn, toIso(thread.createdOn)))
+      .flatMap((message) => {
+        const timestamp = toIso(message.createdOn);
+        return timestamp ? [timestamp] : [];
+      })
       .sort((left, right) => right.localeCompare(left))[0];
-    const updatedAt = toIso(
-      thread.lastMessageOn ?? thread.updatedOn,
-      latestMessageAt ?? toIso(thread.createdOn),
-    );
-    const createdAt = existing?.createdAt ?? toIso(thread.createdOn, latestMessageAt);
+    const updatedAt =
+      toIso(thread.lastMessageOn ?? thread.updatedOn) ?? latestMessageAt ?? sourceCreatedAt;
+    const createdAt = existing?.createdAt ?? sourceCreatedAt;
     const resolvedByMessage = isResolvedByLatestMessage(thread);
     const status: Situation["status"] =
       thread.isActive && promotable && !resolvedByMessage ? "active" : "resolved";

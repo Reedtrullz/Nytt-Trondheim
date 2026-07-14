@@ -20,6 +20,9 @@
 
 - Durable upstream identity: canonical public article URL.
 - Version marker: public article title, excerpt and `article:published_time` metadata when available.
+- Admission requires a parseable upstream `article:published_time`. A missing, malformed or
+  unavailable detail timestamp is never replaced by collection time. Individual unusable cards are
+  skipped; if every listing candidate is unusable, collection fails and source health degrades.
 - Raw payload retention: limited public card/article metadata only; no cookies, hidden state or private resident-targeted data.
 - Normalized payload: Nytt article fields with source `trondheim_kommune`, official reliability tier and Trondheim scope.
 - Provenance: `official` for public municipal statements, otherwise civic context in situation explanations.
@@ -27,5 +30,6 @@
 ## Verification
 
 - Tests must prove the source-audit contract path points to this contract, not to candidate resident notifications.
-- Collector tests must prove public listing parsing, URL canonicalization and graceful degraded source health on fetch failure.
+- Collector tests must prove public listing parsing, URL canonicalization, timestamp rejection and
+  graceful degraded source health on fetch/structure failure.
 - Situation activation must still require place specificity and the existing independent-source or official-source promotion rules.

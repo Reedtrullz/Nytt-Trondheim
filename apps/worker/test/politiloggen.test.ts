@@ -92,6 +92,76 @@ describe("Politiloggen ingestion", () => {
     expect(result.articles).toEqual([]);
   });
 
+  it("accepts 204 as the explicit empty snapshot", async () => {
+    await expect(
+      collectPolitiloggen(async () => new Response(null, { status: 204 })),
+    ).resolves.toEqual({ threads: [], articles: [], count: 0 });
+  });
+
+  it("degrades malformed and empty successful Politiloggen payloads", async () => {
+    await expect(
+      collectPolitiloggen(
+        async () =>
+          new Response(JSON.stringify({ count: 0 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    ).rejects.toThrow(/messageThreads/);
+
+    await expect(
+      collectPolitiloggen(
+        async () =>
+          new Response(JSON.stringify({ messageThreads: [], count: 0 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    ).rejects.toThrow(/tomt 200-svar/i);
+  });
+
+  it("skips an untimestamped thread but retains an independently timestamped thread", async () => {
+    const untimestamped = {
+      ...activeThread,
+      id: "without-time",
+      createdOn: "ikke en dato",
+      updatedOn: undefined,
+      lastMessageOn: undefined,
+      messages: [{ ...activeThread.messages![0]!, createdOn: undefined }],
+    };
+    const result = await collectPolitiloggen(
+      async () =>
+        new Response(JSON.stringify({ messageThreads: [untimestamped, activeThread], count: 2 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    expect(result.threads.map(({ id }) => id)).toEqual([activeThread.id]);
+    expect(result.articles).toHaveLength(1);
+    expect(result.articles[0]?.publishedAt).toBe("2026-05-29T14:48:31.554Z");
+  });
+
+  it("degrades when every Politiloggen thread lacks a usable upstream timestamp", async () => {
+    const untimestamped = {
+      ...activeThread,
+      createdOn: "ikke en dato",
+      updatedOn: undefined,
+      lastMessageOn: undefined,
+      messages: [{ ...activeThread.messages![0]!, createdOn: undefined }],
+    };
+
+    await expect(
+      collectPolitiloggen(
+        async () =>
+          new Response(JSON.stringify({ messageThreads: [untimestamped], count: 1 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    ).rejects.toThrow(/ingen brukbare tidsstempler/i);
+  });
+
   it("classifies police order and crime threads as Krim articles", async () => {
     const orderThread: PolitiloggenThread = {
       ...activeThread,
@@ -203,6 +273,27 @@ describe("Politiloggen ingestion", () => {
       detail: "Siste Politiloggen-oppdatering beskriver hendelsen som avsluttet.",
       official: true,
     });
+  });
+
+  it("does not apply an untimestamped correction as the latest Politiloggen update", () => {
+    const thread: PolitiloggenThread = {
+      ...activeThread,
+      messages: [
+        activeThread.messages![0]!,
+        {
+          id: "untimestamped-resolution",
+          text: "Trafikken går som normalt igjen.",
+          type: "Published",
+        },
+      ],
+      updatedOn: activeThread.createdOn,
+      lastMessageOn: activeThread.createdOn,
+    };
+
+    const situations = politiloggenSituationsFromThreads([thread]);
+
+    expect(situations[0]?.status).toBe("active");
+    expect(situations[0]?.timeline).toHaveLength(1);
   });
 
   it("does not promote low-impact or broad Politiloggen threads to situation rooms", () => {

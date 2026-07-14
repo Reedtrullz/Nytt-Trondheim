@@ -22,6 +22,9 @@
 ## Identity And Retention
 
 - Durable upstream identity: canonical public article URL.
+- Every admitted article must have a parseable upstream timestamp from the listing, structured
+  metadata, or bounded public detail fetch. Missing or invalid values are not replaced with
+  collection time.
 - Raw payload retention: public teaser headline, public excerpt/description, URL, timestamp,
   source label, categories/tags and derived classification metadata.
 - Article detail fetches are bounded and only read public metadata such as `og:title`,
@@ -32,5 +35,8 @@
 
 - Unit tests must cover public frontpage extraction, stable timestamp extraction, malformed or empty
   front pages, dedupe and non-Trondheim handling.
+- A successful HTTP response with no recognizable public article candidates, or with candidates
+  whose timestamps are all unusable after bounded detail fetches, must fail the collection so source
+  health degrades. Mixed pages skip the unusable candidates and retain valid ones.
 - Source audit should show source health and source-item counts without exposing full upstream page
   HTML.
