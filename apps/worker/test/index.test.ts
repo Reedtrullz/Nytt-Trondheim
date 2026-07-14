@@ -28,6 +28,7 @@ import {
   coverageMatcherVersion,
   coverageShadowMetrics,
   normalizeDatexSituationEndpoint,
+  prepareCollectedArticleCoverageAnalyses,
   prepareArticleCoverageAnalysis,
   prepareArticleCoverageAnalyses,
   persistPreparedCoverage,
@@ -882,6 +883,55 @@ describe("worker lifecycle helpers", () => {
       expect.not.objectContaining({ coverageBundle: expect.anything() }),
       expect.not.objectContaining({ coverageBundle: expect.anything() }),
     ]);
+  });
+
+  it("retains recently persisted articles without recording them as newly collected", async () => {
+    const collected = newsArticle({
+      id: "collected-current",
+      title: "Current collected title",
+      publishedAt: "2026-07-14T10:00:00.000Z",
+    });
+    const staleCopy = newsArticle({
+      ...collected,
+      title: "Stale persisted title",
+      coverageBundle: {
+        id: "coverage:stale",
+        kind: "update",
+        confidence: "medium",
+        reason: "Old decision",
+        generatedAt: "2026-07-14T09:00:00.000Z",
+      },
+    });
+    const retained = newsArticle({
+      id: "retained-visible",
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      title: "Still visible from an earlier collection",
+      url: "https://example.test/retained-visible",
+      publishedAt: "2026-07-14T09:55:00.000Z",
+    });
+    const recorded: Article[][] = [];
+
+    const analyses = await prepareCollectedArticleCoverageAnalyses({
+      articlesForGeocoding: [collected],
+      retainedArticlesWithoutGeocoding: [staleCopy, retained],
+      generatedAt: "2026-07-14T10:05:00.000Z",
+      geocoder: async (articles) => articles,
+      recordCollected: async (articles) => {
+        recorded.push(articles);
+      },
+    });
+
+    expect(recorded).toEqual([[collected]]);
+    expect(analyses.active.analysis.articles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "collected-current", title: "Current collected title" }),
+        expect.objectContaining({ id: "retained-visible" }),
+      ]),
+    );
+    expect(analyses.active.analysis.articles).not.toContainEqual(
+      expect.objectContaining({ id: "collected-current", title: "Stale persisted title" }),
+    );
   });
 
   it("skips overlapping collection cycles while one is in flight", async () => {

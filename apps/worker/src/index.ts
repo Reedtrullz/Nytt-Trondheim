@@ -342,30 +342,39 @@ export function coverageShadowMetrics(analyses: PreparedCoverageAnalyses) {
   };
 }
 
-async function prepareCollectedArticleCoverageAnalyses({
+export async function prepareCollectedArticleCoverageAnalyses({
   articlesForGeocoding,
   articlesWithoutGeocoding = [],
+  retainedArticlesWithoutGeocoding = [],
   generatedAt = new Date().toISOString(),
   geocoder = geocodeArticles,
   matcherVersion = "v1",
   correctionSnapshot = { revision: 0, pairs: [] },
+  recordCollected = async () => undefined,
   canonicalize = async (items) => items,
 }: {
   articlesForGeocoding: Article[];
   articlesWithoutGeocoding?: Article[];
+  retainedArticlesWithoutGeocoding?: Article[];
   generatedAt?: string;
   geocoder?: typeof geocodeArticles;
   matcherVersion?: "v1" | "v2";
   correctionSnapshot?: CoverageCorrectionSnapshot;
+  recordCollected?: (articles: Article[]) => Promise<void>;
   canonicalize?: (articles: Article[]) => Promise<Article[]>;
 }): Promise<PreparedCoverageAnalyses> {
   const articlesForAnalysis = articlesForGeocoding.map(stripArticleCoverageBundle);
   const fixedArticlesForAnalysis = articlesWithoutGeocoding.map(stripArticleCoverageBundle);
-  const clean = [
+  const collected = [
     ...(await geocoder(articlesForAnalysis)).map(stripArticleCoverageBundle),
     ...fixedArticlesForAnalysis,
   ];
-  const canonical = await canonicalize(clean);
+  await recordCollected(collected);
+  const retained = retainedArticlesWithoutGeocoding.map(stripArticleCoverageBundle);
+  const merged = [...collected, ...retained].filter(
+    (article, index, articles) => articles.findIndex(({ id }) => id === article.id) === index,
+  );
+  const canonical = await canonicalize(merged);
   return prepareArticleCoverageAnalyses(
     canonical,
     async (items) => items,
@@ -1544,18 +1553,19 @@ async function collectAll({ repository, analyzer, once }: CollectionContext): Pr
   const coverageGeneratedAt = new Date().toISOString();
   const generationMode = coverageGenerationMode();
   const coverageCorrectionSnapshot = await repository.activeCoverageRejectedPairs();
+  const retainedCoverageArticles = await repository.recentArticles(24);
   const coverageAnalyses = await prepareCollectedArticleCoverageAnalyses({
     articlesForGeocoding: articleSets.flat(),
     articlesWithoutGeocoding,
+    retainedArticlesWithoutGeocoding: retainedCoverageArticles,
     generatedAt: coverageGeneratedAt,
     matcherVersion: coverageMatcherVersion(),
     correctionSnapshot: coverageCorrectionSnapshot,
-    canonicalize: async (articles) => {
-      // Keep the raw upstream IDs in the source ledger; only the FK-backed coverage snapshot
-      // should adopt the canonical identity already stored under URL/title-hour dedupe rules.
-      await repository.recordArticleSourceItems(articles);
-      return repository.canonicalizeCoverageArticles(articles);
-    },
+    // Retained rows are eligibility input, not evidence that the source returned them again.
+    recordCollected: (articles) => repository.recordArticleSourceItems(articles),
+    // Keep raw upstream IDs in the source ledger; only the FK-backed coverage snapshot should
+    // adopt the canonical identity already stored under URL/title-hour dedupe rules.
+    canonicalize: (articles) => repository.canonicalizeCoverageArticles(articles),
   });
   const coverageCompletedAt = new Date().toISOString();
   const coverageGenerationId = await persistPreparedCoverage(

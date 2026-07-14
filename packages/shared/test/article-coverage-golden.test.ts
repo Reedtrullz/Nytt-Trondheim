@@ -153,4 +153,33 @@ describe("coverage matcher golden corpus", () => {
       }),
     ).toBe(false);
   });
+
+  it("groups the current sparse production reports in both legacy and v2", () => {
+    const expectations = new Map([
+      [
+        "road-animal-hazard-across-sparse-headlines",
+        [
+          "elk-police",
+          "elk-nidaros",
+          "elk-adressa-brief",
+          "elk-adressa-feature",
+          "elk-tronderbladet",
+          "elk-nrk",
+        ],
+      ],
+      ["vehicle-damage-with-axe-across-sparse-reports", ["axe-adressa", "axe-nidaros", "axe-nrk"]],
+      ["impaired-driving-through-complementary-details", ["dui-adressa", "dui-nrk", "dui-nidaros"]],
+    ]);
+
+    for (const [fixtureId, expectedMembers] of expectations) {
+      const fixture = articleCoverageGoldenCases.find(({ id }) => id === fixtureId);
+      expect(fixture).toBeDefined();
+      for (const analyze of [analyzeArticleCoverage, analyzeArticleCoverageV2]) {
+        const groups = analyze(fixture!.articles, "2026-07-14T11:00:00.000Z").bundles.map(
+          ({ memberArticleIds }) => [...memberArticleIds].sort(),
+        );
+        expect(groups).toContainEqual([...expectedMembers].sort());
+      }
+    }
+  });
 });
