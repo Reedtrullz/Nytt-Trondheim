@@ -1407,6 +1407,7 @@ describe("channelStoryCountsForCards", () => {
           id: "culture",
           title: "Konsert på Byscenen",
           category: "Kultur",
+          url: "https://example.test/culture-channel",
         }),
       ]),
     );

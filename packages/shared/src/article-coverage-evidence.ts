@@ -1102,6 +1102,7 @@ function articlePairSignalsForV2(
   }
   if (
     !sameUrl &&
+    left.source !== right.source &&
     (highDetailNearDuplicate ||
       detailedExactCrossSourceCopy ||
       (normalizeText(left.excerpt).length > 0 &&

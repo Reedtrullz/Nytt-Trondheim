@@ -7,13 +7,14 @@ import {
 } from "../src/index.js";
 
 function article(overrides: Partial<Article> = {}): Article {
+  const id = overrides.id ?? "article-1";
   return {
-    id: "article-1",
+    id,
     source: "nrk",
     sourceLabel: "NRK Trøndelag",
     title: "Rykker ut til slåssing",
     excerpt: "Politiet er på vei til Saupstad i Trondheim hvor noen ungdommer slåss med hverandre.",
-    url: "https://example.test/article",
+    url: `https://example.test/${id}`,
     publishedAt: "2026-06-18T10:39:00.000Z",
     scope: "trondheim",
     category: "Hendelser",
@@ -24,6 +25,70 @@ function article(overrides: Partial<Article> = {}): Article {
 }
 
 describe("article coverage analysis", () => {
+  it("does not bundle same-source stories from shared publisher boilerplate", () => {
+    const publisherBoilerplate =
+      "Adresseavisen arbeider etter Vær Varsom-plakatens regler for god presseskikk. Den som mener seg rammet av urettmessig medieomtale, oppfordres til å ta kontakt med redaksjonen. Se også Redaktøransvar. Tilsynsorgan video: Medietilsynet.";
+    const stories = [
+      article({
+        id: "adressa-elk",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Advarer om elgkalv på E6",
+        excerpt: publisherBoilerplate,
+        url: "https://www.adressa.no/nyhetsstudio/i/elk/advarer-om-elgkalv-paa-e6",
+        publishedAt: "2026-07-14T10:07:52.000Z",
+        category: "Krim",
+        places: [],
+        location: undefined,
+      }),
+      article({
+        id: "adressa-fire",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Rykker ut til brann i lastebil",
+        excerpt: publisherBoilerplate,
+        url: "https://www.adressa.no/nyhetsstudio/i/fire/rykker-ut-til-brann-i-lastebil",
+        publishedAt: "2026-07-14T11:52:51.000Z",
+        category: "Krim",
+        places: [],
+        location: undefined,
+        situationId: "auto-fire-levanger",
+      }),
+    ];
+
+    expect(analyzeArticleCoverage(stories).bundles).toHaveLength(0);
+    expect(analyzeArticleCoverageV2(stories).bundles).toHaveLength(0);
+  });
+
+  it("still bundles same-source updates with one canonical URL", () => {
+    const canonicalUrl = "https://www.adressa.no/nyhetsstudio/i/fire/live";
+    const updates = [
+      article({
+        id: "adressa-fire-start",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Rykker ut til brann i lastebil",
+        excerpt: "Nødetatene er på vei til en lastebilbrann i Levanger.",
+        url: canonicalUrl,
+        publishedAt: "2026-07-14T11:52:51.000Z",
+        places: ["Levanger"],
+      }),
+      article({
+        id: "adressa-fire-update",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Har kontroll på stedet",
+        excerpt: "Brannen er slukket og veien er åpnet igjen.",
+        url: canonicalUrl,
+        publishedAt: "2026-07-14T12:02:51.000Z",
+        places: ["Levanger"],
+      }),
+    ];
+
+    expect(analyzeArticleCoverage(updates).bundles).toHaveLength(1);
+    expect(analyzeArticleCoverageV2(updates).bundles).toHaveLength(1);
+  });
+
   it("keeps multi-source moderate groups distinct from strong match confidence", () => {
     const analysis = analyzeArticleCoverageV2([
       article({

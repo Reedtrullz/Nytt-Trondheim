@@ -11,13 +11,14 @@ import {
 } from "./homeLocalFocus.js";
 
 function article(overrides: Partial<Article> = {}): Article {
+  const id = overrides.id ?? "article-1";
   return {
-    id: "article-1",
+    id,
     source: "nrk",
     sourceLabel: "NRK Trøndelag",
     title: "Nyhet fra Trondheim",
     excerpt: "Kort nyhet.",
-    url: "https://example.test/article",
+    url: `https://example.test/${id}`,
     publishedAt: "2026-07-02T10:00:00.000Z",
     scope: "trondheim",
     category: "Nyheter",
