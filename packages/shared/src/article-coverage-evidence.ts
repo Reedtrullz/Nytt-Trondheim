@@ -50,6 +50,7 @@ export type PositiveIncidentEvidence =
   | "shared_named_entity"
   | "shared_fatal_traffic_fingerprint"
   | "shared_city_incident_fingerprint"
+  | "shared_exact_event_fingerprint"
   | "compatible_incident_subtype";
 
 export interface ArticleCoveragePairEvidence {
@@ -58,6 +59,8 @@ export interface ArticleCoveragePairEvidence {
   incidentSubtypes: [ArticleIncidentSubtype, ArticleIncidentSubtype];
   cityIncidentFingerprints: [string | undefined, string | undefined];
   sharedCityIncidentFingerprint?: string;
+  exactEventFingerprints: [string[], string[]];
+  sharedExactEventFingerprints: string[];
   sharedBodyTokenCount: number;
   bodyScore: number;
   sharedDistinctiveTokenCount: number;
@@ -234,6 +237,7 @@ const specificPlaceWindowMs = 2 * 60 * 60 * 1000;
 const namedEntityWindowMs = 8 * 60 * 60 * 1000;
 const nearDuplicateWindowMs = 24 * 60 * 60 * 1000;
 const topicalThreadWindowMs = 12 * 60 * 60 * 1000;
+const exactEventFingerprintWindowMs = 60 * 60 * 1000;
 
 export const highDetailNearDuplicatePolicy = {
   windowMs: 15 * 60 * 1000,
@@ -439,6 +443,58 @@ function tokenSimilarity(
 
 function normalizedText(article: Article): string {
   return `${article.title} ${article.excerpt}`.toLocaleLowerCase("nb");
+}
+
+export function articleExactEventFingerprints(article: Article): string[] {
+  const text = normalizeText(
+    [article.title, article.excerpt, article.location?.label, ...article.places].join(" "),
+  );
+  const fingerprints = new Set<string>();
+
+  const animal = [
+    ["elg", /\belg\w*\b/u],
+    ["hjort", /\bhjort\w*\b/u],
+    ["rein", /\brein\w*\b/u],
+    ["radyr", /\brådyr\w*\b/u],
+  ].find(([, pattern]) => (pattern as RegExp).test(text))?.[0];
+  if (animal) {
+    for (const match of text.matchAll(/\b(e|rv|fv)\s*(\d{1,4})\b/gu)) {
+      fingerprints.add(`road-animal:${match[1]}${match[2]}:${animal}`);
+    }
+  }
+
+  if (
+    /(?:^|\s)øks\w*(?:$|\s)/u.test(text) &&
+    /\b(?:bil\w*|kjøretøy\w*)\b/u.test(text) &&
+    /\b(?:gikk\s+løs|skad\w*|knus\w*|ødel\w*|hærverk\w*)\b/u.test(text)
+  ) {
+    fingerprints.add("vehicle-damage:axe");
+  }
+
+  const impairedDriving =
+    /\bruskjør\w*\b/u.test(text) ||
+    (/\b(?:ruspåvirk\w*|berus\w*)\b/u.test(text) &&
+      /\b(?:bil\w*|fører\w*|kjør\w*|kjøretøy\w*)\b/u.test(text));
+  if (impairedDriving) {
+    for (const match of text.matchAll(/\b([a-zæøå]{3,}(?:gata|gaten|gate|vegen|veien))\b/gu)) {
+      fingerprints.add(`impaired-driving:street:${match[1]}`);
+    }
+    if (/\bblodprøv\w*\b/u.test(text)) {
+      for (const match of text.matchAll(/\b(\d{2})\s*(?:årene|åra)\b/gu)) {
+        fingerprints.add(`impaired-driving:age-blood:${match[1]}`);
+      }
+    }
+  }
+
+  return [...fingerprints].sort();
+}
+
+export function sharedExactEventFingerprints(left: Article, right: Article): string[] {
+  if (left.source === right.source) return [];
+  const timeDistanceMs = Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt));
+  if (!Number.isFinite(timeDistanceMs) || timeDistanceMs > exactEventFingerprintWindowMs) return [];
+  const rightFingerprints = new Set(articleExactEventFingerprints(right));
+  return articleExactEventFingerprints(left).filter((item) => rightFingerprints.has(item));
 }
 
 function articleBodyTokens(article: Article): Set<string> {
@@ -724,6 +780,13 @@ export function articleCoverageEvidence(
   const rightSubtype = articleIncidentSubtype(right);
   const leftFingerprint = articleCityIncidentFingerprint(left);
   const rightFingerprint = articleCityIncidentFingerprint(right);
+  const leftExactEventFingerprints = articleExactEventFingerprints(left);
+  const rightExactEventFingerprints = articleExactEventFingerprints(right);
+  const exactEventFingerprints = [leftExactEventFingerprints, rightExactEventFingerprints] as [
+    string[],
+    string[],
+  ];
+  const sharedExactFingerprints = sharedExactEventFingerprints(left, right);
   const leftBodyTokens = articleBodyTokens(left);
   const rightBodyTokens = articleBodyTokens(right);
   const body = tokenSimilarity(leftBodyTokens, rightBodyTokens);
@@ -787,6 +850,9 @@ export function articleCoverageEvidence(
   if (sharedCityIncidentFingerprint) {
     positiveIncidentEvidence.push("shared_city_incident_fingerprint");
   }
+  if (sharedExactFingerprints.length > 0) {
+    positiveIncidentEvidence.push("shared_exact_event_fingerprint");
+  }
   if (subtypesCompatible(leftSubtype, rightSubtype)) {
     positiveIncidentEvidence.push("compatible_incident_subtype");
   }
@@ -797,6 +863,8 @@ export function articleCoverageEvidence(
     incidentSubtypes: [leftSubtype, rightSubtype],
     cityIncidentFingerprints: [leftFingerprint, rightFingerprint],
     ...(sharedCityIncidentFingerprint ? { sharedCityIncidentFingerprint } : {}),
+    exactEventFingerprints,
+    sharedExactEventFingerprints: sharedExactFingerprints,
     sharedBodyTokenCount: body.overlap,
     bodyScore: body.score,
     sharedDistinctiveTokenCount: distinctive.overlap,
@@ -808,6 +876,8 @@ export function articleCoverageEvidence(
       positiveIncidentEvidence: [...positiveIncidentEvidence].sort(),
       incidentSubtypes: [leftSubtype, rightSubtype].sort(),
       cityIncidentFingerprints: [leftFingerprint, rightFingerprint].sort(),
+      exactEventFingerprints: exactEventFingerprints.map((items) => [...items].sort()).sort(),
+      sharedExactEventFingerprints: sharedExactFingerprints,
       conflicts: conflicts.map((item) => item.kind).sort(),
       bodyBucket: Math.min(body.overlap, 8),
       distinctiveBucket: Math.min(distinctive.overlap, 5),
@@ -1011,6 +1081,13 @@ function articlePairSignalsForV2(
       detail: "fatal_traffic_follow_up",
     });
   }
+  if (evidence.sharedExactEventFingerprints.length > 0) {
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: evidence.articleIds,
+      detail: evidence.sharedExactEventFingerprints.join(", "),
+    });
+  }
   const body = { overlap: evidence.sharedBodyTokenCount, score: evidence.bodyScore };
   const sameUrl = left.url.length > 0 && left.url === right.url;
   if (sameUrl) {
@@ -1117,6 +1194,9 @@ function automaticEvidenceEligible(
   highDetailNearDuplicate: boolean,
   detailedExactCrossSourceCopy: boolean,
 ): boolean {
+  if (evidence.positiveIncidentEvidence.includes("shared_exact_event_fingerprint")) {
+    return true;
+  }
   if (evidence.positiveIncidentEvidence.includes("shared_fatal_traffic_fingerprint")) {
     return true;
   }
@@ -1219,6 +1299,11 @@ export function articleCoverageEdge(
   )
     ? 0.65
     : 0;
+  const exactEventScore = evidence.positiveIncidentEvidence.includes(
+    "shared_exact_event_fingerprint",
+  )
+    ? 0.85
+    : 0;
   const topicScore =
     kind === "topic" && signals.some((signal) => signal.kind === "topical_thread") ? 0.65 : 0;
   const duplicateScore = signals.some(
@@ -1236,6 +1321,7 @@ export function articleCoverageEdge(
       subtypeScore +
       cityFingerprintScore +
       fatalTrafficScore +
+      exactEventScore +
       topicScore +
       duplicateScore +
       crossSourceScore +
@@ -1248,7 +1334,11 @@ export function articleCoverageEdge(
     !hasBlockingConflict &&
     automaticEvidence &&
     score >= 0.85 &&
-    (situationScore > 0 || topicScore > 0 || duplicateScore > 0 || fatalTrafficScore > 0)
+    (situationScore > 0 ||
+      topicScore > 0 ||
+      duplicateScore > 0 ||
+      fatalTrafficScore > 0 ||
+      exactEventScore > 0)
   ) {
     tier = "strong";
   } else if (

@@ -18,6 +18,7 @@ import {
   articleCoverageEdge,
   isFatalTrafficIncidentFollowUp,
   isHighDetailCrossSourceNearDuplicate,
+  sharedExactEventFingerprints,
 } from "./article-coverage-evidence.js";
 import type {
   ArticleCoverageDecisionSignal,
@@ -859,6 +860,17 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
     !(hasSportsResultTopic && !sportsResultDescriptorsConflict(left, right))
   ) {
     return [];
+  }
+  const exactEventFingerprints = sharedExactEventFingerprints(left, right);
+  if (exactEventFingerprints.length > 0) {
+    return [
+      ...signals,
+      {
+        kind: "cross_source_incident",
+        articleIds: [left.id, right.id],
+        detail: exactEventFingerprints.join(", "),
+      },
+    ];
   }
   if (coverageBundlesCompatible(left, right)) {
     signals.push({
