@@ -5124,6 +5124,23 @@ test("home keeps Vær as weather page navigation and a thematic feed filter", as
   await expect(page.getByText('Ingen saker samsvarer med "bru" Vær i Trøndelag.')).toBeVisible();
 });
 
+test("filtered feed failure does not claim that no stories match", async ({ page }) => {
+  await page.route("**/api/city-pulse/stories?**", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Bypulsen er midlertidig utilgjengelig." }),
+    });
+  });
+
+  await page.goto("/?q=bru");
+
+  await expect(
+    page.getByText("Kunne ikke hente saker: Bypulsen er midlertidig utilgjengelig."),
+  ).toBeVisible();
+  await expect(page.getByText('Ingen saker samsvarer med "bru" i Trondheim.')).toHaveCount(0);
+});
+
 test("sport page shows a World Cup desk with local sport stories", async ({ page }) => {
   const sportArticles: Article[] = [
     {

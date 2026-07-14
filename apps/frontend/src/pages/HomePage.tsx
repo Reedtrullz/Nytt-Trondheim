@@ -2775,7 +2775,7 @@ export function HomePage({
               onCorrect={openCoverageCorrection}
             />
           ) : null}
-          {!loading && !leadCard ? (
+          {!loading && !feedError && !leadCard ? (
             <p className="feed-state">Ingen saker samsvarer med {searchSummary(filters)}.</p>
           ) : null}
           <div className="news-list story-list" aria-label="Bypulssaker">

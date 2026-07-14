@@ -1,10 +1,12 @@
 # Siste nytt quality audit and delivery record
 
-**Status:** Wave 1 merged; bounded worker-readiness rollout follow-up active
+**Status:** Wave 1 deployed; Rotvoll, ingestion-integrity, and UI-state waves active
 
 **Started:** 2026-07-14
 
 **Baseline:** `origin/main` at `e7b8f20dd20db1f7dc949c1c7f28143dea392e3b`
+
+**Current deployed baseline:** `ad2b4f4aa4c90466f5935f27c6fc0e408d314609`
 
 **Production:** `https://nytt.reidar.tech`
 
@@ -251,6 +253,24 @@ boundaries when adding capture/revision and editorial fields.
 - Follow-up policy: retain all crash, restart, health, timestamp, and rollback assertions; widen
   only the completed-cycle poll budget from 18 to 30 bounded attempts. Do not weaken the required
   post-promotion cycle identity or source-health gates.
+- PR `#27` merged the bounded worker-cycle wait as
+  `ad2b4f4aa4c90466f5935f27c6fc0e408d314609`. Exact-main CI run `29359223701` and deploy run
+  `29359579775` passed. Authenticated production readback at 21:16 Europe/Oslo showed the former
+  nine-article theft bridge split into a five-article Moholt burglary story, and a fresh 390 px
+  load measured `390/390` document/body/main width with no horizontal overflow. Public `/health`,
+  `/health/live`, and `/health/ready` returned PostgreSQL-backed HTTP 200 while coverage remained
+  `legacy`.
+
+## UI failure-state integrity candidate
+
+- A filtered `/api/city-pulse/stories` HTTP 503 rendered both “Kunne ikke hente saker” and the
+  contradictory “Ingen saker samsvarer” empty result.
+- The browser regression failed on exact `origin/main` because the false empty claim remained
+  visible, then passed on desktop and mobile after the empty-state branch was made conditional on
+  the absence of `feedError`.
+- Verification: focused browser `2/2`, focused HomePage `48/48`, root unit/integration `1,259/1,259`,
+  full browser/accessibility `149` passed with `1` intentional skip, typecheck, ESLint, Prettier,
+  production build, `git diff --check`, and production dependency audit with `0` vulnerabilities.
 
 ## Visual evidence
 
@@ -260,14 +280,18 @@ boundaries when adding capture/revision and editorial fields.
   `/Users/reidar/.codex/visualizations/2026/07/14/019f6165-5b9c-7581-abf4-288ae4844c56/nytt-siste-nytt-baseline-mobile-390-2026-07-14.png`
 - Expanded wrong merge at 390 px:
   `/Users/reidar/.codex/visualizations/2026/07/14/019f6165-5b9c-7581-abf4-288ae4844c56/nytt-wrong-merge-expanded-mobile-390-2026-07-14.png`
-- After screenshots: pending deployed exact-SHA verification. Frozen local Playwright assertions
-  prove the containment geometry and expanded/collapsed behavior before release.
+- Deployed desktop readback after PR `#27`:
+  `/Users/reidar/.codex/visualizations/2026/07/14/019f620c-0f41-7060-ad3d-d78d5aca86df/nytt-siste-nytt-desktop-ad2b4f4a-baseline.png`
+- Deployed fresh 390 px readback after PR `#27`:
+  `/Users/reidar/.codex/visualizations/2026/07/14/019f620c-0f41-7060-ad3d-d78d5aca86df/nytt-siste-nytt-mobile-390-loaded-ad2b4f4a.png`
 
 ## Explicit non-claims and unresolved risks
 
-- The Critical group is reproduced and explained, not yet fixed in production.
-- Deployed shadow v2 avoids that exact cross-event bridge but under-groups both underlying theft
-  events. The Wave 1 candidate groups both expected components in the corpus.
+- The original Critical theft bridge and 390 px overflow are fixed in the authenticated deployed
+  readback. This does not prove every property-crime topology or responsive state is correct.
+- The Rotvoll collision remains two adjacent public cards. The 21:06 shadow generation likewise
+  keeps NRK + Politiloggen separate from Adresseavisen updates and reports the cross-edge as a
+  specific-place conflict; no production-fix claim is made for that wave.
 - No projection-promotion claim is made.
 - No correction-path readiness claim is made while production corrections are disabled.
 - Green health endpoints do not contradict the visible wrong merge or mobile overflow.
@@ -283,5 +307,7 @@ boundaries when adding capture/revision and editorial fields.
 
 ## Recommended next action
 
-Open the focused Wave 1 PR. Merge and deploy only after clean CI, then repeat exact-SHA health,
-fresh-generation, authenticated desktop, 390 px, keyboard, expanded, and collapsed checks.
+Ship the independently green UI failure-state fix, then complete the production-shaped Rotvoll
+recall and ingestion-integrity waves without weakening place conflicts or projection controls.
+After each merge, require exact-main CI/deploy proof, a fresh worker generation, and authenticated
+desktop/mobile readback of the original production example.
