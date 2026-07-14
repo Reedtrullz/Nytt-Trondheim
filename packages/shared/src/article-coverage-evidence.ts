@@ -50,6 +50,7 @@ export type PositiveIncidentEvidence =
   | "shared_specific_place"
   | "mentioned_specific_place"
   | "shared_named_entity"
+  | "shared_high_information_traffic_collision"
   | "shared_fatal_traffic_fingerprint"
   | "shared_property_crime_event"
   | "shared_city_incident_fingerprint"
@@ -233,6 +234,24 @@ interface FatalTrafficArticleFingerprint {
 }
 const fatalTrafficFingerprintCache = new WeakMap<Article, FatalTrafficArticleFingerprint>();
 
+interface HighInformationTrafficCollisionFingerprint {
+  trafficCollision: boolean;
+  roads: Set<string>;
+  reportedClockMinutes: Set<number>;
+  involvedPersonCounts: Set<number>;
+}
+
+type HighInformationTrafficCollisionRelation =
+  | "not_applicable"
+  | "compatible"
+  | "conflicting"
+  | "insufficient";
+
+const highInformationTrafficCollisionFingerprintCache = new WeakMap<
+  Article,
+  HighInformationTrafficCollisionFingerprint
+>();
+
 const officialSituationWindowMs = 72 * 60 * 60 * 1000;
 // A locality is corroborating context, not an event identifier. Beyond two hours, a place must be
 // backed by a stronger signal such as an exact entity, a topic fingerprint, or near-duplicate text.
@@ -251,6 +270,10 @@ export const highDetailNearDuplicatePolicy = {
 
 export const fatalTrafficFollowUpPolicy = {
   windowMs: 8 * 60 * 60 * 1000,
+} as const;
+
+export const highInformationTrafficCollisionPolicy = {
+  windowMs: 2 * 60 * 60 * 1000,
 } as const;
 
 export const entityBackedNotificationFollowUpPolicy = {
@@ -658,6 +681,47 @@ function hasSharedNamedEntity(left: Article, right: Article): boolean {
   return articleNamedEntityTokens(left).some((token) => rightEntities.has(token));
 }
 
+function canonicalTrafficRoad(value: string): string {
+  return normalizeToken(value)
+    .replace(/^håkon\b/u, "haakon")
+    .replace(/\bvii(?:s)?\b/u, "viis")
+    .replace(/\s+(?:gata|gaten)$/u, " gate")
+    .replace(/(?:gata|gaten)$/u, "gate")
+    .replace(/\s+(?:veien|vegen)$/u, " vei")
+    .replace(/(?:veien|vegen)$/u, "vei");
+}
+
+function articleTrafficRoads(article: Article): Set<string> {
+  const text = `${article.title}. ${article.excerpt}`;
+  const roads = new Set<string>();
+  for (const match of text.matchAll(
+    /\b([\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*(?:\s+(?:[IVXLCDM]+s?|[\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]*)){0,3}\s+(?:gate|gata|gaten|vei|veien|veg|vegen))\b/gu,
+  )) {
+    if (match[1]) roads.add(canonicalTrafficRoad(match[1]));
+  }
+  for (const match of text.matchAll(
+    /\b([\p{Lu}ÆØÅ][\p{L}ÆØÅæøå-]{2,}(?:gata|gaten|veien|vegen))\b/gu,
+  )) {
+    if (match[1]) roads.add(canonicalTrafficRoad(match[1]));
+  }
+  return roads;
+}
+
+function hasTrafficCollisionLanguage(article: Article): boolean {
+  const text = normalizedText(article);
+  if (
+    /\b(?:kollisj\w*|kollider\w*|trafikkuhell\w*|trafikkulykk\w*|påkjør\w*|kjørte\s+(?:av|ut))\b/u.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  const trafficContext =
+    article.category === "Transport" ||
+    /\b(?:bil\w*|kjøretøy\w*|trafikk\w*|veg\w*|vei\w*)\b/u.test(text);
+  return Boolean(trafficContext && /\b(?:sammenstøt\w*|ulykk\w*)\b/u.test(text));
+}
+
 export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype {
   const text = normalizedText(article);
   if (
@@ -716,7 +780,7 @@ export function articleIncidentSubtype(article: Article): ArticleIncidentSubtype
   ) {
     return "construction_fire";
   }
-  if (/\b(kollisjon|trafikkulykke|påkjør\w*|kjørte\s+(?:av|ut))\b/u.test(text)) {
+  if (hasTrafficCollisionLanguage(article)) {
     return "traffic_collision";
   }
   if (/\b(trussel\w*|vold\w*|pågrepet)\b/u.test(text)) return "threat_or_violence";
@@ -800,6 +864,139 @@ function articleReportedClockMinutes(article: Article): Set<number> {
 function hasSharedReportedClockMinute(left: Article, right: Article): boolean {
   const rightMinutes = articleReportedClockMinutes(right);
   return [...articleReportedClockMinutes(left)].some((minute) => rightMinutes.has(minute));
+}
+
+const norwegianIncidentCountWords = new Map<string, number>([
+  ["en", 1],
+  ["ett", 1],
+  ["to", 2],
+  ["tre", 3],
+  ["fire", 4],
+  ["fem", 5],
+  ["seks", 6],
+  ["sju", 7],
+  ["syv", 7],
+  ["åtte", 8],
+  ["ni", 9],
+  ["ti", 10],
+]);
+
+function incidentCount(value: string): number | undefined {
+  const numeric = Number(value);
+  if (Number.isInteger(numeric) && numeric > 0 && numeric <= 99) return numeric;
+  return norwegianIncidentCountWords.get(value);
+}
+
+function articleInvolvedPersonCounts(article: Article): Set<number> {
+  const text = normalizedText(article);
+  const counts = new Set<number>();
+  const countToken = "(?:en|ett|to|tre|fire|fem|seks|sju|syv|åtte|ni|ti|[1-9]\\d?)";
+  const patterns = [
+    new RegExp(
+      `(?:^|[^\\p{L}\\p{N}_])(${countToken})\\s+person(?:er)?\\s+(?:(?:er|var|ble|skal\\s+være)\\s+)?involver\\w*`,
+      "gu",
+    ),
+    new RegExp(
+      `(?:^|[^\\p{L}\\p{N}_])involver\\w*(?:\\s+[\\p{L}]+){0,4}\\s+(${countToken})\\s+person(?:er)?`,
+      "gu",
+    ),
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const count = match[1] ? incidentCount(match[1]) : undefined;
+      if (count !== undefined) counts.add(count);
+    }
+  }
+  return counts;
+}
+
+function highInformationTrafficCollisionFingerprint(
+  article: Article,
+): HighInformationTrafficCollisionFingerprint {
+  const cached = highInformationTrafficCollisionFingerprintCache.get(article);
+  if (cached) return cached;
+  const fingerprint = {
+    trafficCollision: hasTrafficCollisionLanguage(article),
+    roads: articleTrafficRoads(article),
+    reportedClockMinutes: articleReportedClockMinutes(article),
+    involvedPersonCounts: articleInvolvedPersonCounts(article),
+  };
+  highInformationTrafficCollisionFingerprintCache.set(article, fingerprint);
+  return fingerprint;
+}
+
+function descriptorSetsMismatch<T>(left: Set<T>, right: Set<T>): boolean {
+  return left.size > 0 && right.size > 0 && !hasSetOverlap(left, right);
+}
+
+function highInformationTrafficCollisionRelation(
+  left: Article,
+  right: Article,
+  timeDistanceMs: number,
+): HighInformationTrafficCollisionRelation {
+  const leftFingerprint = highInformationTrafficCollisionFingerprint(left);
+  const rightFingerprint = highInformationTrafficCollisionFingerprint(right);
+  if (!leftFingerprint.trafficCollision || !rightFingerprint.trafficCollision) {
+    return "not_applicable";
+  }
+
+  if (
+    (left.situationId && left.situationId === right.situationId) ||
+    (left.url.length > 0 && left.url === right.url)
+  ) {
+    return "insufficient";
+  }
+
+  if (
+    descriptorSetsMismatch(leftFingerprint.roads, rightFingerprint.roads) ||
+    descriptorSetsMismatch(
+      leftFingerprint.reportedClockMinutes,
+      rightFingerprint.reportedClockMinutes,
+    ) ||
+    descriptorSetsMismatch(
+      leftFingerprint.involvedPersonCounts,
+      rightFingerprint.involvedPersonCounts,
+    )
+  ) {
+    return "conflicting";
+  }
+
+  const complete = [leftFingerprint, rightFingerprint].every(
+    ({ roads, reportedClockMinutes, involvedPersonCounts }) =>
+      roads.size > 0 && reportedClockMinutes.size > 0 && involvedPersonCounts.size > 0,
+  );
+  if (!complete) return "insufficient";
+
+  if (
+    left.source === right.source ||
+    !trafficCategoriesCompatible(left, right) ||
+    !Number.isFinite(timeDistanceMs) ||
+    timeDistanceMs > highInformationTrafficCollisionPolicy.windowMs ||
+    (left.situationId && right.situationId && left.situationId !== right.situationId)
+  ) {
+    return "insufficient";
+  }
+  return "compatible";
+}
+
+export function isHighInformationTrafficCollisionMatch(left: Article, right: Article): boolean {
+  return (
+    highInformationTrafficCollisionRelation(
+      left,
+      right,
+      Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt)),
+    ) === "compatible"
+  );
+}
+
+export function trafficCollisionEvidenceConflicts(left: Article, right: Article): boolean {
+  return (
+    highInformationTrafficCollisionRelation(
+      left,
+      right,
+      Math.abs(Date.parse(left.publishedAt) - Date.parse(right.publishedAt)),
+    ) === "conflicting"
+  );
 }
 
 const propertyCrimeDetailFamilyPatterns: Array<[string, RegExp]> = [
@@ -1056,6 +1253,11 @@ export function articleCoverageEvidence(
     timeDistanceMs,
     leftBodyTokens.has("siktet") && rightBodyTokens.has("siktet"),
   );
+  const highInformationTrafficCollision = highInformationTrafficCollisionRelation(
+    left,
+    right,
+    timeDistanceMs,
+  );
   const sharedCityIncidentFingerprintCandidate =
     leftFingerprint && leftFingerprint === rightFingerprint ? leftFingerprint : undefined;
   const sharedCityIncidentFingerprint = eligibleSharedCityIncidentFingerprint(
@@ -1067,14 +1269,25 @@ export function articleCoverageEvidence(
     distinctive.overlap,
   );
   const conflicts: ArticleCoverageConflictSignal[] = [];
-  if (hasConflictingSpecificPlaces(left, right) && !fatalTrafficFollowUp) {
+  if (
+    hasConflictingSpecificPlaces(left, right) &&
+    !fatalTrafficFollowUp &&
+    highInformationTrafficCollision !== "compatible"
+  ) {
     conflicts.push({ kind: "specific_place", articleIds, detail: "Ulike spesifikke steder" });
   }
-  if (subtypesConflict(leftSubtype, rightSubtype) || propertyCrimeRelation === "unmatched") {
+  if (
+    subtypesConflict(leftSubtype, rightSubtype) ||
+    propertyCrimeRelation === "unmatched" ||
+    (highInformationTrafficCollision === "conflicting" && !fatalTrafficFollowUp)
+  ) {
     conflicts.push({
       kind: "incident_subtype",
       articleIds,
-      detail: [leftSubtype, rightSubtype].sort().join("/"),
+      detail:
+        highInformationTrafficCollision === "conflicting"
+          ? "traffic_collision_fingerprint"
+          : [leftSubtype, rightSubtype].sort().join("/"),
     });
   }
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
@@ -1100,6 +1313,9 @@ export function articleCoverageEvidence(
   }
   if (fatalTrafficFollowUp) {
     positiveIncidentEvidence.push("shared_fatal_traffic_fingerprint");
+  }
+  if (highInformationTrafficCollision === "compatible") {
+    positiveIncidentEvidence.push("shared_high_information_traffic_collision");
   }
   if (propertyCrimeRelation === "compatible") {
     positiveIncidentEvidence.push("shared_property_crime_event");
@@ -1207,7 +1423,7 @@ function normalizedMatches(
   );
 }
 
-function hasSetOverlap(left: Set<string>, right: Set<string>): boolean {
+function hasSetOverlap<T>(left: Set<T>, right: Set<T>): boolean {
   return [...left].some((value) => right.has(value));
 }
 
@@ -1371,6 +1587,13 @@ function articlePairSignalsForV2(
       detail: "fatal_traffic_follow_up",
     });
   }
+  if (evidence.positiveIncidentEvidence.includes("shared_high_information_traffic_collision")) {
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: evidence.articleIds,
+      detail: "traffic_collision:road_clock_participants",
+    });
+  }
   if (evidence.sharedExactEventFingerprints.length > 0) {
     signals.push({
       kind: "cross_source_incident",
@@ -1508,6 +1731,9 @@ function automaticEvidenceEligible(
   if (evidence.positiveIncidentEvidence.includes("shared_exact_event_fingerprint")) {
     return true;
   }
+  if (evidence.positiveIncidentEvidence.includes("shared_high_information_traffic_collision")) {
+    return true;
+  }
   if (evidence.positiveIncidentEvidence.includes("shared_fatal_traffic_fingerprint")) {
     return true;
   }
@@ -1626,6 +1852,11 @@ export function articleCoverageEdge(
   )
     ? 0.65
     : 0;
+  const highInformationTrafficCollisionScore = evidence.positiveIncidentEvidence.includes(
+    "shared_high_information_traffic_collision",
+  )
+    ? 0.65
+    : 0;
   const exactEventScore = evidence.positiveIncidentEvidence.includes(
     "shared_exact_event_fingerprint",
   )
@@ -1649,6 +1880,7 @@ export function articleCoverageEdge(
       propertyCrimeScore +
       cityFingerprintScore +
       fatalTrafficScore +
+      highInformationTrafficCollisionScore +
       exactEventScore +
       topicScore +
       duplicateScore +
@@ -1666,6 +1898,7 @@ export function articleCoverageEdge(
       topicScore > 0 ||
       duplicateScore > 0 ||
       fatalTrafficScore > 0 ||
+      highInformationTrafficCollisionScore > 0 ||
       exactEventScore > 0)
   ) {
     tier = "strong";
