@@ -115,10 +115,10 @@ describe("RSS collection policy", () => {
       </item>
     </channel></rss>`;
     const detail = `
-      <html><body>
+      <html><body><main><article>
         <p>Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland.</p>
         <p>Nå er en strekning på cirka 100 meter stengt.</p>
-      </body></html>
+      </article></main></body></html>
     `;
     const fetcher = vi.fn(async (url: string | URL | Request) =>
       String(url).includes("/nyhetsstudio/")
@@ -150,13 +150,126 @@ describe("RSS collection policy", () => {
         }),
         detailPage: {
           url: "https://www.adressa.no/nyhetsstudio/i/k00ejA/ti-meter-stort-ras-kan-bli-stengt-i-flere-uker",
+          selector: "main article p",
           paragraphs: [
-            "Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland.",
-            "Nå er en strekning på cirka 100 meter stengt.",
+            {
+              text: "Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland.",
+              decision: "selected",
+            },
+            {
+              text: "Nå er en strekning på cirka 100 meter stengt.",
+              decision: "selected",
+            },
           ],
         },
       }),
       sourceUpdatedAt: undefined,
+    });
+  });
+
+  it("uses only supported article paragraphs and retains bounded selection evidence", async () => {
+    const adressaRss = `<?xml version="1.0"?><rss><channel>
+      <item>
+        <title>Ti meter stort ras - kan bli stengt i flere uker</title>
+        <description>Kort feedtekst fra Orkland.</description>
+        <link>https://www.adressa.no/nyhetsstudio/i/k00ejA/ti-meter-stort-ras-kan-bli-stengt-i-flere-uker</link>
+        <pubDate>Sat, 28 Mar 2026 20:28:47 GMT</pubDate>
+        <category>Nyhetsstudio</category>
+      </item>
+    </channel></rss>`;
+    const detail = `<html><body>
+      <header><p>Logg inn for å lese flere lokale nyheter og personlige anbefalinger.</p></header>
+      <main><article>
+        <p>Ti meter stort ras – kan bli stengt i flere uker</p>
+        <p>Artikkelen er for abonnenter. Logg inn for å lese videre.</p>
+        <p>Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland.</p>
+        <p>Nå er en strekning på cirka 100 meter stengt mens området undersøkes.</p>
+      </article></main>
+      <footer><p>Redaktøransvar og Vær Varsom-plakaten gjelder for innholdet.</p></footer>
+    </body></html>`;
+    const fetcher = vi.fn(async (url: string | URL | Request) =>
+      String(url).includes("/nyhetsstudio/") ? new Response(detail) : new Response(adressaRss),
+    );
+
+    const articles = await collectRss(
+      { id: "adressa", label: "Adresseavisen", url: "https://www.adressa.no/rss/nyheter" },
+      fetcher,
+    );
+
+    expect(articles[0]?.excerpt).toBe(
+      "Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland. " +
+        "Nå er en strekning på cirka 100 meter stengt mens området undersøkes.",
+    );
+    expect(sourceCaptureForArticle(articles[0]!).rawPayload).toMatchObject({
+      detailPage: {
+        url: articles[0]?.url,
+        selector: "main article p",
+        paragraphs: [
+          {
+            text: "Ti meter stort ras – kan bli stengt i flere uker",
+            decision: "rejected",
+            reason: "headline_duplicate",
+          },
+          {
+            text: "Artikkelen er for abonnenter. Logg inn for å lese videre.",
+            decision: "rejected",
+            reason: "boilerplate",
+          },
+          {
+            text: "Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland.",
+            decision: "selected",
+          },
+          {
+            text: "Nå er en strekning på cirka 100 meter stengt mens området undersøkes.",
+            decision: "selected",
+          },
+        ],
+      },
+    });
+  });
+
+  it("falls back to the feed excerpt while retaining rejected or unscoped detail evidence", async () => {
+    const adressaRss = `<?xml version="1.0"?><rss><channel>
+      <item>
+        <title>Politiet undersøker hendelse i Orkland</title>
+        <description>Kort feedtekst fra politiet i Orkland.</description>
+        <link>https://www.adressa.no/nyhetsstudio/i/fallback/politiet-undersoeker-hendelse</link>
+        <pubDate>Sat, 28 Mar 2026 21:28:47 GMT</pubDate>
+        <category>Nyhetsstudio</category>
+      </item>
+    </channel></rss>`;
+    const detail = `<html><body>
+      <p>Artikkelen er for abonnenter. Logg inn for å lese videre.</p>
+      <p>Dette ser ut som redaksjonell tekst, men mangler en avgrenset artikkelbeholder.</p>
+    </body></html>`;
+    const fetcher = vi.fn(async (url: string | URL | Request) =>
+      String(url).includes("/nyhetsstudio/") ? new Response(detail) : new Response(adressaRss),
+    );
+
+    const articles = await collectRss(
+      { id: "adressa", label: "Adresseavisen", url: "https://www.adressa.no/rss/nyheter" },
+      fetcher,
+    );
+
+    expect(articles[0]?.excerpt).toBe("Kort feedtekst fra politiet i Orkland.");
+    expect(sourceCaptureForArticle(articles[0]!).rawPayload).toMatchObject({
+      detailPage: {
+        url: articles[0]?.url,
+        selector: null,
+        paragraphs: [
+          {
+            text: "Artikkelen er for abonnenter. Logg inn for å lese videre.",
+            decision: "rejected",
+            reason: "unscoped_container",
+          },
+          {
+            text: "Dette ser ut som redaksjonell tekst, men mangler en avgrenset artikkelbeholder.",
+            decision: "rejected",
+            reason: "unscoped_container",
+          },
+        ],
+        fallbackReason: "no_supported_container",
+      },
     });
   });
 

@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./schemas.js";
 export * from "./sample-data.js";
 export * from "./article-bundles.js";
+export * from "./editorial-text.js";
 export * from "./article-coverage-evaluator.js";
 export * from "./article-coverage-evidence.js";
 export * from "./article-coverage-clustering.js";

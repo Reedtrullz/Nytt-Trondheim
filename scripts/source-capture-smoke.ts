@@ -10,11 +10,11 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 const externalId = "ci-faithful-source-capture";
 const baseArticle: Article = {
   id: externalId,
-  source: "nrk",
-  sourceLabel: "NRK Trøndelag",
+  source: "adressa",
+  sourceLabel: "Adresseavisen",
   title: "Brann i Trondheim",
   excerpt: "Nødetatene er varslet.",
-  url: "https://example.test/ci-faithful-source-capture",
+  url: "https://www.adressa.no/nyhetsstudio/i/ci-faithful-source-capture",
   publishedAt: "2026-07-15T01:00:00.000Z",
   scope: "trondheim",
   category: "Hendelser",
@@ -32,11 +32,26 @@ try {
         {
           rawPayload: {
             schemaVersion: 1,
-            transport: { kind: "rss", endpoint: "https://example.test/feed.xml" },
+            transport: { kind: "rss", endpoint: "https://www.adressa.no/rss/nyheter" },
             feedItem: {
               guid: externalId,
               title: baseArticle.title,
               upstreamRevision: revision,
+            },
+            detailPage: {
+              url: baseArticle.url,
+              selector: "main article p",
+              paragraphs: [
+                {
+                  text: "Nødetatene er varslet om brannen i Trondheim.",
+                  decision: "selected",
+                },
+                {
+                  text: "Artikkelen er for abonnenter. Logg inn for å lese videre.",
+                  decision: "rejected",
+                  reason: "boilerplate",
+                },
+              ],
             },
           },
           sourceUpdatedAt: `2026-07-15T01:0${revision}:00.000Z`,
@@ -49,14 +64,22 @@ try {
     id: string;
     capture_hash: string;
     raw_revision: number;
+    paragraph_decision: string;
   }>(
-    `SELECT id, capture_hash, (raw_payload->'feedItem'->>'upstreamRevision')::integer AS raw_revision
+    `SELECT id, capture_hash,
+            (raw_payload->'feedItem'->>'upstreamRevision')::integer AS raw_revision,
+            raw_payload->'detailPage'->'paragraphs'->0->>'decision' AS paragraph_decision
      FROM source_items
-     WHERE provider='nrk' AND kind='article' AND external_id=$1`,
+     WHERE provider='adressa' AND kind='article' AND external_id=$1`,
     [externalId],
   );
   assert.equal(current.rowCount, 1, "expected one current source-item projection");
   assert.equal(current.rows[0]?.raw_revision, 2, "expected current projection at revision two");
+  assert.equal(
+    current.rows[0]?.paragraph_decision,
+    "selected",
+    "expected bounded paragraph decision evidence",
+  );
 
   const captures = await pool.query<{
     source_item_id: string;
@@ -66,7 +89,7 @@ try {
     `SELECT source_item_id, source_updated_at,
             (raw_payload->'feedItem'->>'upstreamRevision')::integer AS raw_revision
      FROM source_item_captures
-     WHERE provider='nrk' AND kind='article' AND external_id=$1
+     WHERE provider='adressa' AND kind='article' AND external_id=$1
      ORDER BY source_updated_at`,
     [externalId],
   );
@@ -87,7 +110,7 @@ try {
   console.log("source capture smoke passed: one current item, two faithful revisions");
 } finally {
   await pool.query(
-    "DELETE FROM source_items WHERE provider='nrk' AND kind='article' AND external_id=$1",
+    "DELETE FROM source_items WHERE provider='adressa' AND kind='article' AND external_id=$1",
     [externalId],
   );
   await pool.end();

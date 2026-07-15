@@ -22,8 +22,14 @@
   timestamps are not replaced with collection time; unusable items are skipped, and a feed whose
   candidate items are all unusable must degrade source health.
 - Raw payload retention: the exact parsed public RSS/Atom item, the extraction field names, and any
-  bounded public paragraph evidence used to enrich a sparse feed excerpt. Never retain credentials,
-  cookies, response headers, full page HTML or paywalled body text.
+  bounded public paragraph evidence evaluated to enrich a sparse feed excerpt. Detail enrichment
+  prefers an explicit `article` container, then `main`; generic page-level paragraphs never become
+  article copy. Retain at most twelve normalized candidate paragraphs with selected/rejected
+  decisions and bounded reason codes, not full HTML. Reject headline duplicates, login,
+  subscription, cookie, navigation, photo-credit and legal boilerplate. When no supported detail
+  paragraph remains, preserve the feed excerpt and record the fail-closed fallback. Bounded generic
+  page paragraphs may be retained only as explicitly rejected `unscoped_container` evidence. Never
+  retain credentials, cookies, response headers, full page HTML or paywalled body text.
 - Cleaned title and excerpt fields decode HTML markup and named or numeric entities before
   whitespace normalization. The exact parsed feed fields remain unchanged in the raw capture so
   the mechanical transformation stays explainable and reversible.
@@ -46,4 +52,7 @@
   items.
 - Tests must prove raw feed fields and revision clocks reach the source-item capture while the
   collection-only evidence is absent from serialized article JSON.
+- Production-shaped tests must prove sparse Nyhetsstudio pages cannot promote interstitial or
+  headline-duplicate paragraphs, and that missing article/main containment falls back to the feed
+  excerpt while preserving bounded decision evidence.
 - Source audit should show source health and source-item counts without exposing raw payloads.
