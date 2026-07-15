@@ -77,6 +77,14 @@ describe("WorkerRepository", () => {
     expect(sourceCaptureCall?.[1]).toEqual(
       expect.arrayContaining([article.source, "article", article.id, article.publishedAt]),
     );
+    const captureSql = String(sourceCaptureCall?.[0]);
+    const captureValues = sourceCaptureCall?.[1] as unknown[];
+    const referencedParameters = new Set(
+      [...captureSql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])),
+    );
+    expect([...referencedParameters].sort((left, right) => left - right)).toEqual(
+      Array.from({ length: captureValues.length }, (_, index) => index + 1),
+    );
   });
 
   it("canonicalizes changed feed ids onto stored article identities before coverage analysis", async () => {

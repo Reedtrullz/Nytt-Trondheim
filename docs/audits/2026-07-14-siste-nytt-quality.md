@@ -444,6 +444,13 @@ changed.
   foundation makes revisions append-only but does not yet claim faithful RSS/JSON-LD/OpenGraph raw
   field retention. The next adapter wave must populate that boundary without exposing raw payloads
   through article or list APIs.
+- The first production attempt (`Deploy to VPS` run `29379681932`) applied the migration and passed
+  API health, but the candidate worker restarted during the stability window. Rollback restored the
+  previous API/worker images and production health. A real PostGIS reproduction exposed PostgreSQL
+  `42P18`: the capture insert supplied unused bind positions that the unit mock could not type.
+  The hotfix uses ten contiguous referenced parameters and adds a regression requiring every supplied
+  bind position to occur in the SQL. Two identical real-repository article upserts now retain exactly
+  one capture without error.
 
 ## Visual evidence
 

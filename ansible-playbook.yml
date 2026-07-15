@@ -794,6 +794,19 @@
           changed_when: false
 
       rescue:
+        - name: Capture failed candidate worker logs before rollback
+          ansible.builtin.command: >-
+            docker compose --env-file .env.production logs --no-color --tail 200 worker
+          args:
+            chdir: "{{ app_dir }}"
+          register: failed_candidate_worker_logs
+          changed_when: false
+          failed_when: false
+
+        - name: Emit failed candidate worker logs
+          ansible.builtin.debug:
+            msg: "{{ failed_candidate_worker_logs.stdout_lines | default([]) }}"
+
         - name: Roll back coverage projection flags without deleting review history
           ansible.builtin.lineinfile:
             path: "{{ app_dir }}/.env.production"
