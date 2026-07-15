@@ -20,10 +20,55 @@ import {
   type WorkerCycleMetrics,
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
-import { WorkerRepository } from "../src/repository.js";
+import { attachArticleSourceCapture } from "../src/articleSourceCapture.js";
+import { articleSourceItemInput, WorkerRepository } from "../src/repository.js";
 import { trafficInfoSourceItemInput } from "../src/vegvesenTrafficInfo.js";
 
 describe("WorkerRepository", () => {
+  it("uses faithful collection evidence and its revision clock for article captures", () => {
+    const article: Article = {
+      id: "nrk-faithful-capture",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Brann i Trondheim",
+      excerpt: "Nødetatene er varslet.",
+      url: "https://www.nrk.no/trondelag/brann-1.2",
+      publishedAt: "2026-07-15T01:00:00.000Z",
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Trondheim"],
+    };
+    const captured = attachArticleSourceCapture(article, {
+      rawPayload: {
+        transport: { kind: "rss", endpoint: "https://www.nrk.no/trondelag/siste.rss" },
+        feedItem: { guid: "nrk-raw-guid", title: "Brann i Trondheim" },
+      },
+      sourceUpdatedAt: "2026-07-15T01:05:00.000Z",
+    });
+
+    const input = articleSourceItemInput(captured, "2026-07-15T01:06:00.000Z");
+    const changedRawInput = articleSourceItemInput(
+      attachArticleSourceCapture(
+        { ...article },
+        {
+          rawPayload: {
+            transport: { kind: "rss", endpoint: "https://www.nrk.no/trondelag/siste.rss" },
+            feedItem: { guid: "nrk-raw-guid", title: "Brann i Trondheim", revision: 2 },
+          },
+          sourceUpdatedAt: "2026-07-15T01:05:00.000Z",
+        },
+      ),
+      "2026-07-15T01:07:00.000Z",
+    );
+
+    expect(input.rawPayload).toEqual({
+      transport: { kind: "rss", endpoint: "https://www.nrk.no/trondelag/siste.rss" },
+      feedItem: { guid: "nrk-raw-guid", title: "Brann i Trondheim" },
+    });
+    expect(input.sourceUpdatedAt).toBe("2026-07-15T01:05:00.000Z");
+    expect(input.captureHash).not.toBe(changedRawInput.captureHash);
+  });
+
   it("refreshes stored article metadata without replacing situation linkage", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);
@@ -74,6 +119,7 @@ describe("WorkerRepository", () => {
       "ON CONFLICT (provider, capture_hash) DO NOTHING",
     );
     expect(String(sourceCaptureCall?.[0])).not.toContain("UPDATE source_item_captures");
+    expect(String(sourceCaptureCall?.[0])).toContain("$7, $8, $9, $10, $11");
     expect(sourceCaptureCall?.[1]).toEqual(
       expect.arrayContaining([article.source, "article", article.id, article.publishedAt]),
     );

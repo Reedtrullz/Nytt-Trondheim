@@ -452,6 +452,33 @@ changed.
   bind position to occur in the SQL. Two identical real-repository article upserts now retain exactly
   one capture without error.
 
+### Faithful media adapter captures candidate
+
+- RSS/Atom articles now carry the exact parsed public feed item, explicit extraction field names,
+  and bounded public paragraph evidence when Adresseavisen Nyhetsstudio enrichment is used.
+- Public-frontpage articles retain the exact JSON-LD `NewsArticle` object or anchor href/text that
+  produced the candidate, matched Amedia `articleLastModified` evidence, and individual public
+  OpenGraph/article metadata fields used by a bounded detail fetch. Trondheim kommune retains the
+  exact card href/text and public `article:published_time` value.
+- Politiloggen articles retain the exact public message-thread object. A parseable latest upstream
+  thread/message clock becomes `sourceUpdatedAt`; RSS/Atom `updated`, JSON-LD `dateModified`,
+  OpenGraph `article:modified_time`, and Amedia `articleLastModified` populate the same capture-only
+  clock when present.
+- Collection evidence is attached under a JavaScript Symbol so geocoding spreads preserve it while
+  article JSON, coverage payloads and public APIs cannot serialize it. The repository consumes it
+  before canonicalization and falls back to the prior normalized-article payload for callers that
+  do not supply capture evidence.
+- Article capture hashes now include retained raw evidence and the source revision clock. Upstream
+  edits that normalize to the same title/excerpt no longer collapse into one historical capture.
+- Proof: worker typecheck and `88/88` focused collector, Politiloggen and repository tests pass;
+  full serial Vitest passes `1274/1274` across `132/132` files; root format, lint, typecheck,
+  production build, diff check and production audit with `0` vulnerabilities pass. A disposable
+  real PostGIS 16 database applied the schema twice and proved one current source item retains two
+  raw upstream revisions with distinct `sourceUpdatedAt` clocks and shared current-item FK. The
+  same real-database smoke is now part of the CI migration job. Browser/accessibility E2E passes
+  `149` scenarios with `1` intentional desktop-only skip. CI, deploy and authenticated readback
+  remain pending.
+
 ## Visual evidence
 
 - Desktop baseline:

@@ -426,7 +426,11 @@ export interface SourceItemRecord extends SourceItem {
   normalizedPayload: unknown;
 }
 
-export type SourceItemInput = Omit<SourceItemRecord, "linkedSituationIds">;
+export type SourceItemInput = Omit<SourceItemRecord, "linkedSituationIds"> & {
+  // Capture-only source revision clock. The current source_items projection intentionally keeps
+  // its existing schema; append-only source_item_captures preserves this value per observation.
+  sourceUpdatedAt?: string;
+};
 
 export interface SourceItemPage {
   items: SourceItem[];

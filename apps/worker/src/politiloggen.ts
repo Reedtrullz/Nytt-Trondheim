@@ -7,6 +7,7 @@ import {
   type Situation,
 } from "@nytt/shared";
 import { articleTopics, categorize } from "./classify.js";
+import { attachArticleSourceCapture } from "./articleSourceCapture.js";
 import { fetchWithSourcePolicy } from "./fetchPolicy.js";
 
 export interface PolitiloggenThreadMessage {
@@ -115,6 +116,19 @@ function threadPublishedAt(thread: PolitiloggenThread): string | undefined {
       return timestamp ? [timestamp] : [];
     })
     .sort((left, right) => left.localeCompare(right))[0];
+}
+
+function threadSourceUpdatedAt(thread: PolitiloggenThread): string | undefined {
+  return [
+    thread.updatedOn,
+    thread.lastMessageOn,
+    ...(thread.messages ?? []).flatMap((message) => [message.updatedOn, message.createdOn]),
+  ]
+    .flatMap((value) => {
+      const timestamp = toIso(value);
+      return timestamp ? [timestamp] : [];
+    })
+    .sort((left, right) => right.localeCompare(left))[0];
 }
 
 function orderedMessages(thread: PolitiloggenThread): PolitiloggenThreadMessage[] {
@@ -241,20 +255,34 @@ export async function collectPolitiloggen(
   if (rawThreads.length === 0) {
     throw new Error("Politiloggen returnerte tomt 200-svar; forventet 204 for tomt øyeblikksbilde");
   }
-  const normalizedThreads = rawThreads.flatMap((thread) => {
-    const normalized = normalizeThread(thread);
-    return normalized ? [normalized] : [];
+  const normalizedThreadRecords = rawThreads.flatMap((rawPayload) => {
+    const thread = normalizeThread(rawPayload);
+    return thread ? [{ thread, rawPayload }] : [];
   });
-  const threads = normalizedThreads.filter((thread) => threadPublishedAt(thread));
+  const timestampedThreadRecords = normalizedThreadRecords.filter(({ thread }) =>
+    threadPublishedAt(thread),
+  );
+  const threads = timestampedThreadRecords.map(({ thread }) => thread);
   if (threads.length === 0) {
     throw new Error("Politiloggen-svaret har ingen brukbare tidsstempler");
   }
   return {
     threads,
-    articles: threads.flatMap((thread) => {
+    articles: timestampedThreadRecords.flatMap(({ thread, rawPayload }) => {
       if (!thread.isActive) return [];
       const article = articleForThread(thread);
-      return article ? [article] : [];
+      return article
+        ? [
+            attachArticleSourceCapture(article, {
+              rawPayload: {
+                schemaVersion: 1,
+                transport: { kind: "json_api", endpoint: url.toString() },
+                thread: rawPayload,
+              },
+              sourceUpdatedAt: threadSourceUpdatedAt(thread),
+            }),
+          ]
+        : [];
     }),
     count: isRecord(payload) && typeof payload.count === "number" ? payload.count : threads.length,
   };

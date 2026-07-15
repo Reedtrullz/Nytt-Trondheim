@@ -23,7 +23,9 @@
 - Admission requires a parseable upstream `article:published_time`. A missing, malformed or
   unavailable detail timestamp is never replaced by collection time. Individual unusable cards are
   skipped; if every listing candidate is unusable, collection fails and source health degrades.
-- Raw payload retention: limited public card/article metadata only; no cookies, hidden state or private resident-targeted data.
+- Raw payload retention: exact public card href/text plus the public detail-page
+  `article:published_time` value used for admission. No full HTML, cookies, hidden state or private
+  resident-targeted data is retained.
 - Normalized payload: Nytt article fields with source `trondheim_kommune`, official reliability tier and Trondheim scope.
 - Provenance: `official` for public municipal statements, otherwise civic context in situation explanations.
 
@@ -32,4 +34,6 @@
 - Tests must prove the source-audit contract path points to this contract, not to candidate resident notifications.
 - Collector tests must prove public listing parsing, URL canonicalization, timestamp rejection and
   graceful degraded source health on fetch/structure failure.
+- Collector tests must prove the retained card and publication fields reach capture provenance
+  without becoming part of serialized article JSON.
 - Situation activation must still require place specificity and the existing independent-source or official-source promotion rules.
