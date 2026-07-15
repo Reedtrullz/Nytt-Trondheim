@@ -165,12 +165,21 @@ export interface CoverageProjectionParity {
   clean: boolean;
 }
 
+export type CoverageCorrectionReasonCategory =
+  | "different_event"
+  | "different_place"
+  | "different_time"
+  | "different_subject"
+  | "different_incident_type"
+  | "other";
+
 export interface CoverageBundleSplitRequest {
   expectedGeneratedAt: string;
   expectedProjectionRevision?: number;
   originalBundleId?: string;
   anchorArticleId: string;
   rejectedArticleIds: string[];
+  reasonCategory?: CoverageCorrectionReasonCategory;
   reason?: string;
 }
 
@@ -181,6 +190,7 @@ export interface CoverageBundleCorrection {
   rejectedArticleId: string;
   matcherVersion: "v1" | "v2";
   evidenceFingerprint: string;
+  reasonCategory?: CoverageCorrectionReasonCategory;
   status: "active" | "reverted";
   createdAt: string;
   revertedAt?: string;
@@ -249,6 +259,7 @@ export interface CoverageCorrectionExportRow {
   normalizedExcerpts: [string, string];
   matcherVersion: "v1" | "v2";
   evidenceFingerprint: string;
+  category?: CoverageCorrectionReasonCategory;
   createdAt: string;
 }
 

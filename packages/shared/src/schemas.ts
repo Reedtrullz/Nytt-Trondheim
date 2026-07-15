@@ -678,6 +678,16 @@ export const coverageBundleSplitRequestSchema = z
     originalBundleId: z.string().trim().min(1).max(300).optional(),
     anchorArticleId: z.string().trim().min(1).max(300),
     rejectedArticleIds: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
+    reasonCategory: z
+      .enum([
+        "different_event",
+        "different_place",
+        "different_time",
+        "different_subject",
+        "different_incident_type",
+        "other",
+      ])
+      .optional(),
     reason: z.string().trim().min(1).max(500).optional(),
   })
   .strict()

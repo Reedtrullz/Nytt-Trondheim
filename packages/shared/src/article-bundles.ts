@@ -5,6 +5,7 @@ import type {
   ArticleCoverageBundleKind,
   CityPulseStory,
   CoverageMatchConfidence,
+  CoverageCorrectionReasonCategory,
   CoverageGenerationSummary,
   CoverageProjectionState,
   CoverageProjectionParity,
@@ -106,6 +107,7 @@ export interface CoverageBundleListItem extends ArticleCoverageBundleDecision {
     generationId?: string;
     anchorArticleId: string;
     rejectedArticleId: string;
+    reasonCategory?: CoverageCorrectionReasonCategory;
     status: "active" | "reverted";
     applicability?: "active" | "history";
     createdAt: string;
