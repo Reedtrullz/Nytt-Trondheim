@@ -461,4 +461,48 @@ describe("home story cards", () => {
       situationId: "politiloggen-torvet-antibac",
     });
   });
+
+  it("shows selected editorial copy while preserving the newest story timestamp", () => {
+    const newsroom = article({
+      id: "nrk-editorial",
+      title: "Politiet rykket ut etter slagsmål på Saupstad",
+      excerpt:
+        "Flere patruljer rykket til Saupstad etter melding om slagsmål. Ingen ble alvorlig skadet.",
+      publishedAt: "2026-07-15T02:50:00.000Z",
+      category: "Nyheter",
+    });
+    const newest = article({
+      id: "politiloggen-newest",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Ro og orden: Saupstad",
+      excerpt: "Politiet har kontroll på stedet.",
+      publishedAt: "2026-07-15T03:00:00.000Z",
+    });
+    const story: CityPulseStory = {
+      id: "coverage:incident:editorial-card",
+      primaryArticleId: newest.id,
+      articleIds: [newest.id, newsroom.id],
+      primary: newest,
+      articles: [newest, newsroom],
+      sourceLabels: ["Politiloggen", "NRK Trøndelag"],
+      sourceCount: 2,
+      updateCount: 2,
+      latestAt: newest.publishedAt,
+      category: newsroom.category,
+      editorialSelection: {
+        articleId: newsroom.id,
+        strategy: "best-source-v1",
+        rationale: "newsroom_complete",
+      },
+    };
+
+    const card = homeStoryCardForStory(story);
+
+    expect(card.primary.id).toBe(newsroom.id);
+    expect(card.title).toBe(newsroom.title);
+    expect(card.excerpt).toBe(newsroom.excerpt);
+    expect(card.category).toBe("Nyheter");
+    expect(card.latestAt).toBe(newest.publishedAt);
+  });
 });

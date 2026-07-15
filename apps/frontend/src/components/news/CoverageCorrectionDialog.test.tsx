@@ -58,6 +58,7 @@ describe("CoverageCorrectionDialog", () => {
 
   it("carries the stable original target separately from the effective displayed bundle", () => {
     const card = clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 });
+    card.primary = card.group.articles[1]!;
     card.group.bundle = {
       ...card.group.bundle!,
       id: "coverage:effective-derived",
@@ -72,10 +73,11 @@ describe("CoverageCorrectionDialog", () => {
       expectedGeneratedAt: bundle.generatedAt,
       expectedProjectionRevision: 4,
       originalBundleId: "coverage:stable-original",
-      anchorArticleId: card.primary.id,
+      anchorArticleId: card.coverageAnchor.id,
       rejectedArticleIds: ["cluster-article-2"],
       reason: "Feil sted",
     });
+    expect(card.primary.id).not.toBe(card.coverageAnchor.id);
     expect(bundle.id).toBe("coverage:effective-derived");
   });
 });

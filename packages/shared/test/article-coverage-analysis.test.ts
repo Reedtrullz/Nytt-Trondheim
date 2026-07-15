@@ -170,6 +170,91 @@ describe("article coverage analysis", () => {
     });
   });
 
+  it("selects deterministic editorial copy independently of the newest update", () => {
+    const bundle = {
+      id: "coverage:incident:saupstad-editorial",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-15T03:00:00.000Z",
+    } as const;
+    const nrk = article({
+      id: "nrk-complete",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Politiet rykket ut etter slagsmål på Saupstad",
+      excerpt:
+        "Flere patruljer rykket til Saupstad etter melding om slagsmål. Ingen ble alvorlig skadet.",
+      publishedAt: "2026-07-15T02:50:00.000Z",
+      category: "Nyheter",
+      coverageBundle: bundle,
+    });
+    const newest = article({
+      id: "politiloggen-newest",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Ro og orden: Saupstad",
+      excerpt: "Politiet har kontroll etter slagsmål på Saupstad.",
+      publishedAt: "2026-07-15T03:00:00.000Z",
+      category: "Hendelser",
+      coverageBundle: bundle,
+    });
+
+    const stories = buildCityPulseStories([newest, nrk]);
+    const permutedStories = buildCityPulseStories([nrk, newest]);
+    expect(stories).toHaveLength(1);
+    expect(permutedStories).toHaveLength(1);
+    const [story] = stories;
+    const [permuted] = permutedStories;
+
+    expect(story).toMatchObject({
+      primaryArticleId: "politiloggen-newest",
+      latestAt: "2026-07-15T03:00:00.000Z",
+      category: "Nyheter",
+      editorialSelection: {
+        articleId: "nrk-complete",
+        strategy: "best-source-v1",
+        rationale: "newsroom_complete",
+      },
+    });
+    expect(permuted?.editorialSelection).toEqual(story?.editorialSelection);
+    expect(permuted?.latestAt).toBe(story?.latestAt);
+  });
+
+  it("rejects newsroom boilerplate when an official source has a useful ingress", () => {
+    const bundle = {
+      id: "coverage:incident:boilerplate",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-15T03:00:00.000Z",
+    } as const;
+    const [story] = buildCityPulseStories([
+      article({
+        id: "adressa-boilerplate",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Brann på Heimdal",
+        excerpt:
+          "Adresseavisen arbeider etter Vær Varsom-plakaten. Se også Redaktøransvar og Medietilsynet.",
+        coverageBundle: bundle,
+      }),
+      article({
+        id: "politiloggen-complete",
+        source: "politiloggen",
+        sourceLabel: "Politiloggen",
+        title: "Brann: Heimdal",
+        excerpt: "Nødetatene er på Heimdal etter melding om røyk fra en leilighet.",
+        coverageBundle: bundle,
+      }),
+    ]);
+
+    expect(story?.editorialSelection).toMatchObject({
+      articleId: "politiloggen-complete",
+      rationale: "official_complete",
+    });
+  });
+
   it("annotates grouped fighting coverage with observable bundle signals", () => {
     const analysis = analyzeArticleCoverage(
       [

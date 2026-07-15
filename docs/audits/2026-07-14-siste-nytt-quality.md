@@ -476,8 +476,37 @@ changed.
   real PostGIS 16 database applied the schema twice and proved one current source item retains two
   raw upstream revisions with distinct `sourceUpdatedAt` clocks and shared current-item FK. The
   same real-database smoke is now part of the CI migration job. Browser/accessibility E2E passes
-  `149` scenarios with `1` intentional desktop-only skip. CI, deploy and authenticated readback
-  remain pending.
+  `149` scenarios with `1` intentional desktop-only skip.
+- Release readback: PR `#36` merged as `a2fdc8c14456cb6a9cc947274973fc7790149bd1` with green
+  PR and exact-main CI. The first deploy lost SSH during image build; the second created and
+  verified encrypted snapshot `7f081dff` but a later Google Drive/rclone restore read timed out
+  before migration or promotion. PR `#37` added one bounded whole-operation retry while retaining
+  the fail-closed archive checks and merged as `5144bb49848a5d7159555bdf0190967e0e3cbc8e`.
+  Exact-main CI `29384288768` and deploy `29384507987` passed. The deploy verified backup/restore,
+  migration, canary, production health, 45-second worker stability, a fresh completed worker cycle,
+  source health, append-only capture coverage and TravelTime exclusion; recap was
+  `ok=54 changed=12 unreachable=0 failed=0 skipped=2 rescued=0`. Public health/live/ready returned
+  `200`; authenticated source-clock/capture inspection remains unclaimed because the existing
+  Chrome session was unavailable.
+
+### Deterministic editorial-copy candidate
+
+- Matcher/persistence `primaryArticleId` remains the coverage anchor. The story contract now adds
+  optional, versioned `editorialSelection` provenance (`best-source-v1`) so copy selection can
+  evolve without redefining matcher identity or breaking older clients.
+- Selection is deterministic and excludes publication time: useful non-boilerplate ingress first,
+  newsroom then official source tier, ingress/title information, and stable source/URL/ID
+  tie-breaks. Known press-ethics/legal boilerplate is not treated as a useful ingress.
+- `latestAt` is independently the maximum member publication clock. Public cards use the selected
+  article for title, ingress and category while retaining the newest story timestamp. Polling and
+  pagination recompute selection when story members merge. The card separately retains its
+  coverage anchor for corrections, so choosing better display copy cannot change split semantics.
+- A five-case labeled golden corpus covers newsroom-over-newer-official, useful-official-over-
+  boilerplate, richer newsroom copy, best available title without ingresses, and a timestamp-
+  independent tie. Forward/reverse ordering plus direct story, card, merge and correction-anchor
+  tests pass. Full Vitest is `1283/1283` across `133/133` files; format, lint, full typecheck,
+  production build, dependency audit (`0` vulnerabilities), diff check, and the complete desktop/
+  mobile Playwright suite (`149` passed, `1` intentional skip) pass.
 
 ## Visual evidence
 
@@ -501,8 +530,8 @@ changed.
 - No projection-promotion claim is made.
 - No correction-path readiness claim is made while production corrections are disabled.
 - Green health endpoints do not contradict the visible wrong merge or mobile overflow.
-- The expanded corpus includes the new theft topology but still does not cover extraction quality
-  or editorial copy quality.
+- The editorial golden corpus is deliberately small and policy-oriented. It does not yet prove
+  every adapter's extraction quality or every live title/ingress shape.
 - The 127 Wave 2 labels are correlated examples from a small topology corpus, not 127 independent
   production events and not promotion evidence for matcher v2.
 - The production worker strips incoming bundle metadata before analysis. Direct-analyzer ID tests
@@ -513,6 +542,6 @@ changed.
 
 ## Recommended next action
 
-Ship the fully gated source-clock candidate as a narrow worker/source-contract change. Require
-exact-main CI/deploy proof, a fresh completed worker cycle, authenticated source-health readback,
-and article-clock sanity checks before claiming the integrity boundary fixed in production.
+Ship the deterministic editorial-copy candidate through exact-main CI and deploy, then verify
+authenticated live cards when a browser session is available. Keep v2 projection promotion and
+corrections disabled until their separate owner-review gate is satisfied.
