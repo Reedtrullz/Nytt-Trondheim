@@ -324,6 +324,43 @@ try {
     parityClean: true,
     integrityErrorCount: 0,
   });
+  const membershipCountBeforeReport = await pool.query<{ count: string }>(
+    `SELECT count(*)::text FROM coverage_bundle_members WHERE generation_id=$1`,
+    [generationId],
+  );
+  const mergeReportInput = {
+    anchorArticleId: articleA.id,
+    candidateArticleId: articleB.id,
+    anchorArticleIds: [articleA.id],
+    candidateArticleIds: [articleB.id],
+    anchorStoryId: "ci-pgstore-story-a",
+    candidateStoryId: "ci-pgstore-story-b",
+    projectionMode: "normalized" as const,
+    matcherVersion: "v2" as const,
+    generationId,
+  };
+  const mergeReport = await store.createCoverageMergeReport(mergeReportInput, ownerId);
+  const mergeReportReplay = await store.createCoverageMergeReport(
+    {
+      ...mergeReportInput,
+      anchorArticleId: articleB.id,
+      candidateArticleId: articleA.id,
+      anchorArticleIds: [articleB.id],
+      candidateArticleIds: [articleA.id],
+    },
+    ownerId,
+  );
+  assert.equal(mergeReportReplay.id, mergeReport.id);
+  const mergeReportExport = await store.exportCoverageMergeReports(30);
+  assert.equal(
+    mergeReportExport.rows.some(({ reportId }) => reportId === mergeReport.id),
+    true,
+  );
+  const membershipCountAfterReport = await pool.query<{ count: string }>(
+    `SELECT count(*)::text FROM coverage_bundle_members WHERE generation_id=$1`,
+    [generationId],
+  );
+  assert.deepEqual(membershipCountAfterReport.rows, membershipCountBeforeReport.rows);
   await pool.query(
     `UPDATE coverage_bundles SET member_article_ids=ARRAY[$2,$2]::text[]
      WHERE id='ci-pgstore-v2' AND generation_id=$1`,
@@ -735,7 +772,8 @@ try {
   );
   assert.equal(legacy.items.length > 0, true);
   console.log(
-    `coverage worker atomicity, dirty-candidate quarantine, current-generation corrections, ` +
+    `coverage worker atomicity, dirty-candidate quarantine, non-mutating merge reports, ` +
+      `current-generation corrections, ` +
       `and bounded projection performance smoke passed (${Math.round(elapsedMs)}ms, ` +
       `${coldQueryCount} cold queries, one materialization)`,
   );

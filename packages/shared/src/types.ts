@@ -192,6 +192,54 @@ export interface CoverageBundleCorrectionResult {
   replacementStories: CityPulseStory[];
 }
 
+export interface CoverageBundleMergeReportRequest {
+  anchorArticleId: string;
+  candidateArticleId: string;
+  anchorArticleIds: string[];
+  candidateArticleIds: string[];
+  anchorStoryId: string;
+  candidateStoryId: string;
+  projectionMode: "legacy" | "normalized";
+  matcherVersion: "v1" | "v2";
+  generationId?: string;
+  reason?: string;
+}
+
+export interface CoverageBundleMergeReport {
+  id: string;
+  anchorArticleId: string;
+  candidateArticleId: string;
+  anchorArticleIds: string[];
+  candidateArticleIds: string[];
+  anchorStoryId: string;
+  candidateStoryId: string;
+  projectionMode: "legacy" | "normalized";
+  matcherVersion: "v1" | "v2";
+  generationId?: string;
+  status: "open";
+  createdAt: string;
+}
+
+export interface CoverageMergeReportExportRow {
+  reportId: string;
+  label: "together";
+  articleIds: [string, string];
+  groupArticleIds: [string[], string[]];
+  sources: [SourceId, SourceId];
+  normalizedTitles: [string, string];
+  normalizedExcerpts: [string, string];
+  matcherVersion: "v1" | "v2";
+  projectionMode: "legacy" | "normalized";
+  generationId?: string;
+  createdAt: string;
+}
+
+export interface CoverageMergeReportExport {
+  schemaVersion: 1;
+  generatedAt: string;
+  rows: CoverageMergeReportExportRow[];
+}
+
 export interface CoverageCorrectionExportRow {
   correctionId: string;
   label: "separate";

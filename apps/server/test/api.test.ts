@@ -29,6 +29,7 @@ import type {
   TrafficMapEvent,
   TrafficPulseCorridor,
   CoverageBundleSplitRequest,
+  CoverageBundleMergeReportRequest,
 } from "@nytt/shared";
 
 const execFileAsync = promisify(execFile);
@@ -70,6 +71,19 @@ function coverageSplitInput(): CoverageBundleSplitRequest {
     anchorArticleId: "speed-a",
     rejectedArticleIds: ["threat"],
     reason: "Ulik hendelse",
+  };
+}
+
+function coverageMergeReportInput(): CoverageBundleMergeReportRequest {
+  return {
+    anchorArticleId: "article-one",
+    candidateArticleId: "article-two",
+    anchorArticleIds: ["article-one"],
+    candidateArticleIds: ["article-two"],
+    anchorStoryId: "story-one",
+    candidateStoryId: "story-two",
+    projectionMode: "legacy",
+    matcherVersion: "v1",
   };
 }
 
@@ -3626,6 +3640,55 @@ describe("private situation API", () => {
         .set("X-CSRF-Token", csrf)
         .send(coverageSplitInput())
         .expect(503, { error: "Korrigering av grupper er ikke aktivert." });
+    });
+
+    it("records missed grouping without enabling or mutating corrections", async () => {
+      const runtime = await ownerAgentWithCoverageCorrections(false);
+      const createReport = vi.spyOn(runtime.store, "createCoverageMergeReport").mockResolvedValue({
+        id: "11111111-1111-4111-8111-111111111111",
+        ...coverageMergeReportInput(),
+        status: "open",
+        createdAt: "2026-07-15T06:10:00.000Z",
+      });
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+      const response = await runtime.agent
+        .post("/api/coverage-bundle-merge-reports")
+        .set("X-CSRF-Token", runtime.csrf)
+        .send(coverageMergeReportInput())
+        .expect(201);
+
+      expect(runtime.capabilities.coverageCorrections).toBe(false);
+      expect(response.body).toMatchObject({ status: "open", projectionMode: "legacy" });
+      expect(createReport).toHaveBeenCalledWith(coverageMergeReportInput(), expect.any(String));
+      const log = info.mock.calls.map(([value]) => String(value)).join("\n");
+      expect(log).toContain('"action":"report_missed_group"');
+      expect(log).not.toMatch(/article-one|article-two|story-one|story-two|credential/i);
+      info.mockRestore();
+      createReport.mockRestore();
+    });
+
+    it("keeps missed-group reports owner-only and validates distinct article pairs", async () => {
+      const authRuntime = await testAppWithEmail(false, true);
+      await request(authRuntime.app)
+        .post("/api/coverage-bundle-merge-reports")
+        .send(coverageMergeReportInput())
+        .expect(401);
+
+      const viewer = await loginViewer(authRuntime);
+      const viewerSession = await viewer.get("/api/session").expect(200);
+      await viewer
+        .post("/api/coverage-bundle-merge-reports")
+        .set("X-CSRF-Token", viewerSession.body.csrfToken as string)
+        .send(coverageMergeReportInput())
+        .expect(403);
+
+      const owner = await ownerAgentWithCoverageCorrections(false);
+      await owner.agent
+        .post("/api/coverage-bundle-merge-reports")
+        .set("X-CSRF-Token", owner.csrf)
+        .send({ ...coverageMergeReportInput(), candidateArticleId: "article-one" })
+        .expect(400);
     });
 
     it("requires authentication, owner access, CSRF, and strict input", async () => {

@@ -1174,6 +1174,40 @@ test("owner splits and restores a grouped Siste nytt card", async ({ page }) => 
   ).toBeVisible();
 });
 
+test("owner reports a missed grouping without changing the visible projection", async ({
+  page,
+}) => {
+  await coverageFixtureControl(page, "reset");
+  await page.goto("/");
+  const anchor = page.locator("article", { hasText: "Korrigerbar hovedsak" });
+  const candidate = page.locator("article", { hasText: "Stor gruppesak" });
+  await anchor.getByRole("button", { name: "Mangler samling?" }).click();
+  await expect(page.locator(".coverage-merge-report-banner")).toContainText(
+    "Velg saken som hører sammen",
+  );
+
+  const reportRequest = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/api/coverage-bundle-merge-reports") && request.method() === "POST",
+  );
+  await candidate.getByRole("button", { name: "Denne hører sammen" }).click();
+  const payload = (await reportRequest).postDataJSON() as {
+    anchorArticleIds: string[];
+    candidateArticleIds: string[];
+  };
+
+  expect(payload.anchorArticleIds.length).toBe(3);
+  expect(payload.candidateArticleIds.length).toBe(7);
+  await expect(
+    page.getByText("Rapporten er lagret. Sakene er ikke slått sammen automatisk.", {
+      exact: true,
+    }),
+  ).toBeAttached();
+  await expect(page.locator(".coverage-merge-report-banner")).toHaveCount(0);
+  await expect(anchor.getByText("2 andre saker fra 2 kilder")).toBeVisible();
+  await expect(candidate.getByText("6 andre saker fra 5 kilder", { exact: true })).toBeVisible();
+});
+
 test("undo context is dropped after a projection generation change without false success", async ({
   page,
 }) => {

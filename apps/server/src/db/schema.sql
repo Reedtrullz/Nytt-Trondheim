@@ -1469,6 +1469,35 @@ CREATE INDEX IF NOT EXISTS coverage_bundle_corrections_original_bundle_idx
 CREATE INDEX IF NOT EXISTS coverage_bundle_corrections_generation_idx
   ON coverage_bundle_corrections (generation_id, status, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS coverage_bundle_merge_reports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  anchor_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  candidate_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+  anchor_article_ids text[] NOT NULL,
+  candidate_article_ids text[] NOT NULL,
+  anchor_story_id text NOT NULL,
+  candidate_story_id text NOT NULL,
+  projection_mode text NOT NULL CHECK (projection_mode IN ('legacy', 'normalized')),
+  matcher_version text NOT NULL CHECK (matcher_version IN ('v1', 'v2')),
+  generation_id uuid REFERENCES coverage_bundle_generations(id) ON DELETE SET NULL,
+  reason text CHECK (reason IS NULL OR char_length(reason) <= 500),
+  status text NOT NULL DEFAULT 'open' CHECK (status = 'open'),
+  created_by text NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (anchor_article_id <> candidate_article_id),
+  CHECK (anchor_story_id <> candidate_story_id),
+  CHECK (anchor_article_id = ANY(anchor_article_ids)),
+  CHECK (candidate_article_id = ANY(candidate_article_ids)),
+  CHECK (NOT (anchor_article_ids && candidate_article_ids))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS coverage_bundle_merge_reports_pair_idx
+  ON coverage_bundle_merge_reports (
+    LEAST(anchor_article_id, candidate_article_id),
+    GREATEST(anchor_article_id, candidate_article_id)
+  );
+CREATE INDEX IF NOT EXISTS coverage_bundle_merge_reports_created_idx
+  ON coverage_bundle_merge_reports (created_at DESC, id);
+
 CREATE TABLE IF NOT EXISTS coverage_projection_revisions (
   projection text PRIMARY KEY CHECK (projection = 'active'),
   revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),

@@ -34,8 +34,11 @@ import type {
   CoverageBundleSummary,
   CoverageBundleCorrection,
   CoverageBundleCorrectionResult,
+  CoverageBundleMergeReport,
+  CoverageBundleMergeReportRequest,
   CoverageBundleSplitRequest,
   CoverageCorrectionExport,
+  CoverageMergeReportExport,
   CoverageGenerationSummary,
   CoverageProjectionParity,
   EvidenceItem,
@@ -559,6 +562,11 @@ export interface Store {
     actorId: string,
   ): Promise<CoverageBundleCorrectionResult>;
   exportCoverageCorrections(sinceDays: number): Promise<CoverageCorrectionExport>;
+  createCoverageMergeReport(
+    input: CoverageBundleMergeReportRequest,
+    actorId: string,
+  ): Promise<CoverageBundleMergeReport>;
+  exportCoverageMergeReports(sinceDays: number): Promise<CoverageMergeReportExport>;
   listNotificationTriggers(
     filters: NotificationTriggerQueryInput,
     login: string,
@@ -4143,6 +4151,9 @@ export class MemoryStore implements Store {
       revertedBy?: string;
     }
   > = [];
+  private coverageMergeReports: Array<
+    CoverageBundleMergeReport & { createdBy: string; reason?: string }
+  > = [];
   private situations = new Map([[sampleSituation.id, clone(sampleSituation)]]);
   private tasks = clone(sampleTasks);
   private notes = clone(sampleNotes);
@@ -4936,6 +4947,7 @@ export class MemoryStore implements Store {
     this.coverageShadowGeneratedAt = generation.completedAt;
     this.articles = e2eCoverageFixtureArticles();
     this.coverageCorrections = [];
+    this.coverageMergeReports = [];
     this.coverageProjectionRevision = 0;
     return { generationId: generation.id };
   }
@@ -4947,6 +4959,7 @@ export class MemoryStore implements Store {
     this.coverageShadowGeneratedAt = new Date().toISOString();
     this.articles = clone(sampleArticles);
     this.coverageCorrections = [];
+    this.coverageMergeReports = [];
     this.coverageProjectionRevision = 0;
     return { restored: true };
   }
@@ -5134,6 +5147,85 @@ export class MemoryStore implements Store {
         (left, right) =>
           left.createdAt.localeCompare(right.createdAt) ||
           left.correctionId.localeCompare(right.correctionId),
+      );
+    return { schemaVersion: 1, generatedAt: new Date().toISOString(), rows };
+  }
+
+  async createCoverageMergeReport(
+    input: CoverageBundleMergeReportRequest,
+    actorId: string,
+  ): Promise<CoverageBundleMergeReport> {
+    const requestedArticleIds = new Set([...input.anchorArticleIds, ...input.candidateArticleIds]);
+    const requestedArticles = this.articles.filter(({ id }) => requestedArticleIds.has(id));
+    const anchor = requestedArticles.find(({ id }) => id === input.anchorArticleId);
+    const candidate = requestedArticles.find(({ id }) => id === input.candidateArticleId);
+    if (!anchor || !candidate || requestedArticles.length !== requestedArticleIds.size) {
+      throw Object.assign(new Error("En av sakene finnes ikke lenger."), { status: 404 });
+    }
+    const pairKey = (left: string, right: string) => [left, right].sort().join("\0");
+    const existing = this.coverageMergeReports.find(
+      (report) =>
+        pairKey(report.anchorArticleId, report.candidateArticleId) ===
+        pairKey(input.anchorArticleId, input.candidateArticleId),
+    );
+    if (existing) return clone(existing);
+    const report: (typeof this.coverageMergeReports)[number] = {
+      id: randomUUID(),
+      anchorArticleId: input.anchorArticleId,
+      candidateArticleId: input.candidateArticleId,
+      anchorArticleIds: input.anchorArticleIds,
+      candidateArticleIds: input.candidateArticleIds,
+      anchorStoryId: input.anchorStoryId,
+      candidateStoryId: input.candidateStoryId,
+      projectionMode: input.projectionMode,
+      matcherVersion: input.matcherVersion,
+      ...(input.generationId ? { generationId: input.generationId } : {}),
+      status: "open",
+      createdAt: new Date().toISOString(),
+      createdBy: actorId,
+      ...(input.reason ? { reason: input.reason } : {}),
+    };
+    this.coverageMergeReports.push(report);
+    return clone(report);
+  }
+
+  async exportCoverageMergeReports(sinceDays: number): Promise<CoverageMergeReportExport> {
+    const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
+    const rows = this.coverageMergeReports
+      .filter(({ createdAt }) => Date.parse(createdAt) >= cutoff)
+      .flatMap((report) => {
+        const anchor = this.articles.find(({ id }) => id === report.anchorArticleId);
+        const candidate = this.articles.find(({ id }) => id === report.candidateArticleId);
+        if (!anchor || !candidate) return [];
+        return [
+          {
+            reportId: report.id,
+            label: "together" as const,
+            articleIds: [anchor.id, candidate.id] as [string, string],
+            groupArticleIds: [report.anchorArticleIds, report.candidateArticleIds] as [
+              string[],
+              string[],
+            ],
+            sources: [anchor.source, candidate.source] as [SourceId, SourceId],
+            normalizedTitles: [
+              normalizedCorrectionText(anchor.title, 160),
+              normalizedCorrectionText(candidate.title, 160),
+            ] as [string, string],
+            normalizedExcerpts: [
+              normalizedCorrectionText(anchor.excerpt, 280),
+              normalizedCorrectionText(candidate.excerpt, 280),
+            ] as [string, string],
+            matcherVersion: report.matcherVersion,
+            projectionMode: report.projectionMode,
+            ...(report.generationId ? { generationId: report.generationId } : {}),
+            createdAt: report.createdAt,
+          },
+        ];
+      })
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.reportId.localeCompare(right.reportId),
       );
     return { schemaVersion: 1, generatedAt: new Date().toISOString(), rows };
   }
@@ -8063,6 +8155,132 @@ export class PgStore implements Store {
         matcherVersion: correction.matcher_version,
         evidenceFingerprint: correction.evidence_fingerprint,
         createdAt: new Date(correction.created_at).toISOString(),
+      })),
+    };
+  }
+
+  async createCoverageMergeReport(
+    input: CoverageBundleMergeReportRequest,
+    actorId: string,
+  ): Promise<CoverageBundleMergeReport> {
+    type MergeReportRow = {
+      id: string;
+      anchor_article_id: string;
+      candidate_article_id: string;
+      anchor_article_ids: string[];
+      candidate_article_ids: string[];
+      anchor_story_id: string;
+      candidate_story_id: string;
+      projection_mode: "legacy" | "normalized";
+      matcher_version: "v1" | "v2";
+      generation_id: string | null;
+      status: "open";
+      created_at: Date;
+    };
+    const row = await withPgTransaction(this.pool, async (client) => {
+      const requestedArticleIds = [
+        ...new Set([...input.anchorArticleIds, ...input.candidateArticleIds]),
+      ];
+      const articles = await client.query<{ id: string }>(
+        `SELECT id FROM articles WHERE id=ANY($1::text[])`,
+        [requestedArticleIds],
+      );
+      if (articles.rowCount !== requestedArticleIds.length) {
+        throw Object.assign(new Error("En av sakene finnes ikke lenger."), { status: 404 });
+      }
+      const inserted = await client.query<MergeReportRow>(
+        `INSERT INTO coverage_bundle_merge_reports
+          (anchor_article_id, candidate_article_id, anchor_article_ids, candidate_article_ids,
+           anchor_story_id, candidate_story_id, projection_mode, matcher_version, generation_id,
+           reason, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT DO NOTHING
+         RETURNING *`,
+        [
+          input.anchorArticleId,
+          input.candidateArticleId,
+          input.anchorArticleIds,
+          input.candidateArticleIds,
+          input.anchorStoryId,
+          input.candidateStoryId,
+          input.projectionMode,
+          input.matcherVersion,
+          input.generationId ?? null,
+          input.reason ?? null,
+          actorId,
+        ],
+      );
+      if (inserted.rows[0]) return inserted.rows[0];
+      const existing = await client.query<MergeReportRow>(
+        `SELECT * FROM coverage_bundle_merge_reports
+         WHERE LEAST(anchor_article_id, candidate_article_id)=LEAST($1,$2)
+           AND GREATEST(anchor_article_id, candidate_article_id)=GREATEST($1,$2)
+         FOR UPDATE`,
+        [input.anchorArticleId, input.candidateArticleId],
+      );
+      const existingRow = existing.rows[0];
+      if (!existingRow) throw new Error("Dekningsrapporten kunne ikke lastes.");
+      return existingRow;
+    });
+    return {
+      id: row.id,
+      anchorArticleId: row.anchor_article_id,
+      candidateArticleId: row.candidate_article_id,
+      anchorArticleIds: row.anchor_article_ids,
+      candidateArticleIds: row.candidate_article_ids,
+      anchorStoryId: row.anchor_story_id,
+      candidateStoryId: row.candidate_story_id,
+      projectionMode: row.projection_mode,
+      matcherVersion: row.matcher_version,
+      ...(row.generation_id ? { generationId: row.generation_id } : {}),
+      status: row.status,
+      createdAt: new Date(row.created_at).toISOString(),
+    };
+  }
+
+  async exportCoverageMergeReports(sinceDays: number): Promise<CoverageMergeReportExport> {
+    const result = await this.pool.query<{
+      report_id: string;
+      anchor: Article;
+      candidate: Article;
+      matcher_version: "v1" | "v2";
+      projection_mode: "legacy" | "normalized";
+      generation_id: string | null;
+      anchor_article_ids: string[];
+      candidate_article_ids: string[];
+      created_at: Date;
+    }>(
+      `SELECT cbmr.id AS report_id, anchor.payload AS anchor, candidate.payload AS candidate,
+              cbmr.matcher_version, cbmr.projection_mode, cbmr.generation_id,
+              cbmr.anchor_article_ids, cbmr.candidate_article_ids, cbmr.created_at
+       FROM coverage_bundle_merge_reports cbmr
+       JOIN articles anchor ON anchor.id=cbmr.anchor_article_id
+       JOIN articles candidate ON candidate.id=cbmr.candidate_article_id
+       WHERE cbmr.created_at >= now() - make_interval(days => $1::int)
+       ORDER BY cbmr.created_at, cbmr.id`,
+      [sinceDays],
+    );
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      rows: result.rows.map((row) => ({
+        reportId: row.report_id,
+        label: "together",
+        articleIds: [row.anchor.id, row.candidate.id],
+        groupArticleIds: [row.anchor_article_ids, row.candidate_article_ids],
+        sources: [row.anchor.source, row.candidate.source],
+        normalizedTitles: [
+          normalizedCorrectionText(row.anchor.title, 160),
+          normalizedCorrectionText(row.candidate.title, 160),
+        ],
+        normalizedExcerpts: [
+          normalizedCorrectionText(row.anchor.excerpt, 280),
+          normalizedCorrectionText(row.candidate.excerpt, 280),
+        ],
+        matcherVersion: row.matcher_version,
+        projectionMode: row.projection_mode,
+        ...(row.generation_id ? { generationId: row.generation_id } : {}),
+        createdAt: new Date(row.created_at).toISOString(),
       })),
     };
   }

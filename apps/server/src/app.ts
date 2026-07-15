@@ -17,6 +17,7 @@ import {
   buildDatabasePoolOptions,
   commandCenterSpatialAnalyticsQuerySchema,
   coverageBundleQuerySchema,
+  coverageBundleMergeReportRequestSchema,
   coverageBundleSplitRequestSchema,
   coverageCorrectionExportQuerySchema,
   emailLoginRequestSchema,
@@ -2518,6 +2519,29 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     },
   );
 
+  app.post("/api/coverage-bundle-merge-reports", requireOwner, async (req, res, next) => {
+    try {
+      const input = coverageBundleMergeReportRequestSchema.parse(req.body);
+      const report = await store.createCoverageMergeReport(input, req.user!.id);
+      console.info(
+        JSON.stringify({
+          event: "coverage_feedback",
+          action: "report_missed_group",
+          reportId: report.id,
+          projectionMode: report.projectionMode,
+          matcherVersion: report.matcherVersion,
+        }),
+      );
+      res.status(201).json(report);
+    } catch (error) {
+      if (errorStatus(error) === 404) {
+        res.status(404).json({ error: "En av sakene finnes ikke lenger." });
+        return;
+      }
+      next(error);
+    }
+  });
+
   app.post(
     "/api/coverage-bundle-corrections/:correctionId/undo",
     requireOwner,
@@ -2560,6 +2584,16 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       const query = coverageCorrectionExportQuerySchema.parse(req.query);
       const payload = await store.exportCoverageCorrections(query.sinceDays);
       res.attachment("coverage-corrections-v1.json").json(payload);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/operations/coverage-merge-reports/export", requireOwner, async (req, res, next) => {
+    try {
+      const query = coverageCorrectionExportQuerySchema.parse(req.query);
+      const payload = await store.exportCoverageMergeReports(query.sinceDays);
+      res.attachment("coverage-merge-reports-v1.json").json(payload);
     } catch (error) {
       next(error);
     }

@@ -639,6 +639,10 @@ function LeadStory({
   canSave,
   canCorrect,
   onCorrect,
+  canReportMissed,
+  mergeReportAnchorId,
+  mergeReportPending,
+  onReportMissed,
 }: {
   card: HomeStoryCard;
   saving: boolean;
@@ -646,6 +650,10 @@ function LeadStory({
   canSave: boolean;
   canCorrect: boolean;
   onCorrect: (card: HomeStoryCard) => void;
+  canReportMissed: boolean;
+  mergeReportAnchorId?: string;
+  mergeReportPending: boolean;
+  onReportMissed: (card: HomeStoryCard) => void;
 }) {
   const article = card.primary;
   const articleUrl = safeExternalUrl(article.url);
@@ -693,6 +701,13 @@ function LeadStory({
         </div>
         <StoryVerificationProof verification={card.verification} />
         <CoverageSourceCluster card={card} canCorrect={canCorrect} onCorrect={onCorrect} />
+        <CoverageMergeReportAction
+          card={card}
+          canReport={canReportMissed}
+          anchorId={mergeReportAnchorId}
+          pending={mergeReportPending}
+          onReport={onReportMissed}
+        />
         <div className="lead-footer">
           <span>{card.clusterLabel ?? "Oppdatert fra nyhetslisten"}</span>
           {articleUrl ? (
@@ -791,6 +806,36 @@ export function StoryEventBundleSummary({ card }: { card: HomeStoryCard }) {
       <span>{storyBundleLabel(card.cardKind)}</span>
       <strong>{summary}</strong>
     </div>
+  );
+}
+
+export function CoverageMergeReportAction({
+  card,
+  canReport,
+  anchorId,
+  pending,
+  onReport,
+}: {
+  card: HomeStoryCard;
+  canReport: boolean;
+  anchorId?: string;
+  pending: boolean;
+  onReport: (card: HomeStoryCard) => void;
+}) {
+  if (!canReport) return null;
+  const selected = anchorId === card.id;
+  const choosing = Boolean(anchorId);
+  const label = selected ? "Avbryt valg" : choosing ? "Denne hører sammen" : "Mangler samling?";
+  return (
+    <button
+      type="button"
+      className={`coverage-merge-report${selected ? " is-selected" : ""}`}
+      aria-pressed={selected}
+      disabled={pending}
+      onClick={() => onReport(card)}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -936,6 +981,10 @@ function StoryCard({
   canSave,
   canCorrect,
   onCorrect,
+  canReportMissed,
+  mergeReportAnchorId,
+  mergeReportPending,
+  onReportMissed,
 }: {
   card: HomeStoryCard;
   saving: boolean;
@@ -943,6 +992,10 @@ function StoryCard({
   canSave: boolean;
   canCorrect: boolean;
   onCorrect: (card: HomeStoryCard) => void;
+  canReportMissed: boolean;
+  mergeReportAnchorId?: string;
+  mergeReportPending: boolean;
+  onReportMissed: (card: HomeStoryCard) => void;
 }) {
   const article = card.primary;
   const articleUrl = safeExternalUrl(article.url);
@@ -1002,6 +1055,13 @@ function StoryCard({
         </div>
         <StoryVerificationProof verification={card.verification} />
         <CoverageSourceCluster card={card} canCorrect={canCorrect} onCorrect={onCorrect} />
+        <CoverageMergeReportAction
+          card={card}
+          canReport={canReportMissed}
+          anchorId={mergeReportAnchorId}
+          pending={mergeReportPending}
+          onReport={onReportMissed}
+        />
       </div>
       <div className="story-card-side">
         {card.isClustered ? (
@@ -1805,10 +1865,12 @@ export function HomePage({
   initialData,
   canSave = true,
   canCorrect = false,
+  canReportMissed = false,
 }: {
   initialData: BootstrapPayload;
   canSave?: boolean;
   canCorrect?: boolean;
+  canReportMissed?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
@@ -1840,6 +1902,10 @@ export function HomePage({
   const [correctionPending, setCorrectionPending] = useState(false);
   const [correctionError, setCorrectionError] = useState<string>();
   const [correctionAnnouncement, setCorrectionAnnouncement] = useState("");
+  const [mergeReportAnchor, setMergeReportAnchor] = useState<HomeStoryCard>();
+  const [mergeReportPending, setMergeReportPending] = useState(false);
+  const [mergeReportError, setMergeReportError] = useState<string>();
+  const [mergeReportAnnouncement, setMergeReportAnnouncement] = useState("");
   const [undoState, setUndoState] = useState<CorrectionUndoState>();
   const [undoPending, setUndoPending] = useState(false);
   const correctionOriginRef = useRef<HTMLElement | null>(null);
@@ -1865,6 +1931,10 @@ export function HomePage({
   const loadedAdditionalPagesRef = useRef(false);
   feedKeyRef.current = feedKey;
   coverageContextRef.current = coverageContext;
+  useEffect(() => {
+    setMergeReportAnchor(undefined);
+    setMergeReportError(undefined);
+  }, [feedKey, projectionKey]);
   const availableCorrectionDialog =
     correctionDialog && coverageCorrectionContextMatches(correctionDialog, coverageContext)
       ? correctionDialog
@@ -2309,6 +2379,54 @@ export function HomePage({
     }
   }
 
+  async function reportMissedCoverage(card: HomeStoryCard) {
+    if (!canReportMissed || mergeReportPending) return;
+    if (!mergeReportAnchor) {
+      setMergeReportAnchor(card);
+      setMergeReportError(undefined);
+      setMergeReportAnnouncement(`Valgte «${card.primary.title}». Velg nå saken som hører sammen.`);
+      return;
+    }
+    if (mergeReportAnchor.id === card.id) {
+      setMergeReportAnchor(undefined);
+      setMergeReportError(undefined);
+      setMergeReportAnnouncement("Valget ble avbrutt.");
+      return;
+    }
+    const projection = storyProjection ?? {
+      mode: "legacy" as const,
+      matcherVersion: "v1" as const,
+      parityClean: false,
+    };
+    if (projection.mode === "normalized" && !projection.generationId) {
+      setMergeReportError("Dekningsgenerasjonen mangler. Oppdater siden og prøv igjen.");
+      return;
+    }
+    setMergeReportPending(true);
+    setMergeReportError(undefined);
+    try {
+      await api.reportCoverageMerge({
+        anchorArticleId: mergeReportAnchor.coverageAnchor.id,
+        candidateArticleId: card.coverageAnchor.id,
+        anchorArticleIds: mergeReportAnchor.group.articles.map(({ id }) => id),
+        candidateArticleIds: card.group.articles.map(({ id }) => id),
+        anchorStoryId: mergeReportAnchor.id,
+        candidateStoryId: card.id,
+        projectionMode: projection.mode,
+        matcherVersion: projection.matcherVersion,
+        ...(projection.mode === "normalized" && projection.generationId
+          ? { generationId: projection.generationId }
+          : {}),
+      });
+      setMergeReportAnchor(undefined);
+      setMergeReportAnnouncement("Rapporten er lagret. Sakene er ikke slått sammen automatisk.");
+    } catch (reason) {
+      setMergeReportError(reason instanceof Error ? reason.message : "Kunne ikke lagre rapporten.");
+    } finally {
+      setMergeReportPending(false);
+    }
+  }
+
   function applyCoverageStories(nextStories: CityPulseStory[]) {
     setStories(nextStories);
     setArticles(articlesFromCityPulseStories(nextStories));
@@ -2596,7 +2714,8 @@ export function HomePage({
   return (
     <main className="home" data-generation-id={storyProjection?.generationId}>
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {coverageCorrectionLiveAnnouncement(Boolean(undoState), correctionAnnouncement)}
+        {coverageCorrectionLiveAnnouncement(Boolean(undoState), correctionAnnouncement) ||
+          mergeReportAnnouncement}
       </p>
       {availableUndoState ? (
         <div className="coverage-correction-toast" role="status" aria-atomic="true">
@@ -2769,6 +2888,22 @@ export function HomePage({
               {saveError}
             </p>
           ) : null}
+          {mergeReportError ? (
+            <p className="feed-state error" role="alert">
+              {mergeReportError}
+            </p>
+          ) : null}
+          {mergeReportAnchor ? (
+            <div className="coverage-merge-report-banner" role="status">
+              <span>
+                Valgt: <strong>{mergeReportAnchor.primary.title}</strong>. Velg saken som hører
+                sammen.
+              </span>
+              <button type="button" onClick={() => void reportMissedCoverage(mergeReportAnchor)}>
+                Avbryt
+              </button>
+            </div>
+          ) : null}
           {loading ? <p className="feed-state">Oppdaterer saker...</p> : null}
           {leadCard ? (
             <LeadStory
@@ -2778,6 +2913,10 @@ export function HomePage({
               canSave={canSave}
               canCorrect={canCorrect}
               onCorrect={openCoverageCorrection}
+              canReportMissed={canReportMissed}
+              mergeReportAnchorId={mergeReportAnchor?.id}
+              mergeReportPending={mergeReportPending}
+              onReportMissed={(card) => void reportMissedCoverage(card)}
             />
           ) : null}
           {!loading && !feedError && !leadCard ? (
@@ -2793,6 +2932,10 @@ export function HomePage({
                 canSave={canSave}
                 canCorrect={canCorrect}
                 onCorrect={openCoverageCorrection}
+                canReportMissed={canReportMissed}
+                mergeReportAnchorId={mergeReportAnchor?.id}
+                mergeReportPending={mergeReportPending}
+                onReportMissed={(card) => void reportMissedCoverage(card)}
               />
             ))}
           </div>

@@ -96,6 +96,7 @@ jobs:
           SELECT 'public.coverage_bundle_members'::regclass;
           SELECT 'public.coverage_bundle_edges'::regclass;
           SELECT 'public.coverage_bundle_corrections'::regclass;
+          SELECT 'public.coverage_bundle_merge_reports'::regclass;
           DO $$
           DECLARE
             actual_count integer;
@@ -270,6 +271,25 @@ jobs:
           SET status='reverted', reverted_at=now(), reverted_by='ci-coverage-owner'
           WHERE id='00000000-0000-4000-8000-000000000702';
 
+          INSERT INTO coverage_bundle_merge_reports
+            (id, anchor_article_id, candidate_article_id, anchor_article_ids,
+             candidate_article_ids, anchor_story_id, candidate_story_id, projection_mode,
+             matcher_version, generation_id, reason, created_by)
+          VALUES
+            ('00000000-0000-4000-8000-000000000703', 'ci-coverage-a', 'ci-coverage-b',
+             ARRAY['ci-coverage-a'], ARRAY['ci-coverage-b'], 'ci-story-a', 'ci-story-b',
+             'normalized', 'v2', '00000000-0000-4000-8000-000000000701',
+             'CI missed grouping smoke', 'ci-coverage-owner');
+          INSERT INTO coverage_bundle_merge_reports
+            (anchor_article_id, candidate_article_id, anchor_article_ids, candidate_article_ids,
+             anchor_story_id, candidate_story_id, projection_mode, matcher_version, generation_id,
+             created_by)
+          VALUES
+            ('ci-coverage-b', 'ci-coverage-a', ARRAY['ci-coverage-b'], ARRAY['ci-coverage-a'],
+             'ci-story-b', 'ci-story-a', 'normalized', 'v2',
+             '00000000-0000-4000-8000-000000000701', 'ci-coverage-owner')
+          ON CONFLICT DO NOTHING;
+
           DO $$
           DECLARE
             previous_projection_readable boolean;
@@ -284,6 +304,11 @@ jobs:
             WHERE id='00000000-0000-4000-8000-000000000702' AND status='reverted';
             IF NOT previous_projection_readable OR NOT correction_reverted THEN
               RAISE EXCEPTION 'undo or previous projection readability failed';
+            END IF;
+            IF (SELECT count(*) FROM coverage_bundle_merge_reports) <> 1
+               OR (SELECT count(*) FROM coverage_bundle_members
+                   WHERE generation_id='00000000-0000-4000-8000-000000000701') <> 2 THEN
+              RAISE EXCEPTION 'missed-group feedback was not idempotent and non-mutating';
             END IF;
           END
           $$;

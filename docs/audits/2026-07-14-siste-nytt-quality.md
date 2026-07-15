@@ -110,13 +110,13 @@ These require an expand-compatible capture/revision wave rather than ad-hoc matc
 
 ### Important — correction, error, stale, and saved UI states can contradict persistence
 
-- Split/undo replacement stories can visually erase saved state until the next normal refresh.
-- A failed filtered feed can show both an error and a false empty result.
-- The 60-second refresh can interrupt an open or committed correction flow.
-- Owner audit rows remain interactive while retained data is loading, stale, or failed.
-- Owner correction lacks reliable focus restoration and live success announcements.
-- A low-friction missed-group report does not exist.
-- Expanded supporting headlines remain permanently ellipsized.
+- Saved overrides now survive split/undo replacement, failed filtered feeds do not claim a false
+  empty result, and refresh work is bound to the current feed/projection context.
+- Correction focus restoration and concise live announcements are covered by browser regressions;
+  expanded supporting headlines wrap while collapsed rows remain intentionally truncated.
+- The non-mutating missed-group report is implemented as a release candidate below.
+- Remaining in this cluster: owner audit rows must still be rechecked across retained-data loading,
+  stale and failed states before the correction workspace can be called ready.
 
 ## Architecture decision
 
@@ -507,6 +507,36 @@ changed.
   tests pass. Full Vitest is `1283/1283` across `133/133` files; format, lint, full typecheck,
   production build, dependency audit (`0` vulnerabilities), diff check, and the complete desktop/
   mobile Playwright suite (`149` passed, `1` intentional skip) pass.
+- Release proof: PR `#38` merged as exact `main`
+  `75b12872f76fe689a29237baf1533f9df2f1739f`. PR CI `29399970544`, exact-main CI
+  `29400322546`, and deploy `29400651370` passed. The deploy verified encrypted backup/restore,
+  migration, canary, production health, 45-second worker stability, a fresh completed cycle,
+  traffic/DATEX/Entur/source-item checks, append-only captures and TravelTime exclusion; recap was
+  `ok=54 changed=11 unreachable=0 failed=0 skipped=2 rescued=0`. Public health/live/ready returned
+  `200`, bootstrap returned `401`, and the rollout remained `legacy`, corrections disabled,
+  matcher `v2`, generation shadow.
+
+### Non-mutating missed-group feedback candidate
+
+- The owner can choose one visible story and then a second story through a quiet two-step
+  “Mangler samling?” flow. Selection, cancellation, submission success and failure are announced
+  without adding a second competing live region.
+- Submission records an idempotent, owner-only `together` label. It snapshots both story IDs,
+  stable coverage anchors, complete member article IDs, projection mode, matcher version and the
+  normalized generation ID when applicable. It does not merge cards or change a projection.
+- The report remains available while coverage corrections are disabled. A sanitized 30-day export
+  sits beside the existing split-correction export in `/command/dekning`; private reason and actor
+  fields are excluded from the evaluation payload.
+- The schema is additive and expand-compatible. Article anchors are protected by foreign keys,
+  normalized reports retain their generation foreign key, memberships cannot overlap, and the
+  unordered anchor pair is unique so retries cannot multiply labels.
+- Current proof: full Vitest passes `1289/1289` across `134/134` files; root typecheck, lint,
+  format, production build, dependency audit (`0` vulnerabilities), and diff check pass. Focused
+  API/store/UI/migration proof passes `190/190`; full desktop/mobile Playwright passes `151` with
+  `1` intentional desktop-only skip. A disposable PostGIS 16 database applied the schema twice and
+  the real PgStore lifecycle smoke proved idempotent reports, sanitized export, unchanged projection
+  membership, current-generation corrections and one bounded projection materialization. This
+  candidate still has no signed commit, PR, CI, deploy or live-readback claim.
 
 ## Visual evidence
 
@@ -542,6 +572,7 @@ changed.
 
 ## Recommended next action
 
-Ship the deterministic editorial-copy candidate through exact-main CI and deploy, then verify
-authenticated live cards when a browser session is available. Keep v2 projection promotion and
-corrections disabled until their separate owner-review gate is satisfied.
+Finish the missed-group feedback candidate through full browser and real PostGIS verification,
+then ship it through signed PR, exact-main CI, deploy and public readback. Verify authenticated
+editorial cards and feedback UX when the existing Chrome session is available. Keep v2 projection
+promotion and corrections disabled until their separate owner-review gate is satisfied.

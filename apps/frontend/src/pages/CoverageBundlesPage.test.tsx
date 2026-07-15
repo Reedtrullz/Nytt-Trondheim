@@ -248,8 +248,9 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Svakeste godkjente treff");
     expect(html).toContain("Vis 1 nesten-treff");
     expect(html).toContain("Splitt gruppe");
-    expect(html).toContain("Eksporter korrigeringer");
-    expect(html).toContain("Gjennomgå og anonymiser eksporten før den legges i testkorpuset.");
+    expect(html).toContain("Feil samling");
+    expect(html).toContain("Manglende samling");
+    expect(html).toContain("Gjennomgå og anonymiser eksportene før de legges i testkorpuset.");
     expect(html).toContain("Angre");
     expect(html).toContain('data-generation-id="coverage-generation-shadow-1"');
     expect(html).toContain('data-primary-article-id="nrk-flatåsen-smoke"');

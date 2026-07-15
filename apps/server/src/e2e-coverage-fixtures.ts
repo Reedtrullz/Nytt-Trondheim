@@ -84,7 +84,7 @@ export function e2eCoverageFixtureGeneration(sequence: number): CoverageGenerati
     Date.parse(fixtureCompletedAt) + (sequence - 1) * 60_000,
   ).toISOString();
   return {
-    id: `e2e-coverage-generation-${sequence}`,
+    id: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
     matcherVersion: "v2",
     mode: "active",
     status: "completed",

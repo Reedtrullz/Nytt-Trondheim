@@ -390,7 +390,7 @@ describe("coverage correction store", () => {
 
     const undone = await store.undoCoverageCorrection(split.corrections[0]!.id, "owner-user-id");
 
-    expect(advanced.generationId).toBe("e2e-coverage-generation-2");
+    expect(advanced.generationId).toBe("00000000-0000-4000-8000-000000000002");
     expect(
       undone.replacementStories.every((story) => story.latestAt >= "2026-07-13T06:48:00.000Z"),
     ).toBe(true);

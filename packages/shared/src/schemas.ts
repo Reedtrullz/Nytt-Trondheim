@@ -700,6 +700,77 @@ export const coverageCorrectionExportQuerySchema = z
   })
   .strict();
 
+export const coverageBundleMergeReportRequestSchema = z
+  .object({
+    anchorArticleId: z.string().trim().min(1).max(300),
+    candidateArticleId: z.string().trim().min(1).max(300),
+    anchorArticleIds: z.array(z.string().trim().min(1).max(300)).min(1).max(100),
+    candidateArticleIds: z.array(z.string().trim().min(1).max(300)).min(1).max(100),
+    anchorStoryId: z.string().trim().min(1).max(300),
+    candidateStoryId: z.string().trim().min(1).max(300),
+    projectionMode: z.enum(["legacy", "normalized"]),
+    matcherVersion: z.enum(["v1", "v2"]),
+    generationId: z.string().uuid().optional(),
+    reason: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.anchorArticleId === value.candidateArticleId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["candidateArticleId"],
+        message: "candidateArticleId must differ from anchorArticleId",
+      });
+    }
+    if (value.anchorStoryId === value.candidateStoryId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["candidateStoryId"],
+        message: "candidateStoryId must differ from anchorStoryId",
+      });
+    }
+    if (!value.anchorArticleIds.includes(value.anchorArticleId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["anchorArticleIds"],
+        message: "anchorArticleIds must include anchorArticleId",
+      });
+    }
+    if (!value.candidateArticleIds.includes(value.candidateArticleId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["candidateArticleIds"],
+        message: "candidateArticleIds must include candidateArticleId",
+      });
+    }
+    if (value.anchorArticleIds.some((id) => value.candidateArticleIds.includes(id))) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["candidateArticleIds"],
+        message: "reported story memberships must not overlap",
+      });
+    }
+    if (value.projectionMode === "normalized" && !value.generationId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["generationId"],
+        message: "generationId is required for normalized projection reports",
+      });
+    }
+    if (value.projectionMode === "legacy" && value.generationId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["generationId"],
+        message: "generationId is not valid for legacy projection reports",
+      });
+    }
+  })
+  .transform((value) => ({
+    ...value,
+    anchorArticleIds: [...new Set(value.anchorArticleIds)].sort(),
+    candidateArticleIds: [...new Set(value.candidateArticleIds)].sort(),
+  }));
+
 export const sourceItemQuerySchema = z.object({
   provider: sourceIdSchema.optional(),
   kind: sourceItemKindSchema.optional(),
