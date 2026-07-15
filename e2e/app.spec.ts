@@ -1347,7 +1347,7 @@ test("grouped cards remain compact and correctable by keyboard at phone width", 
   await expect(page.locator(".news-section")).toHaveCSS("min-width", "0px");
   const card = page.locator("article", { hasText: "Stor gruppesak" });
   const longSupportingTitle = card.getByText(
-    "Brøt seg inn og raserte flere boder i sameie: – Jeg er sjokkert",
+    "Skadeverk i boder på Lerkendal – skadeverk i boder, skadeverk i boder",
     { exact: true },
   );
   await expect(card.locator(".coverage-source-row")).toHaveCount(2);

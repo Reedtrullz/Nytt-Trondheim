@@ -17,7 +17,7 @@ export function coverageCorrectionSplitInput(
           originalBundleId: bundle.correctionTarget.originalBundleId,
         }
       : {}),
-    anchorArticleId: card.primary.id,
+    anchorArticleId: card.coverageAnchor.id,
     rejectedArticleIds: [...rejectedArticleIds].sort(),
     ...(reason.trim() ? { reason: reason.trim() } : {}),
   };
@@ -41,7 +41,7 @@ export function CoverageCorrectionDialog({
   const firstCheckboxRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [reason, setReason] = useState("");
-  const supporting = card.group.articles.filter((article) => article.id !== card.primary.id);
+  const supporting = card.group.articles.filter((article) => article.id !== card.coverageAnchor.id);
 
   useEffect(() => {
     firstCheckboxRef.current?.focus();
@@ -103,7 +103,7 @@ export function CoverageCorrectionDialog({
           <div className="coverage-correction-anchor">
             <span>Behold som hovedsak</span>
             <strong>
-              {card.primary.sourceLabel}: {card.primary.title}
+              {card.coverageAnchor.sourceLabel}: {card.coverageAnchor.title}
             </strong>
           </div>
           <fieldset disabled={pending}>

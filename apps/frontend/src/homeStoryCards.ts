@@ -2,6 +2,7 @@ import {
   sourceIdLabel,
   sourceMixConfidenceSummary,
   derivePublicVerificationForArticleGroup,
+  selectEditorialArticle,
   type Article,
   type ArticleTopic,
   type CityPulseStory,
@@ -15,6 +16,7 @@ export interface HomeStoryCard {
   id: string;
   group: HomeArticleGroup;
   primary: Article;
+  coverageAnchor: Article;
   title: string;
   excerpt: string;
   category: Article["category"];
@@ -151,7 +153,11 @@ function storySourceConfidence(group: HomeArticleGroup): SourceConfidenceSummary
     for (const source of verification.officialSources) sources.add(source);
     for (const source of verification.reportingSources) sources.add(source);
   }
-  return sourceMixConfidenceSummary([...sources], { updatedAt: group.primary.publishedAt });
+  const updatedAt = group.articles.reduce(
+    (latest, article) => (article.publishedAt > latest ? article.publishedAt : latest),
+    group.articles[0]?.publishedAt ?? group.primary.publishedAt,
+  );
+  return sourceMixConfidenceSummary([...sources], { updatedAt });
 }
 
 function articleWithStoryMetadata(article: Article, story: CityPulseStory): Article {
@@ -182,15 +188,21 @@ export function homeArticleGroupForStory(story: CityPulseStory): HomeArticleGrou
 }
 
 export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
+  const editorialArticle = selectEditorialArticle(group.articles);
   const places = storyPlaces(group);
+  const latestAt = group.articles.reduce(
+    (latest, article) => (article.publishedAt > latest ? article.publishedAt : latest),
+    group.articles[0]?.publishedAt ?? editorialArticle.publishedAt,
+  );
   return {
     id: group.id,
     group,
-    primary: group.primary,
-    title: group.primary.title,
-    excerpt: group.primary.excerpt,
-    category: group.primary.category,
-    channelLabel: articleCategoryLabels[group.primary.category],
+    primary: editorialArticle,
+    coverageAnchor: group.primary,
+    title: editorialArticle.title,
+    excerpt: editorialArticle.excerpt,
+    category: editorialArticle.category,
+    channelLabel: articleCategoryLabels[editorialArticle.category],
     topicLabels: storyTopicLabels(group),
     articleCount: group.articles.length,
     sourceCount: new Set(group.articles.map((article) => article.source)).size,
@@ -199,7 +211,7 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     clusterLabel: sourceClusterLabelForGroup(group),
     locationLabel: places[0],
     neighborhoodLabels: places.slice(0, 3),
-    latestAt: group.primary.publishedAt,
+    latestAt,
     isClustered: group.articles.length > 1,
     cardKind: cardKindFor(group),
     sourceConfidence: storySourceConfidence(group),

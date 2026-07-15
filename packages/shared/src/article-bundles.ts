@@ -1071,6 +1071,114 @@ function sortArticles(left: Article, right: Article): number {
   return right.publishedAt.localeCompare(left.publishedAt) || right.id.localeCompare(left.id);
 }
 
+const newsroomArticleSources = new Set<Article["source"]>([
+  "nrk",
+  "adressa",
+  "avisa_st",
+  "snasningen",
+  "merakerposten",
+  "frostingen",
+  "ytringen",
+  "steinkjer_avisa",
+  "innherred",
+  "namdalsavisa",
+  "malviknytt",
+  "selbyggen",
+  "fjell_ljom",
+  "retten",
+  "hitra_froya",
+  "tronderbladet",
+  "nidaros",
+  "t_a",
+  "vg",
+  "dagbladet",
+]);
+
+const officialArticleSources = new Set<Article["source"]>([
+  "trondheim_kommune",
+  "bane_nor",
+  "met",
+  "nve",
+  "datex",
+  "vegvesen_traffic_info",
+  "entur_service_alerts",
+  "dsb",
+  "politiloggen",
+]);
+
+const editorialBoilerplatePattern =
+  /(?:vær\s+varsom-plakaten|redaktøransvar|medietilsynet|urettmessig\s+medieomtale)/iu;
+
+function normalizedEditorialText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function editorialInformationScore(value: string): number {
+  const normalized = normalizedEditorialText(value).toLocaleLowerCase("nb");
+  const tokens = new Set(normalized.match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+  return Math.min(normalized.length, 320) + Math.min(tokens.size, 40) * 8;
+}
+
+function hasUsefulEditorialExcerpt(article: Article): boolean {
+  const excerpt = normalizedEditorialText(article.excerpt);
+  const title = normalizedEditorialText(article.title);
+  return (
+    excerpt.length >= 24 &&
+    excerpt.toLocaleLowerCase("nb") !== title.toLocaleLowerCase("nb") &&
+    !editorialBoilerplatePattern.test(excerpt)
+  );
+}
+
+function editorialSourceTier(article: Article): number {
+  if (newsroomArticleSources.has(article.source)) return 2;
+  if (officialArticleSources.has(article.source)) return 1;
+  return 0;
+}
+
+function compareEditorialArticles(left: Article, right: Article): number {
+  return (
+    Number(hasUsefulEditorialExcerpt(right)) - Number(hasUsefulEditorialExcerpt(left)) ||
+    editorialSourceTier(right) - editorialSourceTier(left) ||
+    editorialInformationScore(right.excerpt) - editorialInformationScore(left.excerpt) ||
+    editorialInformationScore(right.title) - editorialInformationScore(left.title) ||
+    left.source.localeCompare(right.source) ||
+    left.url.localeCompare(right.url) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+export function selectEditorialArticle(articles: Article[]): Article {
+  if (articles.length === 0) throw new Error("Cannot select editorial copy without articles");
+  return [...articles].sort(compareEditorialArticles)[0]!;
+}
+
+function editorialSelectionRationale(
+  article: Article,
+): NonNullable<CityPulseStory["editorialSelection"]>["rationale"] {
+  if (!hasUsefulEditorialExcerpt(article)) return "best_available";
+  if (newsroomArticleSources.has(article.source)) return "newsroom_complete";
+  if (officialArticleSources.has(article.source)) return "official_complete";
+  return "best_available";
+}
+
+export function cityPulseEditorialSelection(
+  articles: Article[],
+): NonNullable<CityPulseStory["editorialSelection"]> {
+  const article = selectEditorialArticle(articles);
+  return {
+    articleId: article.id,
+    strategy: "best-source-v1",
+    rationale: editorialSelectionRationale(article),
+  };
+}
+
+function latestArticleTimestamp(articles: Article[]): string {
+  return articles.reduce(
+    (latest, article) => (article.publishedAt > latest ? article.publishedAt : latest),
+    articles[0]?.publishedAt ?? "",
+  );
+}
+
 function groupId(article: Article): string {
   if (article.coverageBundle?.id) return article.coverageBundle.id;
   if (article.situationId) return `situation:${article.situationId}`;
@@ -1224,6 +1332,7 @@ export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
 }
 
 export function cityPulseStoryFromGroup(group: HomeArticleGroup): CityPulseStory {
+  const editorialArticle = selectEditorialArticle(group.articles);
   return {
     id: group.id,
     primaryArticleId: group.primary.id,
@@ -1233,8 +1342,9 @@ export function cityPulseStoryFromGroup(group: HomeArticleGroup): CityPulseStory
     sourceLabels: group.sourceLabels,
     sourceCount: group.sourceLabels.length,
     updateCount: group.articles.length,
-    latestAt: group.primary.publishedAt,
-    category: group.primary.category,
+    latestAt: latestArticleTimestamp(group.articles),
+    category: editorialArticle.category,
+    editorialSelection: cityPulseEditorialSelection(group.articles),
     ...(group.bundle ? { coverageBundle: group.bundle } : {}),
   };
 }

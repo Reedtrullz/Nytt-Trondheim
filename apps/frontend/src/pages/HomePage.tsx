@@ -11,6 +11,7 @@ import {
 import { Link, useSearchParams } from "react-router-dom";
 import {
   buildPublicNotificationSignalHighlights,
+  cityPulseEditorialSelection,
   publicNotificationTriggerGuidance,
   type Article,
   type BootstrapPayload,
@@ -1566,6 +1567,8 @@ function mergeCityPulseStory(existing: CityPulseStory, incoming: CityPulseStory)
     ...incoming.articleIds,
     ...articles.map((article) => article.id),
   ]);
+  const editorialSelection = cityPulseEditorialSelection(articles);
+  const editorialArticle = articlesById.get(editorialSelection.articleId)!;
   return {
     ...existing,
     articleIds,
@@ -1574,6 +1577,8 @@ function mergeCityPulseStory(existing: CityPulseStory, incoming: CityPulseStory)
     sourceCount: sourceLabels.length,
     updateCount: Math.max(existing.updateCount, incoming.updateCount, articles.length),
     latestAt: newerTimestamp(existing.latestAt, incoming.latestAt),
+    category: editorialArticle.category,
+    editorialSelection,
     coverageBundle: existing.coverageBundle ?? incoming.coverageBundle,
     publicVerification: existing.publicVerification ?? incoming.publicVerification,
   };

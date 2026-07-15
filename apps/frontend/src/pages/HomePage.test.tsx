@@ -439,6 +439,11 @@ describe("articlesFromCityPulseStoryPage", () => {
         sourceCount: 2,
         updateCount: 2,
         latestAt: laterArticle.publishedAt,
+        editorialSelection: {
+          articleId: laterArticle.id,
+          strategy: "best-source-v1",
+          rationale: "newsroom_complete",
+        },
       },
     ]);
   });

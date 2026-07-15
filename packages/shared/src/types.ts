@@ -1392,8 +1392,15 @@ export interface CityPulseStory {
   updateCount: number;
   latestAt: string;
   category: ArticleCategory;
+  editorialSelection?: CityPulseEditorialSelection;
   coverageBundle?: ArticleCoverageBundle;
   publicVerification?: ArticlePublicVerification;
+}
+
+export interface CityPulseEditorialSelection {
+  articleId: string;
+  strategy: "best-source-v1";
+  rationale: "newsroom_complete" | "official_complete" | "best_available";
 }
 
 export interface CityPulseStoryPage {
