@@ -24,6 +24,9 @@
 - Raw payload retention: the exact parsed public RSS/Atom item, the extraction field names, and any
   bounded public paragraph evidence used to enrich a sparse feed excerpt. Never retain credentials,
   cookies, response headers, full page HTML or paywalled body text.
+- Cleaned title and excerpt fields decode HTML markup and named or numeric entities before
+  whitespace normalization. The exact parsed feed fields remain unchanged in the raw capture so
+  the mechanical transformation stays explainable and reversible.
 - `sourceUpdatedAt` uses a parseable public Atom/RSS `updated` value when present. It is a source
   revision clock, not collection time, and is retained only on the append-only capture.
 - Capture identity includes the raw retained evidence and source revision clock as well as the

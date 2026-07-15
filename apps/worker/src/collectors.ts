@@ -166,6 +166,13 @@ function textValue(value: unknown): string {
   return "";
 }
 
+function cleanFeedText(value: unknown): string {
+  const fragment = textValue(value);
+  if (!fragment) return "";
+  const withoutMarkup = fragment.replace(/<[^>]+>/g, " ");
+  return cheerio.load(withoutMarkup, null, false).text().replace(/\s+/g, " ").trim();
+}
+
 function stableId(source: SourceId, url: string): string {
   return `${source}-${createHash("sha1").update(url).digest("hex").slice(0, 16)}`;
 }
@@ -305,11 +312,8 @@ export async function collectRss(
   let articleCandidates = 0;
   let timestampedCandidates = 0;
   for (const item of items) {
-    const title = textValue(item.title).trim();
-    let excerpt = textValue(item.description || item.summary || item.content)
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const title = cleanFeedText(item.title);
+    let excerpt = cleanFeedText(item.description || item.summary || item.content);
     const link =
       source.format === "atom" ? atomLink(item.link, source.url) : textValue(item.link).trim();
     if (!title || !link) continue;
