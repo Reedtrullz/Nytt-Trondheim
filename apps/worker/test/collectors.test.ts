@@ -39,6 +39,43 @@ afterEach(() => {
 });
 
 describe("RSS collection policy", () => {
+  it("decodes HTML entities in cleaned feed copy while retaining raw source fields", async () => {
+    const entityRss = `<?xml version="1.0"?><rss><channel>
+      <item>
+        <title><![CDATA[Ny møteplass for unge &#38; eldre i Malvik]]></title>
+        <description><![CDATA[<p>Kommunen åpner dørene torsdag&nbsp;kveld.</p><p>Flere lag deltar &#8230; og inviterer alle.</p>]]></description>
+        <link>https://malviknytt.no/2026/07/15/ny-moteplass/</link>
+        <pubDate>Wed, 15 Jul 2026 09:00:00 GMT</pubDate>
+      </item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      {
+        id: "malviknytt",
+        label: "Malviknytt",
+        url: "https://malviknytt.no/rss",
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(entityRss, { status: 200 }),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      title: "Ny møteplass for unge & eldre i Malvik",
+      excerpt: "Kommunen åpner dørene torsdag kveld. Flere lag deltar … og inviterer alle.",
+    });
+    expect(sourceCaptureForArticle(articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        feedItem: expect.objectContaining({
+          title: "Ny møteplass for unge &#38; eldre i Malvik",
+          description:
+            "<p>Kommunen åpner dørene torsdag&nbsp;kveld.</p><p>Flere lag deltar &#8230; og inviterer alle.</p>",
+        }),
+      }),
+      sourceUpdatedAt: undefined,
+    });
+  });
+
   it("retains Trondheim-relevant national stories and drops unrelated national items", async () => {
     const articles = await collectRss(
       { id: "vg", label: "VG", url: "https://example.test/rss" },
