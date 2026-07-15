@@ -66,6 +66,17 @@ describe("WorkerRepository", () => {
     expect(String(sourceItemRefreshCall?.[0])).toContain("WHERE id=$1");
     expect(String(sourceItemRefreshCall?.[0])).toContain("WHERE capture_hash=$13");
     expect(String(sourceItemRefreshCall?.[0])).toContain("provider=$2 AND kind=$3");
+    const sourceCaptureCall = query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO source_item_captures"),
+    );
+    expect(sourceCaptureCall).toBeTruthy();
+    expect(String(sourceCaptureCall?.[0])).toContain(
+      "ON CONFLICT (provider, capture_hash) DO NOTHING",
+    );
+    expect(String(sourceCaptureCall?.[0])).not.toContain("UPDATE source_item_captures");
+    expect(sourceCaptureCall?.[1]).toEqual(
+      expect.arrayContaining([article.source, "article", article.id, article.publishedAt]),
+    );
   });
 
   it("canonicalizes changed feed ids onto stored article identities before coverage analysis", async () => {
@@ -818,7 +829,7 @@ describe("WorkerRepository", () => {
 
     const sqlCalls = query.mock.calls.map(([sql]) => String(sql));
 
-    expect(sqlCalls).toHaveLength(7);
+    expect(sqlCalls).toHaveLength(8);
     expect(sqlCalls[0]).toBe("BEGIN");
     expect(sqlCalls[1]).toContain("INSERT INTO official_events");
     expect(sqlCalls[2]).toContain("UPDATE official_events");
@@ -829,7 +840,9 @@ describe("WorkerRepository", () => {
     expect(sqlCalls[4]).toContain("INSERT INTO source_items");
     expect(sqlCalls[5]).toContain("UPDATE source_items");
     expect(sqlCalls[5]).toContain("WHERE id = COALESCE");
-    expect(sqlCalls[6]).toBe("COMMIT");
+    expect(sqlCalls[6]).toContain("INSERT INTO source_item_captures");
+    expect(sqlCalls[6]).toContain("ON CONFLICT (provider, capture_hash) DO NOTHING");
+    expect(sqlCalls[7]).toBe("COMMIT");
     expect(query.mock.calls[2]?.[1]).toEqual([["old-event"]]);
     expect(query.mock.calls[3]?.[1]).toEqual(["datex", ["old-event"], "cancelled"]);
     expect(query.mock.calls[4]?.[1]).toEqual(
@@ -1236,6 +1249,7 @@ describe("WorkerRepository", () => {
       .fn()
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [] });
     const repository = new WorkerRepository({ query } as unknown as pg.Pool);
     const event = trafficMapEvent();
@@ -1261,7 +1275,8 @@ describe("WorkerRepository", () => {
         event.title,
       ]),
     );
-    expect(sqlCalls[2]).toContain("SELECT payload FROM official_events");
+    expect(sqlCalls[2]).toContain("INSERT INTO source_item_captures");
+    expect(sqlCalls[3]).toContain("SELECT payload FROM official_events");
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO official_events"))).toBe(false);
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situations"))).toBe(false);
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO situation_source_items"))).toBe(false);

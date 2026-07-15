@@ -39,6 +39,27 @@ describe("source item schema", () => {
     expect(schema).toContain("situation_source_items_source_item_idx");
   });
 
+  it("preserves source item captures append-only with separate source and collection clocks", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS source_item_captures");
+    expect(schema).toContain("source_item_id text NOT NULL REFERENCES source_items(id)");
+    expect(schema).toContain("published_at timestamptz");
+    expect(schema).toContain("source_updated_at timestamptz");
+    expect(schema).toContain("first_seen_at timestamptz NOT NULL");
+    expect(schema).toContain("captured_at timestamptz NOT NULL");
+    expect(schema).toContain("raw_payload jsonb NOT NULL");
+    expect(schema).toContain("normalized_payload jsonb NOT NULL");
+    expect(schema).toContain("source_item_captures_provider_capture_hash_unique");
+    expect(schema).toContain("source_item_captures_item_captured_idx");
+    expect(schema).toContain("020_source_item_capture_history");
+    expect(schema).toContain(
+      "-- Backfill the current source projection as its first retained capture.",
+    );
+    expect(schema).toMatch(/INSERT INTO source_item_captures[\s\S]*FROM source_items si/);
+    expect(schema).not.toMatch(/UPDATE source_item_captures/);
+  });
+
   it("backfills legacy articles and official events into source items idempotently", async () => {
     const schema = await readFile(schemaPath, "utf8");
 

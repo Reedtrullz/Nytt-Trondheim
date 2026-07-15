@@ -423,6 +423,28 @@ changed.
   production dependency audit with `0` vulnerabilities pass. This candidate changes no matcher,
   activation, schema, projection, correction, or disappearance semantics.
 
+### Append-only capture-history candidate
+
+- The current `source_items` row is an operational projection: a new capture with the same stable
+  source identity updates `raw_payload`, `normalized_payload`, `capture_hash`, and `fetched_at`.
+  Before this candidate, that destroyed the prior revision and made transformation changes
+  impossible to reconstruct.
+- The candidate adds expand-compatible `source_item_captures` storage. Every distinct provider +
+  capture hash is inserted once with the stable current source-item link, first-seen, upstream
+  publication, optional upstream-update, and collection clocks plus the raw and normalized payloads
+  present at ingestion. Existing current rows are idempotently backfilled as their first retained
+  capture; current projection updates remain unchanged for existing readers.
+- TDD RED proved the schema and repository had no append-only capture path (`2` focused failures).
+  GREEN is `77/77` focused schema/repository/deploy-contract tests, `1273/1273` repository-wide
+  tests, `149` Playwright scenarios passed with `1` intentional desktop-only skip, typecheck, lint,
+  formatting, production build, and diff checks. The candidate also updates the lockfile to patched
+  in-range toolchain and transitive releases after newly published advisories made the dependency
+  gate fail; the production dependency audit returns `0` vulnerabilities.
+- Non-claim: media adapters still supply the already cleaned article as their `rawPayload`; this
+  foundation makes revisions append-only but does not yet claim faithful RSS/JSON-LD/OpenGraph raw
+  field retention. The next adapter wave must populate that boundary without exposing raw payloads
+  through article or list APIs.
+
 ## Visual evidence
 
 - Desktop baseline:

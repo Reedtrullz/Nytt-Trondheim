@@ -760,6 +760,29 @@
             chdir: "{{ app_dir }}"
           changed_when: false
 
+        - name: Verify append-only source capture coverage
+          ansible.builtin.shell: |
+            set -euo pipefail
+            docker compose --env-file .env.production exec -T postgres psql -U nytt -d nytt -v ON_ERROR_STOP=1 <<'SQL'
+            SELECT 'public.source_item_captures'::regclass;
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1
+                FROM source_items current
+                LEFT JOIN source_item_captures capture
+                  ON capture.source_item_id = current.id
+                WHERE capture.id IS NULL
+              ) THEN
+                RAISE EXCEPTION 'current source item is missing append-only capture history';
+              END IF;
+            END $$;
+            SQL
+          args:
+            chdir: "{{ app_dir }}"
+            executable: /bin/bash
+          changed_when: false
+
         - name: Verify TravelTime rows are excluded from source items
           ansible.builtin.shell: |
             set -euo pipefail
