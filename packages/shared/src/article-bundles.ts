@@ -1108,9 +1108,21 @@ const officialArticleSources = new Set<Article["source"]>([
 
 const editorialBoilerplatePattern =
   /(?:vær\s+varsom-plakaten|redaktøransvar|medietilsynet|urettmessig\s+medieomtale)/iu;
+const genericEditorialTitlePattern =
+  /^(?:oppdatering|nytt|melding(?:\s+fra)?|andre\s+hendelser|ro\s+og\s+orden|trafikk)(?:\s*[:–—-].*)?$/iu;
+const editorialTitleRiskPattern =
+  /(?:\bi\s+fylla\b|:\s*[–—-]\s*(?:jeg|vi|han|hun|de|det|dette|slik|nå)\b)/iu;
 
 function normalizedEditorialText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
+}
+
+function comparableEditorialText(value: string): string {
+  return normalizedEditorialText(value)
+    .toLocaleLowerCase("nb")
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 function editorialInformationScore(value: string): number {
@@ -1124,7 +1136,7 @@ function hasUsefulEditorialExcerpt(article: Article): boolean {
   const title = normalizedEditorialText(article.title);
   return (
     excerpt.length >= 24 &&
-    excerpt.toLocaleLowerCase("nb") !== title.toLocaleLowerCase("nb") &&
+    comparableEditorialText(excerpt) !== comparableEditorialText(title) &&
     !editorialBoilerplatePattern.test(excerpt)
   );
 }
@@ -1133,6 +1145,54 @@ function editorialSourceTier(article: Article): number {
   if (newsroomArticleSources.has(article.source)) return 2;
   if (officialArticleSources.has(article.source)) return 1;
   return 0;
+}
+
+function hasSpecificEditorialTitle(article: Article): boolean {
+  const title = normalizedEditorialText(article.title);
+  const tokens = title.match(/[\p{L}\p{N}]{3,}/gu) ?? [];
+  return title.length >= 16 && tokens.length >= 3 && !genericEditorialTitlePattern.test(title);
+}
+
+function hasRepeatedEditorialTitlePhrase(title: string): boolean {
+  const tokens = comparableEditorialText(title).split(" ").filter(Boolean);
+  const phrases = new Set<string>();
+  for (let index = 0; index <= tokens.length - 3; index += 1) {
+    const phrase = tokens.slice(index, index + 3).join(" ");
+    if (phrases.has(phrase)) return true;
+    phrases.add(phrase);
+  }
+  return false;
+}
+
+function hasEditorialTitleRisk(article: Article): boolean {
+  const title = normalizedEditorialText(article.title);
+  return (
+    title.length > 110 ||
+    editorialTitleRiskPattern.test(title) ||
+    hasRepeatedEditorialTitlePhrase(title)
+  );
+}
+
+function compareEditorialTitleArticles(left: Article, right: Article): number {
+  return (
+    Number(hasEditorialTitleRisk(left)) - Number(hasEditorialTitleRisk(right)) ||
+    Number(hasSpecificEditorialTitle(right)) - Number(hasSpecificEditorialTitle(left)) ||
+    editorialSourceTier(right) - editorialSourceTier(left) ||
+    editorialInformationScore(right.title) - editorialInformationScore(left.title) ||
+    left.source.localeCompare(right.source) ||
+    left.url.localeCompare(right.url) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function compareEditorialIngressArticles(left: Article, right: Article): number {
+  return (
+    editorialSourceTier(right) - editorialSourceTier(left) ||
+    editorialInformationScore(right.excerpt) - editorialInformationScore(left.excerpt) ||
+    left.source.localeCompare(right.source) ||
+    left.url.localeCompare(right.url) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function compareEditorialArticles(left: Article, right: Article): number {
@@ -1169,6 +1229,45 @@ export function cityPulseEditorialSelection(
     articleId: article.id,
     strategy: "best-source-v1",
     rationale: editorialSelectionRationale(article),
+  };
+}
+
+export function cityPulseEditorialCopy(
+  articles: Article[],
+): NonNullable<CityPulseStory["editorialCopy"]> {
+  if (articles.length === 0) throw new Error("Cannot select editorial copy without articles");
+  const titleArticle = [...articles].sort(compareEditorialTitleArticles)[0]!;
+  const ingressArticle = [...articles]
+    .filter(hasUsefulEditorialExcerpt)
+    .sort(compareEditorialIngressArticles)[0];
+  const title: NonNullable<CityPulseStory["editorialCopy"]>["title"] = {
+    text: normalizedEditorialText(titleArticle.title),
+    mode: "source",
+    articleId: titleArticle.id,
+    field: "title",
+    rationale: hasSpecificEditorialTitle(titleArticle)
+      ? "specific_source_title"
+      : "best_available_title",
+  };
+  if (!ingressArticle) {
+    return {
+      version: 1,
+      strategy: "independent-source-v1",
+      title,
+      ingressFallback: { reason: "insufficient_supported_source_text" },
+    };
+  }
+  return {
+    version: 1,
+    strategy: "independent-source-v1",
+    title,
+    ingress: {
+      text: normalizedEditorialText(ingressArticle.excerpt),
+      mode: "source",
+      articleId: ingressArticle.id,
+      field: "excerpt",
+      rationale: editorialSelectionRationale(ingressArticle),
+    },
   };
 }
 
@@ -1332,7 +1431,8 @@ export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
 }
 
 export function cityPulseStoryFromGroup(group: HomeArticleGroup): CityPulseStory {
-  const editorialArticle = selectEditorialArticle(group.articles);
+  const editorialCopy = cityPulseEditorialCopy(group.articles);
+  const titleArticle = group.articles.find(({ id }) => id === editorialCopy.title.articleId)!;
   return {
     id: group.id,
     primaryArticleId: group.primary.id,
@@ -1343,8 +1443,9 @@ export function cityPulseStoryFromGroup(group: HomeArticleGroup): CityPulseStory
     sourceCount: group.sourceLabels.length,
     updateCount: group.articles.length,
     latestAt: latestArticleTimestamp(group.articles),
-    category: editorialArticle.category,
+    category: titleArticle.category,
     editorialSelection: cityPulseEditorialSelection(group.articles),
+    editorialCopy,
     ...(group.bundle ? { coverageBundle: group.bundle } : {}),
   };
 }

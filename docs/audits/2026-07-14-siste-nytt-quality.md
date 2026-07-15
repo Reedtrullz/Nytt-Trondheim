@@ -1,12 +1,12 @@
 # Siste nytt quality audit and delivery record
 
-**Status:** Waves 1–2 deployed; ingestion-integrity and UI-state waves active
+**Status:** Ingestion-integrity and UI-state waves deployed; independent editorial-copy wave active
 
 **Started:** 2026-07-14
 
 **Baseline:** `origin/main` at `e7b8f20dd20db1f7dc949c1c7f28143dea392e3b`
 
-**Current deployed baseline:** `202af513988fba0aa53f2a9690e9e98f9f9bac92`
+**Current deployed baseline:** `95ed5d9efa01b73cd3af3302aed475782c9aa3ab`
 
 **Production:** `https://nytt.reidar.tech`
 
@@ -565,6 +565,42 @@ changed.
   mobile (`2/2`). Full Vitest passes `1291/1291` across `134/134` files; full desktop/mobile
   Playwright passes `151` with `1` intentional desktop-only skip. Root typecheck, ESLint, Prettier,
   production build, dependency audit (`0` vulnerabilities) and diff checks pass.
+- Release proof: PR `#40` merged as exact `main`
+  `95ed5d9efa01b73cd3af3302aed475782c9aa3ab`. PR CI `29405774110`, exact-main CI
+  `29406139390`, and deploy `29406468852` passed. The deploy verified encrypted backup/restore,
+  migration, canary and production health, worker stability, a fresh completed worker cycle,
+  source checks, append-only capture coverage and TravelTime exclusion; recap was
+  `ok=54 changed=11 unreachable=0 failed=0 skipped=2 rescued=0`. Public health/live/ready and the
+  root returned `200`, bootstrap returned `401`, and the rollout remained `legacy`, corrections
+  disabled, matcher `v2`, generation shadow.
+
+### Independent title/ingress provenance candidate
+
+- The deployed `best-source-v1` selection chooses one article for title, ingress and category. A
+  source with the best title can therefore lose to an article with a better ingress, and choosing
+  the title article also forces its empty, duplicated or boilerplate ingress onto the public card.
+- Alternatives considered: keep one selected article, generate new prose, or independently select
+  source-backed title and ingress. The candidate chooses independent selection as the smallest
+  reversible step. It does not introduce free-form generation without authenticated evidence and
+  a stronger claim-support contract.
+- The additive `editorialCopy` contract is versioned as `independent-source-v1`. Each field carries
+  exact source article ID, source field and rationale. If no supported ingress exists, the story
+  records `insufficient_supported_source_text` and renders no invented fallback sentence.
+- Title policy rejects generic labels, quote-led or colloquial risk, headlines over 110 characters,
+  and repeated three-word phrases before comparing source tier and information content. Ingress
+  policy rejects legal boilerplate and headline duplicates after punctuation-insensitive
+  normalization. Publication time is never a copy-quality tie-breaker; `latestAt` remains the
+  newest member clock and matcher `primaryArticleId` remains the coverage/correction anchor.
+- The labeled copy corpus covers independent source fields, unsupported-ingress forbidden claims,
+  deterministic ordering, Dora neutral wording, the E.C. Dahls regulatory follow-up, long mobile
+  headlines and repeated phrases. RED reproduced missing provenance plus promotion of the repeated
+  support headline; GREEN is `7/7` copy cases, `1,299/1,299` repository Vitest tests, and the full
+  desktop/mobile Playwright suite with `151` passed and `1` intentional desktop-only skip. Root
+  typecheck, ESLint, Prettier, production build, dependency audit (`0` vulnerabilities), and diff
+  checks pass. Release proof is pending.
+- Non-claim: no generated editorial sentence is emitted. Authenticated production title/ingress
+  readback remains blocked by the unavailable existing Chrome connection, and no fresh browser is
+  opened without owner permission.
 
 ## Visual evidence
 

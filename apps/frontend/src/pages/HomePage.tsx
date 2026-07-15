@@ -11,6 +11,7 @@ import {
 import { Link, useSearchParams } from "react-router-dom";
 import {
   buildPublicNotificationSignalHighlights,
+  cityPulseEditorialCopy,
   cityPulseEditorialSelection,
   publicNotificationTriggerGuidance,
   type Article,
@@ -1023,12 +1024,12 @@ function StoryCard({
             target="_blank"
             rel="noreferrer noopener"
           >
-            {article.title}
+            {card.title}
           </a>
         ) : (
-          <span className="headline story-title">{article.title}</span>
+          <span className="headline story-title">{card.title}</span>
         )}
-        <p className="excerpt">{article.excerpt}</p>
+        <p className="excerpt">{card.excerpt}</p>
         <div className="story-card-tags">
           <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
           {card.topicLabels.map((label) => (
@@ -1628,7 +1629,8 @@ function mergeCityPulseStory(existing: CityPulseStory, incoming: CityPulseStory)
     ...articles.map((article) => article.id),
   ]);
   const editorialSelection = cityPulseEditorialSelection(articles);
-  const editorialArticle = articlesById.get(editorialSelection.articleId)!;
+  const editorialCopy = cityPulseEditorialCopy(articles);
+  const editorialArticle = articlesById.get(editorialCopy.title.articleId)!;
   return {
     ...existing,
     articleIds,
@@ -1639,6 +1641,7 @@ function mergeCityPulseStory(existing: CityPulseStory, incoming: CityPulseStory)
     latestAt: newerTimestamp(existing.latestAt, incoming.latestAt),
     category: editorialArticle.category,
     editorialSelection,
+    editorialCopy,
     coverageBundle: existing.coverageBundle ?? incoming.coverageBundle,
     publicVerification: existing.publicVerification ?? incoming.publicVerification,
   };

@@ -1441,6 +1441,7 @@ export interface CityPulseStory {
   latestAt: string;
   category: ArticleCategory;
   editorialSelection?: CityPulseEditorialSelection;
+  editorialCopy?: CityPulseEditorialCopy;
   coverageBundle?: ArticleCoverageBundle;
   publicVerification?: ArticlePublicVerification;
 }
@@ -1449,6 +1450,32 @@ export interface CityPulseEditorialSelection {
   articleId: string;
   strategy: "best-source-v1";
   rationale: "newsroom_complete" | "official_complete" | "best_available";
+}
+
+export interface CityPulseEditorialTitleSourceField {
+  text: string;
+  mode: "source";
+  articleId: string;
+  field: "title";
+  rationale: "specific_source_title" | "best_available_title";
+}
+
+export interface CityPulseEditorialIngressSourceField {
+  text: string;
+  mode: "source";
+  articleId: string;
+  field: "excerpt";
+  rationale: "newsroom_complete" | "official_complete" | "best_available";
+}
+
+export interface CityPulseEditorialCopy {
+  version: 1;
+  strategy: "independent-source-v1";
+  title: CityPulseEditorialTitleSourceField;
+  ingress?: CityPulseEditorialIngressSourceField;
+  ingressFallback?: {
+    reason: "insufficient_supported_source_text";
+  };
 }
 
 export interface CityPulseStoryPage {

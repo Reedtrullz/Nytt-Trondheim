@@ -505,4 +505,47 @@ describe("home story cards", () => {
     expect(card.category).toBe("Nyheter");
     expect(card.latestAt).toBe(newest.publishedAt);
   });
+
+  it("can use a title and ingress from different supported source articles", () => {
+    const titleArticle = article({
+      id: "adressa-specific-title",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Beboere evakuert etter brann i leilighet på Heimdal",
+      excerpt: "Adresseavisen arbeider etter Vær Varsom-plakaten og Redaktøransvar.",
+      category: "Nyheter",
+    });
+    const ingressArticle = article({
+      id: "politiloggen-useful-ingress",
+      source: "politiloggen",
+      sourceLabel: "Politiloggen",
+      title: "Brann: Trondheim, Heimdal",
+      excerpt: "Nødetatene er på Heimdal etter melding om røyk fra en leilighet.",
+      publishedAt: "2026-07-15T03:10:00.000Z",
+    });
+    const story: CityPulseStory = {
+      id: "coverage:incident:independent-copy",
+      primaryArticleId: ingressArticle.id,
+      articleIds: [ingressArticle.id, titleArticle.id],
+      primary: ingressArticle,
+      articles: [ingressArticle, titleArticle],
+      sourceLabels: ["Politiloggen", "Adresseavisen"],
+      sourceCount: 2,
+      updateCount: 2,
+      latestAt: ingressArticle.publishedAt,
+      category: titleArticle.category,
+    };
+
+    const card = homeStoryCardForStory(story);
+
+    expect(card.primary.id).toBe(titleArticle.id);
+    expect(card.title).toBe(titleArticle.title);
+    expect(card.excerpt).toBe(ingressArticle.excerpt);
+    expect(card.category).toBe(titleArticle.category);
+    expect(card.editorialCopy).toMatchObject({
+      version: 1,
+      title: { articleId: titleArticle.id },
+      ingress: { articleId: ingressArticle.id },
+    });
+  });
 });

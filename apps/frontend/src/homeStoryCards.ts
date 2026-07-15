@@ -1,10 +1,11 @@
 import {
   sourceIdLabel,
   sourceMixConfidenceSummary,
+  cityPulseEditorialCopy,
   derivePublicVerificationForArticleGroup,
-  selectEditorialArticle,
   type Article,
   type ArticleTopic,
+  type CityPulseEditorialCopy,
   type CityPulseStory,
   type CoverageMatchConfidence,
   type SourceConfidenceSummary,
@@ -36,6 +37,7 @@ export interface HomeStoryCard {
   matchConfidence?: CoverageMatchConfidence;
   matchRationale?: string;
   verification?: HomeStoryVerification;
+  editorialCopy: CityPulseEditorialCopy;
 }
 
 export interface HomeStoryVerification {
@@ -188,7 +190,8 @@ export function homeArticleGroupForStory(story: CityPulseStory): HomeArticleGrou
 }
 
 export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
-  const editorialArticle = selectEditorialArticle(group.articles);
+  const editorialCopy = cityPulseEditorialCopy(group.articles);
+  const editorialArticle = group.articles.find(({ id }) => id === editorialCopy.title.articleId)!;
   const places = storyPlaces(group);
   const latestAt = group.articles.reduce(
     (latest, article) => (article.publishedAt > latest ? article.publishedAt : latest),
@@ -199,8 +202,8 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     group,
     primary: editorialArticle,
     coverageAnchor: group.primary,
-    title: editorialArticle.title,
-    excerpt: editorialArticle.excerpt,
+    title: editorialCopy.title.text,
+    excerpt: editorialCopy.ingress?.text ?? "",
     category: editorialArticle.category,
     channelLabel: articleCategoryLabels[editorialArticle.category],
     topicLabels: storyTopicLabels(group),
@@ -218,6 +221,7 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     matchConfidence: group.bundle?.matchConfidence,
     matchRationale: group.bundle?.matchConfidence?.rationale,
     verification: storyVerification(group),
+    editorialCopy,
   };
 }
 
