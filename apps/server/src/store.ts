@@ -8241,8 +8241,14 @@ export class PgStore implements Store {
   async exportCoverageMergeReports(sinceDays: number): Promise<CoverageMergeReportExport> {
     const result = await this.pool.query<{
       report_id: string;
-      anchor: Article;
-      candidate: Article;
+      anchor_id: string;
+      candidate_id: string;
+      anchor_source: SourceId;
+      candidate_source: SourceId;
+      anchor_title: string;
+      candidate_title: string;
+      anchor_excerpt: string;
+      candidate_excerpt: string;
       matcher_version: "v1" | "v2";
       projection_mode: "legacy" | "normalized";
       generation_id: string | null;
@@ -8250,7 +8256,13 @@ export class PgStore implements Store {
       candidate_article_ids: string[];
       created_at: Date;
     }>(
-      `SELECT cbmr.id AS report_id, anchor.payload AS anchor, candidate.payload AS candidate,
+      `SELECT cbmr.id AS report_id,
+              anchor.id AS anchor_id, candidate.id AS candidate_id,
+              anchor.source AS anchor_source, candidate.source AS candidate_source,
+              COALESCE(anchor.payload->>'title', '') AS anchor_title,
+              COALESCE(candidate.payload->>'title', '') AS candidate_title,
+              COALESCE(anchor.payload->>'excerpt', '') AS anchor_excerpt,
+              COALESCE(candidate.payload->>'excerpt', '') AS candidate_excerpt,
               cbmr.matcher_version, cbmr.projection_mode, cbmr.generation_id,
               cbmr.anchor_article_ids, cbmr.candidate_article_ids, cbmr.created_at
        FROM coverage_bundle_merge_reports cbmr
@@ -8266,16 +8278,16 @@ export class PgStore implements Store {
       rows: result.rows.map((row) => ({
         reportId: row.report_id,
         label: "together",
-        articleIds: [row.anchor.id, row.candidate.id],
+        articleIds: [row.anchor_id, row.candidate_id],
         groupArticleIds: [row.anchor_article_ids, row.candidate_article_ids],
-        sources: [row.anchor.source, row.candidate.source],
+        sources: [row.anchor_source, row.candidate_source],
         normalizedTitles: [
-          normalizedCorrectionText(row.anchor.title, 160),
-          normalizedCorrectionText(row.candidate.title, 160),
+          normalizedCorrectionText(row.anchor_title, 160),
+          normalizedCorrectionText(row.candidate_title, 160),
         ],
         normalizedExcerpts: [
-          normalizedCorrectionText(row.anchor.excerpt, 280),
-          normalizedCorrectionText(row.candidate.excerpt, 280),
+          normalizedCorrectionText(row.anchor_excerpt, 280),
+          normalizedCorrectionText(row.candidate_excerpt, 280),
         ],
         matcherVersion: row.matcher_version,
         projectionMode: row.projection_mode,

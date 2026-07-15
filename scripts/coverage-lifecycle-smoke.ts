@@ -104,6 +104,24 @@ try {
   await pool.query(
     `INSERT INTO articles
        (id, canonical_url, dedupe_key, source, published_at, scope, category, payload)
+     VALUES
+       ('ci-legacy-report-a', 'https://example.test/ci-legacy-report-a',
+        'ci-legacy-report-a', 'nrk', now(), 'trondheim', 'Nyheter', '{}'::jsonb),
+       ('ci-legacy-report-b', 'https://example.test/ci-legacy-report-b',
+        'ci-legacy-report-b', 'adressa', now(), 'trondheim', 'Nyheter', '{}'::jsonb)`,
+  );
+  await pool.query(
+    `INSERT INTO coverage_bundle_merge_reports
+       (anchor_article_id, candidate_article_id, anchor_article_ids, candidate_article_ids,
+        anchor_story_id, candidate_story_id, projection_mode, matcher_version, created_by)
+     VALUES
+       ('ci-legacy-report-a', 'ci-legacy-report-b', ARRAY['ci-legacy-report-a'],
+        ARRAY['ci-legacy-report-b'], 'ci-legacy-story-a', 'ci-legacy-story-b', 'legacy', 'v1', $1)`,
+    [ownerId],
+  );
+  await pool.query(
+    `INSERT INTO articles
+       (id, canonical_url, dedupe_key, source, published_at, scope, category, payload)
      VALUES ($1,$2,$1,$3,$4,$5,$6,$7)`,
     [
       articleC.id,
