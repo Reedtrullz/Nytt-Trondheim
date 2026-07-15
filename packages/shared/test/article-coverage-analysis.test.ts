@@ -216,7 +216,22 @@ describe("article coverage analysis", () => {
         strategy: "best-source-v1",
         rationale: "newsroom_complete",
       },
+      editorialCopy: {
+        version: 1,
+        strategy: "independent-source-v1",
+        title: {
+          articleId: "nrk-complete",
+          field: "title",
+          mode: "source",
+        },
+        ingress: {
+          articleId: "nrk-complete",
+          field: "excerpt",
+          mode: "source",
+        },
+      },
     });
+    expect(permuted?.editorialCopy).toEqual(story?.editorialCopy);
     expect(permuted?.editorialSelection).toEqual(story?.editorialSelection);
     expect(permuted?.latestAt).toBe(story?.latestAt);
   });

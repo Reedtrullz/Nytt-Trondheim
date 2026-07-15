@@ -487,10 +487,30 @@ describe("articlesFromCityPulseStoryPage", () => {
         sourceCount: 2,
         updateCount: 2,
         latestAt: laterArticle.publishedAt,
+        coverageBundle: undefined,
+        publicVerification: undefined,
         editorialSelection: {
           articleId: laterArticle.id,
           strategy: "best-source-v1",
           rationale: "newsroom_complete",
+        },
+        editorialCopy: {
+          version: 1,
+          strategy: "independent-source-v1",
+          title: {
+            text: laterArticle.title,
+            mode: "source",
+            articleId: laterArticle.id,
+            field: "title",
+            rationale: "specific_source_title",
+          },
+          ingress: {
+            text: article.excerpt,
+            mode: "source",
+            articleId: article.id,
+            field: "excerpt",
+            rationale: "newsroom_complete",
+          },
         },
       },
     ]);
@@ -1553,7 +1573,7 @@ describe("rankHomeStoryCardsForPublicFeed", () => {
     const ranked = rankHomeStoryCardsForPublicFeed(cards, { enabled: true });
 
     expect(ranked.map((card) => card.title)).toEqual([
-      "Fallulykke i Trondheim",
+      "Person skadet etter fallulykke",
       "Sommerkonsert i sentrum",
       "Tidligere utrykning på Tiller",
     ]);
