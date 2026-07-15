@@ -1,16 +1,17 @@
 # Siste nytt quality audit and delivery record
 
-**Status:** Ingestion-integrity and UI-state waves deployed; independent editorial-copy wave active
+**Status:** Ingestion-integrity, UI-state, and independent editorial-copy waves deployed;
+structured correction-category wave staged and release-blocked on signing authorization
 
 **Started:** 2026-07-14
 
 **Baseline:** `origin/main` at `e7b8f20dd20db1f7dc949c1c7f28143dea392e3b`
 
-**Current deployed baseline:** `95ed5d9efa01b73cd3af3302aed475782c9aa3ab`
+**Current deployed baseline:** `d6ff02969bcda6f7bbd2c2eda4a5122a8e64744b`
 
 **Production:** `https://nytt.reidar.tech`
 
-**Branch:** `codex/siste-nytt-quality-20260714`
+**Branch:** `codex/coverage-correction-reason-categories`
 
 ## Release boundary
 
@@ -22,7 +23,7 @@
 
 ## Ranked findings
 
-### Critical — two independent theft events are one public story
+### Resolved Critical — two independent theft events were one public story
 
 Active legacy bundle `coverage:0g728te` combines nine articles from two events:
 
@@ -78,7 +79,7 @@ PR CI `29371289064`, exact-main CI `29371578900`, and deploy `29371880892` passe
 fresh promoted worker cycle, authenticated production showed one Rotvoll card containing the four
 exact production records from NRK, Politiloggen, and Adresseavisen, with no duplicate card.
 
-### Important — fresh 390 px Siste nytt overflows horizontally
+### Resolved Important — fresh 390 px Siste nytt overflowed horizontally
 
 On an authenticated fresh load at a true `390 × 844` viewport, the document measured about
 `487 px`, roughly `97 px` wider than the viewport. `.home-grid` was 346 px wide, while its
@@ -94,7 +95,7 @@ The authenticated session reports coverage corrections disabled. The current wro
 be split from Siste nytt or `/command/dekning`. Enabling corrections is separate from fixing the
 matcher and from promoting v2; both require a dedicated release decision and proof.
 
-### Important — ingestion, identity, and editorial provenance are not revision-safe
+### Partially resolved Important — ingestion, identity, and editorial provenance were not revision-safe
 
 - Invalid or missing upstream timestamps can become collection time and reorder old items.
 - Source + normalized title + published hour is treated as hard identity, so different URLs can be
@@ -108,7 +109,20 @@ matcher and from promoting v2; both require a dedicated release decision and pro
 
 These require an expand-compatible capture/revision wave rather than ad-hoc matcher changes.
 
-### Important — correction, error, stale, and saved UI states can contradict persistence
+Append-only captures, stable upstream clocks, canonical identity, structural source sentinels and
+independent display-copy provenance are now deployed in the release sections below. One extraction
+boundary remains Important: Adresseavisen Nyhetsstudio detail enrichment currently selects the
+first four generic `<p>` elements of the public page. It excludes only short text and `Foto:`
+prefixes, so login, subscription, navigation, legal or other non-editorial paragraphs can become
+the cleaned ingress even though the raw paragraph evidence is retained correctly.
+
+**Next extraction gate:** use a centralized conservative paragraph policy with explicit
+boilerplate/interstitial rejection and article-container preference, preserve the rejected and
+selected bounded evidence internally, and add production-shaped RED fixtures for login/paywall,
+headline duplication and a valid sparse Nyhetsstudio ingress. Fail closed to the feed excerpt when
+no supported detail paragraph remains; do not invent copy.
+
+### Resolved Important — correction, error, stale, and saved UI states contradicted persistence
 
 - Saved overrides now survive split/undo replacement, failed filtered feeds do not claim a false
   empty result, and refresh work is bound to the current feed/projection context.
@@ -597,10 +611,41 @@ changed.
   support headline; GREEN is `7/7` copy cases, `1,299/1,299` repository Vitest tests, and the full
   desktop/mobile Playwright suite with `151` passed and `1` intentional desktop-only skip. Root
   typecheck, ESLint, Prettier, production build, dependency audit (`0` vulnerabilities), and diff
-  checks pass. Release proof is pending.
+  checks pass.
+- Release proof: PR `#41` merged as exact `main`
+  `d6ff02969bcda6f7bbd2c2eda4a5122a8e64744b`. PR CI `29409184030`, exact-main CI
+  `29409514306`, and deploy `29409863450` passed. The deploy verified encrypted backup/restore,
+  migration, canary and production health, worker stability, a fresh completed worker cycle,
+  source checks, append-only capture coverage and TravelTime exclusion; recap was
+  `ok=54 changed=11 unreachable=0 failed=0 skipped=2 rescued=0`. Public health/live/ready and the
+  root returned `200`, bootstrap returned `401`, and the rollout remained `legacy`, corrections
+  disabled, matcher `v2`, generation shadow.
 - Non-claim: no generated editorial sentence is emitted. Authenticated production title/ingress
   readback remains blocked by the unavailable existing Chrome connection, and no fresh browser is
   opened without owner permission.
+
+### Structured correction reason category candidate
+
+- The split workflow previously accepted only optional private prose. That prose is deliberately
+  excluded from evaluation exports, so an owner could correct a bad grouping without producing a
+  safe, aggregatable reason label for matcher evaluation.
+- The candidate adds one optional bounded category: different event, place, time, subject,
+  incident type, or other. The owner-facing dialog and correction history render Bokmål labels;
+  the stable API contract and database store the machine-readable value.
+- Private detail remains optional, capped at 500 characters and excluded from the sanitized export.
+  The export adds only the bounded category and continues to omit private prose and actor IDs.
+- The database change is additive and idempotent: `reason_category` is nullable for old rows and a
+  named check constraint rejects values outside the shared enum. Production correction behavior
+  remains behind the existing disabled flag; this wave does not enable or promote it.
+- RED proved the old schema rejected the field, the UI lacked the selector, the export lacked safe
+  reason metadata and the database lacked the column. GREEN currently passes focused shared,
+  frontend, store and migration tests (`23/23`), full Vitest (`1,300/1,300` across `135/135`
+  files), root typecheck, ESLint, Prettier, production build, dependency audit (`0`
+  vulnerabilities) and diff checks. The full desktop/mobile Playwright matrix passes `151` with
+  `1` intentional desktop-only skip; its keyboard path focuses and selects the new category at
+  390 px before submitting. A disposable PostGIS 16 database applied the schema twice and proved
+  the new column, named constraint and migration marker. Signed release and deploy proof are
+  pending.
 
 ## Visual evidence
 
@@ -636,7 +681,7 @@ changed.
 
 ## Recommended next action
 
-Finish the coverage-audit retained-data candidate through the full browser gate, signed PR,
+Finish the structured correction-category candidate through the full browser gate, signed PR,
 exact-main CI, deploy and public readback. Verify authenticated editorial cards and feedback UX
 when the existing Chrome session is available. Keep v2 projection promotion and corrections
 disabled until their separate owner-review gate is satisfied.

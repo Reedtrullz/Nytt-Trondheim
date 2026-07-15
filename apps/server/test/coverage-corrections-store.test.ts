@@ -310,6 +310,7 @@ describe("coverage correction store", () => {
       rejected_article_id: "threat",
       matcher_version: "v2" as const,
       evidence_fingerprint: "v2:test-edge",
+      reason_category: "different_place" as const,
       status: "active" as const,
       created_at: "2026-07-12T21:01:00.000Z",
       reverted_at: null,
@@ -410,14 +411,16 @@ describe("coverage correction store", () => {
       rejected_article_id: "threat",
       matcher_version: "v2" as const,
       evidence_fingerprint: "v2:test-edge",
+      reason_category: "different_place" as const,
       status: "active" as const,
       created_at: "2026-07-12T21:01:00.000Z",
       reverted_at: null,
     };
     let activeCorrectionReads = 0;
     const queries: string[] = [];
+    let insertedValues: unknown[] | undefined;
     const client = {
-      query: vi.fn(async (sql: string) => {
+      query: vi.fn(async (sql: string, values?: unknown[]) => {
         queries.push(sql);
         if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") {
           return { rows: [], rowCount: 0 };
@@ -464,6 +467,7 @@ describe("coverage correction store", () => {
           };
         }
         if (sql.includes("INSERT INTO coverage_bundle_corrections")) {
+          insertedValues = values;
           return { rows: [correction], rowCount: 1 };
         }
         if (sql.includes("UPDATE coverage_projection_revisions")) {
@@ -481,13 +485,19 @@ describe("coverage correction store", () => {
         expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
         anchorArticleId: "speed-a",
         rejectedArticleIds: ["threat"],
+        reasonCategory: "different_place",
       },
       "owner-user-id",
     );
 
     expect(result.corrections).toEqual([
-      expect.objectContaining({ id: "correction-1", status: "active" }),
+      expect.objectContaining({
+        id: "correction-1",
+        reasonCategory: "different_place",
+        status: "active",
+      }),
     ]);
+    expect(insertedValues?.[6]).toBe("different_place");
     expect(queries[0]).toBe("BEGIN");
     expect(queries.at(-1)).toBe("COMMIT");
     expect(queries).not.toContain("ROLLBACK");
@@ -575,7 +585,7 @@ describe("coverage correction store", () => {
     ).rejects.toBeInstanceOf(CoverageBundleConflictError);
   });
 
-  it("exports sanitized review rows without reasons or actors", async () => {
+  it("exports a bounded category without private reasons or actors", async () => {
     const store = storeFixture();
     const page = await store.listCoverageBundles({ projection: "shadow", limit: 30 });
     const bundle = page.items[0]!;
@@ -585,13 +595,17 @@ describe("coverage correction store", () => {
         expectedGeneratedAt: bundle.generatedAt,
         anchorArticleId: "speed-a",
         rejectedArticleIds: ["threat"],
+        reasonCategory: "different_place",
         reason: "Sensitiv forklaring må ikke eksporteres",
       },
       "owner-user-id",
     );
 
     const exported = await store.exportCoverageCorrections(30);
-    expect(exported).toMatchObject({ schemaVersion: 1, rows: [{ label: "separate" }] });
+    expect(exported).toMatchObject({
+      schemaVersion: 1,
+      rows: [{ label: "separate", category: "different_place" }],
+    });
     expect(exported.rows[0]?.normalizedTitles[0]).toBe("Kjørte i nær 200");
     expect(JSON.stringify(exported)).not.toMatch(/Sensitiv|owner-user-id|reason|createdBy/);
   });

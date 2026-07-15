@@ -1,10 +1,20 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import type { CoverageBundleSplitRequest } from "@nytt/shared";
+import type { CoverageBundleSplitRequest, CoverageCorrectionReasonCategory } from "@nytt/shared";
 import type { HomeStoryCard } from "../../homeStoryCards.js";
+
+export const coverageCorrectionReasonLabels: Record<CoverageCorrectionReasonCategory, string> = {
+  different_event: "Annen hendelse",
+  different_place: "Annet sted",
+  different_time: "Annet tidspunkt",
+  different_subject: "Annen person eller aktør",
+  different_incident_type: "Annen hendelsestype",
+  other: "Annet",
+};
 
 export function coverageCorrectionSplitInput(
   card: HomeStoryCard,
   rejectedArticleIds: string[],
+  reasonCategory: CoverageCorrectionReasonCategory | "",
   reason: string,
 ): CoverageBundleSplitRequest | undefined {
   const bundle = card.group.bundle;
@@ -19,6 +29,7 @@ export function coverageCorrectionSplitInput(
       : {}),
     anchorArticleId: card.coverageAnchor.id,
     rejectedArticleIds: [...rejectedArticleIds].sort(),
+    ...(reasonCategory ? { reasonCategory } : {}),
     ...(reason.trim() ? { reason: reason.trim() } : {}),
   };
 }
@@ -40,6 +51,7 @@ export function CoverageCorrectionDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstCheckboxRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [reasonCategory, setReasonCategory] = useState<CoverageCorrectionReasonCategory | "">("");
   const [reason, setReason] = useState("");
   const supporting = card.group.articles.filter((article) => article.id !== card.coverageAnchor.id);
 
@@ -64,7 +76,7 @@ export function CoverageCorrectionDialog({
     if (event.key !== "Tab") return;
     const controls = [
       ...(dialogRef.current?.querySelectorAll<HTMLElement>(
-        "button:not([disabled]), input:not([disabled]), textarea:not([disabled])",
+        "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])",
       ) ?? []),
     ];
     if (controls.length === 0) return;
@@ -82,7 +94,7 @@ export function CoverageCorrectionDialog({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
-    const input = coverageCorrectionSplitInput(card, [...selectedIds], reason);
+    const input = coverageCorrectionSplitInput(card, [...selectedIds], reasonCategory, reason);
     if (input) onConfirm(input);
   }
 
@@ -129,7 +141,24 @@ export function CoverageCorrectionDialog({
             ))}
           </fieldset>
           <label className="coverage-correction-reason">
-            Årsak (valgfritt)
+            Hvorfor hører sakene ikke sammen? (valgfritt)
+            <select
+              value={reasonCategory}
+              disabled={pending}
+              onChange={(event) =>
+                setReasonCategory(event.target.value as CoverageCorrectionReasonCategory | "")
+              }
+            >
+              <option value="">Velg kategori</option>
+              {Object.entries(coverageCorrectionReasonLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="coverage-correction-reason">
+            Intern detalj (valgfritt, eksporteres ikke)
             <textarea
               maxLength={500}
               value={reason}

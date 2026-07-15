@@ -1446,6 +1446,7 @@ CREATE TABLE IF NOT EXISTS coverage_bundle_corrections (
   rejected_article_id text NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
   matcher_version text NOT NULL CHECK (matcher_version IN ('v1', 'v2')),
   evidence_fingerprint text NOT NULL,
+  reason_category text,
   reason text CHECK (reason IS NULL OR char_length(reason) <= 500),
   status text NOT NULL CHECK (status IN ('active', 'reverted')),
   created_by text NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -1458,6 +1459,21 @@ CREATE TABLE IF NOT EXISTS coverage_bundle_corrections (
     OR (status = 'reverted' AND reverted_at IS NOT NULL AND reverted_by IS NOT NULL)
   )
 );
+ALTER TABLE coverage_bundle_corrections
+  ADD COLUMN IF NOT EXISTS reason_category text;
+ALTER TABLE coverage_bundle_corrections
+  DROP CONSTRAINT IF EXISTS coverage_bundle_corrections_reason_category_check;
+ALTER TABLE coverage_bundle_corrections
+  ADD CONSTRAINT coverage_bundle_corrections_reason_category_check CHECK (
+    reason_category IS NULL OR reason_category IN (
+      'different_event',
+      'different_place',
+      'different_time',
+      'different_subject',
+      'different_incident_type',
+      'other'
+    )
+  );
 CREATE UNIQUE INDEX IF NOT EXISTS coverage_bundle_corrections_active_pair_idx
   ON coverage_bundle_corrections (
     LEAST(anchor_article_id, rejected_article_id),
@@ -1637,3 +1653,4 @@ INSERT INTO schema_migrations (version) VALUES ('017_coverage_legacy_snapshot') 
 INSERT INTO schema_migrations (version) VALUES ('018_coverage_effective_projection') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('019_coverage_projection_integrity') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('020_source_item_capture_history') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('021_coverage_correction_reason_category') ON CONFLICT DO NOTHING;

@@ -7,7 +7,7 @@ import {
 import { clusteredHomeStoryCard } from "../../test-fixtures/homeStoryCards.js";
 
 describe("CoverageCorrectionDialog", () => {
-  it("renders anchor, selectable supporting stories, and a bounded optional reason", () => {
+  it("renders anchor, selectable supporting stories, a category, and bounded optional detail", () => {
     const html = renderToStaticMarkup(
       <CoverageCorrectionDialog
         card={clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 })}
@@ -22,6 +22,8 @@ describe("CoverageCorrectionDialog", () => {
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain("Behold som hovedsak");
     expect((html.match(/type="checkbox"/g) ?? []).length).toBe(2);
+    expect(html).toContain("Hvorfor hører sakene ikke sammen?");
+    expect(html).toContain("Annet sted");
     expect(html).toContain('maxLength="500"');
     expect(html).toContain("Splitt nå");
   });
@@ -69,12 +71,15 @@ describe("CoverageCorrectionDialog", () => {
     };
     const bundle = card.group.bundle;
 
-    expect(coverageCorrectionSplitInput(card, ["cluster-article-2"], "Feil sted")).toEqual({
+    expect(
+      coverageCorrectionSplitInput(card, ["cluster-article-2"], "different_place", "Feil sted"),
+    ).toEqual({
       expectedGeneratedAt: bundle.generatedAt,
       expectedProjectionRevision: 4,
       originalBundleId: "coverage:stable-original",
       anchorArticleId: card.coverageAnchor.id,
       rejectedArticleIds: ["cluster-article-2"],
+      reasonCategory: "different_place",
       reason: "Feil sted",
     });
     expect(card.primary.id).not.toBe(card.coverageAnchor.id);

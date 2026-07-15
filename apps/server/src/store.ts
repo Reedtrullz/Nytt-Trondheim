@@ -38,6 +38,7 @@ import type {
   CoverageBundleMergeReportRequest,
   CoverageBundleSplitRequest,
   CoverageCorrectionExport,
+  CoverageCorrectionReasonCategory,
   CoverageMergeReportExport,
   CoverageGenerationSummary,
   CoverageProjectionParity,
@@ -1908,6 +1909,7 @@ interface CoverageCorrectionRow {
   rejected_article_id: string;
   matcher_version: "v1" | "v2";
   evidence_fingerprint: string;
+  reason_category: CoverageCorrectionReasonCategory | null;
   status: "active" | "reverted";
   created_at: Date | string;
   reverted_at: Date | string | null;
@@ -1973,6 +1975,7 @@ function coverageCorrectionFromRow(row: CoverageCorrectionRow): CoverageBundleCo
     rejectedArticleId: row.rejected_article_id,
     matcherVersion: row.matcher_version,
     evidenceFingerprint: row.evidence_fingerprint,
+    ...(row.reason_category ? { reasonCategory: row.reason_category } : {}),
     status: row.status,
     createdAt: new Date(row.created_at).toISOString(),
     ...(row.reverted_at ? { revertedAt: new Date(row.reverted_at).toISOString() } : {}),
@@ -4147,6 +4150,7 @@ export class MemoryStore implements Store {
     CoverageBundleCorrection & {
       generationId: string;
       createdBy: string;
+      reasonCategory?: CoverageCorrectionReasonCategory;
       reason?: string;
       revertedBy?: string;
     }
@@ -4850,6 +4854,7 @@ export class MemoryStore implements Store {
               generationId,
               anchorArticleId,
               rejectedArticleId,
+              reasonCategory,
               status,
               createdAt,
               revertedAt,
@@ -4858,6 +4863,7 @@ export class MemoryStore implements Store {
               generationId,
               anchorArticleId,
               rejectedArticleId,
+              ...(reasonCategory ? { reasonCategory } : {}),
               status,
               applicability:
                 this.articles.some(({ id: articleId }) => articleId === anchorArticleId) &&
@@ -4890,6 +4896,7 @@ export class MemoryStore implements Store {
         rejected_article_id: correction.rejectedArticleId,
         matcher_version: correction.matcherVersion,
         evidence_fingerprint: correction.evidenceFingerprint,
+        reason_category: correction.reasonCategory ?? null,
         status: correction.status,
         created_at: correction.createdAt,
         reverted_at: correction.revertedAt ?? null,
@@ -5050,6 +5057,7 @@ export class MemoryStore implements Store {
         status: "active",
         createdAt: new Date().toISOString(),
         createdBy: actorId,
+        ...(input.reasonCategory ? { reasonCategory: input.reasonCategory } : {}),
         ...(input.reason ? { reason: input.reason } : {}),
       };
       this.coverageCorrections.push(correction);
@@ -5139,6 +5147,7 @@ export class MemoryStore implements Store {
             ] as [string, string],
             matcherVersion: correction.matcherVersion,
             evidenceFingerprint: correction.evidenceFingerprint,
+            ...(correction.reasonCategory ? { category: correction.reasonCategory } : {}),
             createdAt: correction.createdAt,
           },
         ];
@@ -7517,7 +7526,8 @@ export class PgStore implements Store {
                 SELECT jsonb_agg(jsonb_build_object(
                   'id', cbc.id, 'generationId', cbc.generation_id,
                   'anchorArticleId', cbc.anchor_article_id,
-                  'rejectedArticleId', cbc.rejected_article_id, 'status', cbc.status,
+                  'rejectedArticleId', cbc.rejected_article_id,
+                  'reasonCategory', cbc.reason_category, 'status', cbc.status,
                   'applicability', CASE WHEN $1='active' AND
                     EXISTS (
                       SELECT 1 FROM coverage_generation_articles active_anchor
@@ -7951,8 +7961,8 @@ export class PgStore implements Store {
         const inserted = await client.query<CoverageCorrectionRow>(
           `INSERT INTO coverage_bundle_corrections
             (generation_id, original_bundle_id, anchor_article_id, rejected_article_id,
-             matcher_version, evidence_fingerprint, reason, status, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8)
+             matcher_version, evidence_fingerprint, reason_category, reason, status, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)
            ON CONFLICT (
              LEAST(anchor_article_id, rejected_article_id),
              GREATEST(anchor_article_id, rejected_article_id)
@@ -7965,6 +7975,7 @@ export class PgStore implements Store {
             rejectedArticleId,
             projection.matcherVersion,
             fingerprintByPair.get(orderedIds.join("\0")) ?? `v2:no-edge:${orderedIds.join(":")}`,
+            input.reasonCategory ?? null,
             input.reason ?? null,
             actorId,
           ],
@@ -8154,6 +8165,7 @@ export class PgStore implements Store {
         ],
         matcherVersion: correction.matcher_version,
         evidenceFingerprint: correction.evidence_fingerprint,
+        ...(correction.reason_category ? { category: correction.reason_category } : {}),
         createdAt: new Date(correction.created_at).toISOString(),
       })),
     };

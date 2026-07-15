@@ -78,6 +78,11 @@ describe("migration invariants", () => {
       "ALTER TABLE coverage_projection_revisions ADD COLUMN IF NOT EXISTS legacy_revision",
     );
     expect(normalizedSql).toContain("VALUES ('019_coverage_projection_integrity')");
+    expect(normalizedSql).toContain(
+      "ALTER TABLE coverage_bundle_corrections ADD COLUMN IF NOT EXISTS reason_category text",
+    );
+    expect(normalizedSql).toContain("coverage_bundle_corrections_reason_category_check");
+    expect(normalizedSql).toContain("VALUES ('021_coverage_correction_reason_category')");
     expect(normalizedSql).not.toMatch(
       /UPDATE coverage_bundle_generations SET health_outcome\s*=\s*'healthy'/,
     );

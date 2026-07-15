@@ -9,7 +9,10 @@ import type {
   PositiveIncidentEvidence,
 } from "@nytt/shared";
 import { api, CoverageCorrectionConflictError, type CoverageBundleRequestQuery } from "../api.js";
-import { CoverageCorrectionDialog } from "../components/news/CoverageCorrectionDialog.js";
+import {
+  CoverageCorrectionDialog,
+  coverageCorrectionReasonLabels,
+} from "../components/news/CoverageCorrectionDialog.js";
 import { homeStoryCardForGroup } from "../homeStoryCards.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
 
@@ -709,6 +712,11 @@ function BundleDrawer({
                     Opprettet {time(correction.createdAt)}
                     {correction.revertedAt ? ` · angret ${time(correction.revertedAt)}` : ""}
                   </small>
+                  {correction.reasonCategory ? (
+                    <small>
+                      Kategori: {coverageCorrectionReasonLabels[correction.reasonCategory]}
+                    </small>
+                  ) : null}
                 </div>
                 {correctionsEnabled && correction.status === "active" ? (
                   <button

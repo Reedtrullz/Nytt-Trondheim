@@ -60,6 +60,26 @@ describe("coverage corrections", () => {
     ).toThrow();
   });
 
+  it("accepts only bounded correction reason categories", () => {
+    expect(
+      coverageBundleSplitRequestSchema.parse({
+        expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+        anchorArticleId: "speed-a",
+        rejectedArticleIds: ["threat"],
+        reasonCategory: "different_place",
+        reason: "  To ulike steder  ",
+      }),
+    ).toMatchObject({ reasonCategory: "different_place", reason: "To ulike steder" });
+    expect(() =>
+      coverageBundleSplitRequestSchema.parse({
+        expectedGeneratedAt: "2026-07-12T21:00:00.000Z",
+        anchorArticleId: "speed-a",
+        rejectedArticleIds: ["threat"],
+        reasonCategory: "private_guess",
+      }),
+    ).toThrow();
+  });
+
   it("splits an exact rejected pair and retains it as a correction conflict", () => {
     const analysis = analyzeArticleCoverageV2(
       correctionFixtureArticles(),

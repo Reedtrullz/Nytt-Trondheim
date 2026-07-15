@@ -1419,7 +1419,14 @@ test("grouped cards remain compact and correctable by keyboard at phone width", 
   await expect(firstCheckbox).toBeFocused();
   await page.keyboard.press("Space");
   await expect(firstCheckbox).toBeChecked();
-  for (let index = 0; index < 8; index += 1) await page.keyboard.press("Tab");
+  for (let index = 0; index < 6; index += 1) await page.keyboard.press("Tab");
+  const reasonCategory = dialog.getByRole("combobox", {
+    name: "Hvorfor hører sakene ikke sammen? (valgfritt)",
+  });
+  await expect(reasonCategory).toBeFocused();
+  await reasonCategory.selectOption("different_place");
+  await expect(reasonCategory).toHaveValue("different_place");
+  for (let index = 0; index < 3; index += 1) await page.keyboard.press("Tab");
   await expect(dialog.getByRole("button", { name: "Splitt nå" })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.locator(".coverage-correction-toast")).toContainText("Gruppen er splittet");
