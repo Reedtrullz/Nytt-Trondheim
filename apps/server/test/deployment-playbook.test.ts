@@ -24,6 +24,10 @@ const lifecycleSmoke = readFileSync(
   new URL("../../../scripts/coverage-lifecycle-smoke.ts", import.meta.url),
   "utf8",
 );
+const restoreCheck = readFileSync(
+  new URL("../../../scripts/restore-check.sh", import.meta.url),
+  "utf8",
+);
 
 describe("deployment playbook Entur verification", () => {
   it("plumbs safe server and worker coverage rollout defaults without exposing them to Vite", () => {
@@ -245,6 +249,17 @@ describe("deployment playbook Entur verification", () => {
     expect(task).toContain("/usr/local/bin/nytt-restore-check");
     expect(task).toMatch(/async:\s*1800/);
     expect(task).toMatch(/poll:\s*15/);
+  });
+
+  it("retries transient repository reads without weakening the restore gate", () => {
+    expect(restoreCheck).toContain("RESTORE_CHECK_MAX_ATTEMPTS:-2");
+    expect(restoreCheck).toContain("RESTORE_CHECK_RETRY_DELAY_SECONDS:-20");
+    expect(restoreCheck).toContain('retry_restic_read "Repository integrity check"');
+    expect(restoreCheck).toContain('retry_restic_read "Snapshot restore"');
+    expect(restoreCheck).toContain("if ((attempt >= MAX_ATTEMPTS))");
+    expect(restoreCheck).toContain("return 1");
+    expect(restoreCheck).toContain('pg_restore --list "$dump_path"');
+    expect(restoreCheck).toContain('tar -tzf "$uploads_path"');
   });
 
   it("requires DATEX source health rows to come from the promoted candidate window", () => {
