@@ -848,12 +848,17 @@ export function CoverageBundlesDashboard({
       </section>
       <section className="coverage-export-panel">
         <div>
-          <strong>Korrigeringskorpus</strong>
-          <p>Gjennomgå og anonymiser eksporten før den legges i testkorpuset.</p>
+          <strong>Tilbakemeldingskorpus</strong>
+          <p>Gjennomgå og anonymiser eksportene før de legges i testkorpuset.</p>
         </div>
-        <a href="/api/operations/coverage-corrections/export?sinceDays=30" download>
-          Eksporter korrigeringer
-        </a>
+        <div className="coverage-export-actions">
+          <a href="/api/operations/coverage-corrections/export?sinceDays=30" download>
+            Feil samling
+          </a>
+          <a href="/api/operations/coverage-merge-reports/export?sinceDays=30" download>
+            Manglende samling
+          </a>
+        </div>
       </section>
       <div className="coverage-bundles-grid">
         <aside className="coverage-bundles-sidebar" aria-label="Dekningsfiltre">

@@ -1946,6 +1946,51 @@ a.coverage-source-row:focus-visible {
   font-weight: 700;
 }
 
+.coverage-merge-report {
+  min-height: 30px;
+  margin-top: 10px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.coverage-merge-report.is-selected {
+  color: var(--blue);
+}
+
+.coverage-merge-report-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--blue);
+  background: color-mix(in srgb, var(--paper) 88%, var(--blue) 12%);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.coverage-merge-report-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.coverage-merge-report-banner button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--blue);
+  font-weight: 800;
+}
+
 .coverage-correction-backdrop {
   position: fixed;
   z-index: 1200;
@@ -5360,6 +5405,13 @@ a.coverage-source-row:focus-visible {
   font-size: 12px;
   font-weight: 800;
   text-decoration: none;
+}
+
+.coverage-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .coverage-bundles-actions,

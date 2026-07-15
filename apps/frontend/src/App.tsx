@@ -232,6 +232,7 @@ function HomeRoute({
   error,
   canSave,
   canCorrect,
+  canReportMissed,
   onRetry,
 }: {
   data?: BootstrapPayload;
@@ -239,9 +240,19 @@ function HomeRoute({
   error?: string;
   canSave: boolean;
   canCorrect: boolean;
+  canReportMissed: boolean;
   onRetry: () => void;
 }) {
-  if (data) return <HomePage initialData={data} canSave={canSave} canCorrect={canCorrect} />;
+  if (data) {
+    return (
+      <HomePage
+        initialData={data}
+        canSave={canSave}
+        canCorrect={canCorrect}
+        canReportMissed={canReportMissed}
+      />
+    );
+  }
   if (loading) return <LoadingPage message="Henter siste nytt..." />;
   return (
     <main className="fatal-error" role="alert">
@@ -337,6 +348,7 @@ function AuthenticatedApp() {
                   error={bootstrapError}
                   canSave={isOwner}
                   canCorrect={isOwner && session.capabilities?.coverageCorrections === true}
+                  canReportMissed={isOwner}
                   onRetry={() => setAttempt((value) => value + 1)}
                 />
               }

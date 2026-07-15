@@ -17,6 +17,8 @@ import type {
   CoverageBundlePage,
   CoverageBundleQueryInput,
   CoverageBundleCorrectionResult,
+  CoverageBundleMergeReport,
+  CoverageBundleMergeReportRequest,
   CoverageBundleSplitRequest,
   EmailLoginRequestInput,
   MapFeature,
@@ -302,6 +304,11 @@ export const api = {
       `/api/coverage-bundle-corrections/${encodeURIComponent(correctionId)}/undo`,
       { method: "POST" },
     ),
+  reportCoverageMerge: (input: CoverageBundleMergeReportRequest) =>
+    request<CoverageBundleMergeReport>("/api/coverage-bundle-merge-reports", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   notificationTriggers: (query: NotificationTriggerQueryInput = { limit: 30 }) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

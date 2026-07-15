@@ -16,6 +16,7 @@ import {
   ChannelContextPanel,
   CityPulseRefreshStatus,
   CityPulseSignalPanel,
+  CoverageMergeReportAction,
   LocalFocusRadiusControl,
   LocalFocusSummaryPanel,
   MapClusterSummary,
@@ -159,6 +160,53 @@ const sourceHealth: SourceHealth[] = [
     detail: "Intern varslingskanal.",
   },
 ];
+
+describe("CoverageMergeReportAction", () => {
+  const [card] = homeStoryCardsForGroups(groupHomeArticles([article]));
+
+  it("keeps missed-group feedback owner-only and exposes the two-step selection state", () => {
+    const hidden = renderToStaticMarkup(
+      <CoverageMergeReportAction
+        card={card!}
+        canReport={false}
+        pending={false}
+        onReport={() => undefined}
+      />,
+    );
+    const initial = renderToStaticMarkup(
+      <CoverageMergeReportAction
+        card={card!}
+        canReport
+        pending={false}
+        onReport={() => undefined}
+      />,
+    );
+    const selected = renderToStaticMarkup(
+      <CoverageMergeReportAction
+        card={card!}
+        canReport
+        anchorId={card!.id}
+        pending={false}
+        onReport={() => undefined}
+      />,
+    );
+    const candidate = renderToStaticMarkup(
+      <CoverageMergeReportAction
+        card={card!}
+        canReport
+        anchorId="another-story"
+        pending={false}
+        onReport={() => undefined}
+      />,
+    );
+
+    expect(hidden).toBe("");
+    expect(initial).toContain("Mangler samling?");
+    expect(selected).toContain("Avbryt valg");
+    expect(selected).toContain('aria-pressed="true"');
+    expect(candidate).toContain("Denne hører sammen");
+  });
+});
 
 describe("MorningBriefPanel", () => {
   it("renders the pinned public briefing with mode and highlights", () => {
