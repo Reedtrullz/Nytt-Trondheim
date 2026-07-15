@@ -1144,6 +1144,22 @@ export class WorkerRepository {
        )`,
       values,
     );
+    const captureId = `capture:${sourceItemHash([item.provider, item.kind, item.captureHash])}`;
+    await client.query(
+      `INSERT INTO source_item_captures
+        (id, source_item_id, provider, kind, external_id, first_seen_at, published_at,
+         source_updated_at, captured_at, capture_hash, raw_payload, normalized_payload)
+       SELECT
+         $16, current.id, $2, $3, $4, current.created_at, $9, NULL, $10, $13, $11, $12
+       FROM source_items current
+       WHERE current.id = COALESCE(
+         (SELECT id FROM source_items WHERE id=$1),
+         (SELECT id FROM source_items WHERE capture_hash=$13),
+         (SELECT id FROM source_items WHERE $4::text IS NOT NULL AND provider=$2 AND kind=$3 AND external_id=$4)
+       )
+       ON CONFLICT (provider, capture_hash) DO NOTHING`,
+      [...values, captureId],
+    );
   }
 
   async upsertTrafficInfoSourceItems(items: SourceItemInput[]): Promise<void> {

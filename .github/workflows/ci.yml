@@ -82,6 +82,8 @@ jobs:
           SELECT postgis_version();
           SELECT count(*) AS schema_migration_count FROM schema_migrations;
           SELECT count(*) AS source_item_count FROM source_items;
+          SELECT 'public.source_item_captures'::regclass;
+          SELECT count(*) AS source_item_capture_count FROM source_item_captures;
           SQL
       - name: Verify normalized coverage schema
         run: |

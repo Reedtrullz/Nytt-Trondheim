@@ -189,6 +189,9 @@ describe("deployment playbook Entur verification", () => {
     );
     expect(validationBlock).toContain("- name: Verify Entur source health");
     expect(validationBlock).toContain("- name: Verify source item query sanity");
+    expect(validationBlock).toContain("- name: Verify append-only source capture coverage");
+    expect(validationBlock).toContain("LEFT JOIN source_item_captures capture");
+    expect(validationBlock).toContain("current source item is missing append-only capture history");
 
     const alwaysStart = playbook.indexOf("always:", rescueStart);
     const rescueBlock = playbook.slice(

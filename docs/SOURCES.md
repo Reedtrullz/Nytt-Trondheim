@@ -37,6 +37,13 @@ Trondheim kommune publication timestamps are interpreted in `Europe/Oslo`, inclu
 
 Articles and official MET/NVE/DATEX/Politiloggen situation events, Entur service alerts, Bane NOR rail/mobility messages and Vegvesen TrafficInfo records are mirrored into the internal `source_items` ledger when their source contracts permit it. DATEX TravelTime, DATEX Weather, DATEX CCTV, Trafikkdata counters and Entur vehicle positions are explicitly excluded from the editorial source stream and remain telemetry/context tables plus `source_health` only.
 
+`source_items` is the current source projection. Every distinct admitted capture is also retained
+append-only in `source_item_captures`, keyed by provider and capture hash. The capture ledger keeps
+first-seen, upstream publication, optional upstream-update and collection clocks separate, together
+with the raw and normalized payloads available at that ingestion boundary. Repeated identical
+captures are idempotent. Current projection updates must never rewrite historical capture rows, and
+the capture table is not exposed by public or ordinary owner list APIs.
+
 Coverage bundles are not a collected source. They are worker-derived article grouping decisions stored as stable bundle rows plus immutable generation-scoped versions, members, and edges for owner-only Command Center review at `/command/dekning`. Persisted generation membership is the uncorrected matcher base; owner rejected pairs are a current-generation read overlay and separate conflict diagnostic, not new evidence. They may reference article ids and source labels, but they do not write raw upstream payloads, do not require a source contract, and must not be mirrored into `source_items`.
 
 Matcher versions and owner corrections are derived decisions, not collected sources. Shadow edges, evaluation labels, exact-pair split/undo records, and sanitized correction exports must never be written to `source_items`, used as automatic situation evidence, or change source reliability. A correction changes only the effective grouping projection; it cannot activate, verify, dismiss, or otherwise mutate a situation.

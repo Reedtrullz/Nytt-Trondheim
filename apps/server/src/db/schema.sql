@@ -720,6 +720,52 @@ CREATE INDEX IF NOT EXISTS source_items_provider_kind_idx ON source_items (provi
 CREATE INDEX IF NOT EXISTS source_items_fetched_at_idx ON source_items (fetched_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS source_items_geo_hint_idx ON source_items USING gist (geo_hint);
 
+CREATE TABLE IF NOT EXISTS source_item_captures (
+  id text PRIMARY KEY,
+  source_item_id text NOT NULL REFERENCES source_items(id) ON DELETE CASCADE,
+  provider text NOT NULL,
+  kind text NOT NULL,
+  external_id text,
+  first_seen_at timestamptz NOT NULL,
+  published_at timestamptz,
+  source_updated_at timestamptz,
+  captured_at timestamptz NOT NULL,
+  capture_hash text NOT NULL,
+  raw_payload jsonb NOT NULL,
+  normalized_payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS source_item_captures_provider_capture_hash_unique
+  ON source_item_captures (provider, capture_hash);
+CREATE INDEX IF NOT EXISTS source_item_captures_item_captured_idx
+  ON source_item_captures (source_item_id, captured_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS source_item_captures_provider_captured_idx
+  ON source_item_captures (provider, captured_at DESC, id DESC);
+
+-- Backfill the current source projection as its first retained capture.
+INSERT INTO source_item_captures (
+  id, source_item_id, provider, kind, external_id, first_seen_at, published_at,
+  source_updated_at, captured_at, capture_hash, raw_payload, normalized_payload
+)
+SELECT
+  'capture:' || encode(
+    digest(jsonb_build_array(si.provider, si.kind, si.capture_hash)::text, 'sha256'),
+    'hex'
+  ),
+  si.id,
+  si.provider,
+  si.kind,
+  si.external_id,
+  si.created_at,
+  si.published_at,
+  NULL,
+  si.fetched_at,
+  si.capture_hash,
+  si.raw_payload,
+  si.normalized_payload
+FROM source_items si
+ON CONFLICT (provider, capture_hash) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS situation_source_items (
   situation_id text NOT NULL REFERENCES situations(id) ON DELETE CASCADE,
   source_item_id text NOT NULL REFERENCES source_items(id) ON DELETE CASCADE,
@@ -1561,3 +1607,4 @@ INSERT INTO schema_migrations (version) VALUES ('016_coverage_bundle_lifecycle')
 INSERT INTO schema_migrations (version) VALUES ('017_coverage_legacy_snapshot') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('018_coverage_effective_projection') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (version) VALUES ('019_coverage_projection_integrity') ON CONFLICT DO NOTHING;
+INSERT INTO schema_migrations (version) VALUES ('020_source_item_capture_history') ON CONFLICT DO NOTHING;
