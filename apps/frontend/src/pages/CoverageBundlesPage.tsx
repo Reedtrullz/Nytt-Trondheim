@@ -735,7 +735,9 @@ export function CoverageBundlesDashboard({
   filters,
   onFiltersChange,
   mutationPending = false,
+  dataState = "fresh",
   visibleError,
+  onRetry,
   onSplit,
   onUndo,
 }: {
@@ -743,7 +745,9 @@ export function CoverageBundlesDashboard({
   filters: CoverageWorkspaceFilters;
   onFiltersChange: (filters: CoverageWorkspaceFilters) => void;
   mutationPending?: boolean;
+  dataState?: "fresh" | "refreshing" | "stale";
   visibleError?: string;
+  onRetry?: () => void;
   onSplit?: (bundle: CoverageBundleListItem) => void;
   onUndo?: (correctionId: string) => void;
 }) {
@@ -761,6 +765,7 @@ export function CoverageBundlesDashboard({
   const parityClean = page.parity?.clean !== false;
   const integrityClean = page.summary.integrityErrorCount === 0;
   const isSuperseded = selectedProjection === "superseded";
+  const interactionsLocked = mutationPending || dataState !== "fresh";
   const correctionsEnabled =
     page.correctionsEnabled === true &&
     (selectedProjection === "shadow" || selectedProjection === "active") &&
@@ -771,7 +776,12 @@ export function CoverageBundlesDashboard({
   }
 
   return (
-    <main className="coverage-bundles-page" data-generation-id={page.summary.generation?.id}>
+    <main
+      className="coverage-bundles-page"
+      data-generation-id={page.summary.generation?.id}
+      data-data-state={dataState}
+      aria-busy={dataState === "refreshing" ? true : undefined}
+    >
       <header className="coverage-bundles-hero">
         <div>
           <p className="label">Privat kommandosenter</p>
@@ -788,7 +798,24 @@ export function CoverageBundlesDashboard({
           <Link to="/command/kilder">Kilderevisjon</Link>
         </div>
       </header>
-      {visibleError ? (
+      {dataState === "refreshing" ? (
+        <div className="coverage-workspace-alert coverage-workspace-refreshing" role="status">
+          <strong>Oppdaterer dekningsgrupper</strong>
+          <span>
+            Beholdte data vises mens den nye visningen hentes. Handlinger er midlertidig låst.
+          </span>
+        </div>
+      ) : null}
+      {dataState === "stale" ? (
+        <div className="coverage-workspace-alert coverage-workspace-stale" role="alert">
+          <strong>Viser sist hentede data</strong>
+          <span>Handlinger er låst til nye data er hentet.</span>
+          {visibleError ? <p>{visibleError}</p> : null}
+          <button type="button" disabled={!onRetry} onClick={onRetry}>
+            Prøv igjen
+          </button>
+        </div>
+      ) : visibleError ? (
         <div className="coverage-workspace-alert" role="alert">
           {visibleError}
         </div>
@@ -1002,6 +1029,7 @@ export function CoverageBundlesDashboard({
             {page.nextCursor ? (
               <button
                 type="button"
+                disabled={interactionsLocked}
                 onClick={() => onFiltersChange({ ...displayedFilters, cursor: page.nextCursor })}
               >
                 Neste side
@@ -1010,6 +1038,7 @@ export function CoverageBundlesDashboard({
             {selectedProjection === "superseded" && page.historyNextCursor ? (
               <button
                 type="button"
+                disabled={interactionsLocked}
                 onClick={() =>
                   onFiltersChange({
                     ...displayedFilters,
@@ -1037,6 +1066,7 @@ export function CoverageBundlesDashboard({
                   className={`coverage-bundle-row ${selected ? "selected" : ""}`}
                   data-coverage-bundle-row
                   data-primary-article-id={bundle.primaryArticleId}
+                  disabled={interactionsLocked}
                   key={bundle.id}
                   onClick={() => onFiltersChange({ ...displayedFilters, bundleId: bundle.id })}
                   type="button"
@@ -1070,7 +1100,7 @@ export function CoverageBundlesDashboard({
         <BundleDrawer
           bundle={selectedBundle}
           correctionsEnabled={correctionsEnabled}
-          mutationPending={mutationPending}
+          mutationPending={interactionsLocked}
           onSplit={onSplit}
           onUndo={onUndo}
         />
@@ -1087,18 +1117,28 @@ export function CoverageBundlesPage() {
   const [selectedBundle, setSelectedBundle] = useState<CoverageBundleListItem>();
   const [pendingAction, setPendingAction] = useState<"split" | `undo:${string}`>();
   const [visibleError, setVisibleError] = useState<string>();
+  const [dataState, setDataState] = useState<"loading" | "fresh" | "refreshing" | "stale">(
+    "loading",
+  );
   const requestIdRef = useRef(0);
+  const hasPageRef = useRef(false);
 
   const loadCoveragePage = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setVisibleError(undefined);
+    setDataState(hasPageRef.current ? "refreshing" : "loading");
     try {
       const response = await api.coverageBundles(coverageQueryFromFilters(filters));
-      if (requestId === requestIdRef.current) setPage(response);
+      if (requestId === requestIdRef.current) {
+        hasPageRef.current = true;
+        setPage(response);
+        setDataState("fresh");
+      }
       return true;
     } catch (reason) {
       if (requestId === requestIdRef.current) {
+        setDataState(hasPageRef.current ? "stale" : "loading");
         setVisibleError(
           reason instanceof Error ? reason.message : "Kunne ikke hente dekningsgrupper.",
         );
@@ -1114,12 +1154,16 @@ export function CoverageBundlesPage() {
     };
   }, [loadCoveragePage]);
 
+  useEffect(() => {
+    setSelectedBundle(undefined);
+  }, [searchText]);
+
   function updateFilters(next: CoverageWorkspaceFilters) {
     setSearchParams(coverageWorkspaceSearch(next), { replace: true });
   }
 
   async function handleSplit(input: CoverageBundleSplitRequest) {
-    if (!selectedBundle || pendingAction) return;
+    if (!selectedBundle || pendingAction || dataState !== "fresh") return;
     setPendingAction("split");
     setVisibleError(undefined);
     try {
@@ -1150,7 +1194,7 @@ export function CoverageBundlesPage() {
   }
 
   async function handleUndo(correctionId: string) {
-    if (pendingAction) return;
+    if (pendingAction || dataState !== "fresh") return;
     setPendingAction(`undo:${correctionId}`);
     setVisibleError(undefined);
     try {
@@ -1189,8 +1233,11 @@ export function CoverageBundlesPage() {
         filters={filters}
         onFiltersChange={updateFilters}
         mutationPending={pendingAction !== undefined}
+        dataState={dataState === "loading" ? "refreshing" : dataState}
         visibleError={selectedBundle ? undefined : visibleError}
+        onRetry={() => void loadCoveragePage()}
         onSplit={(bundle) => {
+          if (dataState !== "fresh") return;
           setVisibleError(undefined);
           setSelectedBundle(bundle);
         }}
@@ -1199,7 +1246,7 @@ export function CoverageBundlesPage() {
       {selectedBundle && correctionCard ? (
         <CoverageCorrectionDialog
           card={correctionCard}
-          pending={pendingAction === "split"}
+          pending={pendingAction === "split" || dataState !== "fresh"}
           error={visibleError}
           onCancel={() => {
             if (pendingAction) return;
