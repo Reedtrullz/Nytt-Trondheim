@@ -202,6 +202,16 @@ describe("deployment playbook Entur verification", () => {
     expect(rescueBlock).toContain("nytt-trondheim-api:latest");
     expect(rescueBlock).toContain("nytt-trondheim-worker:previous");
     expect(rescueBlock).toContain("nytt-trondheim-worker:latest");
+    expect(rescueBlock).toContain("- name: Capture failed candidate worker logs before rollback");
+    expect(rescueBlock).toContain(
+      "docker compose --env-file .env.production logs --no-color --tail 200 worker",
+    );
+    expect(rescueBlock).toContain("- name: Emit failed candidate worker logs");
+    expect(
+      rescueBlock.indexOf("Capture failed candidate worker logs before rollback"),
+    ).toBeLessThan(
+      rescueBlock.indexOf("Restore previous worker image after failed candidate validation"),
+    );
     expect(rescueBlock).toContain("docker compose --env-file .env.production up -d app worker");
     expect(rescueBlock).toContain("COVERAGE_MATCHER_VERSION=v1");
   });

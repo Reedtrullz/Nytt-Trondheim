@@ -1145,20 +1145,32 @@ export class WorkerRepository {
       values,
     );
     const captureId = `capture:${sourceItemHash([item.provider, item.kind, item.captureHash])}`;
+    const captureValues = [
+      captureId,
+      item.id,
+      item.provider,
+      item.kind,
+      item.externalId ?? null,
+      item.publishedAt ?? null,
+      item.fetchedAt,
+      item.captureHash,
+      item.rawPayload,
+      item.normalizedPayload,
+    ];
     await client.query(
       `INSERT INTO source_item_captures
         (id, source_item_id, provider, kind, external_id, first_seen_at, published_at,
          source_updated_at, captured_at, capture_hash, raw_payload, normalized_payload)
        SELECT
-         $16, current.id, $2, $3, $4, current.created_at, $9, NULL, $10, $13, $11, $12
+         $1, current.id, $3, $4, $5, current.created_at, $6, NULL, $7, $8, $9, $10
        FROM source_items current
        WHERE current.id = COALESCE(
-         (SELECT id FROM source_items WHERE id=$1),
-         (SELECT id FROM source_items WHERE capture_hash=$13),
-         (SELECT id FROM source_items WHERE $4::text IS NOT NULL AND provider=$2 AND kind=$3 AND external_id=$4)
+         (SELECT id FROM source_items WHERE id=$2),
+         (SELECT id FROM source_items WHERE capture_hash=$8),
+         (SELECT id FROM source_items WHERE $5::text IS NOT NULL AND provider=$3 AND kind=$4 AND external_id=$5)
        )
        ON CONFLICT (provider, capture_hash) DO NOTHING`,
-      [...values, captureId],
+      captureValues,
     );
   }
 
