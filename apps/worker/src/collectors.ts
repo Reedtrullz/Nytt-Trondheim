@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { XMLParser } from "fast-xml-parser";
-import type { Article, SourceId } from "@nytt/shared";
+import {
+  comparableEditorialText,
+  editorialTextRejectionReason,
+  normalizedEditorialText,
+  type Article,
+  type EditorialTextRejectionReason,
+  type SourceId,
+} from "@nytt/shared";
 import { articleTopics, categorize, detectScope, extractPlaces } from "./classify.js";
 import { attachArticleSourceCapture } from "./articleSourceCapture.js";
 import {
@@ -249,33 +256,89 @@ function shouldFetchArticleExcerpt(
 }
 
 interface ArticlePageExcerptEvidence {
-  excerpt: string;
+  excerpt?: string;
   rawPayload: {
     url: string;
-    paragraphs: string[];
+    selector: "main article p" | "article p" | "main p" | null;
+    paragraphs: Array<{
+      text: string;
+      decision: "selected" | "rejected";
+      reason?:
+        | EditorialTextRejectionReason
+        | "duplicate"
+        | "selection_limit"
+        | "unscoped_container";
+    }>;
+    fallbackReason?: "no_supported_container" | "no_supported_paragraphs";
   };
 }
 
 async function articlePageExcerpt(
   url: string,
+  title: string,
   fetcher: typeof fetch,
 ): Promise<ArticlePageExcerptEvidence | undefined> {
   try {
     const response = await fetchWithSourcePolicy(fetcher, url);
     if (!response.ok) return undefined;
     const $ = cheerio.load(await response.text());
-    const paragraphs = $("p")
+    const container = [
+      { selector: "main article p" as const, paragraphs: $("main article").first().find("p") },
+      { selector: "article p" as const, paragraphs: $("article").first().find("p") },
+      { selector: "main p" as const, paragraphs: $("main").first().find("p") },
+    ].find(({ paragraphs }) => paragraphs.length > 0);
+    if (!container) {
+      const unscopedParagraphs = $("p")
+        .toArray()
+        .map((element) => normalizedEditorialText($(element).text()))
+        .filter(Boolean)
+        .slice(0, 12)
+        .map((text) => ({
+          text,
+          decision: "rejected" as const,
+          reason: "unscoped_container" as const,
+        }));
+      return {
+        rawPayload: {
+          url,
+          selector: null,
+          paragraphs: unscopedParagraphs,
+          fallbackReason: "no_supported_container",
+        },
+      };
+    }
+    const candidates = container.paragraphs
       .toArray()
-      .map((element) => $(element).text().replace(/\s+/g, " ").trim())
-      .filter((text) => text.length >= 40 && !/^foto:/i.test(text))
-      .slice(0, 4);
-    const excerpt = paragraphs.join(" ").replace(/\s+/g, " ").trim();
-    return excerpt
-      ? {
-          excerpt: excerpt.slice(0, 600),
-          rawPayload: { url, paragraphs },
-        }
-      : undefined;
+      .map((element) => normalizedEditorialText($(element).text()))
+      .filter(Boolean)
+      .slice(0, 12);
+    const selected: string[] = [];
+    const seen = new Set<string>();
+    const paragraphs = candidates.map((text) => {
+      const policyReason = editorialTextRejectionReason(text, { title, minLength: 40 });
+      const comparable = comparableEditorialText(text);
+      const reason =
+        policyReason ??
+        (seen.has(comparable)
+          ? ("duplicate" as const)
+          : selected.length >= 4
+            ? ("selection_limit" as const)
+            : undefined);
+      seen.add(comparable);
+      if (reason) return { text, decision: "rejected" as const, reason };
+      selected.push(text);
+      return { text, decision: "selected" as const };
+    });
+    const excerpt = normalizedEditorialText(selected.join(" ")).slice(0, 600);
+    return {
+      ...(excerpt ? { excerpt } : {}),
+      rawPayload: {
+        url,
+        selector: container.selector,
+        paragraphs,
+        ...(!excerpt ? { fallbackReason: "no_supported_paragraphs" as const } : {}),
+      },
+    };
   } catch {
     return undefined;
   }
@@ -335,7 +398,7 @@ export async function collectRss(
       shouldFetchArticleExcerpt(source, url, categories, excerpt)
     ) {
       detailFetches += 1;
-      const detail = await articlePageExcerpt(url, fetcher);
+      const detail = await articlePageExcerpt(url, title, fetcher);
       excerpt = detail?.excerpt ?? excerpt;
       detailPageEvidence = detail?.rawPayload;
     }

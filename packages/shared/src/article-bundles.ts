@@ -12,6 +12,11 @@ import type {
 } from "./types.js";
 import { isFootballClubBrannContext } from "./incident-text.js";
 import {
+  comparableEditorialText,
+  editorialTextRejectionReason,
+  normalizedEditorialText,
+} from "./editorial-text.js";
+import {
   clusterArticlesByCoverageEdges,
   type CoverageRejectedPair,
 } from "./article-coverage-clustering.js";
@@ -1108,24 +1113,10 @@ const officialArticleSources = new Set<Article["source"]>([
   "politiloggen",
 ]);
 
-const editorialBoilerplatePattern =
-  /(?:vær\s+varsom-plakaten|redaktøransvar|medietilsynet|urettmessig\s+medieomtale)/iu;
 const genericEditorialTitlePattern =
   /^(?:oppdatering|nytt|melding(?:\s+fra)?|andre\s+hendelser|ro\s+og\s+orden|trafikk)(?:\s*[:–—-].*)?$/iu;
 const editorialTitleRiskPattern =
   /(?:\bi\s+fylla\b|:\s*[–—-]\s*(?:jeg|vi|han|hun|de|det|dette|slik|nå)\b)/iu;
-
-function normalizedEditorialText(value: string): string {
-  return value.replace(/\s+/gu, " ").trim();
-}
-
-function comparableEditorialText(value: string): string {
-  return normalizedEditorialText(value)
-    .toLocaleLowerCase("nb")
-    .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
-}
 
 function editorialInformationScore(value: string): number {
   const normalized = normalizedEditorialText(value).toLocaleLowerCase("nb");
@@ -1134,13 +1125,10 @@ function editorialInformationScore(value: string): number {
 }
 
 function hasUsefulEditorialExcerpt(article: Article): boolean {
-  const excerpt = normalizedEditorialText(article.excerpt);
-  const title = normalizedEditorialText(article.title);
-  return (
-    excerpt.length >= 24 &&
-    comparableEditorialText(excerpt) !== comparableEditorialText(title) &&
-    !editorialBoilerplatePattern.test(excerpt)
-  );
+  return !editorialTextRejectionReason(article.excerpt, {
+    title: article.title,
+    minLength: 24,
+  });
 }
 
 function editorialSourceTier(article: Article): number {
