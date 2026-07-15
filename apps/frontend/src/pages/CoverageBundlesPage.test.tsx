@@ -263,6 +263,52 @@ describe("CoverageBundlesDashboard", () => {
     expect(html).toContain("Mangler sterk offisiell verifisering");
   });
 
+  it("marks retained rows busy and locks decisions while a refresh is pending", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={page}
+          filters={{ projection: "shadow" }}
+          dataState="refreshing"
+          onFiltersChange={vi.fn()}
+          onSplit={vi.fn()}
+          onUndo={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain("Oppdaterer dekningsgrupper");
+    expect(html).toContain("Beholdte data vises mens den nye visningen hentes");
+    expect(html).toMatch(/data-coverage-bundle-row[^>]*disabled/);
+    expect(html).toMatch(/class="coverage-bundle-mutation"[^>]*disabled/);
+    expect(html).toMatch(/disabled=""[^>]*>Angre<\/button>/);
+  });
+
+  it("labels retained rows stale, locks decisions and offers a retry after refresh failure", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CoverageBundlesDashboard
+          page={page}
+          filters={{ projection: "shadow" }}
+          dataState="stale"
+          visibleError="Tjenesten svarte ikke."
+          onRetry={vi.fn()}
+          onFiltersChange={vi.fn()}
+          onSplit={vi.fn()}
+          onUndo={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain("Viser sist hentede data");
+    expect(html).toContain("Handlinger er låst til nye data er hentet");
+    expect(html).toContain("Tjenesten svarte ikke.");
+    expect(html).toContain("Prøv igjen");
+    expect(html).toMatch(/data-coverage-bundle-row[^>]*disabled/);
+    expect(html).toMatch(/class="coverage-bundle-mutation"[^>]*disabled/);
+  });
+
   it("offers one honest superseded generation projection without mutation controls", () => {
     const supersededPage: CoverageBundlePage = {
       ...page,

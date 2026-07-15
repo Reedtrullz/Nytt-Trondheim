@@ -5369,6 +5369,28 @@ a.coverage-source-row:focus-visible {
   color: var(--terracotta);
 }
 
+.coverage-workspace-refreshing {
+  border-left-color: var(--blue);
+  color: var(--ink);
+}
+
+.coverage-workspace-alert span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.coverage-workspace-alert button {
+  flex: 0 0 auto;
+  padding: 9px 11px;
+  border: 1px solid currentColor;
+  color: inherit;
+  background: var(--paper);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .coverage-workspace-ready {
   border-left: 5px solid var(--green);
 }
@@ -14008,6 +14030,7 @@ button.journey-context-chip {
   }
 
   .coverage-export-panel a,
+  .coverage-workspace-alert button,
   .coverage-bundle-mutation,
   .coverage-review-group button,
   .coverage-correction-history button {

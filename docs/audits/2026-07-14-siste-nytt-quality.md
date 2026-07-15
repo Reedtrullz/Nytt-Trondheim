@@ -6,7 +6,7 @@
 
 **Baseline:** `origin/main` at `e7b8f20dd20db1f7dc949c1c7f28143dea392e3b`
 
-**Current deployed baseline:** `2c4a35bc3c2d74f90cbb946761790648a6fd1915`
+**Current deployed baseline:** `202af513988fba0aa53f2a9690e9e98f9f9bac92`
 
 **Production:** `https://nytt.reidar.tech`
 
@@ -114,9 +114,9 @@ These require an expand-compatible capture/revision wave rather than ad-hoc matc
   empty result, and refresh work is bound to the current feed/projection context.
 - Correction focus restoration and concise live announcements are covered by browser regressions;
   expanded supporting headlines wrap while collapsed rows remain intentionally truncated.
-- The non-mutating missed-group report is implemented as a release candidate below.
-- Remaining in this cluster: owner audit rows must still be rechecked across retained-data loading,
-  stale and failed states before the correction workspace can be called ready.
+- The non-mutating missed-group report is deployed below.
+- The retained-data loading/stale/error candidate below locks owner audit decisions until the
+  selected server view is fresh and gives failed refreshes an explicit retry path.
 
 ## Architecture decision
 
@@ -534,9 +534,37 @@ changed.
   format, production build, dependency audit (`0` vulnerabilities), and diff check pass. Focused
   API/store/UI/migration proof passes `190/190`; full desktop/mobile Playwright passes `151` with
   `1` intentional desktop-only skip. A disposable PostGIS 16 database applied the schema twice and
-  the real PgStore lifecycle smoke proved idempotent reports, sanitized export, unchanged projection
-  membership, current-generation corrections and one bounded projection materialization. This
-  candidate still has no signed commit, PR, CI, deploy or live-readback claim.
+  the real PgStore lifecycle smoke proved idempotent reports, sanitized export, unchanged public
+  projection membership, current-generation corrections and one bounded projection materialization.
+- Release proof: PR `#39` merged as exact `main`
+  `202af513988fba0aa53f2a9690e9e98f9f9bac92`. PR CI `29403207781`, exact-main CI
+  `29403620850`, and deploy `29403957710` passed. The deploy verified encrypted backup/restore,
+  migration, canary and production health, 45-second worker stability, a fresh completed worker
+  cycle, traffic/DATEX/Entur/source-item checks, append-only capture coverage and TravelTime
+  exclusion; recap was `ok=54 changed=11 unreachable=0 failed=0 skipped=2 rescued=0`.
+  Public health/live/ready returned `200`, bootstrap returned `401`, and the root returned `200`.
+  The rollout remained `legacy`, corrections disabled, matcher `v2`, generation shadow.
+- Non-claim: authenticated production feedback submission and sanitized export have not been
+  visually exercised because the existing authenticated Chrome connection is unavailable.
+
+### Coverage audit retained-data integrity candidate
+
+- A filter change kept the previous server page visible under the new URL while the replacement
+  request was pending. A failed request then retained those rows indefinitely. Neither state said
+  that the data belonged to the previous query, and row selection, split, undo and pagination
+  remained available against that retained snapshot.
+- The candidate tracks initial load, fresh data, retained-data refresh and stale failure separately.
+  Retained rows stay visible for orientation, but the workspace announces the refresh with
+  `aria-busy`, labels failed data as last fetched, and locks row selection, pagination, split and
+  undo until a fresh response arrives. Failed refreshes expose one explicit “Prøv igjen” action.
+- Request IDs still prevent older responses from replacing newer filter state. Mutation refreshes
+  use the same freshness boundary, and server-side authorization, CSRF and correction semantics are
+  unchanged.
+- Current proof: focused dashboard unit/render tests pass `24/24`; the combined keyboard,
+  accessibility, retained-refresh and stale-failure Playwright flow passes on desktop and 390 px
+  mobile (`2/2`). Full Vitest passes `1291/1291` across `134/134` files; full desktop/mobile
+  Playwright passes `151` with `1` intentional desktop-only skip. Root typecheck, ESLint, Prettier,
+  production build, dependency audit (`0` vulnerabilities) and diff checks pass.
 
 ## Visual evidence
 
@@ -572,7 +600,7 @@ changed.
 
 ## Recommended next action
 
-Finish the missed-group feedback candidate through full browser and real PostGIS verification,
-then ship it through signed PR, exact-main CI, deploy and public readback. Verify authenticated
-editorial cards and feedback UX when the existing Chrome session is available. Keep v2 projection
-promotion and corrections disabled until their separate owner-review gate is satisfied.
+Finish the coverage-audit retained-data candidate through the full browser gate, signed PR,
+exact-main CI, deploy and public readback. Verify authenticated editorial cards and feedback UX
+when the existing Chrome session is available. Keep v2 projection promotion and corrections
+disabled until their separate owner-review gate is satisfied.

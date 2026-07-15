@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import {
   buildCityPulseStories,
   fallbackWorldCupDashboard,
@@ -1706,12 +1706,65 @@ test("coverage audit review filters are keyboard-safe and usable at phone width"
   }
   await page.goto("/command/dekning?projection=active");
 
+  const audit = page.locator("main.coverage-bundles-page");
+  const retainedRow = audit.locator("[data-coverage-bundle-row]").first();
+  await expect(retainedRow).toBeEnabled();
+  await retainedRow.click();
+  await expect(audit.getByRole("button", { name: "Splitt gruppe" })).toBeEnabled();
+
+  let markRequested: (() => void) | undefined;
+  const requested = new Promise<void>((resolve) => {
+    markRequested = resolve;
+  });
+  let releaseFailure: (() => void) | undefined;
+  const failureGate = new Promise<void>((resolve) => {
+    releaseFailure = resolve;
+  });
+  const failCorrectedFilter = async (route: Route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("corrected") !== "true") {
+      await route.continue();
+      return;
+    }
+    markRequested?.();
+    await failureGate;
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Dekningslageret er midlertidig utilgjengelig." }),
+    });
+  };
+  await page.route("**/api/operations/coverage-bundles**", failCorrectedFilter);
+
+  await audit.getByLabel("Korrigert").selectOption("yes");
+  await requested;
+  await expect(audit).toHaveAttribute("aria-busy", "true");
+  await expect(audit.getByText("Oppdaterer dekningsgrupper")).toBeVisible();
+  await expect(retainedRow).toBeDisabled();
+  await expect(audit.getByRole("button", { name: "Splitt gruppe" })).toBeDisabled();
+
+  releaseFailure?.();
+  await expect(audit).toHaveAttribute("data-data-state", "stale");
+  await expect(audit.getByText("Viser sist hentede data")).toBeVisible();
+  await expect(audit.getByText("Handlinger er låst til nye data er hentet.")).toBeVisible();
+  await expect(audit.getByRole("button", { name: "Prøv igjen" })).toBeEnabled();
+  await expect(retainedRow).toBeDisabled();
+  await expect(audit.getByRole("button", { name: "Splitt gruppe" })).toBeDisabled();
+
+  await page.unroute("**/api/operations/coverage-bundles**", failCorrectedFilter);
+  await audit.getByRole("button", { name: "Prøv igjen" }).click();
+  await expect(audit).toHaveAttribute("data-data-state", "fresh");
+  await audit.getByLabel("Korrigert").selectOption("");
+  await expect(retainedRow).toBeEnabled();
+
   const weakFilter = page.getByRole("checkbox", { name: "Svake kandidater" });
   await weakFilter.focus();
   await page.keyboard.press("Space");
   await expect(weakFilter).toBeChecked();
   await expect(page).toHaveURL(/review=weak/);
-  await expect(page.getByRole("status")).toContainText(/Serverfilteret returnerte \d+ grupper/);
+  await expect(page.locator(".coverage-bundle-filter-count")).toContainText(
+    /Serverfilteret returnerte \d+ grupper/,
+  );
   await expectNoHorizontalPageOverflow(page);
   const accessibility = await new AxeBuilder({ page })
     .include("main.coverage-bundles-page")
