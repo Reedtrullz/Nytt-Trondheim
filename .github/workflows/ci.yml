@@ -74,6 +74,8 @@ jobs:
       - run: npm run build -w @nytt/server
       - run: npm run db:migrate
       - run: npm run db:migrate
+      - name: Verify faithful append-only source captures
+        run: npm run smoke:source-captures
       - name: Run migration sanity queries
         run: |
           sudo apt-get update

@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import { XMLParser } from "fast-xml-parser";
 import type { Article, SourceId } from "@nytt/shared";
 import { articleTopics, categorize, detectScope, extractPlaces } from "./classify.js";
+import { attachArticleSourceCapture } from "./articleSourceCapture.js";
 import {
   defaultDatexSituationEndpoint,
   normalizeDatexSituationEndpoint,
@@ -240,7 +241,18 @@ function shouldFetchArticleExcerpt(
   return categories.some((category) => category.toLocaleLowerCase("nb") === "nyhetsstudio");
 }
 
-async function articlePageExcerpt(url: string, fetcher: typeof fetch): Promise<string | undefined> {
+interface ArticlePageExcerptEvidence {
+  excerpt: string;
+  rawPayload: {
+    url: string;
+    paragraphs: string[];
+  };
+}
+
+async function articlePageExcerpt(
+  url: string,
+  fetcher: typeof fetch,
+): Promise<ArticlePageExcerptEvidence | undefined> {
   try {
     const response = await fetchWithSourcePolicy(fetcher, url);
     if (!response.ok) return undefined;
@@ -251,7 +263,12 @@ async function articlePageExcerpt(url: string, fetcher: typeof fetch): Promise<s
       .filter((text) => text.length >= 40 && !/^foto:/i.test(text))
       .slice(0, 4);
     const excerpt = paragraphs.join(" ").replace(/\s+/g, " ").trim();
-    return excerpt ? excerpt.slice(0, 600) : undefined;
+    return excerpt
+      ? {
+          excerpt: excerpt.slice(0, 600),
+          rawPayload: { url, paragraphs },
+        }
+      : undefined;
   } catch {
     return undefined;
   }
@@ -303,34 +320,60 @@ export async function collectRss(
       continue;
     }
     articleCandidates += 1;
-    const publishedAt = parsePublishedAt(item.pubDate || item.published || item.updated);
+    const publicationField = item.pubDate ? "pubDate" : item.published ? "published" : "updated";
+    const publishedAt = parsePublishedAt(item[publicationField]);
     if (!publishedAt) continue;
     timestampedCandidates += 1;
     const categories = source.format === "atom" ? atomCategories(item) : itemCategories(item);
+    let detailPageEvidence: ArticlePageExcerptEvidence["rawPayload"] | undefined;
     if (
       detailFetches < maxDetailFetches &&
       shouldFetchArticleExcerpt(source, url, categories, excerpt)
     ) {
       detailFetches += 1;
-      excerpt = (await articlePageExcerpt(url, fetcher)) ?? excerpt;
+      const detail = await articlePageExcerpt(url, fetcher);
+      excerpt = detail?.excerpt ?? excerpt;
+      detailPageEvidence = detail?.rawPayload;
     }
     const articleText = `${title} ${excerpt} ${categories.join(" ")}`;
     const scope = detectScope(articleText);
     if (!scope && !source.retainRegionalUnmatched) continue;
     const category = categorize(articleText);
-    articles.push({
-      id: stableId(source.id, url),
-      source: source.id,
-      sourceLabel: source.label,
-      title,
-      excerpt: excerpt.slice(0, 300),
-      url,
-      publishedAt,
-      scope: scope ?? "trondelag",
-      category,
-      topics: articleTopics(articleText, category),
-      places: extractPlaces(articleText),
-    });
+    articles.push(
+      attachArticleSourceCapture(
+        {
+          id: stableId(source.id, url),
+          source: source.id,
+          sourceLabel: source.label,
+          title,
+          excerpt: excerpt.slice(0, 300),
+          url,
+          publishedAt,
+          scope: scope ?? "trondelag",
+          category,
+          topics: articleTopics(articleText, category),
+          places: extractPlaces(articleText),
+        },
+        {
+          rawPayload: {
+            schemaVersion: 1,
+            transport: {
+              kind: source.format === "atom" ? "atom" : "rss",
+              endpoint: source.url,
+            },
+            feedItem: item,
+            extraction: {
+              publicationField,
+              linkField: "link",
+              titleField: "title",
+              excerptField: item.description ? "description" : item.summary ? "summary" : "content",
+            },
+            ...(detailPageEvidence ? { detailPage: detailPageEvidence } : {}),
+          },
+          sourceUpdatedAt: parsePublishedAt(item.updated),
+        },
+      ),
+    );
   }
   if (articleCandidates === 0) {
     throw new Error(`${source.label} har ingen brukbare artikkelkandidater i feeden`);
@@ -347,6 +390,11 @@ interface FrontpageCandidate {
   url: string;
   categories: string[];
   publishedAt?: string;
+  sourceUpdatedAt?: string;
+  sourceEvidence: {
+    kind: "json_ld_news_article" | "html_anchor";
+    payload: unknown;
+  };
 }
 
 interface ArticlePageMetadata {
@@ -354,6 +402,8 @@ interface ArticlePageMetadata {
   excerpt?: string;
   categories: string[];
   publishedAt?: string;
+  sourceUpdatedAt?: string;
+  rawPayload: Record<string, unknown>;
 }
 
 function normalizeArticleText(value: string): string {
@@ -385,14 +435,21 @@ function frontpageStoryId(url: string): string | undefined {
   return /(?:^|\/)(\d+-\d+-\d+)(?:$|[/?#])/.exec(new URL(url).pathname)?.[1];
 }
 
-function amediaTimestampMap(html: string): Map<string, string> {
-  const timestamps = new Map<string, string>();
+interface AmediaTimestampEvidence {
+  rawValue: string;
+  timestamp: string;
+}
+
+function amediaTimestampMap(html: string): Map<string, AmediaTimestampEvidence> {
+  const timestamps = new Map<string, AmediaTimestampEvidence>();
   for (const match of html.matchAll(
     /"id":"(\d+-\d+-\d+)"[\s\S]{0,700}?"articleLastModified":"([^"]+)"/g,
   )) {
     const [, id, timestamp] = match;
     const publishedAt = parsePublishedAt(timestamp);
-    if (id && publishedAt) timestamps.set(id, publishedAt);
+    if (id && timestamp && publishedAt) {
+      timestamps.set(id, { rawValue: timestamp, timestamp: publishedAt });
+    }
   }
   return timestamps;
 }
@@ -417,6 +474,11 @@ function frontpageJsonLdCandidates($: cheerio.CheerioAPI, source: FrontpageSourc
         url,
         categories: [],
         publishedAt: parsePublishedAt(record.datePublished || record.dateModified),
+        sourceUpdatedAt: parsePublishedAt(record.dateModified),
+        sourceEvidence: {
+          kind: "json_ld_news_article",
+          payload: record,
+        },
       });
     } catch {
       return;
@@ -448,7 +510,8 @@ function frontpageAnchorCandidates(
 ): FrontpageCandidate[] {
   const candidates: FrontpageCandidate[] = [];
   $("a[href]").each((_index, element) => {
-    const rawTitle = cleanFrontpageTitle($(element).text());
+    const rawText = $(element).text();
+    const rawTitle = cleanFrontpageTitle(rawText);
     if (rawTitle.length < 20) return;
     const href = $(element).attr("href");
     if (!href) return;
@@ -464,7 +527,16 @@ function frontpageAnchorCandidates(
       ) {
         return;
       }
-      candidates.push({ title: rawTitle, excerpt: "", url, categories: [] });
+      candidates.push({
+        title: rawTitle,
+        excerpt: "",
+        url,
+        categories: [],
+        sourceEvidence: {
+          kind: "html_anchor",
+          payload: { href, text: rawText },
+        },
+      });
     } catch {
       return;
     }
@@ -480,28 +552,40 @@ async function articlePageMetadata(
     const response = await fetchWithSourcePolicy(fetcher, url);
     if (!response.ok) return undefined;
     const $ = cheerio.load(await response.text());
-    const title = normalizeArticleText(
-      $("meta[property='og:title']").attr("content") ?? $("h1").first().text(),
-    );
-    const excerpt = normalizeArticleText(
-      $("meta[property='og:description']").attr("content") ??
-        $("meta[name='description']").attr("content") ??
-        "",
-    ).slice(0, 300);
-    const categories = $("meta[property='article:tag']")
+    const rawOgTitle = $("meta[property='og:title']").attr("content");
+    const rawH1 = $("h1").first().text();
+    const rawOgDescription = $("meta[property='og:description']").attr("content");
+    const rawDescription = $("meta[name='description']").attr("content");
+    const rawCategories = $("meta[property='article:tag']")
       .toArray()
-      .map((element) => normalizeArticleText($(element).attr("content") ?? ""))
+      .map((element) => $(element).attr("content") ?? "")
       .filter(Boolean);
-    const publishedAt = parsePublishedAt(
-      $("meta[property='article:published_time']").attr("content") ??
-        $("time[datetime]").first().attr("datetime") ??
-        "",
-    );
+    const rawPublishedTime = $("meta[property='article:published_time']").attr("content");
+    const rawTimeDatetime = $("time[datetime]").first().attr("datetime");
+    const rawModifiedTime = $("meta[property='article:modified_time']").attr("content");
+    const title = normalizeArticleText(rawOgTitle ?? rawH1);
+    const excerpt = normalizeArticleText(rawOgDescription ?? rawDescription ?? "").slice(0, 300);
+    const categories = rawCategories.map(normalizeArticleText).filter(Boolean);
+    const publishedAt = parsePublishedAt(rawPublishedTime ?? rawTimeDatetime ?? "");
     return {
       ...(title ? { title: title.slice(0, 180) } : {}),
       ...(excerpt ? { excerpt } : {}),
       categories,
       ...(publishedAt ? { publishedAt } : {}),
+      ...(parsePublishedAt(rawModifiedTime)
+        ? { sourceUpdatedAt: parsePublishedAt(rawModifiedTime) }
+        : {}),
+      rawPayload: {
+        url,
+        ogTitle: rawOgTitle ?? null,
+        h1: rawH1 || null,
+        ogDescription: rawOgDescription ?? null,
+        description: rawDescription ?? null,
+        articleTags: rawCategories,
+        articlePublishedTime: rawPublishedTime ?? null,
+        timeDatetime: rawTimeDatetime ?? null,
+        articleModifiedTime: rawModifiedTime ?? null,
+      },
     };
   } catch {
     return undefined;
@@ -533,14 +617,16 @@ export async function collectFrontpage(
   let timestampedCandidates = 0;
   for (const candidate of [...byUrl.values()].slice(0, source.maxArticles ?? 24)) {
     const storyId = frontpageStoryId(candidate.url);
-    let publishedAt =
-      candidate.publishedAt ?? (storyId ? timestampByStoryId.get(storyId) : undefined);
+    const embeddedTimestamp = storyId ? timestampByStoryId.get(storyId) : undefined;
+    let publishedAt = candidate.publishedAt ?? embeddedTimestamp?.timestamp;
     let title = candidate.title;
     let excerpt = candidate.excerpt;
     let categories = candidate.categories;
+    let detailEvidence: ArticlePageMetadata | undefined;
     if (!publishedAt && detailFetches < (source.detailFetchLimit ?? 8)) {
       detailFetches += 1;
       const detail = await articlePageMetadata(candidate.url, fetcher);
+      detailEvidence = detail;
       publishedAt = detail?.publishedAt ?? publishedAt;
       title = detail?.title ?? title;
       excerpt = detail?.excerpt ?? excerpt;
@@ -552,19 +638,38 @@ export async function collectFrontpage(
     const scope = detectScope(articleText);
     if (!scope && !source.retainRegionalUnmatched) continue;
     const category = categorize(articleText);
-    articles.push({
-      id: stableId(source.id, candidate.url),
-      source: source.id,
-      sourceLabel: source.label,
-      title,
-      excerpt: excerpt.slice(0, 300),
-      url: candidate.url,
-      publishedAt,
-      scope: scope ?? "trondelag",
-      category,
-      topics: articleTopics(articleText, category),
-      places: extractPlaces(articleText),
-    });
+    articles.push(
+      attachArticleSourceCapture(
+        {
+          id: stableId(source.id, candidate.url),
+          source: source.id,
+          sourceLabel: source.label,
+          title,
+          excerpt: excerpt.slice(0, 300),
+          url: candidate.url,
+          publishedAt,
+          scope: scope ?? "trondelag",
+          category,
+          topics: articleTopics(articleText, category),
+          places: extractPlaces(articleText),
+        },
+        {
+          rawPayload: {
+            schemaVersion: 1,
+            transport: { kind: "html_frontpage", endpoint: source.url },
+            candidate: candidate.sourceEvidence,
+            ...(embeddedTimestamp
+              ? { embeddedArticleLastModified: { storyId, ...embeddedTimestamp } }
+              : {}),
+            ...(detailEvidence ? { detailPage: detailEvidence.rawPayload } : {}),
+          },
+          sourceUpdatedAt:
+            detailEvidence?.sourceUpdatedAt ??
+            candidate.sourceUpdatedAt ??
+            embeddedTimestamp?.timestamp,
+        },
+      ),
+    );
   }
   if (timestampedCandidates === 0) {
     throw new Error(`${source.label} har ingen brukbare tidsstempler på forsiden`);
@@ -597,16 +702,27 @@ function parseNorwegianDate(value: string): string | undefined {
   return new Date(wallClockUtc - offset * 60_000).toISOString();
 }
 
-async function municipalPublishedAt(
+interface MunicipalPublicationEvidence {
+  publishedAt: string;
+  rawPayload: {
+    url: string;
+    articlePublishedTime: string;
+  };
+}
+
+async function municipalPublicationEvidence(
   url: string,
   fetcher: typeof fetch,
-): Promise<string | undefined> {
+): Promise<MunicipalPublicationEvidence | undefined> {
   try {
     const response = await fetchWithSourcePolicy(fetcher, url);
     if (!response.ok) return undefined;
     const detail = cheerio.load(await response.text());
     const value = detail('meta[property="article:published_time"]').attr("content") ?? "";
-    return parseNorwegianDate(value);
+    const publishedAt = parseNorwegianDate(value);
+    return publishedAt
+      ? { publishedAt, rawPayload: { url, articlePublishedTime: value } }
+      : undefined;
   } catch {
     return undefined;
   }
@@ -620,7 +736,10 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
   if ($("article.card").length === 0) {
     throw new Error("Trondheim kommune nyhetsliste mangler forventede artikkelkort");
   }
-  const candidates: Array<Omit<Article, "publishedAt">> = [];
+  const candidates: Array<{
+    article: Omit<Article, "publishedAt">;
+    rawPayload: { href: string; text: string; title: string; excerpt: string };
+  }> = [];
   $("article.card").each((_index, element) => {
     const link = $(element).find("a[href]").first();
     const title = link.text().replace(/\s+/g, " ").trim();
@@ -632,19 +751,23 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
     } catch {
       return;
     }
-    const excerpt = $(element).text().replace(title, "").replace(/\s+/g, " ").trim();
+    const rawText = $(element).text();
+    const excerpt = rawText.replace(title, "").replace(/\s+/g, " ").trim();
     const category = categorize(`${title} ${excerpt}`);
     candidates.push({
-      id: stableId("trondheim_kommune", canonical),
-      source: "trondheim_kommune",
-      sourceLabel: "Trondheim kommune",
-      title,
-      excerpt: excerpt.slice(0, 300),
-      url: canonical,
-      scope: "trondheim",
-      category,
-      topics: articleTopics(`${title} ${excerpt}`, category),
-      places: extractPlaces(`${title} ${excerpt}`),
+      article: {
+        id: stableId("trondheim_kommune", canonical),
+        source: "trondheim_kommune",
+        sourceLabel: "Trondheim kommune",
+        title,
+        excerpt: excerpt.slice(0, 300),
+        url: canonical,
+        scope: "trondheim",
+        category,
+        topics: articleTopics(`${title} ${excerpt}`, category),
+        places: extractPlaces(`${title} ${excerpt}`),
+      },
+      rawPayload: { href, text: rawText, title, excerpt },
     });
   });
   if (candidates.length === 0) {
@@ -652,13 +775,28 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
   }
   const timestamped = (
     await Promise.all(
-      candidates.map(async (article) => ({
-        ...article,
-        publishedAt: await municipalPublishedAt(article.url, fetcher),
+      candidates.map(async ({ article, rawPayload }) => ({
+        article,
+        rawPayload,
+        publication: await municipalPublicationEvidence(article.url, fetcher),
       })),
     )
-  ).flatMap((article) =>
-    article.publishedAt ? [{ ...article, publishedAt: article.publishedAt }] : [],
+  ).flatMap(({ article, rawPayload, publication }) =>
+    publication
+      ? [
+          attachArticleSourceCapture(
+            { ...article, publishedAt: publication.publishedAt },
+            {
+              rawPayload: {
+                schemaVersion: 1,
+                transport: { kind: "html_listing", endpoint: url },
+                card: rawPayload,
+                detailPage: publication.rawPayload,
+              },
+            },
+          ),
+        ]
+      : [],
   );
   if (timestamped.length === 0) {
     throw new Error("Trondheim kommune har ingen brukbare tidsstempler i nyhetslisten");

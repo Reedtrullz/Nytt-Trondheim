@@ -21,7 +21,14 @@
 - Every admitted article must have a parseable upstream publication timestamp. Missing or invalid
   timestamps are not replaced with collection time; unusable items are skipped, and a feed whose
   candidate items are all unusable must degrade source health.
-- Raw payload retention: limited public feed/article fields only; never credentials, cookies or paywalled body text.
+- Raw payload retention: the exact parsed public RSS/Atom item, the extraction field names, and any
+  bounded public paragraph evidence used to enrich a sparse feed excerpt. Never retain credentials,
+  cookies, response headers, full page HTML or paywalled body text.
+- `sourceUpdatedAt` uses a parseable public Atom/RSS `updated` value when present. It is a source
+  revision clock, not collection time, and is retained only on the append-only capture.
+- Capture identity includes the raw retained evidence and source revision clock as well as the
+  normalized article. An upstream revision therefore remains distinct even when the public article
+  projection does not change.
 - Avisa Sør-Trøndelag uses RSS `https://www.avisa-st.no/rss`; public feed categories may be used for Trondheim/Trøndelag relevance and place hints, but full article bodies are not retained.
 - Ytringen uses public Atom `https://ytringen.no/atom.xml`.
 - Innherred, Malviknytt, Hitra-Frøya and Trønderbladet use public RSS frontpage/news feeds.
@@ -34,4 +41,6 @@
   candidate timestamp must fail the collection so source health cannot report it as healthy.
 - Mixed feeds skip individual malformed items while retaining valid, independently timestamped
   items.
+- Tests must prove raw feed fields and revision clocks reach the source-item capture while the
+  collection-only evidence is absent from serialized article JSON.
 - Source audit should show source health and source-item counts without exposing raw payloads.

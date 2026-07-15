@@ -5,6 +5,7 @@ import {
   type PolitiloggenThread,
 } from "../src/politiloggen.js";
 import type { Situation } from "@nytt/shared";
+import { sourceCaptureForArticle } from "../src/articleSourceCapture.js";
 
 const activeThread: PolitiloggenThread = {
   id: "265vq7",
@@ -49,10 +50,16 @@ describe("Politiloggen ingestion", () => {
       requestedUrl = new URL(String(url));
       userAgent = new Headers(init?.headers).get("User-Agent");
       signal = init?.signal ?? undefined;
-      return new Response(JSON.stringify({ messageThreads: [activeThread], count: 1 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          messageThreads: [{ ...activeThread, publicApiRevision: "revision-7" }],
+          count: 1,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     });
 
     expect(requestedUrl?.origin).toBe("https://api.politiloggen.politiet.no");
@@ -74,6 +81,18 @@ describe("Politiloggen ingestion", () => {
       scope: "trondheim",
       category: "Transport",
       places: ["Kroppan Bru", "Trondheim"],
+    });
+    expect(sourceCaptureForArticle(result.articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        schemaVersion: 1,
+        transport: expect.objectContaining({ kind: "json_api" }),
+        thread: expect.objectContaining({
+          id: "265vq7",
+          publicApiRevision: "revision-7",
+          messages: activeThread.messages,
+        }),
+      }),
+      sourceUpdatedAt: "2026-05-29T15:20:22.797Z",
     });
   });
 

@@ -6,6 +6,7 @@ import {
   collectRss,
   probeOfficialSources,
 } from "../src/collectors.js";
+import { sourceCaptureForArticle } from "../src/articleSourceCapture.js";
 import { articleDedupeKey } from "../src/repository.js";
 
 const rss = `<?xml version="1.0"?><rss><channel>
@@ -100,6 +101,26 @@ describe("RSS collection policy", () => {
       places: ["Gangåsvegen", "Orkland"],
     });
     expect(articles[0]?.excerpt).toContain("Gangåsveien");
+    expect(sourceCaptureForArticle(articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        transport: {
+          kind: "rss",
+          endpoint: "https://www.adressa.no/rss/nyheter",
+        },
+        feedItem: expect.objectContaining({
+          title: "Ti meter stort ras - kan bli stengt i flere uker",
+          category: "Nyhetsstudio",
+        }),
+        detailPage: {
+          url: "https://www.adressa.no/nyhetsstudio/i/k00ejA/ti-meter-stort-ras-kan-bli-stengt-i-flere-uker",
+          paragraphs: [
+            "Onsdag kveld gikk det et ras med steiner og løsmasser på Gangåsveien i Orkland.",
+            "Nå er en strekning på cirka 100 meter stengt.",
+          ],
+        },
+      }),
+      sourceUpdatedAt: undefined,
+    });
   });
 
   it("uses Avisa Sør-Trøndelag RSS categories as regional place hints", async () => {
@@ -160,6 +181,22 @@ describe("RSS collection policy", () => {
       scope: "trondelag",
       places: ["Namsos"],
     });
+    expect(sourceCaptureForArticle(articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        schemaVersion: 1,
+        transport: {
+          kind: "atom",
+          endpoint: "https://ytringen.no/atom.xml",
+        },
+        feedItem: expect.objectContaining({
+          title: "Vannlekkasje i Namsos sentrum",
+          updated: "2026-06-28T12:30:00+02:00",
+        }),
+        extraction: expect.objectContaining({ publicationField: "updated" }),
+      }),
+      sourceUpdatedAt: "2026-06-28T10:30:00.000Z",
+    });
+    expect(JSON.stringify(articles[0])).not.toContain("articleSourceCapture");
   });
 
   it("collects Amedia public frontpage teasers with embedded stable timestamps", async () => {
@@ -196,6 +233,22 @@ describe("RSS collection policy", () => {
       category: "Nyheter",
     });
     expect(articles[0]?.title).toContain("Fire siktet");
+    expect(sourceCaptureForArticle(articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        candidate: {
+          kind: "html_anchor",
+          payload: expect.objectContaining({
+            href: "/en-person-mottar-helsehjelp-etter-voldshendelse/s/30-113-18203",
+          }),
+        },
+        embeddedArticleLastModified: {
+          storyId: "30-113-18203",
+          rawValue: "2026-06-28T18:45:00.000+0200",
+          timestamp: "2026-06-28T16:45:00.000Z",
+        },
+      }),
+      sourceUpdatedAt: "2026-06-28T16:45:00.000Z",
+    });
   });
 
   it("collects public JSON-LD frontpage teasers with article-page date metadata", async () => {
@@ -237,6 +290,27 @@ describe("RSS collection policy", () => {
       title: "Kokevarselet i Tydal er opphevet",
       publishedAt: "2026-06-28T09:15:00.000Z",
       scope: "trondelag",
+    });
+    expect(sourceCaptureForArticle(articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        schemaVersion: 1,
+        transport: {
+          kind: "html_frontpage",
+          endpoint: "https://www.selbyggen.no/",
+        },
+        candidate: {
+          kind: "json_ld_news_article",
+          payload: expect.objectContaining({
+            headline: "Kokevarselet i Tydal er opphevet",
+            url: "/kokevarselet-i-tydal-er-opphevet/295674",
+          }),
+        },
+        detailPage: expect.objectContaining({
+          articlePublishedTime: "2026-06-28T09:15:00.000Z",
+          articleTags: ["Tydal"],
+        }),
+      }),
+      sourceUpdatedAt: undefined,
     });
   });
 
@@ -402,6 +476,20 @@ describe("RSS collection policy", () => {
         new Response(String(url).includes("/aktuelt/sak/") ? detail : listing, { status: 200 }),
     );
     expect(articles[0]?.publishedAt).toBe("2026-05-26T11:15:00.000Z");
+    expect(sourceCaptureForArticle(articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        schemaVersion: 1,
+        transport: {
+          kind: "html_listing",
+          endpoint: "https://www.trondheim.kommune.no/aktuelt/nyheter/",
+        },
+        card: expect.objectContaining({ href: "/aktuelt/sak/" }),
+        detailPage: {
+          url: "https://www.trondheim.kommune.no/aktuelt/sak/",
+          articlePublishedTime: "26.05.2026 13:15:00",
+        },
+      }),
+    });
   });
 
   it("uses Oslo winter time for municipal publication timestamps", async () => {

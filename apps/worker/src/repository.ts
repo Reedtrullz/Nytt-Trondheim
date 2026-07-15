@@ -35,6 +35,7 @@ import type {
   UserRole,
   WorkerCycleMetrics,
 } from "@nytt/shared";
+import { sourceCaptureForArticle } from "./articleSourceCapture.js";
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
 
@@ -1152,6 +1153,7 @@ export class WorkerRepository {
       item.kind,
       item.externalId ?? null,
       item.publishedAt ?? null,
+      item.sourceUpdatedAt ?? null,
       item.fetchedAt,
       item.captureHash,
       item.rawPayload,
@@ -1162,11 +1164,11 @@ export class WorkerRepository {
         (id, source_item_id, provider, kind, external_id, first_seen_at, published_at,
          source_updated_at, captured_at, capture_hash, raw_payload, normalized_payload)
        SELECT
-         $1, current.id, $3, $4, $5, current.created_at, $6, NULL, $7, $8, $9, $10
+         $1, current.id, $3, $4, $5, current.created_at, $6, $7, $8, $9, $10, $11
        FROM source_items current
        WHERE current.id = COALESCE(
          (SELECT id FROM source_items WHERE id=$2),
-         (SELECT id FROM source_items WHERE capture_hash=$8),
+         (SELECT id FROM source_items WHERE capture_hash=$9),
          (SELECT id FROM source_items WHERE $5::text IS NOT NULL AND provider=$3 AND kind=$4 AND external_id=$5)
        )
        ON CONFLICT (provider, capture_hash) DO NOTHING`,
@@ -2277,8 +2279,10 @@ function sourceItemId(provider: string, kind: string, stableKey: string): string
 }
 
 export function articleSourceItemInput(article: Article, fetchedAt: string): SourceItemInput {
-  const rawPayload = { ...article };
-  delete rawPayload.coverageBundle;
+  const sourceCapture = sourceCaptureForArticle(article);
+  const fallbackRawPayload = { ...article };
+  delete fallbackRawPayload.coverageBundle;
+  const rawPayload = sourceCapture?.rawPayload ?? fallbackRawPayload;
   const normalizedPayload = {
     id: article.id,
     source: article.source,
@@ -2301,6 +2305,7 @@ export function articleSourceItemInput(article: Article, fetchedAt: string): Sou
     title: article.title,
     summary: article.excerpt,
     publishedAt: article.publishedAt,
+    sourceUpdatedAt: sourceCapture?.sourceUpdatedAt,
     fetchedAt,
     rawPayload,
     normalizedPayload,
@@ -2310,6 +2315,8 @@ export function articleSourceItemInput(article: Article, fetchedAt: string): Sou
       article.id,
       article.url,
       article.publishedAt,
+      sourceCapture?.sourceUpdatedAt ?? null,
+      rawPayload,
       normalizedPayload,
     ]),
     geoHint: article.location
