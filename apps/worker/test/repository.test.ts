@@ -21,10 +21,33 @@ import {
 } from "@nytt/shared";
 import { describe, expect, it, vi } from "vitest";
 import { attachArticleSourceCapture } from "../src/articleSourceCapture.js";
-import { articleSourceItemInput, WorkerRepository } from "../src/repository.js";
+import { articleDedupeKey, articleSourceItemInput, WorkerRepository } from "../src/repository.js";
 import { trafficInfoSourceItemInput } from "../src/vegvesenTrafficInfo.js";
 
 describe("WorkerRepository", () => {
+  it("uses the publisher story id across Adresseavisen path variants", () => {
+    const base: Article = {
+      id: "adressa-newsroom-path",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Arbeidsulykke i Trondheim: – Liten eksplosjon",
+      excerpt: "Nødetatene rykket ut til Ranheim.",
+      url: "https://www.adressa.no/nyhetsstudio/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
+      publishedAt: "2026-07-16T08:21:00.000Z",
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Ranheim"],
+    };
+
+    expect(articleDedupeKey(base)).toBe(
+      articleDedupeKey({
+        ...base,
+        id: "adressa-section-path",
+        url: "https://www.adressa.no/nyheter/trondheim/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
+      }),
+    );
+  });
+
   it("uses faithful collection evidence and its revision clock for article captures", () => {
     const article: Article = {
       id: "nrk-faithful-capture",

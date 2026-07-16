@@ -30,6 +30,7 @@ import {
   isPropertyCrimeEventMatch,
   isTrafficCollisionArticle,
   propertyCrimeEvidenceConflicts,
+  publisherStoryIdentityKey,
   samePublisherStoryUrl,
   sharedExactEventFingerprints,
   trafficCollisionEvidenceConflicts,
@@ -1078,6 +1079,36 @@ function sortArticles(left: Article, right: Article): number {
   return right.publishedAt.localeCompare(left.publishedAt) || right.id.localeCompare(left.id);
 }
 
+function preferredPublicationVariant(left: Article, right: Article): Article {
+  const fidelity =
+    right.excerpt.trim().length - left.excerpt.trim().length ||
+    right.title.trim().length - left.title.trim().length ||
+    right.publishedAt.localeCompare(left.publishedAt) ||
+    left.id.localeCompare(right.id);
+  return fidelity > 0 ? right : left;
+}
+
+function collapsePublisherPathVariants(articles: Article[]): Article[] {
+  const retained: Article[] = [];
+  const indexByIdentity = new Map<string, number>();
+  for (const article of articles) {
+    const storyIdentity = publisherStoryIdentityKey(article.url);
+    if (!storyIdentity) {
+      retained.push(article);
+      continue;
+    }
+    const identity = `${article.source}:${storyIdentity}:${normalizedEditorialText(article.title)}:${article.publishedAt}`;
+    const existingIndex = indexByIdentity.get(identity);
+    if (existingIndex === undefined) {
+      indexByIdentity.set(identity, retained.length);
+      retained.push(article);
+      continue;
+    }
+    retained[existingIndex] = preferredPublicationVariant(retained[existingIndex]!, article);
+  }
+  return retained;
+}
+
 const newsroomArticleSources = new Set<Article["source"]>([
   "nrk",
   "adressa",
@@ -1383,7 +1414,7 @@ function mergeCandidateGroups(
 
 export function groupHomeArticles(articles: Article[]): HomeArticleGroup[] {
   const groups: HomeArticleGroup[] = [];
-  const sorted = [...articles].sort(sortArticles);
+  const sorted = collapsePublisherPathVariants(articles).sort(sortArticles);
   const memo: GroupPairMemo = { conflicts: new Map(), similarities: new Map() };
 
   sorted.forEach((article) => {
