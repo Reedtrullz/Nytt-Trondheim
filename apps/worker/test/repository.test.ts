@@ -43,7 +43,33 @@ describe("WorkerRepository", () => {
       articleDedupeKey({
         ...base,
         id: "adressa-section-path",
+        title: "Arbeidsulykke i Trondheim: – En liten eksplosjon under sveising",
         url: "https://www.adressa.no/nyheter/trondheim/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
+      }),
+    );
+  });
+
+  it("keeps a later Amedia revision with the same story id distinct", () => {
+    const base: Article = {
+      id: "adressa-original-revision",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "To biler krasjet i rundkjøring",
+      excerpt: "To biler kolliderte.",
+      url: "https://www.adressa.no/nyheter/trondelag/i/V65J9W/to-biler-krasjet-paa-e39",
+      publishedAt: "2026-07-16T15:30:00.000Z",
+      scope: "regional",
+      category: "Hendelser",
+      places: [],
+    };
+
+    expect(articleDedupeKey(base)).not.toBe(
+      articleDedupeKey({
+        ...base,
+        id: "adressa-later-revision",
+        title: "Veien åpnet etter kollisjonen",
+        url: "https://www.adressa.no/nyhetsstudio/i/V65J9W/to-biler-krasjet-paa-e39",
+        publishedAt: "2026-07-16T15:45:00.000Z",
       }),
     );
   });

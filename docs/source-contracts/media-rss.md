@@ -19,7 +19,9 @@
 
 - Durable upstream identity: canonical article URL plus source-local IDs when available. NRK's
   explicit trailing publication ID (for example `1.17960432`) remains authoritative across public
-  slug/title updates; Amedia path aliases retain title and publication time as a revision boundary.
+  slug/title updates. Amedia aliases with the same stable ID and publication time represent one
+  published record even when route, slug or title changes; a later publication time remains a
+  distinct revision.
 - Every admitted article must have a parseable upstream publication timestamp. Missing or invalid
   timestamps are not replaced with collection time; unusable items are skipped, and a feed whose
   candidate items are all unusable must degrade source health.

@@ -717,7 +717,22 @@ changed.
   Amedia aliases were absent, but owner review withheld promotion after finding one new NRK alias:
   two slugs/titles for the exact stable publication suffix `1.17960432`. A narrow NRK-host rule now
   treats that explicit ID as authoritative across editorial slug/title updates while preserving
-  Amedia's stricter title/time revision boundary.
+  Amedia's revision boundary.
+- PR `#47` merged as `d1c95fa00679a04dbae288aa3175b0fa3a0d3fa8`; exact-main CI
+  `29510583659` and deploy `29511026059` passed. The deploy recap was
+  `ok=54 changed=11 unreachable=0 failed=0 skipped=2`, and public readiness stayed healthy on
+  `legacy` while the matcher remained shadow-only.
+- Fresh owner-authenticated generation `2b982d35-ee4d-4c80-979a-b7f04d2eb424` had 21 groups, 16
+  strong, five moderate, 60 review candidates, zero integrity errors and clean storage parity. The
+  NRK publication `1.17960432` collapsed to one NRK URL, and the previously known Nidaros and
+  Innherred aliases remained absent. Promotion was withheld after a live Adresseavisen record with
+  stable ID `/i/V65J9W` appeared through both `/nyheter/trondelag/` and `/nyhetsstudio/` with the
+  same publication time but different titles.
+- The revised Amedia boundary treats the stable ID plus publication time as one published record,
+  independent of route, slug and title. A later publication time with the same stable ID remains a
+  distinct revision. Focused regressions passed `124/124`; complete release gates passed
+  typecheck, ESLint, Prettier, `1325/1325` Vitest tests, the production build and `151` Playwright
+  tests with one intentional skip.
 
 ## Completion audit against the original mission
 

@@ -542,7 +542,7 @@ describe("RSS collection policy", () => {
       <description>Nødetatene rykket ut til Ranheim.</description>
       <link>https://www.adressa.no/nyhetsstudio/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon</link>
       <pubDate>Thu, 16 Jul 2026 08:21:00 GMT</pubDate></item>
-      <item><title>Arbeidsulykke i Trondheim: – Liten eksplosjon</title>
+      <item><title>Arbeidsulykke i Trondheim: – En liten eksplosjon under sveising</title>
       <description>Nødetatene rykket ut.</description>
       <link>https://www.adressa.no/nyheter/trondheim/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon</link>
       <pubDate>Thu, 16 Jul 2026 08:21:00 GMT</pubDate></item>
@@ -563,6 +563,29 @@ describe("RSS collection policy", () => {
       excerpt: "Nødetatene rykket ut til Ranheim.",
       url: "https://www.adressa.no/nyhetsstudio/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
     });
+  });
+
+  it("retains a later Amedia revision with the same story id", async () => {
+    const rss = `<?xml version="1.0"?><rss><channel>
+      <item><title>To biler krasjet i rundkjøring</title><description>To biler kolliderte.</description>
+      <link>https://www.adressa.no/nyheter/trondelag/i/V65J9W/to-biler-krasjet-paa-e39</link>
+      <pubDate>Thu, 16 Jul 2026 15:30:00 GMT</pubDate></item>
+      <item><title>Veien åpnet etter kollisjonen</title><description>Veien er åpnet igjen.</description>
+      <link>https://www.adressa.no/nyhetsstudio/i/V65J9W/to-biler-krasjet-paa-e39</link>
+      <pubDate>Thu, 16 Jul 2026 15:45:00 GMT</pubDate></item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      {
+        id: "adressa",
+        label: "Adresseavisen",
+        url: "https://www.adressa.no/rss/nyheter",
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(rss),
+    );
+
+    expect(articles).toHaveLength(2);
   });
 
   it("admits one Nidaros article when one Amedia story id has multiple slugs", async () => {

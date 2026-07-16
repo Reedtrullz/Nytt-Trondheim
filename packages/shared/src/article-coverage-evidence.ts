@@ -499,7 +499,7 @@ export function publisherStoryIdentityKey(value: string): string | undefined {
 
 export function publisherStoryVariantKey(
   value: string,
-  editorialRevisionIdentity: string,
+  publicationRevisionIdentity: string,
 ): string | undefined {
   const storyIdentity = publisherStoryIdentityKey(value);
   if (!storyIdentity) return undefined;
@@ -509,7 +509,7 @@ export function publisherStoryVariantKey(
   } catch {
     return undefined;
   }
-  return `${storyIdentity}:${editorialRevisionIdentity}`;
+  return `${storyIdentity}:${publicationRevisionIdentity}`;
 }
 
 export function samePublisherStoryUrl(left: Article, right: Article): boolean {
