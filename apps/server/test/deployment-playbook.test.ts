@@ -152,7 +152,15 @@ describe("deployment playbook Entur verification", () => {
     expect(pauseBlock).toContain("COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID != ''");
     expect(pauseBlock).toContain("mode='active'");
     expect(pauseBlock).toContain("health_outcome='healthy'");
-    expect(pauseBlock).toContain("docker compose --env-file .env.production stop worker");
+    expect(pauseBlock).toContain('reviewed_generation_id="$1"');
+    expect(pauseBlock).toContain(
+      "docker compose --env-file .env.production stop --timeout 30 worker",
+    );
+    expect(pauseBlock).toContain(
+      "docker compose --env-file .env.production ps --status running -q worker",
+    );
+    expect(pauseBlock).toContain("mode='shadow'");
+    expect(pauseBlock).toContain('latest_shadow" != "$reviewed_generation_id');
 
     const recoveryBlock = deployWorkflow.slice(recovery);
     expect(recoveryBlock).toContain("always()");

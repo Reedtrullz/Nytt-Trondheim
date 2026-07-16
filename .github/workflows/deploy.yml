@@ -117,15 +117,34 @@ jobs:
               && env.COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID != '' }}
         shell: bash
         run: |
-          ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 'bash -se' <<'REMOTE'
+          ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 \
+            bash -se -- "$COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID" <<'REMOTE'
           set -euo pipefail
           cd /home/deploy/nytt-trondheim
+          reviewed_generation_id="$1"
           active_generation="$(docker compose --env-file .env.production exec -T postgres \
             psql -U nytt -d nytt -qAt -v ON_ERROR_STOP=1 -c \
             "SELECT id FROM coverage_bundle_generations WHERE matcher_version='v2' AND mode='active' AND status='completed' AND is_current AND health_outcome='healthy' ORDER BY completed_at DESC, id DESC LIMIT 1;")"
-          if [ -z "$active_generation" ]; then
-            docker compose --env-file .env.production stop worker
+          if [[ "$active_generation" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+            echo "Healthy active v2 generation already exists: $active_generation"
+            exit 0
           fi
+
+          docker compose --env-file .env.production stop --timeout 30 worker
+          running_worker="$(docker compose --env-file .env.production ps --status running -q worker)"
+          if [ -n "$running_worker" ]; then
+            echo "::error::Shadow worker is still running after guarded stop"
+            exit 1
+          fi
+
+          latest_shadow="$(docker compose --env-file .env.production exec -T postgres \
+            psql -U nytt -d nytt -qAt -v ON_ERROR_STOP=1 -c \
+            "SELECT id FROM coverage_bundle_generations WHERE matcher_version='v2' AND mode='shadow' AND status='completed' ORDER BY completed_at DESC, id DESC LIMIT 1;")"
+          if [ "$latest_shadow" != "$reviewed_generation_id" ]; then
+            echo "::error::Reviewed generation $reviewed_generation_id is not the latest completed shadow after stopping the worker ($latest_shadow)"
+            exit 1
+          fi
+          echo "Shadow worker stopped; reviewed generation remains latest: $latest_shadow"
           REMOTE
       - name: Run Ansible deployment
         run: >-
