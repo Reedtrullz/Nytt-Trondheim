@@ -35,6 +35,13 @@
   or metadata revisions remain inspectable even if normalization yields the same article fields.
 - Article detail fetches are bounded and only read public metadata such as `og:title`,
   `og:description`, `article:published_time` and public tags. Full article bodies are not retained.
+- Explicit public Amedia access markers such as `premium="true"`, subscriber-only teaser text, or
+  JSON-LD `isAccessibleForFree=false` may mark an article as `paid`. Missing markers mean unknown
+  access, never an inferred free article. The reader surface labels only positive evidence as
+  `Pluss`.
+- Nidaros may use at most four public detail-page requests per collection cycle to fill empty
+  teaser copy from bounded description metadata. It does not cross login or paywall boundaries and
+  fails closed to an empty excerpt.
 - Provenance: usually `reporting_estimate`.
 
 ## Verification

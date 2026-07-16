@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { HomeStoryCard } from "../../homeStoryCards.js";
 import { coverageMatchExplanation } from "../../homeStoryCards.js";
 import { safeExternalUrl } from "../../safeExternalUrl.js";
+import { ArticleAccessBadge } from "./ArticleAccessBadge.js";
 
 function sourceTime(value: string): string {
   return new Intl.DateTimeFormat("nb-NO", {
@@ -44,6 +45,7 @@ export function CoverageSourceCluster({
             <>
               <b>
                 {article.sourceLabel} · {sourceTime(article.publishedAt)}
+                <ArticleAccessBadge access={article.access} />
               </b>
               <small>{article.title}</small>
             </>

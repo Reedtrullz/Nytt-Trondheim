@@ -27,6 +27,9 @@ interface FeedSource {
   format?: "rss" | "atom";
   maxItems?: number;
   retainRegionalUnmatched?: boolean;
+  detailFetchLimit?: number;
+  enrichEmptyExcerpt?: boolean;
+  detectArticleAccess?: boolean;
 }
 
 interface FrontpageSource {
@@ -36,6 +39,7 @@ interface FrontpageSource {
   maxArticles?: number;
   detailFetchLimit?: number;
   retainRegionalUnmatched?: boolean;
+  enrichEmptyExcerpt?: boolean;
 }
 
 export const rssSources: FeedSource[] = [
@@ -50,6 +54,9 @@ export const rssSources: FeedSource[] = [
     label: "Adresseavisen",
     url: "https://www.adressa.no/rss/nyheter",
     retainRegionalUnmatched: true,
+    detailFetchLimit: 12,
+    enrichEmptyExcerpt: true,
+    detectArticleAccess: true,
   },
   {
     id: "avisa_st",
@@ -138,6 +145,8 @@ export const frontpageSources: FrontpageSource[] = [
     id: "nidaros",
     label: "Nidaros",
     url: "https://www.nidaros.no/",
+    detailFetchLimit: 4,
+    enrichEmptyExcerpt: true,
     retainRegionalUnmatched: true,
   },
   {
@@ -278,6 +287,7 @@ function shouldFetchArticleExcerpt(
 
 interface ArticlePageExcerptEvidence {
   excerpt?: string;
+  access?: Article["access"];
   rawPayload: {
     url: string;
     selector: "main article p" | "article p" | "main p" | null;
@@ -291,7 +301,40 @@ interface ArticlePageExcerptEvidence {
         | "unscoped_container";
     }>;
     fallbackReason?: "no_supported_container" | "no_supported_paragraphs";
+    accessEvidence?: "json_ld_is_accessible_for_free_false";
   };
+}
+
+function explicitPaidText(value: string): boolean {
+  return /\b(?:artikkelen er for abonnenter|krever abonnement|kun for abonnenter)\b/i.test(value);
+}
+
+function jsonLdPaidAccess(
+  $: cheerio.CheerioAPI,
+): ArticlePageExcerptEvidence["rawPayload"]["accessEvidence"] {
+  let paid = false;
+  const visit = (value: unknown): void => {
+    if (paid || value === null || value === undefined) return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record.isAccessibleForFree === false || record.isAccessibleForFree === "false") {
+      paid = true;
+      return;
+    }
+    Object.values(record).forEach(visit);
+  };
+  $("script[type='application/ld+json']").each((_index, element) => {
+    try {
+      visit(JSON.parse($(element).text()));
+    } catch {
+      return;
+    }
+  });
+  return paid ? "json_ld_is_accessible_for_free_false" : undefined;
 }
 
 async function articlePageExcerpt(
@@ -303,6 +346,7 @@ async function articlePageExcerpt(
     const response = await fetchWithSourcePolicy(fetcher, url);
     if (!response.ok) return undefined;
     const $ = cheerio.load(await response.text());
+    const accessEvidence = jsonLdPaidAccess($);
     const container = [
       { selector: "main article p" as const, paragraphs: $("main article").first().find("p") },
       { selector: "article p" as const, paragraphs: $("article").first().find("p") },
@@ -320,11 +364,13 @@ async function articlePageExcerpt(
           reason: "unscoped_container" as const,
         }));
       return {
+        ...(accessEvidence ? { access: "paid" as const } : {}),
         rawPayload: {
           url,
           selector: null,
           paragraphs: unscopedParagraphs,
           fallbackReason: "no_supported_container",
+          ...(accessEvidence ? { accessEvidence } : {}),
         },
       };
     }
@@ -353,11 +399,13 @@ async function articlePageExcerpt(
     const excerpt = normalizedEditorialText(selected.join(" ")).slice(0, 600);
     return {
       ...(excerpt ? { excerpt } : {}),
+      ...(accessEvidence ? { access: "paid" as const } : {}),
       rawPayload: {
         url,
         selector: container.selector,
         paragraphs,
         ...(!excerpt ? { fallbackReason: "no_supported_paragraphs" as const } : {}),
+        ...(accessEvidence ? { accessEvidence } : {}),
       },
     };
   } catch {
@@ -384,7 +432,7 @@ export async function collectRss(
   }
   const articles: Article[] = [];
   let detailFetches = 0;
-  const maxDetailFetches = source.id === "adressa" ? 12 : 0;
+  const maxDetailFetches = source.detailFetchLimit ?? (source.id === "adressa" ? 12 : 0);
   const items = (
     source.format === "atom" ? asArray(feed.feed?.entry) : asArray(feed.rss?.channel?.item)
   ).slice(0, source.maxItems ?? 60);
@@ -413,15 +461,29 @@ export async function collectRss(
     if (!publishedAt) continue;
     timestampedCandidates += 1;
     const categories = source.format === "atom" ? atomCategories(item) : itemCategories(item);
-    let detailPageEvidence: ArticlePageExcerptEvidence["rawPayload"] | undefined;
-    if (
-      detailFetches < maxDetailFetches &&
-      shouldFetchArticleExcerpt(source, url, categories, excerpt)
-    ) {
+    let access: Article["access"] | undefined =
+      explicitPaidText(`${title} ${excerpt}`) ||
+      categories.some((category) => /^(?:pluss|premium|abonnement)$/i.test(category.trim()))
+        ? "paid"
+        : undefined;
+    let detailPageEvidence: Record<string, unknown> | undefined;
+    const needsEditorialExcerpt = shouldFetchArticleExcerpt(source, url, categories, excerpt);
+    const needsMetadata =
+      (source.enrichEmptyExcerpt === true && excerpt.length === 0) ||
+      (source.detectArticleAccess === true && !access);
+    if (detailFetches < maxDetailFetches && (needsEditorialExcerpt || needsMetadata)) {
       detailFetches += 1;
-      const detail = await articlePageExcerpt(url, title, fetcher);
-      excerpt = detail?.excerpt ?? excerpt;
-      detailPageEvidence = detail?.rawPayload;
+      if (needsEditorialExcerpt) {
+        const detail = await articlePageExcerpt(url, title, fetcher);
+        excerpt = detail?.excerpt ?? excerpt;
+        access = detail?.access ?? access;
+        detailPageEvidence = detail?.rawPayload;
+      } else {
+        const detail = await articlePageMetadata(url, fetcher);
+        if (source.enrichEmptyExcerpt && excerpt.length === 0) excerpt = detail?.excerpt ?? excerpt;
+        access = detail?.access ?? access;
+        detailPageEvidence = detail?.rawPayload;
+      }
     }
     const articleText = `${title} ${excerpt} ${categories.join(" ")}`;
     const scope = detectScope(articleText);
@@ -441,6 +503,7 @@ export async function collectRss(
           category,
           topics: articleTopics(articleText, category),
           places: extractPlaces(articleText),
+          ...(access ? { access } : {}),
         },
         {
           rawPayload: {
@@ -479,6 +542,7 @@ interface FrontpageCandidate {
   categories: string[];
   publishedAt?: string;
   sourceUpdatedAt?: string;
+  access?: Article["access"];
   sourceEvidence: {
     kind: "json_ld_news_article" | "html_anchor";
     payload: unknown;
@@ -491,6 +555,7 @@ interface ArticlePageMetadata {
   categories: string[];
   publishedAt?: string;
   sourceUpdatedAt?: string;
+  access?: Article["access"];
   rawPayload: Record<string, unknown>;
 }
 
@@ -563,6 +628,9 @@ function frontpageJsonLdCandidates($: cheerio.CheerioAPI, source: FrontpageSourc
         categories: [],
         publishedAt: parsePublishedAt(record.datePublished || record.dateModified),
         sourceUpdatedAt: parsePublishedAt(record.dateModified),
+        ...(record.isAccessibleForFree === false || record.isAccessibleForFree === "false"
+          ? { access: "paid" as const }
+          : {}),
         sourceEvidence: {
           kind: "json_ld_news_article",
           payload: record,
@@ -620,6 +688,10 @@ function frontpageAnchorCandidates(
         excerpt: "",
         url,
         categories: [],
+        ...(explicitPaidText(rawText) ||
+        $(element).closest("[premium='true'], [data-premium='true']").length > 0
+          ? { access: "paid" as const }
+          : {}),
         sourceEvidence: {
           kind: "html_anchor",
           payload: { href, text: rawText },
@@ -640,6 +712,7 @@ async function articlePageMetadata(
     const response = await fetchWithSourcePolicy(fetcher, url);
     if (!response.ok) return undefined;
     const $ = cheerio.load(await response.text());
+    const accessEvidence = jsonLdPaidAccess($);
     const rawOgTitle = $("meta[property='og:title']").attr("content");
     const rawH1 = $("h1").first().text();
     const rawOgDescription = $("meta[property='og:description']").attr("content");
@@ -663,6 +736,7 @@ async function articlePageMetadata(
       ...(parsePublishedAt(rawModifiedTime)
         ? { sourceUpdatedAt: parsePublishedAt(rawModifiedTime) }
         : {}),
+      ...(accessEvidence ? { access: "paid" as const } : {}),
       rawPayload: {
         url,
         ogTitle: rawOgTitle ?? null,
@@ -673,6 +747,7 @@ async function articlePageMetadata(
         articlePublishedTime: rawPublishedTime ?? null,
         timeDatetime: rawTimeDatetime ?? null,
         articleModifiedTime: rawModifiedTime ?? null,
+        ...(accessEvidence ? { accessEvidence } : {}),
       },
     };
   } catch {
@@ -710,8 +785,12 @@ export async function collectFrontpage(
     let title = candidate.title;
     let excerpt = candidate.excerpt;
     let categories = candidate.categories;
+    let access = candidate.access;
     let detailEvidence: ArticlePageMetadata | undefined;
-    if (!publishedAt && detailFetches < (source.detailFetchLimit ?? 8)) {
+    if (
+      (!publishedAt || (source.enrichEmptyExcerpt === true && excerpt.length === 0)) &&
+      detailFetches < (source.detailFetchLimit ?? 8)
+    ) {
       detailFetches += 1;
       const detail = await articlePageMetadata(candidate.url, fetcher);
       detailEvidence = detail;
@@ -719,6 +798,7 @@ export async function collectFrontpage(
       title = detail?.title ?? title;
       excerpt = detail?.excerpt ?? excerpt;
       categories = [...new Set([...categories, ...(detail?.categories ?? [])])];
+      access = detail?.access ?? access;
     }
     if (!publishedAt) continue;
     timestampedCandidates += 1;
@@ -740,6 +820,7 @@ export async function collectFrontpage(
           category,
           topics: articleTopics(articleText, category),
           places: extractPlaces(articleText),
+          ...(access ? { access } : {}),
         },
         {
           rawPayload: {
@@ -762,7 +843,7 @@ export async function collectFrontpage(
   if (timestampedCandidates === 0) {
     throw new Error(`${source.label} har ingen brukbare tidsstempler på forsiden`);
   }
-  return articles;
+  return collapseCollectedPublicationVariants(articles);
 }
 
 function parseNorwegianDate(value: string): string | undefined {

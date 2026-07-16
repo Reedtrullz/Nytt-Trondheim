@@ -43,4 +43,17 @@ describe("CoverageSourceCluster", () => {
 
     expect(html).toBe("");
   });
+
+  it("marks a paid supporting source without describing unknown rows as free", () => {
+    const card = clusteredHomeStoryCard({ articleCount: 3, sourceCount: 3 });
+    card.group.articles[1] = { ...card.group.articles[1]!, access: "paid" };
+    const html = renderToStaticMarkup(
+      <CoverageSourceCluster card={card} canCorrect={false} onCorrect={vi.fn()} />,
+    );
+
+    expect(html).toContain("Pluss");
+    expect((html.match(/story-badge-paid/g) ?? []).length).toBe(1);
+    expect(html).toContain("Krever abonnement hos kilden");
+    expect(html).not.toContain("Gratis");
+  });
 });

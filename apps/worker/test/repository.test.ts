@@ -48,6 +48,52 @@ describe("WorkerRepository", () => {
     );
   });
 
+  it("uses the Amedia story id across Nidaros slug variants", () => {
+    const base: Article = {
+      id: "nidaros-correct-slug",
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      title: "Ulykke i Trondheim: – Kun en person involvert",
+      excerpt: "En person var involvert i ulykken.",
+      url: "https://www.nidaros.no/ulykke-i-trondheim-kun-en-person-involvert/s/30-113-19187",
+      publishedAt: "2026-07-15T17:11:00.000Z",
+      scope: "trondheim",
+      category: "Hendelser",
+      places: ["Trondheim"],
+    };
+
+    expect(articleDedupeKey(base)).toBe(
+      articleDedupeKey({
+        ...base,
+        id: "nidaros-typo-slug",
+        url: "https://www.nidaros.no/ulykke-i-trondheim-kun-en-person-involert/s/30-113-19187",
+      }),
+    );
+  });
+
+  it("uses the Amedia story id across Innherred route variants", () => {
+    const base: Article = {
+      id: "innherred-news-route",
+      source: "innherred",
+      sourceLabel: "Innherred",
+      title: "Advarte om kalver på E6: – Mulig de har dratt hjem",
+      excerpt: "Kalver ble observert langs E6.",
+      url: "https://www.innherred.no/nyheter/n/9p848l/melder-om-kalver-paa-e6-kjoer-forsiktig",
+      publishedAt: "2026-07-16T06:25:00.000Z",
+      scope: "regional",
+      category: "Hendelser",
+      places: ["Levanger"],
+    };
+
+    expect(articleDedupeKey(base)).toBe(
+      articleDedupeKey({
+        ...base,
+        id: "innherred-article-route",
+        url: "https://www.innherred.no/nyheter/i/9p848l/melder-om-kalver-paa-e6-kjoer-forsiktig",
+      }),
+    );
+  });
+
   it("uses faithful collection evidence and its revision clock for article captures", () => {
     const article: Article = {
       id: "nrk-faithful-capture",

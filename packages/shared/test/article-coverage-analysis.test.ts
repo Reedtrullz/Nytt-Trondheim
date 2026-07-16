@@ -220,6 +220,58 @@ describe("article coverage analysis", () => {
     });
   });
 
+  it("collapses Nidaros slug variants for the same Amedia publication", () => {
+    const stories = buildCityPulseStories([
+      article({
+        id: "nidaros-correct-slug",
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        title: "Ulykke i Trondheim: – Kun en person involvert",
+        excerpt: "En person var involvert i ulykken.",
+        url: "https://www.nidaros.no/ulykke-i-trondheim-kun-en-person-involvert/s/30-113-19187",
+        publishedAt: "2026-07-15T17:11:00.000Z",
+      }),
+      article({
+        id: "nidaros-typo-slug",
+        source: "nidaros",
+        sourceLabel: "Nidaros",
+        title: "Ulykke i Trondheim: – Kun en person involvert",
+        excerpt: "En person var involvert.",
+        url: "https://www.nidaros.no/ulykke-i-trondheim-kun-en-person-involert/s/30-113-19187",
+        publishedAt: "2026-07-15T17:11:00.000Z",
+      }),
+    ]);
+
+    expect(stories).toHaveLength(1);
+    expect(stories[0]?.articles).toHaveLength(1);
+    expect(stories[0]?.primary.url).toContain("involvert/s/30-113-19187");
+  });
+
+  it("collapses Innherred route variants for the same Amedia publication", () => {
+    const stories = buildCityPulseStories([
+      article({
+        id: "innherred-news-route",
+        source: "innherred",
+        sourceLabel: "Innherred",
+        title: "Advarte om kalver på E6: – Mulig de har dratt hjem",
+        url: "https://www.innherred.no/nyheter/n/9p848l/melder-om-kalver-paa-e6-kjoer-forsiktig",
+        publishedAt: "2026-07-16T06:25:00.000Z",
+      }),
+      article({
+        id: "innherred-article-route",
+        source: "innherred",
+        sourceLabel: "Innherred",
+        title: "Advarte om kalver på E6: – Mulig de har dratt hjem",
+        url: "https://www.innherred.no/nyheter/i/9p848l/melder-om-kalver-paa-e6-kjoer-forsiktig",
+        publishedAt: "2026-07-16T06:25:00.000Z",
+      }),
+    ]);
+
+    expect(stories).toHaveLength(1);
+    expect(stories[0]?.articles).toHaveLength(1);
+    expect(stories[0]?.primary.url).toContain("/9p848l/");
+  });
+
   it("selects deterministic editorial copy independently of the newest update", () => {
     const bundle = {
       id: "coverage:incident:saupstad-editorial",

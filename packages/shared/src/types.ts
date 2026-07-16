@@ -127,6 +127,7 @@ export interface Article {
   saved?: boolean;
   situationId?: string;
   imageUrl?: string;
+  access?: "paid";
   coverageBundle?: ArticleCoverageBundle;
   publicVerification?: ArticlePublicVerification;
 }
