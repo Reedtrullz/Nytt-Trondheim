@@ -122,11 +122,10 @@ jobs:
           set -euo pipefail
           cd /home/deploy/nytt-trondheim
           reviewed_generation_id="$1"
-          active_generation="$(docker compose --env-file .env.production exec -T postgres \
-            psql -U nytt -d nytt -qAt -v ON_ERROR_STOP=1 -c \
-            "SELECT id FROM coverage_bundle_generations WHERE matcher_version='v2' AND mode='active' AND status='completed' AND is_current AND health_outcome='healthy' ORDER BY completed_at DESC, id DESC LIMIT 1;")"
-          if [[ "$active_generation" =~ ^[0-9a-fA-F-]{36}$ ]]; then
-            echo "Healthy active v2 generation already exists: $active_generation"
+          deployed_projection="$(curl -fsS http://127.0.0.1:8090/health/ready | \
+            python3 -c 'import json,sys; print(json.load(sys.stdin).get("coverageProjectionMode", ""))')"
+          if [ "$deployed_projection" = "normalized-active" ]; then
+            echo "Runtime already serves normalized-active; first-promotion pause is not required"
             exit 0
           fi
 
