@@ -620,6 +620,32 @@ describe("RSS collection policy", () => {
     expect(articles[0]?.url).toContain("/9p848l/");
   });
 
+  it("admits one NRK article when one publication id has multiple slugs", async () => {
+    const rss = `<?xml version="1.0"?><rss><channel>
+      <item><title>Sammenstøt mellom to biler i Orkanger</title>
+      <description>To biler støtte sammen i Orkanger.</description>
+      <link>https://www.nrk.no/trondelag/sammenstot-mellom-to-biler-i-orkanger-1.17960432</link>
+      <pubDate>Thu, 16 Jul 2026 15:28:00 GMT</pubDate></item>
+      <item><title>Vegen er åpen igjen etter sammenstøt mellom to biler i Orkanger</title>
+      <description>Vegen er åpnet igjen.</description>
+      <link>https://www.nrk.no/trondelag/vegen-er-apen-igjen-etter-sammenstot-mellom-to-biler-i-orkanger-1.17960432</link>
+      <pubDate>Thu, 16 Jul 2026 15:28:00 GMT</pubDate></item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      {
+        id: "nrk",
+        label: "NRK Trøndelag",
+        url: "https://www.nrk.no/trondelag/siste.rss",
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(rss),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toContain("-1.17960432");
+  });
+
   it("rejects non-http article URLs from feeds", async () => {
     const unsafeRss = `<?xml version="1.0"?><rss><channel>
       <item><title>Brann i Trondheim sentrum</title><description>Nødetatene er varslet.</description>

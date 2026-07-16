@@ -30,7 +30,7 @@ import {
   isPropertyCrimeEventMatch,
   isTrafficCollisionArticle,
   propertyCrimeEvidenceConflicts,
-  publisherStoryIdentityKey,
+  publisherStoryVariantKey,
   samePublisherStoryUrl,
   sharedExactEventFingerprints,
   trafficCollisionEvidenceConflicts,
@@ -1092,12 +1092,15 @@ function collapsePublisherPathVariants(articles: Article[]): Article[] {
   const retained: Article[] = [];
   const indexByIdentity = new Map<string, number>();
   for (const article of articles) {
-    const storyIdentity = publisherStoryIdentityKey(article.url);
+    const storyIdentity = publisherStoryVariantKey(
+      article.url,
+      `${normalizedEditorialText(article.title)}:${article.publishedAt}`,
+    );
     if (!storyIdentity) {
       retained.push(article);
       continue;
     }
-    const identity = `${article.source}:${storyIdentity}:${normalizedEditorialText(article.title)}:${article.publishedAt}`;
+    const identity = `${article.source}:${storyIdentity}`;
     const existingIndex = indexByIdentity.get(identity);
     if (existingIndex === undefined) {
       indexByIdentity.set(identity, retained.length);

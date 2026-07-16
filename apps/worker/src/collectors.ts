@@ -5,7 +5,7 @@ import {
   comparableEditorialText,
   editorialTextRejectionReason,
   normalizedEditorialText,
-  publisherStoryIdentityKey,
+  publisherStoryVariantKey,
   type Article,
   type EditorialTextRejectionReason,
   type SourceId,
@@ -197,10 +197,11 @@ function stableId(source: SourceId, url: string): string {
 function collapseCollectedPublicationVariants(articles: Article[]): Article[] {
   const byIdentity = new Map<string, Article>();
   for (const article of articles) {
-    const storyIdentity = publisherStoryIdentityKey(article.url);
-    const identity = storyIdentity
-      ? `${article.source}:${storyIdentity}:${normalizedEditorialText(article.title)}:${article.publishedAt}`
-      : `id:${article.id}`;
+    const storyIdentity = publisherStoryVariantKey(
+      article.url,
+      `${normalizedEditorialText(article.title)}:${article.publishedAt}`,
+    );
+    const identity = storyIdentity ? `${article.source}:${storyIdentity}` : `id:${article.id}`;
     const retained = byIdentity.get(identity);
     if (
       !retained ||

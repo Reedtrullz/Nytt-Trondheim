@@ -272,6 +272,31 @@ describe("article coverage analysis", () => {
     expect(stories[0]?.primary.url).toContain("/9p848l/");
   });
 
+  it("collapses NRK slug variants for the same publication id", () => {
+    const stories = buildCityPulseStories([
+      article({
+        id: "nrk-original-slug",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Sammenstøt mellom to biler i Orkanger",
+        url: "https://www.nrk.no/trondelag/sammenstot-mellom-to-biler-i-orkanger-1.17960432",
+        publishedAt: "2026-07-16T15:28:00.000Z",
+      }),
+      article({
+        id: "nrk-updated-slug",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Vegen er åpen igjen etter sammenstøt mellom to biler i Orkanger",
+        url: "https://www.nrk.no/trondelag/vegen-er-apen-igjen-etter-sammenstot-mellom-to-biler-i-orkanger-1.17960432",
+        publishedAt: "2026-07-16T15:28:00.000Z",
+      }),
+    ]);
+
+    expect(stories).toHaveLength(1);
+    expect(stories[0]?.articles).toHaveLength(1);
+    expect(stories[0]?.primary.url).toContain("-1.17960432");
+  });
+
   it("selects deterministic editorial copy independently of the newest update", () => {
     const bundle = {
       id: "coverage:incident:saupstad-editorial",

@@ -94,6 +94,30 @@ describe("WorkerRepository", () => {
     );
   });
 
+  it("uses the NRK publication id across slug variants", () => {
+    const base: Article = {
+      id: "nrk-original-slug",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Sammenstøt mellom to biler i Orkanger",
+      excerpt: "To biler støtte sammen i Orkanger.",
+      url: "https://www.nrk.no/trondelag/sammenstot-mellom-to-biler-i-orkanger-1.17960432",
+      publishedAt: "2026-07-16T15:28:00.000Z",
+      scope: "regional",
+      category: "Hendelser",
+      places: ["Orkanger"],
+    };
+
+    expect(articleDedupeKey(base)).toBe(
+      articleDedupeKey({
+        ...base,
+        id: "nrk-updated-slug",
+        title: "Vegen er åpen igjen etter sammenstøt mellom to biler i Orkanger",
+        url: "https://www.nrk.no/trondelag/vegen-er-apen-igjen-etter-sammenstot-mellom-to-biler-i-orkanger-1.17960432",
+      }),
+    );
+  });
+
   it("uses faithful collection evidence and its revision clock for article captures", () => {
     const article: Article = {
       id: "nrk-faithful-capture",

@@ -4,7 +4,7 @@ import {
   articleCoverageEvidence,
   comparePublicHomeSituations,
   normalizedEditorialText,
-  publisherStoryIdentityKey,
+  publisherStoryVariantKey,
   publicLeadLongRunningSituationAgeMs,
   shouldFeaturePublicHomeSituation,
 } from "@nytt/shared";
@@ -2267,10 +2267,11 @@ export function articleDedupeKey(article: Article): string {
   // A canonical URL remains the durable default. Some publisher CMSes expose one story id under
   // multiple section paths; exact normalized title + publication time disambiguates real updates
   // while collapsing only the path aliases for one published record.
-  const publisherStoryIdentity = publisherStoryIdentityKey(article.url);
-  const identity = publisherStoryIdentity
-    ? `${publisherStoryIdentity}\0${normalizedEditorialText(article.title)}\0${article.publishedAt}`
-    : article.url;
+  const publisherStoryIdentity = publisherStoryVariantKey(
+    article.url,
+    `${normalizedEditorialText(article.title)}\0${article.publishedAt}`,
+  );
+  const identity = publisherStoryIdentity ? publisherStoryIdentity : article.url;
   const digest = createHash("sha256")
     .update(`article-url-v2\0${article.source}\0${identity}`)
     .digest("hex");

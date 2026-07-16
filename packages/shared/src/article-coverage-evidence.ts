@@ -480,15 +480,36 @@ function normalizeToken(value: string): string {
 export function publisherStoryIdentityKey(value: string): string | undefined {
   try {
     const url = new URL(value);
+    const hostname = url.hostname.replace(/^www\./u, "");
+    const nrkStoryId =
+      hostname === "nrk.no" || hostname.endsWith(".nrk.no")
+        ? url.pathname.match(/-(\d+\.\d+)(?:\/|$)/u)?.[1]
+        : undefined;
     const storyId =
       url.pathname.match(/\/i\/([^/]+)(?:\/|$)/u)?.[1] ??
       url.pathname.match(/\/n\/([a-z0-9]{6})(?:\/|$)/iu)?.[1] ??
-      url.pathname.match(/\/s\/(\d+-\d+-\d+)(?:\/|$)/u)?.[1];
+      url.pathname.match(/\/s\/(\d+-\d+-\d+)(?:\/|$)/u)?.[1] ??
+      nrkStoryId;
     if (!storyId) return undefined;
-    return `${url.hostname.replace(/^www\./u, "")}:${storyId}`;
+    return `${hostname}:${storyId}`;
   } catch {
     return undefined;
   }
+}
+
+export function publisherStoryVariantKey(
+  value: string,
+  editorialRevisionIdentity: string,
+): string | undefined {
+  const storyIdentity = publisherStoryIdentityKey(value);
+  if (!storyIdentity) return undefined;
+  try {
+    const hostname = new URL(value).hostname.replace(/^www\./u, "");
+    if (hostname === "nrk.no" || hostname.endsWith(".nrk.no")) return storyIdentity;
+  } catch {
+    return undefined;
+  }
+  return `${storyIdentity}:${editorialRevisionIdentity}`;
 }
 
 export function samePublisherStoryUrl(left: Article, right: Article): boolean {
