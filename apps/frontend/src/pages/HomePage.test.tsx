@@ -19,11 +19,13 @@ import {
   CoverageMergeReportAction,
   LocalFocusRadiusControl,
   LocalFocusSummaryPanel,
+  LeadStory,
   MapClusterSummary,
   MapTimeSlider,
   MorningBriefPanel,
   PublicSourceStatusPanel,
   StoryConfidenceBadge,
+  StoryCard,
   StoryEventBundleSummary,
   StoryFeedTrustStrip,
   StoryVerificationProof,
@@ -1216,6 +1218,74 @@ describe("StoryConfidenceBadge", () => {
     expect(html).toContain("98 %");
     expect(html).toContain("story-confidence-confirmed");
     expect(html).toContain("Offisielle kilder og redaksjonelle kilder peker mot samme område.");
+  });
+});
+
+describe("mixed free and paid story links", () => {
+  it("renders paid-derived editorial copy with the free source as the main link", () => {
+    const coverageBundle = {
+      id: "coverage:incident:heimdal-fire",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-16T18:00:00.000Z",
+    } as const;
+    const paidArticle = {
+      ...article,
+      id: "adressa-paid-editorial",
+      title: "Beboere evakuert etter brann i leilighet på Heimdal",
+      excerpt:
+        "Tre beboere ble evakuert etter at det begynte å brenne i en leilighet på Heimdal natt til torsdag.",
+      url: "https://example.test/adressa-paid",
+      access: "paid",
+      category: "Nyheter",
+      imageUrl: "https://example.test/adressa-editorial.jpg",
+      coverageBundle,
+    } satisfies Article;
+    const freeArticle = {
+      ...article,
+      id: "nrk-free-click-target",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Brann på Heimdal",
+      excerpt: "Nødetatene rykket ut til Heimdal.",
+      url: "https://example.test/nrk-free",
+      category: "Hendelser",
+      coverageBundle,
+    } satisfies Article;
+    const [card] = homeStoryCardsForGroups(groupHomeArticles([paidArticle, freeArticle]));
+    const render = (Component: typeof LeadStory | typeof StoryCard) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <Component
+            card={card!}
+            saving={false}
+            onSave={async () => undefined}
+            canSave={false}
+            canCorrect={false}
+            onCorrect={() => undefined}
+            canReportMissed={false}
+            mergeReportPending={false}
+            onReportMissed={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+
+    for (const Component of [LeadStory, StoryCard]) {
+      const html = render(Component);
+      const mainMetadata = html.match(/(?:story-kicker|story-card-kicker)[^>]*>(.*?)<\/div>/s)?.[1];
+
+      expect(html).toContain(paidArticle.title);
+      expect(html).toContain(paidArticle.excerpt);
+      expect(html).toContain(`href="${freeArticle.url}"`);
+      if (Component === LeadStory) {
+        expect(html).toContain(`src="${paidArticle.imageUrl}"`);
+        expect(html).not.toContain("lead-story text-only");
+      }
+      expect(mainMetadata).not.toContain("Pluss");
+      expect(html).toContain("Pluss");
+      expect(html).toContain(`href="${paidArticle.url}"`);
+    }
   });
 });
 

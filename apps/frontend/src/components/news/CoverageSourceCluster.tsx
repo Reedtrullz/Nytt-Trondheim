@@ -22,7 +22,7 @@ export function CoverageSourceCluster({
   onCorrect: (card: HomeStoryCard) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const supporting = card.group.articles.filter((article) => article.id !== card.primary.id);
+  const supporting = card.group.articles.filter((article) => article.id !== card.clickArticle.id);
   if (supporting.length === 0) return null;
   const visible = expanded ? supporting : supporting.slice(0, 2);
   const supportingSourceCount = new Set(supporting.map((article) => article.source)).size;

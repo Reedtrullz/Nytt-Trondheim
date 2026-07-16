@@ -1,7 +1,7 @@
 import type { Article } from "@nytt/shared";
 import { describe, expect, it } from "vitest";
 import { groupHomeArticles } from "./homeArticleGroups.js";
-import { homeStoryCardsForGroups } from "./homeStoryCards.js";
+import { homeStoryCardForGroup, homeStoryCardsForGroups } from "./homeStoryCards.js";
 import {
   distanceKmBetween,
   localFocusMetaForCard,
@@ -81,6 +81,44 @@ describe("home local focus", () => {
     expect(localFocusMetaForCard(ranked[0]!, { lat: 63.4305, lng: 10.3951 }).withinRadius).toBe(
       true,
     );
+  });
+
+  it("keeps editorial coordinates when a different free article is the click target", () => {
+    const coverageBundle = {
+      id: "coverage:incident:mixed-access-location",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-16T18:00:00.000Z",
+    } as const;
+    const paidArticle = article({
+      id: "paid-editorial-near",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Beboere evakuert etter brann i leilighet på Heimdal",
+      excerpt: "Tre beboere ble evakuert etter at det begynte å brenne i en leilighet på Heimdal.",
+      access: "paid",
+      location: { lat: 63.4305, lng: 10.3951, label: "Torvet" },
+      coverageBundle,
+    });
+    const freeArticle = article({
+      id: "free-click-far",
+      title: "Brann på Heimdal",
+      excerpt: "Nødetatene rykket ut.",
+      location: { lat: 63.312, lng: 9.853, label: "Orkanger" },
+      coverageBundle,
+    });
+    const card = homeStoryCardForGroup({
+      id: coverageBundle.id,
+      primary: paidArticle,
+      articles: [paidArticle, freeArticle],
+      sourceLabels: [paidArticle.sourceLabel, freeArticle.sourceLabel],
+      bundle: coverageBundle,
+    });
+
+    expect(card.primary.id).toBe("paid-editorial-near");
+    expect(card.clickArticle.id).toBe("free-click-far");
+    expect(localFocusMetaForCard(card, { lat: 63.4305, lng: 10.3951 }).distanceKm).toBe(0);
   });
 
   it("keeps published order when local focus is inactive", () => {

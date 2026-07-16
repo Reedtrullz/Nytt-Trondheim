@@ -548,4 +548,71 @@ describe("home story cards", () => {
       ingress: { articleId: ingressArticle.id },
     });
   });
+
+  it("uses all sources for editorial copy but makes a free article the click target", () => {
+    const paidArticle = article({
+      id: "adressa-paid-editorial",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Beboere evakuert etter brann i leilighet på Heimdal",
+      excerpt:
+        "Tre beboere ble evakuert etter at det begynte å brenne i en leilighet på Heimdal natt til torsdag.",
+      url: "https://example.test/adressa-paid",
+      access: "paid",
+      category: "Nyheter",
+    });
+    const freeArticle = article({
+      id: "nrk-free-click-target",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Brann på Heimdal",
+      excerpt: "Nødetatene rykket ut til Heimdal.",
+      url: "https://example.test/nrk-free",
+      category: "Hendelser",
+    });
+    const group = groupHomeArticles([paidArticle, freeArticle])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.title).toBe(paidArticle.title);
+    expect(card.excerpt).toBe(paidArticle.excerpt);
+    expect(card.editorialCopy).toMatchObject({
+      title: { articleId: paidArticle.id },
+      ingress: { articleId: paidArticle.id },
+    });
+    expect(card.primary.id).toBe(paidArticle.id);
+    expect(card.clickArticle.id).toBe(freeArticle.id);
+    expect(card.clickArticle.url).toBe(freeArticle.url);
+    expect(card.clickArticle.access).toBeUndefined();
+    expect(card.category).toBe(paidArticle.category);
+  });
+
+  it("keeps the best editorial article as click target when every source is paid", () => {
+    const strongest = article({
+      id: "adressa-paid-strongest",
+      source: "adressa",
+      sourceLabel: "Adresseavisen",
+      title: "Beboere evakuert etter brann i leilighet på Heimdal",
+      excerpt:
+        "Tre beboere ble evakuert etter at det begynte å brenne i en leilighet på Heimdal natt til torsdag.",
+      url: "https://example.test/adressa-paid-strongest",
+      access: "paid",
+    });
+    const other = article({
+      id: "nidaros-paid-other",
+      source: "nidaros",
+      sourceLabel: "Nidaros",
+      title: "Brann på Heimdal",
+      excerpt: "Nødetatene rykket ut.",
+      url: "https://example.test/nidaros-paid-other",
+      access: "paid",
+    });
+    const group = groupHomeArticles([strongest, other])[0]!;
+
+    const card = homeStoryCardForGroup(group);
+
+    expect(card.primary.id).toBe(strongest.id);
+    expect(card.clickArticle.id).toBe(strongest.id);
+    expect(card.clickArticle.access).toBe("paid");
+  });
 });
