@@ -197,10 +197,7 @@ function stableId(source: SourceId, url: string): string {
 function collapseCollectedPublicationVariants(articles: Article[]): Article[] {
   const byIdentity = new Map<string, Article>();
   for (const article of articles) {
-    const storyIdentity = publisherStoryVariantKey(
-      article.url,
-      `${normalizedEditorialText(article.title)}:${article.publishedAt}`,
-    );
+    const storyIdentity = publisherStoryVariantKey(article.url, article.publishedAt);
     const identity = storyIdentity ? `${article.source}:${storyIdentity}` : `id:${article.id}`;
     const retained = byIdentity.get(identity);
     if (

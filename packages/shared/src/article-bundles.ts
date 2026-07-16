@@ -1092,10 +1092,7 @@ function collapsePublisherPathVariants(articles: Article[]): Article[] {
   const retained: Article[] = [];
   const indexByIdentity = new Map<string, number>();
   for (const article of articles) {
-    const storyIdentity = publisherStoryVariantKey(
-      article.url,
-      `${normalizedEditorialText(article.title)}:${article.publishedAt}`,
-    );
+    const storyIdentity = publisherStoryVariantKey(article.url, article.publishedAt);
     if (!storyIdentity) {
       retained.push(article);
       continue;

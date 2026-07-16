@@ -3,7 +3,6 @@ import pg from "pg";
 import {
   articleCoverageEvidence,
   comparePublicHomeSituations,
-  normalizedEditorialText,
   publisherStoryVariantKey,
   publicLeadLongRunningSituationAgeMs,
   shouldFeaturePublicHomeSituation,
@@ -2265,12 +2264,9 @@ function mergeSituation(existing: Situation | undefined, incoming: Situation): S
 
 export function articleDedupeKey(article: Article): string {
   // A canonical URL remains the durable default. Some publisher CMSes expose one story id under
-  // multiple section paths; exact normalized title + publication time disambiguates real updates
-  // while collapsing only the path aliases for one published record.
-  const publisherStoryIdentity = publisherStoryVariantKey(
-    article.url,
-    `${normalizedEditorialText(article.title)}\0${article.publishedAt}`,
-  );
+  // multiple section paths and titles; publication time disambiguates later revisions while
+  // collapsing aliases for one published record.
+  const publisherStoryIdentity = publisherStoryVariantKey(article.url, article.publishedAt);
   const identity = publisherStoryIdentity ? publisherStoryIdentity : article.url;
   const digest = createHash("sha256")
     .update(`article-url-v2\0${article.source}\0${identity}`)

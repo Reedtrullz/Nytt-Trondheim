@@ -193,7 +193,7 @@ describe("article coverage analysis", () => {
         id: "adressa-section-path",
         source: "adressa",
         sourceLabel: "Adresseavisen",
-        title: "Arbeidsulykke i Trondheim: – Liten eksplosjon",
+        title: "Arbeidsulykke i Trondheim: – En liten eksplosjon under sveising",
         excerpt: "Nødetatene rykket ut.",
         url: "https://www.adressa.no/nyheter/trondheim/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
         publishedAt: "2026-07-16T08:21:00.000Z",
@@ -218,6 +218,30 @@ describe("article coverage analysis", () => {
       sourceCount: 2,
       updateCount: 2,
     });
+  });
+
+  it("keeps a later Amedia publication revision with the same story id", () => {
+    const stories = buildCityPulseStories([
+      article({
+        id: "adressa-original-revision",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "To biler krasjet i rundkjøring",
+        url: "https://www.adressa.no/nyheter/trondelag/i/V65J9W/to-biler-krasjet-paa-e39",
+        publishedAt: "2026-07-16T15:30:00.000Z",
+      }),
+      article({
+        id: "adressa-later-revision",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Veien åpnet etter kollisjonen",
+        url: "https://www.adressa.no/nyhetsstudio/i/V65J9W/to-biler-krasjet-paa-e39",
+        publishedAt: "2026-07-16T15:45:00.000Z",
+      }),
+    ]);
+
+    expect(stories).toHaveLength(1);
+    expect(stories[0]?.articles).toHaveLength(2);
   });
 
   it("collapses Nidaros slug variants for the same Amedia publication", () => {
