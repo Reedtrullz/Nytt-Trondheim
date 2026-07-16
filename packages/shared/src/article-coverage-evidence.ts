@@ -477,7 +477,7 @@ function normalizeToken(value: string): string {
   return normalizeText(value).replace(/\s+/g, " ");
 }
 
-function publisherStoryUrlKey(value: string): string | undefined {
+export function publisherStoryIdentityKey(value: string): string | undefined {
   try {
     const url = new URL(value);
     const storyId = url.pathname.match(/\/i\/([^/]+)(?:\/|$)/u)?.[1];
@@ -491,8 +491,8 @@ function publisherStoryUrlKey(value: string): string | undefined {
 export function samePublisherStoryUrl(left: Article, right: Article): boolean {
   if (left.url.length === 0 || right.url.length === 0) return false;
   if (left.url === right.url) return true;
-  const leftStoryKey = publisherStoryUrlKey(left.url);
-  return leftStoryKey !== undefined && leftStoryKey === publisherStoryUrlKey(right.url);
+  const leftStoryKey = publisherStoryIdentityKey(left.url);
+  return leftStoryKey !== undefined && leftStoryKey === publisherStoryIdentityKey(right.url);
 }
 
 function tokens(value: string): Set<string> {

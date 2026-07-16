@@ -5,6 +5,7 @@ import {
   comparableEditorialText,
   editorialTextRejectionReason,
   normalizedEditorialText,
+  publisherStoryIdentityKey,
   type Article,
   type EditorialTextRejectionReason,
   type SourceId,
@@ -182,6 +183,26 @@ function cleanFeedText(value: unknown): string {
 
 function stableId(source: SourceId, url: string): string {
   return `${source}-${createHash("sha1").update(url).digest("hex").slice(0, 16)}`;
+}
+
+function collapseCollectedPublicationVariants(articles: Article[]): Article[] {
+  const byIdentity = new Map<string, Article>();
+  for (const article of articles) {
+    const storyIdentity = publisherStoryIdentityKey(article.url);
+    const identity = storyIdentity
+      ? `${article.source}:${storyIdentity}:${normalizedEditorialText(article.title)}:${article.publishedAt}`
+      : `id:${article.id}`;
+    const retained = byIdentity.get(identity);
+    if (
+      !retained ||
+      article.excerpt.trim().length > retained.excerpt.trim().length ||
+      (article.excerpt.trim().length === retained.excerpt.trim().length &&
+        article.title.trim().length > retained.title.trim().length)
+    ) {
+      byIdentity.set(identity, article);
+    }
+  }
+  return [...byIdentity.values()];
 }
 
 function nonEmptyEnv(value: string | undefined): string | undefined {
@@ -448,7 +469,7 @@ export async function collectRss(
   if (timestampedCandidates === 0) {
     throw new Error(`${source.label} har ingen brukbare tidsstempler i feeden`);
   }
-  return articles;
+  return collapseCollectedPublicationVariants(articles);
 }
 
 interface FrontpageCandidate {

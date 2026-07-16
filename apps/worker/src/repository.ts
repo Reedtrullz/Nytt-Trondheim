@@ -3,6 +3,8 @@ import pg from "pg";
 import {
   articleCoverageEvidence,
   comparePublicHomeSituations,
+  normalizedEditorialText,
+  publisherStoryIdentityKey,
   publicLeadLongRunningSituationAgeMs,
   shouldFeaturePublicHomeSituation,
 } from "@nytt/shared";
@@ -2262,10 +2264,15 @@ function mergeSituation(existing: Situation | undefined, incoming: Situation): S
 }
 
 export function articleDedupeKey(article: Article): string {
-  // Headlines and publication hours are similarity evidence, not durable identity: publishers
-  // routinely reuse generic headlines for unrelated incidents in the same hour.
+  // A canonical URL remains the durable default. Some publisher CMSes expose one story id under
+  // multiple section paths; exact normalized title + publication time disambiguates real updates
+  // while collapsing only the path aliases for one published record.
+  const publisherStoryIdentity = publisherStoryIdentityKey(article.url);
+  const identity = publisherStoryIdentity
+    ? `${publisherStoryIdentity}\0${normalizedEditorialText(article.title)}\0${article.publishedAt}`
+    : article.url;
   const digest = createHash("sha256")
-    .update(`article-url-v2\0${article.source}\0${article.url}`)
+    .update(`article-url-v2\0${article.source}\0${identity}`)
     .digest("hex");
   return `article-url-v2:${digest}`;
 }

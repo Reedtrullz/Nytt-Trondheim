@@ -170,6 +170,56 @@ describe("article coverage analysis", () => {
     });
   });
 
+  it("collapses Adresseavisen path variants for the same publication in City Pulse", () => {
+    const bundle = {
+      id: "coverage:incident:ranheim-work-accident",
+      kind: "incident",
+      confidence: "high",
+      reason: "Samme hendelse på tvers av kilder",
+      generatedAt: "2026-07-16T08:30:00.000Z",
+    } as const;
+    const stories = buildCityPulseStories([
+      article({
+        id: "adressa-newsroom-path",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Arbeidsulykke i Trondheim: – Liten eksplosjon",
+        excerpt: "Nødetatene rykket ut til en arbeidsulykke på Ranheim.",
+        url: "https://www.adressa.no/nyhetsstudio/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
+        publishedAt: "2026-07-16T08:21:00.000Z",
+        coverageBundle: bundle,
+      }),
+      article({
+        id: "adressa-section-path",
+        source: "adressa",
+        sourceLabel: "Adresseavisen",
+        title: "Arbeidsulykke i Trondheim: – Liten eksplosjon",
+        excerpt: "Nødetatene rykket ut.",
+        url: "https://www.adressa.no/nyheter/trondheim/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
+        publishedAt: "2026-07-16T08:21:00.000Z",
+        coverageBundle: bundle,
+      }),
+      article({
+        id: "nrk-ranheim-work-accident",
+        source: "nrk",
+        sourceLabel: "NRK Trøndelag",
+        title: "Arbeidsulykke på Ranheim",
+        excerpt: "En person blir undersøkt av helse etter en arbeidsulykke på Ranheim.",
+        url: "https://www.nrk.no/trondelag/arbeidsulykke-pa-ranheim-1.17959780",
+        publishedAt: "2026-07-16T08:25:00.000Z",
+        coverageBundle: bundle,
+      }),
+    ]);
+
+    expect(stories).toHaveLength(1);
+    expect(stories[0]).toMatchObject({
+      articleIds: ["nrk-ranheim-work-accident", "adressa-newsroom-path"],
+      sourceLabels: ["NRK Trøndelag", "Adresseavisen"],
+      sourceCount: 2,
+      updateCount: 2,
+    });
+  });
+
   it("selects deterministic editorial copy independently of the newest update", () => {
     const bundle = {
       id: "coverage:incident:saupstad-editorial",

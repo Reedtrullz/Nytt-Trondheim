@@ -488,6 +488,35 @@ describe("RSS collection policy", () => {
     );
   });
 
+  it("admits one Adresseavisen article when one story id has multiple section paths", async () => {
+    const rss = `<?xml version="1.0"?><rss><channel>
+      <item><title>Arbeidsulykke i Trondheim: – Liten eksplosjon</title>
+      <description>Nødetatene rykket ut til Ranheim.</description>
+      <link>https://www.adressa.no/nyhetsstudio/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon</link>
+      <pubDate>Thu, 16 Jul 2026 08:21:00 GMT</pubDate></item>
+      <item><title>Arbeidsulykke i Trondheim: – Liten eksplosjon</title>
+      <description>Nødetatene rykket ut.</description>
+      <link>https://www.adressa.no/nyheter/trondheim/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon</link>
+      <pubDate>Thu, 16 Jul 2026 08:21:00 GMT</pubDate></item>
+    </channel></rss>`;
+
+    const articles = await collectRss(
+      {
+        id: "adressa",
+        label: "Adresseavisen",
+        url: "https://www.adressa.no/rss/nyheter",
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(rss),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      excerpt: "Nødetatene rykket ut til Ranheim.",
+      url: "https://www.adressa.no/nyhetsstudio/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
+    });
+  });
+
   it("rejects non-http article URLs from feeds", async () => {
     const unsafeRss = `<?xml version="1.0"?><rss><channel>
       <item><title>Brann i Trondheim sentrum</title><description>Nødetatene er varslet.</description>

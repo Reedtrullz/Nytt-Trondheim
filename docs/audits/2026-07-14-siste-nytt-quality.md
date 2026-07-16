@@ -660,21 +660,45 @@ changed.
   for protected `/api/bootstrap`. Readiness reported PostgreSQL, `status=ok`, and projection
   `legacy`.
 
+### Authenticated completion readback and publisher path identity repair
+
+- Owner-authenticated Chrome readback on deployed baseline `b885844fc9d61bf9fc24e67c3472eaff81fcc3e4`
+  loaded the complete Siste nytt surface rather than the login shell. Desktop at `1354x1089`
+  rendered 25 article regions with document and viewport width both `1354`; fresh mobile at
+  `390x844` rendered the same 25 article regions with document and viewport width both `390`.
+  Neither pass had horizontal overflow.
+- Keyboard traversal exposed a visible `3px` focus outline on the brand and primary navigation.
+  The grouped-card disclosure changed from “Vis alle” to “Vis færre” and exposed all related links.
+  The private command center reported a completed worker cycle, zero parse errors, zero sources
+  requiring attention, and all 34 open sources at normal status.
+- The expanded Ranheim work-accident card revealed one Important defect: the same Adresseavisen
+  publication appeared twice under `/nyhetsstudio/i/oEwbza/...` and
+  `/nyheter/trondheim/i/oEwbza/...`, with identical title and publication time.
+- RED fixtures now reproduce the duplicate independently at RSS admission, durable worker identity,
+  and City Pulse presentation. The repair derives the publisher story identity from host + `/i/`
+  content ID, then uses exact normalized title and publication time to distinguish a path alias from
+  a real later update. It retains the richer excerpt, preserves the independent NRK member and keeps
+  distinct same-story updates with changed title/time.
+- GREEN passes the focused `129/129` coverage/collector/repository corpus and the complete local
+  gates: typecheck, ESLint, Prettier, `1309/1309` Vitest tests across `136/136` files, and the full
+  production build. PR `#45` is the release vehicle; no projection, correction, generation, source,
+  or authentication flag changes are included.
+
 ## Completion audit against the original mission
 
-| #   | Mission layer                                                     | Authoritative evidence                                                                                                                                                                         | Status                                                                  |
-| --- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 1   | Source ingestion                                                  | Append-only raw captures, stable source clocks, structural sentinels and source-health degradation; PRs `#32`–`#36`                                                                            | Complete within authorized source boundaries                            |
-| 2   | Title extraction and cleanup                                      | Raw/clean separation, publisher-noise policy and RSS entity decoding; PR `#42` plus source contracts and fixtures                                                                              | Complete                                                                |
-| 3   | Ingress extraction and generation                                 | Article-scoped Nyhetsstudio evidence, centralized boilerplate rejection and fail-closed empty/fallback behavior; PR `#44`                                                                      | Complete; broader Amedia enrichment decision-gated                      |
-| 4   | Canonicalization and deduplication                                | Canonical URL/revision identity, one-to-one stable ID arbitration and stale metadata clearing                                                                                                  | Complete                                                                |
-| 5   | Same-story bundling                                               | Production-shaped bridge/recall cases, 127 labeled pairs, explicit conflicts and zero known critical bridge errors                                                                             | Complete on active legacy; v2 promotion decision-gated                  |
-| 6   | Primary article selection                                         | Deterministic coverage anchor separated from display-copy quality and latest publication time                                                                                                  | Complete                                                                |
-| 7   | Bundle title and ingress synthesis                                | Versioned independent source-backed title/ingress selection, forbidden-claim corpus, exact field provenance and deterministic fallback; PRs `#38`, `#41`                                       | Complete; unsupported generation remains disabled                       |
-| 8   | Ordering, freshness and updates                                   | Published/updated/fetched/first-seen separation plus retained-data freshness locking and update-aware display clocks                                                                           | Complete                                                                |
-| 9   | Corrections and owner feedback                                    | Immediate split, undo, categories, durable history, sanitized export and missed-group report                                                                                                   | Implemented; production enablement decision-gated                       |
-| 10  | Desktop/mobile UI, accessibility and performance                  | Authenticated before/after release evidence plus 390 px, keyboard, stale/error/saved, accessibility and overflow regressions                                                                   | Complete for released UI; current authenticated recheck authority-gated |
-| 11  | Evaluation, observability, deployment and production verification | Versioned production-shaped corpus, per-case failures, edge/conflict/rejection and generation provenance, sequential exact-main CI/deploy through `b885844f`, fresh worker and public readback | Complete for current policy; not v2 promotion proof                     |
+| #   | Mission layer                                                     | Authoritative evidence                                                                                                                                                                         | Status                                                 |
+| --- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 1   | Source ingestion                                                  | Append-only raw captures, stable source clocks, structural sentinels and source-health degradation; PRs `#32`–`#36`                                                                            | Complete within authorized source boundaries           |
+| 2   | Title extraction and cleanup                                      | Raw/clean separation, publisher-noise policy and RSS entity decoding; PR `#42` plus source contracts and fixtures                                                                              | Complete                                               |
+| 3   | Ingress extraction and generation                                 | Article-scoped Nyhetsstudio evidence, centralized boilerplate rejection and fail-closed empty/fallback behavior; PR `#44`                                                                      | Complete; broader Amedia enrichment decision-gated     |
+| 4   | Canonicalization and deduplication                                | Canonical URL/revision identity, publisher content-ID path alias handling, one-to-one stable ID arbitration and stale metadata clearing                                                        | Complete                                               |
+| 5   | Same-story bundling                                               | Production-shaped bridge/recall cases, 127 labeled pairs, explicit conflicts and zero known critical bridge errors                                                                             | Complete on active legacy; v2 promotion decision-gated |
+| 6   | Primary article selection                                         | Deterministic coverage anchor separated from display-copy quality and latest publication time                                                                                                  | Complete                                               |
+| 7   | Bundle title and ingress synthesis                                | Versioned independent source-backed title/ingress selection, forbidden-claim corpus, exact field provenance and deterministic fallback; PRs `#38`, `#41`                                       | Complete; unsupported generation remains disabled      |
+| 8   | Ordering, freshness and updates                                   | Published/updated/fetched/first-seen separation plus retained-data freshness locking and update-aware display clocks                                                                           | Complete                                               |
+| 9   | Corrections and owner feedback                                    | Immediate split, undo, categories, durable history, sanitized export and missed-group report                                                                                                   | Implemented; production enablement decision-gated      |
+| 10  | Desktop/mobile UI, accessibility and performance                  | Current owner-authenticated desktop + fresh 390 px readback, keyboard focus, disclosure behavior, plus stale/error/saved, accessibility and overflow regressions                               | Complete for released UI                               |
+| 11  | Evaluation, observability, deployment and production verification | Versioned production-shaped corpus, per-case failures, edge/conflict/rejection and generation provenance, sequential exact-main CI/deploy through `b885844f`, fresh worker and public readback | Complete for current policy; not v2 promotion proof    |
 
 ## Visual evidence
 
@@ -688,6 +712,10 @@ changed.
   `/Users/reidar/.codex/visualizations/2026/07/14/019f620c-0f41-7060-ad3d-d78d5aca86df/nytt-siste-nytt-desktop-ad2b4f4a-baseline.png`
 - Deployed fresh 390 px readback after PR `#27`:
   `/Users/reidar/.codex/visualizations/2026/07/14/019f620c-0f41-7060-ad3d-d78d5aca86df/nytt-siste-nytt-mobile-390-loaded-ad2b4f4a.png`
+- Owner-authenticated completion desktop readback on `b885844f`:
+  `/Users/reidar/.codex/visualizations/2026/07/14/019f620c-0f41-7060-ad3d-d78d5aca86df/nytt-siste-nytt-desktop-production-2026-07-16.png`
+- Owner-authenticated completion mobile viewport evidence at `390x844` on `b885844f`:
+  `/Users/reidar/.codex/visualizations/2026/07/14/019f620c-0f41-7060-ad3d-d78d5aca86df/nytt-siste-nytt-mobile-390x844-production-2026-07-16.png`
 
 ## Explicit non-claims and unresolved risks
 
@@ -697,9 +725,9 @@ changed.
   readback. This does not prove every same-title or same-hour topology is correct.
 - No projection-promotion claim is made.
 - No correction-path readiness claim is made while production corrections are disabled.
-- Chrome is installed and the ChatGPT Chrome Extension is enabled, but Chrome was not running on
-  the 16 July completion audit. Launching a browser window requires explicit owner permission, so
-  no current authenticated card/editorial/desktop/390 px recheck is claimed.
+- The authenticated completion pass proved the currently populated desktop/mobile, grouped-card,
+  source-health and keyboard-focus states. It did not mutate saved state, submit a correction, or
+  synthesize loading/error/stale states in production; those remain regression-suite claims.
 - Green health endpoints do not contradict the visible wrong merge or mobile overflow.
 - The editorial golden corpus is deliberately small and policy-oriented. It does not yet prove
   every adapter's extraction quality or every live title/ingress shape.
@@ -713,8 +741,8 @@ changed.
 
 ## Recommended next action
 
-Request owner direction on three material boundaries: permission to launch Chrome for the current
-authenticated production acceptance pass; whether to prepare correction enablement and reviewed v2
+After PR `#45` is released and the repaired live group is read back, request owner direction on the
+two remaining material boundaries: whether to prepare correction enablement and reviewed v2
 promotion; and whether broader Amedia article/paywall enrichment is authorized with an explicit
 request/evidence policy. Keep projection `legacy`, corrections disabled, matcher `v2`, and
 generation shadow until those decisions are made.
