@@ -46,12 +46,14 @@ describe("deployment playbook Entur verification", () => {
     expect(compose).not.toContain("VITE_COVERAGE_");
   });
 
-  it("requires exact reviewed promotion when the current active v2 generation is not healthy", () => {
+  it("requires exact reviewed promotion until the deployed runtime serves normalized-active", () => {
     const promotionContract = `${playbook}\n${promotionSql}`;
     expect(deployWorkflow).toContain("COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID");
     expect(playbook).toContain("coverage_v2_promotion_required");
     expect(playbook).toContain("coverage_v2_owner_reviewed_generation_id");
-    expect(playbook).toContain("health_outcome='healthy'");
+    expect(playbook).toContain("Read currently deployed coverage projection");
+    expect(playbook).toContain("deployed_coverage_health.json");
+    expect(playbook).not.toContain("current_active_v2_generation.stdout");
     expect(promotionContract).toContain("matcher_version='v2'");
     expect(promotionContract).toContain("mode='shadow'");
     expect(promotionContract).toContain("status='completed'");
@@ -135,7 +137,7 @@ describe("deployment playbook Entur verification", () => {
     expect(ciWorkflow).toContain("docker build --target worker");
   });
 
-  it("pauses only the first reviewed v2 shadow worker and always restores worker service", () => {
+  it("uses deployed runtime mode to pause only the first reviewed v2 shadow worker", () => {
     const pause = deployWorkflow.indexOf(
       "- name: Pause shadow worker for guarded first v2 promotion",
     );
@@ -150,8 +152,9 @@ describe("deployment playbook Entur verification", () => {
     const pauseBlock = deployWorkflow.slice(pause, deployment);
     expect(pauseBlock).toContain("NYTT_COVERAGE_PROJECTION_MODE == 'normalized-active'");
     expect(pauseBlock).toContain("COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID != ''");
-    expect(pauseBlock).toContain("mode='active'");
-    expect(pauseBlock).toContain("health_outcome='healthy'");
+    expect(pauseBlock).toContain("http://127.0.0.1:8090/health/ready");
+    expect(pauseBlock).toContain('deployed_projection" = "normalized-active');
+    expect(pauseBlock).not.toContain("mode='active'");
     expect(pauseBlock).toContain('reviewed_generation_id="$1"');
     expect(pauseBlock).toContain(
       "docker compose --env-file .env.production stop --timeout 30 worker",

@@ -324,29 +324,18 @@
         chdir: "{{ app_dir }}"
       changed_when: true
 
-    - name: Read current completed active v2 coverage generation
-      ansible.builtin.shell: |
-        set -euo pipefail
-        docker compose --env-file .env.production exec -T postgres \
-          psql -U nytt -d nytt -v ON_ERROR_STOP=1 -qAt <<'SQL'
-        SELECT id AS locked_generation_id
-        FROM coverage_bundle_generations
-        WHERE matcher_version='v2' AND mode='active' AND status='completed' AND is_current
-          AND health_outcome='healthy'
-        ORDER BY completed_at DESC, id DESC
-        LIMIT 1;
-        SQL
-      args:
-        chdir: "{{ app_dir }}"
-        executable: /bin/bash
-      register: current_active_v2_generation
+    - name: Read currently deployed coverage projection
+      ansible.builtin.uri:
+        url: "{{ public_origin }}/health/ready"
+        return_content: true
+      register: deployed_coverage_health
       changed_when: false
 
     - name: Determine whether exact reviewed v2 promotion is required
       ansible.builtin.set_fact:
         coverage_v2_promotion_required: >-
           {{ coverage_projection_mode == 'normalized-active'
-             and (current_active_v2_generation.stdout | trim | length == 0) }}
+             and (deployed_coverage_health.json | default({})).get('coverageProjectionMode') != 'normalized-active' }}
 
     - name: Require a valid reviewed generation UUID for first v2 promotion
       ansible.builtin.assert:
