@@ -91,7 +91,10 @@ reader UI changes in this wave.
 
 ## Release status and non-claims
 
-All four files are staged, but the configured 1Password-backed signed commit failed with
-`1Password: failed to fill whole buffer`. Signing was not bypassed. No commit, push, PR, CI, merge,
-deploy, production worker cycle, exact-SHA readback, or authenticated production QA is claimed.
-Production flags remain unchanged.
+Signed candidate `638bca701c807d28347dfdb4c53c554b252bf9bb` merged in PR `#42` as exact main
+`53a7dcef343411210997268c8deec3c04724f3b5`. PR CI `29457729693`, exact-main CI
+`29458079339`, and deploy `29458348446` passed, including a fresh worker cycle and source/capture
+invariants. Public root/live/ready readback returned `200`; protected bootstrap returned `401`.
+Authenticated production card inspection remains unclaimed because Chrome was unavailable.
+Production flags remain projection `legacy`, corrections disabled, matcher `v2`, and generation
+shadow.

@@ -74,8 +74,14 @@ Current GREEN proof:
 
 ## Release and non-claims
 
-- Signed commit, PR, CI, deploy, exact-main readback, fresh worker generation, and live source-item
-  inspection are pending.
+- Signed candidate `6281c0f6d8f3a7f7a6ac4cfed9939353c82d58c6` merged in PR `#44` as exact main
+  `b885844fc9d61bf9fc24e67c3472eaff81fcc3e4`. Rebased PR CI `29459258316`, exact-main CI
+  `29460092199`, and deploy `29460330082` passed. The deploy observed a stable recent completed
+  worker cycle and passed source/capture invariants with `failed=0`.
+- Public root/live/ready readback returned `200`; protected bootstrap returned `401`; readiness
+  reported PostgreSQL and projection `legacy`.
+- Current authenticated source-item/card inspection remains unclaimed because Chrome was not
+  running and launching it requires explicit owner permission.
 - No schema, matcher, situation activation, projection, correction, or feature-flag behavior
   changes.
 - Production must remain projection `legacy`, corrections disabled, matcher `v2`, and generation
