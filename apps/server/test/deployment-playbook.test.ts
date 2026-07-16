@@ -135,6 +135,30 @@ describe("deployment playbook Entur verification", () => {
     expect(ciWorkflow).toContain("docker build --target worker");
   });
 
+  it("pauses only the first reviewed v2 shadow worker and always restores worker service", () => {
+    const pause = deployWorkflow.indexOf(
+      "- name: Pause shadow worker for guarded first v2 promotion",
+    );
+    const deployment = deployWorkflow.indexOf("- name: Run Ansible deployment");
+    const recovery = deployWorkflow.indexOf(
+      "- name: Ensure worker is running after guarded first v2 promotion",
+    );
+    expect(pause).toBeGreaterThan(-1);
+    expect(pause).toBeLessThan(deployment);
+    expect(recovery).toBeGreaterThan(deployment);
+
+    const pauseBlock = deployWorkflow.slice(pause, deployment);
+    expect(pauseBlock).toContain("NYTT_COVERAGE_PROJECTION_MODE == 'normalized-active'");
+    expect(pauseBlock).toContain("COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID != ''");
+    expect(pauseBlock).toContain("mode='active'");
+    expect(pauseBlock).toContain("health_outcome='healthy'");
+    expect(pauseBlock).toContain("docker compose --env-file .env.production stop worker");
+
+    const recoveryBlock = deployWorkflow.slice(recovery);
+    expect(recoveryBlock).toContain("always()");
+    expect(recoveryBlock).toContain("docker compose --env-file .env.production up -d worker");
+  });
+
   it("keeps API and worker compose healthchecks on their own runtime duties", () => {
     const appStart = compose.indexOf("  app:");
     const workerStart = compose.indexOf("  worker:");
