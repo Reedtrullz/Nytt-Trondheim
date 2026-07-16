@@ -32,6 +32,7 @@ import { api, CoverageCorrectionConflictError } from "../api.js";
 import { ArrowIcon, ArticleCategoryIcon, BookmarkIcon } from "../components/Icons.js";
 import { CoverageCorrectionDialog } from "../components/news/CoverageCorrectionDialog.js";
 import { CoverageSourceCluster } from "../components/news/CoverageSourceCluster.js";
+import { ArticleAccessBadge } from "../components/news/ArticleAccessBadge.js";
 import {
   articleCategories,
   articleCategoryDescriptions,
@@ -671,6 +672,7 @@ function LeadStory({
             {card.sourceSummary} · {formatTime(card.latestAt)}
           </p>
           {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
+          <ArticleAccessBadge access={article.access} />
         </div>
         {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
         <StoryEventBundleSummary card={card} />
@@ -1015,6 +1017,7 @@ function StoryCard({
             {card.sourceSummary.toUpperCase()} · {formatTime(card.latestAt)}
           </p>
           {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
+          <ArticleAccessBadge access={article.access} />
         </div>
         <StoryEventBundleSummary card={card} />
         {articleUrl ? (

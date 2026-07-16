@@ -684,19 +684,44 @@ changed.
   production build. PR `#45` is the release vehicle; no projection, correction, generation, source,
   or authentication flag changes are included.
 
+### Owner-approved Pluss marking, bounded Amedia enrichment and v2 preflight
+
+- The owner approved production correction enablement, reviewed matcher-v2 promotion and a bounded
+  Amedia enrichment pilot. Paid access is now an explicit optional article fact, never a free/paid
+  inference: only public feed/category text, public teaser markup or
+  `isAccessibleForFree=false` JSON-LD may produce the visible `Pluss` badge. Unknown access remains
+  unlabelled.
+- Adresseavisen may use at most 12 public detail requests per cycle, shared between empty-ingress
+  enrichment and paid-access detection. Nidaros may use at most four public detail requests per
+  cycle for empty-ingress enrichment. Neither adapter authenticates, crosses a paywall or retains
+  article body text.
+- The badge is shown on lead stories, ordinary cards and each paid supporting source, with the
+  accessible label `Krever abonnement hos kilden`. Source-contract fixtures cover positive
+  evidence and the fail-closed unknown state.
+- Owner-authenticated review covered seven consecutive shadow generations. All had zero integrity
+  errors and projection parity, but the latest generation was deliberately not approved after two
+  live Amedia aliases were found: Nidaros `/s/30-113-19187` slug variants and Innherred
+  `/nyheter/n/9p848l` versus `/nyheter/i/9p848l`. The shared publisher identity now collapses the
+  exact stable IDs across collection, durable repository identity and City Pulse presentation.
+  Promotion therefore requires a fresh post-deploy generation where these duplicates are absent.
+- Local release gates after the first alias repair passed typecheck, ESLint, Prettier, `1316/1316`
+  Vitest tests, the production build and `151` Playwright tests with one intentional skip. The
+  additional Innherred regression then passed its focused `118/118` corpus; complete gates must be
+  rerun before release.
+
 ## Completion audit against the original mission
 
 | #   | Mission layer                                                     | Authoritative evidence                                                                                                                                                                         | Status                                                 |
 | --- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | 1   | Source ingestion                                                  | Append-only raw captures, stable source clocks, structural sentinels and source-health degradation; PRs `#32`–`#36`                                                                            | Complete within authorized source boundaries           |
 | 2   | Title extraction and cleanup                                      | Raw/clean separation, publisher-noise policy and RSS entity decoding; PR `#42` plus source contracts and fixtures                                                                              | Complete                                               |
-| 3   | Ingress extraction and generation                                 | Article-scoped Nyhetsstudio evidence, centralized boilerplate rejection and fail-closed empty/fallback behavior; PR `#44`                                                                      | Complete; broader Amedia enrichment decision-gated     |
+| 3   | Ingress extraction and generation                                 | Article-scoped Nyhetsstudio evidence, centralized boilerplate rejection, fail-closed empty/fallback behavior and bounded public Amedia enrichment                                              | Complete within approved request budgets               |
 | 4   | Canonicalization and deduplication                                | Canonical URL/revision identity, publisher content-ID path alias handling, one-to-one stable ID arbitration and stale metadata clearing                                                        | Complete                                               |
 | 5   | Same-story bundling                                               | Production-shaped bridge/recall cases, 127 labeled pairs, explicit conflicts and zero known critical bridge errors                                                                             | Complete on active legacy; v2 promotion decision-gated |
 | 6   | Primary article selection                                         | Deterministic coverage anchor separated from display-copy quality and latest publication time                                                                                                  | Complete                                               |
 | 7   | Bundle title and ingress synthesis                                | Versioned independent source-backed title/ingress selection, forbidden-claim corpus, exact field provenance and deterministic fallback; PRs `#38`, `#41`                                       | Complete; unsupported generation remains disabled      |
 | 8   | Ordering, freshness and updates                                   | Published/updated/fetched/first-seen separation plus retained-data freshness locking and update-aware display clocks                                                                           | Complete                                               |
-| 9   | Corrections and owner feedback                                    | Immediate split, undo, categories, durable history, sanitized export and missed-group report                                                                                                   | Implemented; production enablement decision-gated      |
+| 9   | Corrections and owner feedback                                    | Immediate split, undo, categories, durable history, sanitized export and missed-group report                                                                                                   | Implemented; owner approved production enablement      |
 | 10  | Desktop/mobile UI, accessibility and performance                  | Current owner-authenticated desktop + fresh 390 px readback, keyboard focus, disclosure behavior, plus stale/error/saved, accessibility and overflow regressions                               | Complete for released UI                               |
 | 11  | Evaluation, observability, deployment and production verification | Versioned production-shaped corpus, per-case failures, edge/conflict/rejection and generation provenance, sequential exact-main CI/deploy through `b885844f`, fresh worker and public readback | Complete for current policy; not v2 promotion proof    |
 
@@ -741,8 +766,8 @@ changed.
 
 ## Recommended next action
 
-After PR `#45` is released and the repaired live group is read back, request owner direction on the
-two remaining material boundaries: whether to prepare correction enablement and reviewed v2
-promotion; and whether broader Amedia article/paywall enrichment is authorized with an explicit
-request/evidence policy. Keep projection `legacy`, corrections disabled, matcher `v2`, and
-generation shadow until those decisions are made.
+Release the bounded enrichment and alias repair while keeping projection `legacy`, corrections
+disabled, matcher `v2` and generation shadow. Review a fresh post-deploy shadow generation, promote
+only its exact UUID if parity and integrity remain clean and the known Amedia aliases are collapsed,
+then enable corrections and run an immediately undone owner smoke correction. Verify public health,
+authenticated desktop/mobile rendering and visible `Pluss` badges after the promoted worker cycle.

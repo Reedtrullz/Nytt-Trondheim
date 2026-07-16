@@ -33,6 +33,11 @@
 - Cleaned title and excerpt fields decode HTML markup and named or numeric entities before
   whitespace normalization. The exact parsed feed fields remain unchanged in the raw capture so
   the mechanical transformation stays explainable and reversible.
+- Explicit subscriber text, exact paid categories, or public JSON-LD
+  `isAccessibleForFree=false` may mark an article as `paid`; missing evidence remains unknown rather
+  than free. Adresseavisen detail inspection has a hard twelve-page-per-cycle budget shared by
+  access detection, empty-description metadata and existing Nyhetsstudio enrichment. It never
+  crosses authentication or retains full article bodies.
 - `sourceUpdatedAt` uses a parseable public Atom/RSS `updated` value when present. It is a source
   revision clock, not collection time, and is retained only on the append-only capture.
 - Capture identity includes the raw retained evidence and source revision clock as well as the

@@ -378,6 +378,7 @@ describe("RSS collection policy", () => {
     expect(articles[0]).toMatchObject({
       source: "nidaros",
       sourceLabel: "Nidaros",
+      access: "paid",
       publishedAt: "2026-06-28T16:45:00.000Z",
       scope: "trondheim",
       category: "Nyheter",
@@ -398,6 +399,53 @@ describe("RSS collection policy", () => {
         },
       }),
       sourceUpdatedAt: "2026-06-28T16:45:00.000Z",
+    });
+  });
+
+  it("enriches a bounded empty Amedia RSS ingress and records explicit paid access", async () => {
+    const rss = `<?xml version="1.0"?><rss><channel>
+      <item><title>Ny plan for Trondheim sentrum</title><description></description>
+      <link>https://www.adressa.no/nyheter/trondheim/i/paid-one/ny-plan</link>
+      <pubDate>Tue, 16 Jul 2026 10:15:00 GMT</pubDate></item>
+    </channel></rss>`;
+    const detail = `<html><head>
+      <meta property="og:description" content="Planen endrer hvordan sentrum skal utvikles de neste årene.">
+      <script type="application/ld+json">{
+        "@type":"NewsArticle","isAccessibleForFree":false
+      }</script>
+    </head></html>`;
+    const fetcher = vi.fn(async (url: string | URL | Request) =>
+      String(url).includes("/paid-one/")
+        ? new Response(detail, { status: 200 })
+        : new Response(rss, { status: 200 }),
+    );
+
+    const articles = await collectRss(
+      {
+        id: "adressa",
+        label: "Adresseavisen",
+        url: "https://www.adressa.no/rss/nyheter",
+        detailFetchLimit: 1,
+        enrichEmptyExcerpt: true,
+        detectArticleAccess: true,
+        retainRegionalUnmatched: true,
+      },
+      fetcher,
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      access: "paid",
+      excerpt: "Planen endrer hvordan sentrum skal utvikles de neste årene.",
+    });
+    expect(sourceCaptureForArticle(articles[0]!)).toEqual({
+      rawPayload: expect.objectContaining({
+        detailPage: expect.objectContaining({
+          accessEvidence: "json_ld_is_accessible_for_free_false",
+        }),
+      }),
+      sourceUpdatedAt: undefined,
     });
   });
 
@@ -515,6 +563,61 @@ describe("RSS collection policy", () => {
       excerpt: "Nødetatene rykket ut til Ranheim.",
       url: "https://www.adressa.no/nyhetsstudio/i/oEwbza/arbeidsulykke-i-trondheim-liten-eksplosjon",
     });
+  });
+
+  it("admits one Nidaros article when one Amedia story id has multiple slugs", async () => {
+    const html = `<html><body>
+      <a href="/ulykke-i-trondheim-kun-en-person-involvert/s/30-113-19187">
+        Ulykke i Trondheim: – Kun en person involvert
+      </a>
+      <a href="/ulykke-i-trondheim-kun-en-person-involert/s/30-113-19187">
+        Ulykke i Trondheim: – Kun en person involvert
+      </a>
+      <script type="application/json">
+        {"id":"30-113-19187","articleLastModified":"2026-07-15T19:11:00.000+0200"}
+      </script>
+    </body></html>`;
+
+    const articles = await collectFrontpage(
+      {
+        id: "nidaros",
+        label: "Nidaros",
+        url: "https://www.nidaros.no/",
+        detailFetchLimit: 0,
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(html),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toContain("involvert/s/30-113-19187");
+  });
+
+  it("admits one Innherred article when one Amedia story id has multiple routes", async () => {
+    const html = `<html><head>
+      <meta property="article:published_time" content="2026-07-16T06:25:00.000Z">
+    </head><body>
+      <a href="/nyheter/n/9p848l/melder-om-kalver-paa-e6-kjoer-forsiktig">
+        Advarte om kalver på E6: – Mulig de har dratt hjem
+      </a>
+      <a href="/nyheter/i/9p848l/melder-om-kalver-paa-e6-kjoer-forsiktig">
+        Advarte om kalver på E6: – Mulig de har dratt hjem
+      </a>
+    </body></html>`;
+
+    const articles = await collectFrontpage(
+      {
+        id: "innherred",
+        label: "Innherred",
+        url: "https://www.innherred.no/",
+        detailFetchLimit: 2,
+        retainRegionalUnmatched: true,
+      },
+      async () => new Response(html),
+    );
+
+    expect(articles).toHaveLength(1);
+    expect(articles[0]?.url).toContain("/9p848l/");
   });
 
   it("rejects non-http article URLs from feeds", async () => {

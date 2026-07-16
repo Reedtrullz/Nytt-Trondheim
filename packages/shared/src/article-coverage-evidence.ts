@@ -480,7 +480,10 @@ function normalizeToken(value: string): string {
 export function publisherStoryIdentityKey(value: string): string | undefined {
   try {
     const url = new URL(value);
-    const storyId = url.pathname.match(/\/i\/([^/]+)(?:\/|$)/u)?.[1];
+    const storyId =
+      url.pathname.match(/\/i\/([^/]+)(?:\/|$)/u)?.[1] ??
+      url.pathname.match(/\/n\/([a-z0-9]{6})(?:\/|$)/iu)?.[1] ??
+      url.pathname.match(/\/s\/(\d+-\d+-\d+)(?:\/|$)/u)?.[1];
     if (!storyId) return undefined;
     return `${url.hostname.replace(/^www\./u, "")}:${storyId}`;
   } catch {
