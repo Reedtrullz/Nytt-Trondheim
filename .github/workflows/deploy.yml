@@ -111,7 +111,31 @@ jobs:
           ssh-keyscan -H 198.23.137.16 >> ~/.ssh/known_hosts
       - name: Smoke test SSH
         run: ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 "echo SSH_OK"
+      - name: Pause shadow worker for guarded first v2 promotion
+        if: >-
+          ${{ env.NYTT_COVERAGE_PROJECTION_MODE == 'normalized-active'
+              && env.COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID != '' }}
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /home/deploy/nytt-trondheim
+          active_generation="$(docker compose --env-file .env.production exec -T postgres \
+            psql -U nytt -d nytt -qAt -v ON_ERROR_STOP=1 -c \
+            "SELECT id FROM coverage_bundle_generations WHERE matcher_version='v2' AND mode='active' AND status='completed' AND is_current AND health_outcome='healthy' ORDER BY completed_at DESC, id DESC LIMIT 1;")"
+          if [ -z "$active_generation" ]; then
+            docker compose --env-file .env.production stop worker
+          fi
+          REMOTE
       - name: Run Ansible deployment
         run: >-
           ansible-playbook -i inventory/hosts.yml ansible-playbook.yml
           -e coverage_v2_owner_reviewed_generation_id="${COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID:-}"
+      - name: Ensure worker is running after guarded first v2 promotion
+        if: >-
+          ${{ always()
+              && env.NYTT_COVERAGE_PROJECTION_MODE == 'normalized-active'
+              && env.COVERAGE_V2_OWNER_REVIEWED_GENERATION_ID != '' }}
+        run: >-
+          ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16
+          "cd /home/deploy/nytt-trondheim && docker compose --env-file .env.production up -d worker"
