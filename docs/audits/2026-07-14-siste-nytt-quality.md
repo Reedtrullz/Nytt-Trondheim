@@ -708,6 +708,16 @@ changed.
   Vitest tests, the production build and `151` Playwright tests with one intentional skip. The
   additional Innherred regression then passed its focused `118/118` corpus; complete gates must be
   rerun before release.
+- PR `#46` merged as `65b95d182796dd12d7fb5cb8454c4f3666cd7dfa`; exact-main CI
+  `29507092183` passed. Deploy `29507523798` lost one SSH control connection during its first image
+  build, then completed on the idempotent retry with
+  `ok=54 changed=10 unreachable=0 failed=0 skipped=2`. Readiness remained healthy on `legacy`.
+- Fresh post-deploy shadow generation `93740065-9c56-489a-b08c-b1bd8d484a48` had 20 groups, 15
+  strong, five moderate, 58 review candidates, zero integrity errors and clean storage parity. Both
+  Amedia aliases were absent, but owner review withheld promotion after finding one new NRK alias:
+  two slugs/titles for the exact stable publication suffix `1.17960432`. A narrow NRK-host rule now
+  treats that explicit ID as authoritative across editorial slug/title updates while preserving
+  Amedia's stricter title/time revision boundary.
 
 ## Completion audit against the original mission
 
@@ -768,6 +778,7 @@ changed.
 
 Release the bounded enrichment and alias repair while keeping projection `legacy`, corrections
 disabled, matcher `v2` and generation shadow. Review a fresh post-deploy shadow generation, promote
-only its exact UUID if parity and integrity remain clean and the known Amedia aliases are collapsed,
+only its exact UUID if parity and integrity remain clean and the known publisher aliases are
+collapsed,
 then enable corrections and run an immediately undone owner smoke correction. Verify public health,
 authenticated desktop/mobile rendering and visible `Pluss` badges after the promoted worker cycle.
