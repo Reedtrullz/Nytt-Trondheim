@@ -10,6 +10,7 @@ import type {
   SourceHealth,
 } from "@nytt/shared";
 import {
+  ActiveAlertStrip,
   articlesFromCityPulseStoryPage,
   articlesFromCityPulseStories,
   CityPulseDashboard,
@@ -22,6 +23,7 @@ import {
   MapClusterSummary,
   MapTimeSlider,
   MorningBriefPanel,
+  PublicNowBrief,
   PublicSourceStatusPanel,
   StoryConfidenceBadge,
   StoryEventBundleSummary,
@@ -44,7 +46,10 @@ import {
   loadCoverageConflictRefreshState,
   mergeCityPulseStoryLists,
   morningBriefFreshness,
+  publicActiveSituations,
+  publicFeedFreshness,
   rankHomeStoryCardsForPublicFeed,
+  sortHomeStoryCardsForPublicFeed,
   shouldShowStoryConfidenceBadge,
   storyFeedSummary,
   storyFeedTrustStats,
@@ -267,6 +272,81 @@ describe("MorningBriefPanel", () => {
     expect(
       morningBriefFreshness("2026-06-29T07:30:00.000Z", new Date("2026-07-02T12:00:00.000Z")),
     ).toMatchObject({ label: "Eldre brief", tone: "stale" });
+  });
+});
+
+describe("public first-fold freshness and alerts", () => {
+  it("keeps feed freshness separate from source-health freshness", () => {
+    const now = new Date("2026-07-02T12:00:00.000Z");
+    expect(publicFeedFreshness("2026-07-02T11:45:00.000Z", now)).toMatchObject({
+      label: "Oppdatert nå",
+      tone: "fresh",
+    });
+    expect(publicFeedFreshness("2026-07-02T10:00:00.000Z", now)).toMatchObject({
+      label: "Oppdatert siste 2 t",
+      tone: "fresh",
+    });
+    expect(publicFeedFreshness("2026-07-01T10:00:00.000Z", now)).toMatchObject({
+      label: "Oppdatert i går",
+      tone: "watch",
+    });
+    expect(publicFeedFreshness("not-a-date", now)).toMatchObject({
+      label: "Ukjent oppdatering",
+      tone: "watch",
+    });
+  });
+
+  it("prioritizes active situations while keeping the newest update first within a status", () => {
+    const preliminary = {
+      ...situation,
+      id: "preliminary",
+      status: "preliminary" as const,
+      updatedAt: "2026-07-02T11:50:00.000Z",
+    };
+    const activeOlder = {
+      ...situation,
+      id: "active-older",
+      updatedAt: "2026-07-02T09:00:00.000Z",
+    };
+    const activeNewer = {
+      ...situation,
+      id: "active-newer",
+      updatedAt: "2026-07-02T10:00:00.000Z",
+    };
+    expect(
+      publicActiveSituations([preliminary, activeOlder, activeNewer]).map((item) => item.id),
+    ).toEqual(["active-newer", "active-older", "preliminary"]);
+  });
+
+  it("renders the compact current-state digest and active alert strip", () => {
+    const cards = homeStoryCardsForGroups(groupHomeArticles([article]));
+    const briefWithoutLinks = { ...brief, articleIds: [], situationIds: [] };
+    const digestHtml = renderToStaticMarkup(
+      <MemoryRouter>
+        <PublicNowBrief
+          brief={briefWithoutLinks}
+          cards={cards}
+          now={new Date("2026-07-02T12:00:00.000Z")}
+          situations={[situation]}
+        />
+      </MemoryRouter>,
+    );
+    expect(digestHtml).toContain("Oppdatert nå");
+    expect(digestHtml).toContain("Det viktigste i Trondheim");
+    expect(digestHtml).toContain("Kø ved Sluppen");
+    expect(digestHtml).toContain("Oppdatert i dag");
+
+    const alertHtml = renderToStaticMarkup(
+      <MemoryRouter>
+        <ActiveAlertStrip now={new Date("2026-07-02T12:00:00.000Z")} situations={[situation]} />
+      </MemoryRouter>,
+    );
+    expect(alertHtml).toContain("Aktive varsler");
+    expect(alertHtml).toContain("Én situasjon følges nå");
+    expect(alertHtml).toContain("Steinsprang, vegen er stengt");
+    expect(alertHtml).toContain("Pågår");
+    expect(alertHtml).toContain("oppdatert i dag");
+    expect(alertHtml).toContain("/situasjoner/situation-one");
   });
 });
 
@@ -1578,6 +1658,41 @@ describe("rankHomeStoryCardsForPublicFeed", () => {
       "Tidligere utrykning på Tiller",
     ]);
     expect(rankHomeStoryCardsForPublicFeed(cards, { enabled: false })).toBe(cards);
+  });
+
+  it("uses strict newest-first order for the default feed mode", () => {
+    const storyArticle = (overrides: Partial<Article> = {}) =>
+      ({ ...article, ...overrides }) satisfies Article;
+    const cards = homeStoryCardsForGroups(
+      groupHomeArticles([
+        storyArticle({
+          id: "older-high-signal",
+          title: "Bekreftet hendelse fra tidligere",
+          category: "Hendelser",
+          source: "nrk",
+          sourceLabel: "NRK Trøndelag",
+          url: "https://example.test/older-high-signal",
+          publishedAt: "2026-07-02T09:00:00.000Z",
+          places: ["Elgeseter"],
+          publicVerification: {
+            status: "verified",
+            label: "Verifisert",
+            detail: "Offentlig bekreftet.",
+            officialSources: ["politiloggen"],
+            reportingSources: ["nrk"],
+          },
+        }),
+        storyArticle({
+          id: "newer-low-signal",
+          title: "Ny lokal oppdatering",
+          category: "Kultur",
+          publishedAt: "2026-07-02T10:00:00.000Z",
+        }),
+      ]),
+    );
+    expect(sortHomeStoryCardsForPublicFeed(cards, "latest").map((card) => card.primary.id)).toEqual(
+      ["newer-low-signal", "older-high-signal"],
+    );
   });
 });
 
