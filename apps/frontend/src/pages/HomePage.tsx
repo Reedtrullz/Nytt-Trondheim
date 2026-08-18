@@ -758,12 +758,10 @@ export function PublicNowBrief({
   brief,
   cards,
   now = new Date(),
-  situations = [],
 }: {
   brief?: BootstrapPayload["morningBrief"];
   cards: HomeStoryCard[];
   now?: Date;
-  situations?: HomeSituationSummary[];
 }) {
   const topStories = cards.slice(0, 3);
   const freshness = publicFeedFreshness(topStories[0]?.latestAt ?? brief?.generatedAt, now);
@@ -3180,11 +3178,7 @@ export function HomePage({
         />
       ) : null}
       {!isTextSearch && isDefaultHomeFeed(filters) ? (
-        <PublicNowBrief
-          brief={cityPulseData.morningBrief}
-          cards={displayedStoryCards}
-          situations={cityPulseData.situations}
-        />
+        <PublicNowBrief brief={cityPulseData.morningBrief} cards={displayedStoryCards} />
       ) : null}
       {!isTextSearch ? (
         <CityPulseDashboard compact={isDefaultHomeFeed(filters)} data={cityPulseData} />

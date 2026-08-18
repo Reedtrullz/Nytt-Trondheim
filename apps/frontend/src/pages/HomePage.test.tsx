@@ -327,7 +327,6 @@ describe("public first-fold freshness and alerts", () => {
           brief={briefWithoutLinks}
           cards={cards}
           now={new Date("2026-07-02T12:00:00.000Z")}
-          situations={[situation]}
         />
       </MemoryRouter>,
     );
