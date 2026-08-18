@@ -42,9 +42,12 @@ import {
   homeTimeWindowFrom,
   homeTimeWindowLabels,
   homeTimeWindows,
+  homeFeedModeLabels,
+  homeFeedModes,
   parseHomeFilters,
   searchSummary,
   type ArticleCategoryFilter,
+  type HomeFeedMode,
   type HomeFilters,
   type HomeTimeWindow,
 } from "../homeFilters.js";
@@ -263,6 +266,70 @@ export function morningBriefFreshness(
   return {
     label: "Eldre brief",
     detail: `Oppdatert ${osloDateLabelFormatter.format(generatedDate)}`,
+    tone: "stale",
+  };
+}
+
+export type PublicFreshnessTone = "fresh" | "watch" | "stale";
+
+export interface PublicFreshness {
+  label: string;
+  detail?: string;
+  tone: PublicFreshnessTone;
+}
+
+/**
+ * Keep public freshness language tied to the feed timestamp rather than to a
+ * collection-health check or a stored morning brief. This lets the first fold
+ * say exactly what is fresh (or stale) without implying that every upstream
+ * source is healthy.
+ */
+export function publicFeedFreshness(
+  timestamp: string | undefined,
+  now: Date = new Date(),
+): PublicFreshness {
+  const observedAt = timestamp ? new Date(timestamp) : undefined;
+  if (!observedAt || !Number.isFinite(observedAt.getTime())) {
+    return {
+      label: "Ukjent oppdatering",
+      detail: "Tidspunktet kunne ikke leses",
+      tone: "watch",
+    };
+  }
+
+  const ageMs = Math.max(0, now.getTime() - observedAt.getTime());
+  const ageMinutes = ageMs / 60_000;
+  if (ageMinutes <= 30) {
+    return { label: "Oppdatert nå", detail: formatTime(observedAt.toISOString()), tone: "fresh" };
+  }
+  if (ageMinutes <= 2 * 60) {
+    return {
+      label: "Oppdatert siste 2 t",
+      detail: formatTime(observedAt.toISOString()),
+      tone: "fresh",
+    };
+  }
+
+  const observedKey = osloDateKey(observedAt);
+  const nowKey = osloDateKey(now);
+  const ageDays = observedKey && nowKey ? daysBetweenOsloDates(observedKey, nowKey) : 0;
+  if (ageDays <= 0) {
+    return {
+      label: "Oppdatert i dag",
+      detail: formatTime(observedAt.toISOString()),
+      tone: "watch",
+    };
+  }
+  if (ageDays === 1) {
+    return {
+      label: "Oppdatert i går",
+      detail: `${osloDateLabelFormatter.format(observedAt)} · ${formatTime(observedAt.toISOString())}`,
+      tone: "watch",
+    };
+  }
+  return {
+    label: "Eldre oppdatering",
+    detail: `${osloDateLabelFormatter.format(observedAt)} · ${formatTime(observedAt.toISOString())}`,
     tone: "stale",
   };
 }
@@ -626,12 +693,160 @@ export function CityPulseSignalPanel({
   );
 }
 
-export function CityPulseDashboard({ data }: { data: BootstrapPayload }) {
-  const activeSituations = data.situations.filter(
-    (item) => item.status === "preliminary" || item.status === "active",
-  );
+export function publicActiveSituations(
+  situations: HomeSituationSummary[],
+  limit = 3,
+): HomeSituationSummary[] {
+  return situations
+    .filter((item) => item.status === "preliminary" || item.status === "active")
+    .sort((left, right) => {
+      const leftStatus = left.status === "active" ? 1 : 0;
+      const rightStatus = right.status === "active" ? 1 : 0;
+      return (
+        rightStatus - leftStatus ||
+        (situationLatestMs(right) ?? 0) - (situationLatestMs(left) ?? 0) ||
+        left.title.localeCompare(right.title, "nb")
+      );
+    })
+    .slice(0, limit);
+}
+
+function publicSituationStatusLabel(status: HomeSituationSummary["status"]): string {
+  return status === "active" ? "Pågår" : "Til vurdering";
+}
+
+export function ActiveAlertStrip({
+  now = new Date(),
+  situations,
+}: {
+  now?: Date;
+  situations: HomeSituationSummary[];
+}) {
+  const activeSituations = publicActiveSituations(situations);
   if (activeSituations.length === 0) return null;
-  return <SituationBanner situations={activeSituations} />;
+  return (
+    <section className="active-alert-strip" aria-labelledby="active-alert-heading">
+      <div className="active-alert-heading">
+        <p className="label">Aktive varsler</p>
+        <h2 id="active-alert-heading">
+          {activeSituations.length === 1
+            ? "Én situasjon følges nå"
+            : `${activeSituations.length} situasjoner følges nå`}
+        </h2>
+      </div>
+      <ul>
+        {activeSituations.map((situation) => {
+          const freshness = publicFeedFreshness(situationLatestTimestamp(situation), now);
+          return (
+            <li key={situation.id} className={`active-alert-item active-alert-${freshness.tone}`}>
+              <Link to={`/situasjoner/${encodeURIComponent(situation.id)}`}>
+                <strong>{situation.title}</strong>
+                <span>
+                  {publicSituationStatusLabel(situation.status)} · {situation.locationLabel} ·{" "}
+                  {freshness.label.toLocaleLowerCase("nb")}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+export function PublicNowBrief({
+  brief,
+  cards,
+  now = new Date(),
+  situations = [],
+}: {
+  brief?: BootstrapPayload["morningBrief"];
+  cards: HomeStoryCard[];
+  now?: Date;
+  situations?: HomeSituationSummary[];
+}) {
+  const topStories = cards.slice(0, 3);
+  const activeSituations = publicActiveSituations(situations, 3);
+  const freshness = publicFeedFreshness(topStories[0]?.latestAt ?? brief?.generatedAt, now);
+  const briefFreshness = brief ? publicFeedFreshness(brief.generatedAt, now) : undefined;
+  if (topStories.length === 0 && !brief && activeSituations.length === 0) return null;
+
+  const fallbackSummary =
+    topStories.length === 1
+      ? "1 fersk sak er klar for en rask gjennomgang."
+      : topStories.length > 1
+        ? `${topStories.length} ferske saker er klare for en rask gjennomgang.`
+        : "Det er foreløpig ingen ferske saker i det åpne Trondheim-utvalget.";
+  const summary = brief && briefFreshness?.tone !== "stale" ? brief.paragraphs[0] : fallbackSummary;
+
+  return (
+    <section className="public-now-brief" aria-labelledby="public-now-heading">
+      <div className="public-now-brief-heading">
+        <div>
+          <p className="label">Oppdatert nå</p>
+          <h2 id="public-now-heading">Det viktigste i Trondheim</h2>
+          <p>{summary}</p>
+        </div>
+        <div
+          className={`public-now-freshness public-now-freshness-${freshness.tone}`}
+          aria-label="Siste oppdatering i bypulsen"
+        >
+          <strong>{freshness.label}</strong>
+          {freshness.detail ? <small>{freshness.detail}</small> : null}
+        </div>
+      </div>
+      {topStories.length > 0 ? (
+        <ol className="public-now-stories" aria-label="Tre viktigste ferske saker">
+          {topStories.map((card) => {
+            const articleUrl = safeExternalUrl(card.primary.url);
+            const storyTitle = articleUrl ? (
+              <a href={articleUrl} target="_blank" rel="noreferrer noopener">
+                {card.primary.title}
+              </a>
+            ) : (
+              <strong>{card.primary.title}</strong>
+            );
+            return (
+              <li key={card.id}>
+                <span className="public-now-story-index" aria-hidden="true" />
+                <div>
+                  <span className="metadata compact">
+                    {card.sourceSummary} · {formatTime(card.latestAt)}
+                  </span>
+                  {storyTitle}
+                  <small>
+                    {card.channelLabel}
+                    {card.locationLabel ? ` · ${card.locationLabel}` : ""}
+                  </small>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+      {topStories.length === 0 && brief ? (
+        <small className="public-now-brief-note">
+          Briefen venter på de ferske sakene i feeden.
+        </small>
+      ) : null}
+    </section>
+  );
+}
+
+export function CityPulseDashboard({
+  compact = false,
+  data,
+}: {
+  compact?: boolean;
+  data: BootstrapPayload;
+}) {
+  const activeSituations = publicActiveSituations(data.situations);
+  if (activeSituations.length === 0) return null;
+  return compact ? (
+    <ActiveAlertStrip situations={activeSituations} />
+  ) : (
+    <SituationBanner situations={activeSituations} />
+  );
 }
 
 function LeadStory({
@@ -1540,12 +1755,38 @@ export function rankHomeStoryCardsForPublicFeed(
     .map((item) => item.card);
 }
 
+/**
+ * Sort the public feed according to the mode the reader selected. `latest` is
+ * deliberately strict chronological order. The priority mode reuses the
+ * freshness-banded signal ranking above so a high-signal item can move up only
+ * alongside material of comparable age.
+ */
+export function sortHomeStoryCardsForPublicFeed(
+  cards: HomeStoryCard[],
+  mode: HomeFeedMode = "latest",
+): HomeStoryCard[] {
+  if (cards.length < 2) return cards;
+  if (mode === "priority") return rankHomeStoryCardsForPublicFeed(cards, { enabled: true });
+  return cards
+    .map((card, index) => ({ card, index, timestamp: timestampMs(card.latestAt) ?? 0 }))
+    .sort((left, right) => right.timestamp - left.timestamp || left.index - right.index)
+    .map((item) => item.card);
+}
+
 function situationLatestMs(situation: HomeSituationSummary): number | undefined {
   const updatedAt = timestampMs(situation.updatedAt);
   const createdAt = timestampMs(situation.createdAt);
   if (updatedAt === undefined) return createdAt;
   if (createdAt === undefined) return updatedAt;
   return Math.max(updatedAt, createdAt);
+}
+
+function situationLatestTimestamp(situation: HomeSituationSummary): string | undefined {
+  const updatedAt = timestampMs(situation.updatedAt);
+  const createdAt = timestampMs(situation.createdAt);
+  if (updatedAt === undefined) return situation.createdAt;
+  if (createdAt === undefined || updatedAt >= createdAt) return situation.updatedAt;
+  return situation.createdAt;
 }
 
 function situationMatchesWindow(
@@ -1881,6 +2122,7 @@ export function HomePage({
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
   const { scope, category, topic, timeWindow, q: query } = filters;
+  const feedMode: HomeFeedMode = filters.feedMode ?? "latest";
   const initialFeedIsDefault = isDefaultHomeFeed(filters);
   const [liveData, setLiveData] = useState(initialData);
   const [articles, setArticles] = useState(() =>
@@ -2325,14 +2567,12 @@ export function HomePage({
     () => rankHomeStoryCardsByLocalFocus(storyCards, activeLocalFocus),
     [activeLocalFocus, storyCards],
   );
-  const publicFeedRankingEnabled =
-    !activeLocalFocus && category === "Alle" && !isTextSearch && !topic;
   const displayedStoryCards = useMemo(
     () =>
-      rankHomeStoryCardsForPublicFeed(localRankedStoryCards, {
-        enabled: publicFeedRankingEnabled,
-      }),
-    [localRankedStoryCards, publicFeedRankingEnabled],
+      activeLocalFocus
+        ? localRankedStoryCards
+        : sortHomeStoryCardsForPublicFeed(localRankedStoryCards, feedMode),
+    [activeLocalFocus, feedMode, localRankedStoryCards],
   );
   const displayedGroups = useMemo(
     () => displayedStoryCards.map((card) => card.group),
@@ -2876,10 +3116,41 @@ export function HomePage({
           summary={localFocusSummary}
         />
       ) : null}
-      {!isTextSearch ? <CityPulseDashboard data={cityPulseData} /> : null}
+      {!isTextSearch && isDefaultHomeFeed(filters) ? (
+        <PublicNowBrief
+          brief={cityPulseData.morningBrief}
+          cards={displayedStoryCards}
+          situations={cityPulseData.situations}
+        />
+      ) : null}
+      {!isTextSearch ? (
+        <CityPulseDashboard compact={isDefaultHomeFeed(filters)} data={cityPulseData} />
+      ) : null}
       <div className="home-grid">
         <section className="news-section">
-          <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
+          <div className="news-section-heading">
+            <div>
+              <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
+              <p className="news-section-mode-label">
+                {feedMode === "priority"
+                  ? "Høyeffektsaker løftes innen samme ferskhetsbånd."
+                  : "Sortert etter siste oppdatering."}
+              </p>
+            </div>
+            <div className="feed-mode-switch" role="group" aria-label="Rekkefølge på saker">
+              {homeFeedModes.map((mode) => (
+                <button
+                  type="button"
+                  aria-pressed={feedMode === mode}
+                  className={feedMode === mode ? "selected" : ""}
+                  key={mode}
+                  onClick={() => updateFilters({ feedMode: mode })}
+                >
+                  {homeFeedModeLabels[mode]}
+                </button>
+              ))}
+            </div>
+          </div>
           {displayedStoryCards.length > 0 ? (
             <p className="story-feed-summary" aria-label="Sammendrag av bypulssaker">
               {storyFeedSummary(displayedStoryCards)}

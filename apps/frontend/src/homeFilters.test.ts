@@ -7,6 +7,7 @@ import {
   articleCategoryLabels,
   articleTopicLabels,
   buildHomeSearch,
+  homeFeedModeLabels,
   homeTimeWindowFrom,
   parseHomeFilters,
   searchSummary,
@@ -61,6 +62,22 @@ describe("home filter query params", () => {
         timeWindow: "24h",
       }),
     ).toBe("?window=24h");
+    expect(
+      buildHomeSearch({
+        q: "",
+        scope: "trondheim",
+        category: "Alle",
+        timeWindow: "all",
+        feedMode: "priority",
+      }),
+    ).toBe("?sort=priority");
+  });
+
+  it("keeps the default feed chronological while exposing priority as an explicit URL mode", () => {
+    expect(parseHomeFilters("?sort=priority")).toMatchObject({ feedMode: "priority" });
+    expect(parseHomeFilters("?sort=latest")).not.toHaveProperty("feedMode");
+    expect(parseHomeFilters("?sort=unknown")).not.toHaveProperty("feedMode");
+    expect(homeFeedModeLabels).toEqual({ latest: "Nyeste", priority: "Prioritert" });
   });
 
   it("keeps API category values separate from home filter labels", () => {
