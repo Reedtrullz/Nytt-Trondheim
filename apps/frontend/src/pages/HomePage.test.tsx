@@ -336,6 +336,16 @@ describe("public first-fold freshness and alerts", () => {
     expect(digestHtml).toContain("Kø ved Sluppen");
     expect(digestHtml).toContain("Oppdatert i dag");
 
+    const staleDigestHtml = renderToStaticMarkup(
+      <PublicNowBrief
+        brief={{ ...briefWithoutLinks, generatedAt: "2026-06-30T07:30:00.000Z" }}
+        cards={cards}
+        now={new Date("2026-07-02T12:00:00.000Z")}
+      />,
+    );
+    expect(staleDigestHtml).not.toContain("Morgenbildet dekker 12 ferske saker.");
+    expect(staleDigestHtml).toContain("1 fersk sak er klar for en rask gjennomgang.");
+
     const alertHtml = renderToStaticMarkup(
       <MemoryRouter>
         <ActiveAlertStrip now={new Date("2026-07-02T12:00:00.000Z")} situations={[situation]} />

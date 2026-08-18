@@ -766,15 +766,17 @@ export function PublicNowBrief({
   situations?: HomeSituationSummary[];
 }) {
   const topStories = cards.slice(0, 3);
-  const activeSituations = publicActiveSituations(situations, 3);
   const freshness = publicFeedFreshness(topStories[0]?.latestAt ?? brief?.generatedAt, now);
-  if (topStories.length === 0 && !brief && activeSituations.length === 0) return null;
+  const briefFreshness = brief ? publicFeedFreshness(brief.generatedAt, now) : undefined;
+  if (topStories.length === 0 && !brief) return null;
 
   const fallbackSummary =
-    topStories.length > 0
-      ? `${topStories.length} ferske ${topStories.length === 1 ? "sak" : "saker"} er klare for en rask gjennomgang.`
-      : "Det er foreløpig ingen ferske saker i det åpne Trondheim-utvalget.";
-  const summary = brief?.paragraphs[0] ?? fallbackSummary;
+    topStories.length === 1
+      ? "1 fersk sak er klar for en rask gjennomgang."
+      : topStories.length > 1
+        ? `${topStories.length} ferske saker er klare for en rask gjennomgang.`
+        : "Det er foreløpig ingen ferske saker i det åpne Trondheim-utvalget.";
+  const summary = brief && briefFreshness?.tone !== "stale" ? brief.paragraphs[0] : fallbackSummary;
 
   return (
     <section className="public-now-brief" aria-labelledby="public-now-heading">
@@ -1166,9 +1168,13 @@ export function ChannelContextPanel({
   const place = scope === "trondheim" ? "Trondheim" : "Trøndelag";
   const windowLabel =
     timeWindow === "all" ? "hele tidslinjen" : `siste ${homeTimeWindowLabels[timeWindow]}`;
+  const isDefault = category === "Alle" && scope === "trondheim" && timeWindow === "all";
 
   return (
-    <section className="channel-context" aria-label="Valgt tematisk kanal">
+    <section
+      className={`channel-context${isDefault ? " channel-context-default" : ""}`}
+      aria-label="Valgt tematisk kanal"
+    >
       <span className="channel-context-icon" aria-hidden="true">
         <ArticleCategoryIcon name={category} />
       </span>
