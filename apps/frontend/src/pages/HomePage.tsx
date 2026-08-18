@@ -676,7 +676,7 @@ function LeadStory({
         </div>
         {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
         <StoryEventBundleSummary card={card} />
-        <h2>{article.title}</h2>
+        <h3>{article.title}</h3>
         <p>{article.excerpt}</p>
         <div className="story-card-tags lead-story-tags">
           <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
@@ -1021,16 +1021,13 @@ function StoryCard({
         </div>
         <StoryEventBundleSummary card={card} />
         {articleUrl ? (
-          <a
-            className="headline story-title"
-            href={articleUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            {card.title}
-          </a>
+          <h3 className="headline story-title">
+            <a href={articleUrl} target="_blank" rel="noreferrer noopener">
+              {card.title}
+            </a>
+          </h3>
         ) : (
-          <span className="headline story-title">{card.title}</span>
+          <h3 className="headline story-title">{card.title}</h3>
         )}
         <p className="excerpt">{card.excerpt}</p>
         <div className="story-card-tags">
@@ -1882,6 +1879,14 @@ export function HomePage({
   const filters = useMemo(() => parseHomeFilters(searchParams.toString()), [searchParams]);
   const { scope, category, topic, timeWindow, q: query } = filters;
   const initialFeedIsDefault = isDefaultHomeFeed(filters);
+  const [filtersOpen, setFiltersOpen] = useState(() => !initialFeedIsDefault);
+  const activeFilterLabels = [
+    category !== "Alle" ? articleCategoryLabels[category] : undefined,
+    topic ? articleTopicLabels[topic] : undefined,
+    timeWindow !== "all" ? homeTimeWindowLabels[timeWindow] : undefined,
+    query.trim() ? `Søk: ${query.trim()}` : undefined,
+  ].filter((label): label is string => Boolean(label));
+  const activeFilterCount = activeFilterLabels.length + (scope !== "trondheim" ? 1 : 0);
   const [liveData, setLiveData] = useState(initialData);
   const [articles, setArticles] = useState(() =>
     initialFeedIsDefault ? initialData.articles : [],
@@ -1963,6 +1968,10 @@ export function HomePage({
       setStoryProjection(initialData.storyProjection);
     }
   }, [initialData]);
+
+  useEffect(() => {
+    if (!isDefaultHomeFeed(filters)) setFiltersOpen(true);
+  }, [category, query, scope, timeWindow, topic]);
 
   useEffect(() => {
     if (!correctionDialog || coverageCorrectionContextMatches(correctionDialog, coverageContext)) {
@@ -2717,11 +2726,30 @@ export function HomePage({
     }
   }
 
+  const feedBusy = loading || loadingMore || refreshingCityPulse;
+  const pageTitle = `Siste nytt i ${scope === "trondheim" ? "Trondheim" : "Trøndelag"}`;
+
   return (
-    <main className="home" data-generation-id={storyProjection?.generationId}>
+    <main
+      className="home"
+      id="main-content"
+      data-generation-id={storyProjection?.generationId}
+      aria-labelledby="home-heading"
+      aria-busy={feedBusy}
+    >
+      <h1 className="sr-only" id="home-heading">
+        {pageTitle}
+      </h1>
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {coverageCorrectionLiveAnnouncement(Boolean(undoState), correctionAnnouncement) ||
-          mergeReportAnnouncement}
+          mergeReportAnnouncement ||
+          (loading
+            ? "Oppdaterer saker."
+            : loadingMore
+              ? "Henter flere saker."
+              : refreshingCityPulse
+                ? "Oppdaterer bypulsen."
+                : cityPulseRefreshError || "")}
       </p>
       {availableUndoState ? (
         <div className="coverage-correction-toast" role="status" aria-atomic="true">
@@ -2731,135 +2759,167 @@ export function HomePage({
           </button>
         </div>
       ) : null}
-      <div className="view-controls">
-        <div className="scope-switch" aria-label="Geografisk visning">
-          <button
-            type="button"
-            aria-pressed={scope === "trondheim"}
-            className={scope === "trondheim" ? "selected" : ""}
-            onClick={() => updateFilters({ scope: "trondheim" })}
-          >
-            Trondheim
-          </button>
-          <button
-            type="button"
-            aria-pressed={scope === "trondelag"}
-            className={scope === "trondelag" ? "selected" : ""}
-            onClick={() => updateFilters({ scope: "trondelag" })}
-          >
-            Trøndelag
-          </button>
-        </div>
-        <div className="filters" aria-label="Tematiske kanaler">
-          {articleCategories.map((item: ArticleCategoryFilter) => {
-            const count = channelStoryCounts[item] ?? 0;
-            return (
-              <button
-                type="button"
-                aria-pressed={category === item}
-                className={`channel-filter channel-filter-${item.toLocaleLowerCase("nb")}${
-                  category === item ? " selected" : ""
-                }`}
-                key={item}
-                onClick={() => updateFilters({ category: item })}
-                title={`${articleCategoryLabels[item]}: ${channelCountText(count)}`}
-              >
-                <span className="channel-filter-icon" aria-hidden="true">
-                  <ArticleCategoryIcon name={item} />
-                </span>
-                <span className="channel-filter-label">{articleCategoryLabels[item]}</span>
-                <span className="channel-filter-count" aria-label={channelCountText(count)}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {category === "Sport" ? (
-          <div className="topic-filters" aria-label="Sportskategorier">
+      <div className="view-controls" role="region" aria-label="Visnings- og filtervalg">
+        <div className="view-controls-bar">
+          <div className="scope-switch" role="group" aria-label="Geografisk visning">
             <button
               type="button"
-              aria-pressed={topic === "rosenborg"}
-              className={topic === "rosenborg" ? "selected" : ""}
-              onClick={() =>
-                updateFilters({ topic: topic === "rosenborg" ? undefined : "rosenborg" })
-              }
+              aria-pressed={scope === "trondheim"}
+              className={scope === "trondheim" ? "selected" : ""}
+              onClick={() => updateFilters({ scope: "trondheim" })}
             >
-              {articleTopicLabels.rosenborg}
+              Trondheim
+            </button>
+            <button
+              type="button"
+              aria-pressed={scope === "trondelag"}
+              className={scope === "trondelag" ? "selected" : ""}
+              onClick={() => updateFilters({ scope: "trondelag" })}
+            >
+              Trøndelag
             </button>
           </div>
-        ) : null}
-        <div className="time-filters" aria-label="Tidsvindu">
-          {homeTimeWindows.map((item) => (
-            <button
-              type="button"
-              aria-pressed={timeWindow === item}
-              className={timeWindow === item ? "selected" : ""}
-              key={item}
-              onClick={() => updateFilters({ timeWindow: item })}
-            >
-              {homeTimeWindowLabels[item]}
-            </button>
-          ))}
-        </div>
-        {feedKey === defaultHomeFeedKey ? (
-          <CityPulseRefreshStatus
-            error={cityPulseRefreshError}
-            lastUpdatedAt={cityPulseRefreshedAt}
-            onRefresh={() => void refreshCityPulse()}
-            refreshing={refreshingCityPulse}
-          />
-        ) : null}
-        <div className={`local-focus local-focus-${localFocus.status}`} aria-live="polite">
           <button
             type="button"
-            aria-pressed={localFocus.status === "active"}
-            className={localFocus.status === "active" ? "selected" : ""}
-            disabled={localFocus.status === "locating"}
-            onClick={localFocus.status === "active" ? clearLocalFocus : requestLocalFocus}
+            className={`filters-toggle${activeFilterCount > 0 ? " has-active" : ""}`}
+            aria-expanded={filtersOpen}
+            aria-controls="home-filter-panel"
+            onClick={() => setFiltersOpen((open) => !open)}
           >
-            {localFocus.status === "locating"
-              ? "Finner posisjon"
-              : localFocus.status === "active"
-                ? "Lokalt fokus aktivt"
-                : "Nær meg"}
-          </button>
-          <select
-            aria-label="Velg nærområde"
-            value={neighborhoodFocusId}
-            onChange={(event) => selectNeighborhoodFocus(event.target.value)}
-          >
-            <option value="">Velg område</option>
-            {homeNeighborhoodFocusOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <form className="local-focus-search" onSubmit={applyNeighborhoodFocusQuery}>
-            <input
-              aria-label="Postnummer eller sted"
-              inputMode="search"
-              placeholder="Postnummer/sted"
-              value={neighborhoodFocusQuery}
-              onChange={(event) => setNeighborhoodFocusQuery(event.target.value)}
-            />
-            <button type="submit">Bruk</button>
-          </form>
-          {localFocus.status === "active" ? (
-            <LocalFocusRadiusControl
-              value={activeLocalFocusRadiusKm}
-              onChange={updateLocalFocusRadius}
-            />
-          ) : null}
-          {localFocus.status === "active" ? (
-            <span>
-              Nær {localFocus.label} · innen {activeLocalFocusRadiusKm} km
-              {localFocus.persistent ? " · huskes her" : ""}
+            <span>Filtrer</span>
+            {activeFilterCount > 0 ? (
+              <span
+                className="filters-toggle-count"
+                aria-label={`${activeFilterCount} aktive filtre`}
+              >
+                {activeFilterCount}
+              </span>
+            ) : null}
+            <span className="filters-toggle-chevron" aria-hidden="true">
+              {filtersOpen ? "−" : "+"}
             </span>
-          ) : localFocus.status === "error" ? (
-            <span role="status">{localFocus.message}</span>
+          </button>
+          <span className="active-filter-summary" aria-live="polite">
+            {activeFilterLabels.length > 0 ? activeFilterLabels.join(" · ") : "Alle kanaler · Alt"}
+          </span>
+        </div>
+        <div
+          id="home-filter-panel"
+          className="home-filter-panel"
+          hidden={!filtersOpen}
+          aria-label="Filtre for siste nytt"
+        >
+          <div className="filters" role="group" aria-label="Tematiske kanaler">
+            {articleCategories.map((item: ArticleCategoryFilter) => {
+              const count = channelStoryCounts[item] ?? 0;
+              return (
+                <button
+                  type="button"
+                  aria-pressed={category === item}
+                  className={`channel-filter channel-filter-${item.toLocaleLowerCase("nb")}${
+                    category === item ? " selected" : ""
+                  }`}
+                  key={item}
+                  onClick={() => updateFilters({ category: item })}
+                  title={`${articleCategoryLabels[item]}: ${channelCountText(count)}`}
+                >
+                  <span className="channel-filter-icon" aria-hidden="true">
+                    <ArticleCategoryIcon name={item} />
+                  </span>
+                  <span className="channel-filter-label">{articleCategoryLabels[item]}</span>
+                  <span className="channel-filter-count" aria-label={channelCountText(count)}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {category === "Sport" ? (
+            <div className="topic-filters" role="group" aria-label="Sportskategorier">
+              <button
+                type="button"
+                aria-pressed={topic === "rosenborg"}
+                className={topic === "rosenborg" ? "selected" : ""}
+                onClick={() =>
+                  updateFilters({ topic: topic === "rosenborg" ? undefined : "rosenborg" })
+                }
+              >
+                {articleTopicLabels.rosenborg}
+              </button>
+            </div>
           ) : null}
+          <div className="time-filters" role="group" aria-label="Tidsvindu">
+            {homeTimeWindows.map((item) => (
+              <button
+                type="button"
+                aria-pressed={timeWindow === item}
+                className={timeWindow === item ? "selected" : ""}
+                key={item}
+                onClick={() => updateFilters({ timeWindow: item })}
+              >
+                {homeTimeWindowLabels[item]}
+              </button>
+            ))}
+          </div>
+          {feedKey === defaultHomeFeedKey ? (
+            <CityPulseRefreshStatus
+              error={cityPulseRefreshError}
+              lastUpdatedAt={cityPulseRefreshedAt}
+              onRefresh={() => void refreshCityPulse()}
+              refreshing={refreshingCityPulse}
+            />
+          ) : null}
+          <div className={`local-focus local-focus-${localFocus.status}`} aria-live="polite">
+            <button
+              type="button"
+              aria-pressed={localFocus.status === "active"}
+              className={localFocus.status === "active" ? "selected" : ""}
+              disabled={localFocus.status === "locating"}
+              onClick={localFocus.status === "active" ? clearLocalFocus : requestLocalFocus}
+            >
+              {localFocus.status === "locating"
+                ? "Finner posisjon"
+                : localFocus.status === "active"
+                  ? "Lokalt fokus aktivt"
+                  : "Nær meg"}
+            </button>
+            <select
+              aria-label="Velg nærområde"
+              value={neighborhoodFocusId}
+              onChange={(event) => selectNeighborhoodFocus(event.target.value)}
+            >
+              <option value="">Velg område</option>
+              {homeNeighborhoodFocusOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <form className="local-focus-search" onSubmit={applyNeighborhoodFocusQuery}>
+              <input
+                aria-label="Postnummer eller sted"
+                inputMode="search"
+                placeholder="Postnummer/sted"
+                value={neighborhoodFocusQuery}
+                onChange={(event) => setNeighborhoodFocusQuery(event.target.value)}
+              />
+              <button type="submit">Bruk</button>
+            </form>
+            {localFocus.status === "active" ? (
+              <LocalFocusRadiusControl
+                value={activeLocalFocusRadiusKm}
+                onChange={updateLocalFocusRadius}
+              />
+            ) : null}
+            {localFocus.status === "active" ? (
+              <span>
+                Nær {localFocus.label} · innen {activeLocalFocusRadiusKm} km
+                {localFocus.persistent ? " · huskes her" : ""}
+              </span>
+            ) : localFocus.status === "error" ? (
+              <span role="status">{localFocus.message}</span>
+            ) : null}
+          </div>
         </div>
       </div>
       <ChannelContextPanel
@@ -2878,8 +2938,8 @@ export function HomePage({
       ) : null}
       {!isTextSearch ? <CityPulseDashboard data={cityPulseData} /> : null}
       <div className="home-grid">
-        <section className="news-section">
-          <h1>Siste nytt i {scope === "trondheim" ? "Trondheim" : "Trøndelag"}</h1>
+        <section className="news-section" aria-labelledby="news-heading">
+          <h2 id="news-heading">{pageTitle}</h2>
           {displayedStoryCards.length > 0 ? (
             <p className="story-feed-summary" aria-label="Sammendrag av bypulssaker">
               {storyFeedSummary(displayedStoryCards)}
@@ -2887,7 +2947,9 @@ export function HomePage({
           ) : null}
           <StoryFeedTrustStrip cards={displayedStoryCards} />
           {feedError ? (
-            <p className="feed-state error">Kunne ikke hente saker: {feedError}</p>
+            <p className="feed-state error" role="alert">
+              Kunne ikke hente saker: {feedError}
+            </p>
           ) : null}
           {saveError ? (
             <p className="feed-state error" role="alert">
@@ -2910,7 +2972,11 @@ export function HomePage({
               </button>
             </div>
           ) : null}
-          {loading ? <p className="feed-state">Oppdaterer saker...</p> : null}
+          {loading ? (
+            <p className="feed-state" role="status" aria-live="polite">
+              Oppdaterer saker...
+            </p>
+          ) : null}
           {leadCard ? (
             <LeadStory
               card={leadCard}
@@ -2928,7 +2994,7 @@ export function HomePage({
           {!loading && !feedError && !leadCard ? (
             <p className="feed-state">Ingen saker samsvarer med {searchSummary(filters)}.</p>
           ) : null}
-          <div className="news-list story-list" aria-label="Bypulssaker">
+          <div className="news-list story-list" aria-label="Bypulssaker" aria-busy={feedBusy}>
             {secondaryCards.map((card) => (
               <StoryCard
                 key={card.id}
