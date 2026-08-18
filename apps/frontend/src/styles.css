@@ -12637,6 +12637,131 @@ button.journey-context-chip {
   }
 }
 
+/* Home density pass: keep provenance and source health available without letting
+   operational metadata compete with the headline and nearby story list. */
+.home .story-card-kicker .metadata.compact {
+  color: color-mix(in srgb, var(--muted) 82%, var(--green));
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.home .story-card .story-place,
+.home .story-card .story-badge,
+.home .story-card .story-topic {
+  min-height: 19px;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.home .story-card .coverage-source-cluster {
+  gap: 6px;
+  margin-top: 9px;
+  padding: 7px 9px;
+  background: color-mix(in srgb, var(--paper) 96%, var(--blue) 4%);
+}
+
+.home .story-card .coverage-source-heading strong,
+.home .story-card .coverage-source-heading span,
+.home .story-card .coverage-source-row b,
+.home .story-card .coverage-source-row small,
+.home .story-card .coverage-source-actions button,
+.home .story-card .coverage-merge-report {
+  font-size: 10px;
+}
+
+.home .story-card .coverage-source-list {
+  gap: 3px;
+}
+
+.home .story-card .coverage-source-row {
+  gap: 4px 8px;
+  padding: 4px 6px;
+}
+
+.home .source-status {
+  padding-top: 2px;
+}
+
+.home .source-status-summary {
+  gap: 2px;
+  margin-top: 8px;
+  padding-left: 8px;
+}
+
+.home .source-status-summary span,
+.home .source-status-summary p,
+.home .source-status-private,
+.home .source-status-empty {
+  font-size: 11px;
+}
+
+.home .source-status-summary strong {
+  font-size: 13px;
+}
+
+.home .health-grid {
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.home .health-grid span {
+  gap: 4px;
+  padding: 4px 6px;
+}
+
+.home .health-grid b {
+  font-size: 10px;
+}
+
+.home .health-grid small {
+  font-size: 9px;
+}
+
+@media (max-width: 720px) {
+  .home .nearby-module {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .home .nearby-module .rail-title,
+  .home .nearby-module .nearby-time-slider,
+  .home .nearby-module .nearby-map-density {
+    order: 0;
+  }
+
+  .home .nearby-module .nearby-list {
+    order: 1;
+  }
+
+  .home .nearby-module .nearby-detail,
+  .home .nearby-module .nearby-empty {
+    order: 2;
+  }
+
+  .home .nearby-module .nearby-map {
+    order: 3;
+    min-height: 180px;
+    height: clamp(180px, 30vh, 240px);
+    margin-top: 10px;
+  }
+
+  .home .nearby-module .nearby-list {
+    margin-top: 8px;
+  }
+
+  .home .nearby-module .nearby-story-row {
+    min-height: 0;
+    padding-block: 8px;
+  }
+
+  .home .nearby-module .nearby-kind {
+    margin-top: 4px;
+    padding: 2px 5px;
+    font-size: 9px;
+  }
+}
+
 /* Sport */
 .sport-page {
   display: grid;
