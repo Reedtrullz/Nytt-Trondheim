@@ -326,14 +326,13 @@ describe("public first-fold freshness and alerts", () => {
         <PublicNowBrief
           brief={briefWithoutLinks}
           cards={cards}
-          now={new Date("2026-07-02T12:00:00.000Z")}
+          now={new Date("2026-07-02T08:30:00.000Z")}
         />
       </MemoryRouter>,
     );
     expect(digestHtml).toContain("Oppdatert nå");
     expect(digestHtml).toContain("Det viktigste i Trondheim");
     expect(digestHtml).toContain("Kø ved Sluppen");
-    expect(digestHtml).toContain("Oppdatert i dag");
 
     const staleDigestHtml = renderToStaticMarkup(
       <PublicNowBrief
@@ -343,7 +342,8 @@ describe("public first-fold freshness and alerts", () => {
       />,
     );
     expect(staleDigestHtml).not.toContain("Morgenbildet dekker 12 ferske saker.");
-    expect(staleDigestHtml).toContain("1 fersk sak er klar for en rask gjennomgang.");
+    expect(staleDigestHtml).toContain("Kort fortalt");
+    expect(staleDigestHtml).toContain("1 sak er klar for en rask gjennomgang.");
 
     const alertHtml = renderToStaticMarkup(
       <MemoryRouter>

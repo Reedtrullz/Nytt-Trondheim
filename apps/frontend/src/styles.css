@@ -13676,7 +13676,7 @@ button.journey-context-chip {
   display: none;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1320px) {
   .site-header {
     height: auto;
   }
@@ -15407,13 +15407,33 @@ main#main-content:focus {
 
 /* Header navigation and home filter disclosure */
 .masthead {
-  gap: 24px;
+  gap: 14px;
 }
 
 .masthead nav {
-  flex: 1 1 390px;
-  gap: clamp(14px, 1.8vw, 24px);
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 14px;
   overflow: visible;
+}
+
+.search {
+  flex: 0 1 220px;
+  min-width: 190px;
+  max-width: 220px;
+}
+
+.refreshed {
+  flex: 0 0 130px;
+  max-width: 130px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-role {
+  flex: 0 1 145px;
+  max-width: 145px;
 }
 
 .nav-more {
@@ -15589,7 +15609,7 @@ main#main-content:focus {
   margin-left: 0;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1320px) {
   .masthead nav {
     flex: 0 0 100%;
     width: 100%;
@@ -15601,8 +15621,8 @@ main#main-content:focus {
   }
 
   .nav-more-menu {
-    right: auto;
-    left: 0;
+    right: 0;
+    left: auto;
   }
 }
 
@@ -15632,6 +15652,14 @@ main#main-content:focus {
 }
 
 @media (max-width: 720px) {
+  .search {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
   .masthead nav {
     gap: 0 8px;
     padding-bottom: 2px;

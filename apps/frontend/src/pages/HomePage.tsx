@@ -768,19 +768,27 @@ export function PublicNowBrief({
   const briefFreshness = brief ? publicFeedFreshness(brief.generatedAt, now) : undefined;
   if (topStories.length === 0 && !brief) return null;
 
+  const hasFreshFeed = freshness.tone === "fresh";
   const fallbackSummary =
     topStories.length === 1
-      ? "1 fersk sak er klar for en rask gjennomgang."
+      ? `${hasFreshFeed ? "1 fersk sak" : "1 sak"} er klar for en rask gjennomgang.`
       : topStories.length > 1
-        ? `${topStories.length} ferske saker er klare for en rask gjennomgang.`
+        ? `${topStories.length} ${hasFreshFeed ? "ferske " : ""}saker er klare for en rask gjennomgang.`
         : "Det er foreløpig ingen ferske saker i det åpne Trondheim-utvalget.";
-  const summary = brief && briefFreshness?.tone !== "stale" ? brief.paragraphs[0] : fallbackSummary;
+  const summary =
+    brief && briefFreshness?.tone !== "stale" && freshness.tone !== "stale"
+      ? brief.paragraphs[0]
+      : fallbackSummary;
+  const eyebrow = hasFreshFeed ? "Oppdatert nå" : "Kort fortalt";
+  const storyListLabel = hasFreshFeed
+    ? `${topStories.length} viktigste ferske saker`
+    : `${topStories.length} viktigste saker`;
 
   return (
     <section className="public-now-brief" aria-labelledby="public-now-heading">
       <div className="public-now-brief-heading">
         <div>
-          <p className="label">Oppdatert nå</p>
+          <p className="label">{eyebrow}</p>
           <h2 id="public-now-heading">Det viktigste i Trondheim</h2>
           <p>{summary}</p>
         </div>
@@ -793,7 +801,7 @@ export function PublicNowBrief({
         </div>
       </div>
       {topStories.length > 0 ? (
-        <ol className="public-now-stories" aria-label="Tre viktigste ferske saker">
+        <ol className="public-now-stories" aria-label={storyListLabel}>
           {topStories.map((card) => {
             const articleUrl = safeExternalUrl(card.primary.url);
             const storyTitle = articleUrl ? (
@@ -875,6 +883,7 @@ function LeadStory({
     <article
       id={`story-${card.id}`}
       className={`lead-story${article.imageUrl ? "" : " text-only"}`}
+      data-article-id={article.id}
       tabIndex={-1}
     >
       {article.imageUrl ? <img src={article.imageUrl} alt="" /> : null}
@@ -2974,6 +2983,7 @@ export function HomePage({
     <main
       className="home"
       id="main-content"
+      tabIndex={-1}
       data-generation-id={storyProjection?.generationId}
       aria-labelledby="home-heading"
       aria-busy={feedBusy}

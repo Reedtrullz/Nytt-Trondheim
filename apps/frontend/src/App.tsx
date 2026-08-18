@@ -138,10 +138,6 @@ function Header({
                 ? " active"
                 : ""
             }`}
-            open={
-              isOwner &&
-              (location.pathname === "/situasjoner" || location.pathname.startsWith("/command"))
-            }
           >
             <summary>Mer</summary>
             <div className="nav-more-menu" aria-label="Flere sider">

@@ -366,10 +366,11 @@ test("Situation Room explains provenance and keeps private map controls distinct
   );
   await expect(municipalityArchiveLink).toHaveAttribute("target", "_blank");
   await expect(municipalityArchiveLink).toHaveAttribute("rel", "noreferrer noopener");
-  await expect(
-    page.getByRole("heading", { name: "Skogbrann ved Bymarka", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: /Åpne situasjonsrom/ }).click();
+  const activeAlert = page.locator(".active-alert-strip");
+  await expect(activeAlert.getByRole("heading", { name: "Én situasjon følges nå" })).toBeVisible();
+  const situationLink = activeAlert.getByRole("link", { name: /Skogbrann ved Bymarka/ });
+  await expect(situationLink).toBeVisible();
+  await situationLink.click();
   await expect(page.getByRole("heading", { name: "Hvorfor vises dette?" })).toBeVisible();
   await expect(page.getByText("Kun kontekst")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
@@ -465,6 +466,7 @@ test("frontpage can refresh City Pulse on demand without duplicate article fetch
   expect(bootstrapCalls).toBeGreaterThanOrEqual(1);
   expect(articleRequests).toEqual([]);
   refreshRequested = true;
+  await openHomeFilters(page);
   await page.getByRole("button", { name: "Oppdater bypuls" }).click();
   await expect(
     page.getByRole("heading", { level: 2, name: "Oppdatert bypuls fra live-refresh" }),
@@ -694,12 +696,12 @@ test("City Pulse keeps the public frontpage free of morning brief chrome", async
   await expect(brief).toHaveCount(0);
   await expect(page.getByText("Kort oversikt")).toHaveCount(0);
   await expect(page.getByText("Bypulsen starter med tre tydelige signaler")).toHaveCount(0);
-  const situationBanner = page.locator(".situation-banner");
-  await expect(situationBanner.getByRole("heading", { name: situation.title })).toBeVisible();
-  await expect(situationBanner.getByRole("link", { name: /Åpne situasjonsrom/ })).toHaveAttribute(
-    "href",
-    `/situasjoner/${situation.id}`,
-  );
+  await expect(page.locator(".situation-banner")).toHaveCount(0);
+  const activeAlert = page.locator(".active-alert-strip");
+  await expect(activeAlert.getByRole("heading", { name: "Én situasjon følges nå" })).toBeVisible();
+  await expect(
+    activeAlert.getByRole("link", { name: new RegExp(situation.title) }),
+  ).toHaveAttribute("href", `/situasjoner/${situation.id}`);
   const publicSources = page.locator(".source-status");
   await expect(publicSources).toContainText("Delvis kildegrunnlag");
   await expect(publicSources).toContainText("2 kilder trenger tilsyn blant 7 åpne kilder.");
@@ -1244,6 +1246,7 @@ test("undo context is dropped after a projection generation change without false
   await splitFixtureGroup();
   const splitGeneration = await page.locator("main.home").getAttribute("data-generation-id");
   await coverageFixtureControl(page, "advance-generation");
+  await openHomeFilters(page);
   await page.getByRole("button", { name: "Oppdater bypuls" }).click();
   await expect(page.locator("main.home")).not.toHaveAttribute(
     "data-generation-id",
@@ -6512,6 +6515,13 @@ test("command center stays inside the phone viewport", async ({ page }) => {
     Number.parseFloat(getComputedStyle(node).fontSize),
   );
   expect(fontSize).toBeLessThanOrEqual(42);
+  const navigation = page.getByRole("navigation", { name: "Hovedmeny" });
+  await navigation.getByText("Mer", { exact: true }).click();
+  const commandLink = navigation.getByRole("link", { name: "Kommandosenter" });
+  await expect(commandLink).toBeVisible();
+  const commandBox = await commandLink.boundingBox();
+  expect(commandBox).toBeTruthy();
+  expect(commandBox!.x + commandBox!.width).toBeLessThanOrEqual(390);
   await expectNoHorizontalPageOverflow(page);
 });
 
@@ -6528,6 +6538,10 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(
     situationDetails.getByRole("link", { name: "Se i operasjonstidslinje" }),
   ).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Hovedmeny" })
+    .getByText("Mer", { exact: true })
+    .click();
   await page.getByRole("link", { name: "Kommandosenter" }).click();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Command Center-matrise" })).toBeVisible();
@@ -6587,6 +6601,10 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(page).toHaveURL(/\/command\/tidslinje$/);
   await expect(page.getByRole("heading", { name: "Operasjonstidslinje" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Siste operative spor" })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Hovedmeny" })
+    .getByText("Mer", { exact: true })
+    .click();
   await page.getByRole("link", { name: "Lagret" }).click();
   await expect(page.getByRole("heading", { name: "Lagret" })).toBeVisible();
 });
