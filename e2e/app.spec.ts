@@ -43,6 +43,14 @@ async function openTrafficDisclosure(page: Page, summary: string): Promise<void>
   }
 }
 
+async function openHomeFilters(page: Page): Promise<void> {
+  const toggle = page.getByRole("button", { name: /^Filtrer/ });
+  await expect(toggle).toHaveCount(1);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+}
+
 async function expectNoHorizontalPageOverflow(page: Page): Promise<void> {
   const metrics = await page.evaluate(() => ({
     bodyScrollWidth: document.body.scrollWidth,
@@ -1070,6 +1078,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await context.setGeolocation({ latitude: 63.4305, longitude: 10.3951 });
 
   await page.goto("/");
+  await openHomeFilters(page);
 
   const channels = page.getByLabel("Tematiske kanaler");
   await expect(channels.getByRole("button", { name: /Alle/ })).toContainText("2");
@@ -1156,6 +1165,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
 test("owner splits and restores a grouped Siste nytt card", async ({ page }) => {
   await coverageFixtureControl(page, "reset");
   await page.goto("/");
+  await openHomeFilters(page);
   const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
   await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
   await card.getByRole("button", { name: "Feil gruppering?" }).click();
@@ -1256,6 +1266,7 @@ test("undo context is dropped across scope and filter changes without false succ
 
   await coverageFixtureControl(page, "reset");
   await page.goto("/");
+  await openHomeFilters(page);
   const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
   await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
   await card.getByRole("button", { name: "Feil gruppering?" }).click();
