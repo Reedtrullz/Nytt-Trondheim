@@ -1172,7 +1172,9 @@ test("owner splits and restores a grouped Siste nytt card", async ({ page }) => 
   await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
   await page.getByRole("button", { name: "Splitt nå" }).click();
   await expect(page.locator(".coverage-correction-toast")).toContainText("Gruppen er splittet");
-  await expect(page.getByRole("link", { name: "Urelatert støttesak" })).toBeVisible();
+  await expect(
+    page.getByLabel("Siste nytt i Trondheim").getByRole("link", { name: "Urelatert støttesak" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Angre" }).click();
   await expect(page.locator("p.sr-only[role=status]")).toContainText(
     "Grupperingen er gjenopprettet",
@@ -5340,6 +5342,7 @@ test("frontpage and sport stay responsive on phone and tablet viewports", async 
     await page.setViewportSize(viewport);
 
     await page.goto("/");
+    await openHomeFilters(page);
     await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
     await expect(page.locator(".filters")).toHaveCSS("flex-wrap", "wrap");
     await expectNoHorizontalPageOverflow(page);

@@ -15661,10 +15661,8 @@ main#main-content:focus {
   }
 
   .home-filter-panel > .filters {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    scrollbar-width: thin;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .home-filter-panel > .filters button {

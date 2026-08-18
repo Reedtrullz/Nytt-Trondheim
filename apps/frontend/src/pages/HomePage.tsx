@@ -2979,7 +2979,7 @@ export function HomePage({
       aria-busy={feedBusy}
     >
       <h1 className="sr-only" id="home-heading">
-        {pageTitle}
+        Nytt {scope === "trondheim" ? "Trondheim" : "Trøndelag"}
       </h1>
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {coverageCorrectionLiveAnnouncement(Boolean(undoState), correctionAnnouncement) ||
