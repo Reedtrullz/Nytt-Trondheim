@@ -15606,9 +15606,34 @@ main#main-content:focus {
   }
 }
 
+@media (min-width: 1081px) and (max-width: 1480px) {
+  .masthead {
+    gap: 14px;
+  }
+
+  .masthead nav {
+    flex-basis: 430px;
+    gap: 14px;
+  }
+
+  .search {
+    min-width: 190px;
+    max-width: 200px;
+  }
+
+  .refreshed {
+    max-width: 130px;
+  }
+
+  .session-role {
+    flex-basis: 145px;
+    max-width: 145px;
+  }
+}
+
 @media (max-width: 720px) {
   .masthead nav {
-    gap: 0 14px;
+    gap: 0 8px;
     padding-bottom: 2px;
   }
 
