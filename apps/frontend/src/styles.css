@@ -15626,7 +15626,7 @@ main#main-content:focus {
   }
 }
 
-@media (min-width: 1081px) and (max-width: 1480px) {
+@media (min-width: 1321px) and (max-width: 1480px) {
   .masthead {
     gap: 14px;
   }
@@ -15708,6 +15708,13 @@ main#main-content:focus {
   .home-filter-panel > .local-focus,
   .home-filter-panel > .city-pulse-refresh {
     flex-basis: 100%;
+  }
+}
+
+@media (max-width: 380px) {
+  .nav-more-menu {
+    right: auto;
+    left: 0;
   }
 }
 
