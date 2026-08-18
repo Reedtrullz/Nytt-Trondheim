@@ -676,7 +676,7 @@ function LeadStory({
         </div>
         {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
         <StoryEventBundleSummary card={card} />
-        <h3>{article.title}</h3>
+        <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
         <div className="story-card-tags lead-story-tags">
           <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
