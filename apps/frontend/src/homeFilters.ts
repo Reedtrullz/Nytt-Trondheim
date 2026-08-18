@@ -56,17 +56,35 @@ export const homeTimeWindowLabels = {
   "7d": "7 dager",
 } as const satisfies Record<HomeTimeWindow, string>;
 
+/**
+ * The public home feed has two intentionally explicit reading modes. The
+ * default is the newsroom-like chronological view; the priority view is a
+ * secondary lens that may lift high-signal stories within the same freshness
+ * band without hiding newer material.
+ */
+export const homeFeedModes = ["latest", "priority"] as const;
+
+export type HomeFeedMode = (typeof homeFeedModes)[number];
+
+export const homeFeedModeLabels = {
+  latest: "Nyeste",
+  priority: "Prioritert",
+} as const satisfies Record<HomeFeedMode, string>;
+
 export interface HomeFilters {
   q: string;
   scope: GeographicScope;
   category: ArticleCategoryFilter;
   topic?: ArticleTopic;
   timeWindow: HomeTimeWindow;
+  /** Client-side presentation mode; omitted means the default latest view. */
+  feedMode?: HomeFeedMode;
 }
 
 const categorySet = new Set<string>(articleCategories);
 const topicSet = new Set<string>(Object.keys(articleTopicLabels));
 const timeWindowSet = new Set<string>(homeTimeWindows);
+const feedModeSet = new Set<string>(homeFeedModes);
 
 export function parseHomeFilters(search: string): HomeFilters {
   const parameters = new URLSearchParams(search);
@@ -74,12 +92,17 @@ export function parseHomeFilters(search: string): HomeFilters {
   const requestedCategory = parameters.get("category");
   const requestedTopic = parameters.get("topic");
   const requestedTimeWindow = parameters.get("window");
+  const requestedFeedMode = parameters.get("sort");
   const category = categorySet.has(requestedCategory ?? "")
     ? (requestedCategory as ArticleCategoryFilter)
     : "Alle";
   const topic =
     category === "Sport" && topicSet.has(requestedTopic ?? "")
       ? (requestedTopic as ArticleTopic)
+      : undefined;
+  const feedMode =
+    requestedFeedMode && feedModeSet.has(requestedFeedMode)
+      ? (requestedFeedMode as HomeFeedMode)
       : undefined;
   return {
     q: (parameters.get("q") ?? "").trim(),
@@ -89,6 +112,7 @@ export function parseHomeFilters(search: string): HomeFilters {
       ? (requestedTimeWindow as HomeTimeWindow)
       : "all",
     ...(topic ? { topic } : {}),
+    ...(feedMode && feedMode !== "latest" ? { feedMode } : {}),
   };
 }
 
@@ -100,6 +124,7 @@ export function buildHomeSearch(filters: HomeFilters): string {
   if (filters.category !== "Alle") parameters.set("category", filters.category);
   if (filters.category === "Sport" && filters.topic) parameters.set("topic", filters.topic);
   if (filters.timeWindow !== "all") parameters.set("window", filters.timeWindow);
+  if (filters.feedMode === "priority") parameters.set("sort", "priority");
   const serialized = parameters.toString();
   return serialized ? `?${serialized}` : "";
 }

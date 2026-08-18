@@ -130,15 +130,36 @@ function Header({
           <NavLink to="/trafikk">Trafikk</NavLink>
           <NavLink to="/vaer">Vær</NavLink>
           <NavLink to="/sport">Sport</NavLink>
-          <NavLink to="/varsler">Varsler</NavLink>
-          {isOwner ? <NavLink to="/lagret">Lagret</NavLink> : null}
-          {isOwner ? <NavLink to="/command">Kommandosenter</NavLink> : null}
+          <details
+            className={`nav-more${
+              location.pathname === "/varsler" ||
+              location.pathname === "/lagret" ||
+              location.pathname.startsWith("/command")
+                ? " active"
+                : ""
+            }`}
+          >
+            <summary>Mer</summary>
+            <div className="nav-more-menu" aria-label="Flere sider">
+              <NavLink to="/varsler">Varsler</NavLink>
+              {isOwner ? <NavLink to="/lagret">Lagret</NavLink> : null}
+              {isOwner ? <NavLink to="/command">Kommandosenter</NavLink> : null}
+            </div>
+          </details>
         </nav>
-        <label className="search">
-          <span className="sr-only">Søk i saker</span>
-          <input placeholder="Søk i saker" value={filters.q} onChange={searchChanged} />
+        <form className="search" role="search" onSubmit={(event) => event.preventDefault()}>
+          <label className="sr-only" htmlFor="header-search">
+            Søk i saker
+          </label>
+          <input
+            id="header-search"
+            type="search"
+            placeholder="Søk i saker"
+            value={filters.q}
+            onChange={searchChanged}
+          />
           <span aria-hidden="true">⌕</span>
-        </label>
+        </form>
         <div className="refreshed">{freshnessLabel}</div>
         <div className="session-role">
           {user.role === "owner" ? "Eier" : "Lesetilgang"} · {user.displayName}
@@ -265,6 +286,7 @@ function HomeRoute({
 }
 
 function AuthenticatedApp() {
+  const location = useLocation();
   const [data, setData] = useState<BootstrapPayload>();
   const [session, setSession] = useState<SessionPayload>();
   const [sessionError, setSessionError] = useState<string>();
@@ -326,6 +348,11 @@ function AuthenticatedApp() {
 
   return (
     <>
+      {location.pathname === "/" ? (
+        <a className="skip-link" href="#main-content">
+          Hopp til hovedinnhold
+        </a>
+      ) : null}
       {session ? <Header freshnessLabel={freshnessLabel} user={session.user} /> : null}
       {sessionLoading ? <LoadingPage message="Henter innlogging..." /> : null}
       {!sessionLoading && sessionError ? (

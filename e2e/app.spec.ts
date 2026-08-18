@@ -43,6 +43,14 @@ async function openTrafficDisclosure(page: Page, summary: string): Promise<void>
   }
 }
 
+async function openHomeFilters(page: Page): Promise<void> {
+  const toggle = page.getByRole("button", { name: /^Filtrer/ });
+  await expect(toggle).toHaveCount(1);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+}
+
 async function expectNoHorizontalPageOverflow(page: Page): Promise<void> {
   const metrics = await page.evaluate(() => ({
     bodyScrollWidth: document.body.scrollWidth,
@@ -358,10 +366,11 @@ test("Situation Room explains provenance and keeps private map controls distinct
   );
   await expect(municipalityArchiveLink).toHaveAttribute("target", "_blank");
   await expect(municipalityArchiveLink).toHaveAttribute("rel", "noreferrer noopener");
-  await expect(
-    page.getByRole("heading", { name: "Skogbrann ved Bymarka", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: /Åpne situasjonsrom/ }).click();
+  const activeAlert = page.locator(".active-alert-strip");
+  await expect(activeAlert.getByRole("heading", { name: "Én situasjon følges nå" })).toBeVisible();
+  const situationLink = activeAlert.getByRole("link", { name: /Skogbrann ved Bymarka/ });
+  await expect(situationLink).toBeVisible();
+  await situationLink.click();
   await expect(page.getByRole("heading", { name: "Hvorfor vises dette?" })).toBeVisible();
   await expect(page.getByText("Kun kontekst")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Kart og berørte områder" })).toBeVisible();
@@ -457,6 +466,7 @@ test("frontpage can refresh City Pulse on demand without duplicate article fetch
   expect(bootstrapCalls).toBeGreaterThanOrEqual(1);
   expect(articleRequests).toEqual([]);
   refreshRequested = true;
+  await openHomeFilters(page);
   await page.getByRole("button", { name: "Oppdater bypuls" }).click();
   await expect(
     page.getByRole("heading", { level: 2, name: "Oppdatert bypuls fra live-refresh" }),
@@ -686,12 +696,12 @@ test("City Pulse keeps the public frontpage free of morning brief chrome", async
   await expect(brief).toHaveCount(0);
   await expect(page.getByText("Kort oversikt")).toHaveCount(0);
   await expect(page.getByText("Bypulsen starter med tre tydelige signaler")).toHaveCount(0);
-  const situationBanner = page.locator(".situation-banner");
-  await expect(situationBanner.getByRole("heading", { name: situation.title })).toBeVisible();
-  await expect(situationBanner.getByRole("link", { name: /Åpne situasjonsrom/ })).toHaveAttribute(
-    "href",
-    `/situasjoner/${situation.id}`,
-  );
+  await expect(page.locator(".situation-banner")).toHaveCount(0);
+  const activeAlert = page.locator(".active-alert-strip");
+  await expect(activeAlert.getByRole("heading", { name: "Én situasjon følges nå" })).toBeVisible();
+  await expect(
+    activeAlert.getByRole("link", { name: new RegExp(situation.title) }),
+  ).toHaveAttribute("href", `/situasjoner/${situation.id}`);
   const publicSources = page.locator(".source-status");
   await expect(publicSources).toContainText("Delvis kildegrunnlag");
   await expect(publicSources).toContainText("2 kilder trenger tilsyn blant 7 åpne kilder.");
@@ -1070,6 +1080,7 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
   await context.setGeolocation({ latitude: 63.4305, longitude: 10.3951 });
 
   await page.goto("/");
+  await openHomeFilters(page);
 
   const channels = page.getByLabel("Tematiske kanaler");
   await expect(channels.getByRole("button", { name: /Alle/ })).toContainText("2");
@@ -1156,13 +1167,16 @@ test("home feed renders persisted coverage-bundle labels for similar stories", a
 test("owner splits and restores a grouped Siste nytt card", async ({ page }) => {
   await coverageFixtureControl(page, "reset");
   await page.goto("/");
+  await openHomeFilters(page);
   const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
   await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
   await card.getByRole("button", { name: "Feil gruppering?" }).click();
   await page.getByRole("checkbox", { name: /Urelatert støttesak/ }).check();
   await page.getByRole("button", { name: "Splitt nå" }).click();
   await expect(page.locator(".coverage-correction-toast")).toContainText("Gruppen er splittet");
-  await expect(page.getByRole("link", { name: "Urelatert støttesak" })).toBeVisible();
+  await expect(
+    page.getByLabel("Siste nytt i Trondheim").getByRole("link", { name: "Urelatert støttesak" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Angre" }).click();
   await expect(page.locator("p.sr-only[role=status]")).toContainText(
     "Grupperingen er gjenopprettet",
@@ -1232,6 +1246,7 @@ test("undo context is dropped after a projection generation change without false
   await splitFixtureGroup();
   const splitGeneration = await page.locator("main.home").getAttribute("data-generation-id");
   await coverageFixtureControl(page, "advance-generation");
+  await openHomeFilters(page);
   await page.getByRole("button", { name: "Oppdater bypuls" }).click();
   await expect(page.locator("main.home")).not.toHaveAttribute(
     "data-generation-id",
@@ -1256,6 +1271,7 @@ test("undo context is dropped across scope and filter changes without false succ
 
   await coverageFixtureControl(page, "reset");
   await page.goto("/");
+  await openHomeFilters(page);
   const card = page.locator("article", { hasText: "Korrigerbar hovedsak" });
   await expect(card.getByText("2 andre saker fra 2 kilder")).toBeVisible();
   await card.getByRole("button", { name: "Feil gruppering?" }).click();
@@ -5329,6 +5345,7 @@ test("frontpage and sport stay responsive on phone and tablet viewports", async 
     await page.setViewportSize(viewport);
 
     await page.goto("/");
+    await openHomeFilters(page);
     await expect(page.getByRole("heading", { name: "Siste nytt i Trondheim" })).toBeVisible();
     await expect(page.locator(".filters")).toHaveCSS("flex-wrap", "wrap");
     await expectNoHorizontalPageOverflow(page);
@@ -6498,6 +6515,13 @@ test("command center stays inside the phone viewport", async ({ page }) => {
     Number.parseFloat(getComputedStyle(node).fontSize),
   );
   expect(fontSize).toBeLessThanOrEqual(42);
+  const navigation = page.getByRole("navigation", { name: "Hovedmeny" });
+  await navigation.getByText("Mer", { exact: true }).click();
+  const commandLink = navigation.getByRole("link", { name: "Kommandosenter" });
+  await expect(commandLink).toBeVisible();
+  const commandBox = await commandLink.boundingBox();
+  expect(commandBox).toBeTruthy();
+  expect(commandBox!.x + commandBox!.width).toBeLessThanOrEqual(390);
   await expectNoHorizontalPageOverflow(page);
 });
 
@@ -6514,6 +6538,10 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(
     situationDetails.getByRole("link", { name: "Se i operasjonstidslinje" }),
   ).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Hovedmeny" })
+    .getByText("Mer", { exact: true })
+    .click();
   await page.getByRole("link", { name: "Kommandosenter" }).click();
   await expect(page.getByRole("heading", { name: "Kommandosenter" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Command Center-matrise" })).toBeVisible();
@@ -6573,6 +6601,10 @@ test("owner can open the real situation index and operations status", async ({ p
   await expect(page).toHaveURL(/\/command\/tidslinje$/);
   await expect(page.getByRole("heading", { name: "Operasjonstidslinje" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Siste operative spor" })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Hovedmeny" })
+    .getByText("Mer", { exact: true })
+    .click();
   await page.getByRole("link", { name: "Lagret" }).click();
   await expect(page.getByRole("heading", { name: "Lagret" })).toBeVisible();
 });
