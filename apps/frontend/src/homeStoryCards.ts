@@ -3,6 +3,7 @@ import {
   sourceMixConfidenceSummary,
   cityPulseEditorialCopy,
   derivePublicVerificationForArticleGroup,
+  selectEditorialArticle,
   type Article,
   type ArticleTopic,
   type CityPulseEditorialCopy,
@@ -17,6 +18,7 @@ export interface HomeStoryCard {
   id: string;
   group: HomeArticleGroup;
   primary: Article;
+  clickArticle: Article;
   coverageAnchor: Article;
   title: string;
   excerpt: string;
@@ -192,6 +194,11 @@ export function homeArticleGroupForStory(story: CityPulseStory): HomeArticleGrou
 export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
   const editorialCopy = cityPulseEditorialCopy(group.articles);
   const editorialArticle = group.articles.find(({ id }) => id === editorialCopy.title.articleId)!;
+  const freeArticles = group.articles.filter(({ access }) => access !== "paid");
+  const clickArticle =
+    editorialArticle.access !== "paid" || freeArticles.length === 0
+      ? editorialArticle
+      : selectEditorialArticle(freeArticles);
   const places = storyPlaces(group);
   const latestAt = group.articles.reduce(
     (latest, article) => (article.publishedAt > latest ? article.publishedAt : latest),
@@ -201,6 +208,7 @@ export function homeStoryCardForGroup(group: HomeArticleGroup): HomeStoryCard {
     id: group.id,
     group,
     primary: editorialArticle,
+    clickArticle,
     coverageAnchor: group.primary,
     title: editorialCopy.title.text,
     excerpt: editorialCopy.ingress?.text ?? "",

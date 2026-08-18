@@ -854,7 +854,7 @@ export function CityPulseDashboard({
   );
 }
 
-function LeadStory({
+export function LeadStory({
   card,
   saving,
   onSave,
@@ -878,7 +878,8 @@ function LeadStory({
   onReportMissed: (card: HomeStoryCard) => void;
 }) {
   const article = card.primary;
-  const articleUrl = safeExternalUrl(article.url);
+  const clickArticle = card.clickArticle;
+  const articleUrl = safeExternalUrl(clickArticle.url);
   return (
     <article
       id={`story-${card.id}`}
@@ -893,14 +894,14 @@ function LeadStory({
             {card.sourceSummary} · {formatTime(card.latestAt)}
           </p>
           {card.locationLabel ? <span className="story-place">{card.locationLabel}</span> : null}
-          <ArticleAccessBadge access={article.access} />
+          <ArticleAccessBadge access={clickArticle.access} />
         </div>
-        {canSave ? <SaveButton article={article} saving={saving} onUpdate={onSave} /> : null}
+        {canSave ? <SaveButton article={clickArticle} saving={saving} onUpdate={onSave} /> : null}
         <StoryEventBundleSummary card={card} />
-        <h2>{article.title}</h2>
-        <p>{article.excerpt}</p>
+        <h2>{card.title}</h2>
+        <p>{card.excerpt}</p>
         <div className="story-card-tags lead-story-tags">
-          <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
+          <span className={`topic ${card.category.toLowerCase()}`}>{card.channelLabel}</span>
           {card.topicLabels.map((label) => (
             <span className="story-topic" key={label}>
               {label}
@@ -1202,7 +1203,7 @@ export function ChannelContextPanel({
   );
 }
 
-function StoryCard({
+export function StoryCard({
   card,
   saving,
   onSave,
@@ -1225,14 +1226,14 @@ function StoryCard({
   mergeReportPending: boolean;
   onReportMissed: (card: HomeStoryCard) => void;
 }) {
-  const article = card.primary;
+  const article = card.clickArticle;
   const articleUrl = safeExternalUrl(article.url);
   const count = card.sourceCount > 1 ? card.sourceCount : card.updateCount;
   const countLabel = card.sourceCount > 1 ? "kilder" : "oppdateringer";
   return (
     <article
       id={`story-${card.id}`}
-      className={`story-card story-card-${article.category.toLowerCase()}`}
+      className={`story-card story-card-${card.category.toLowerCase()}`}
       data-article-id={article.id}
       tabIndex={-1}
     >
@@ -1256,7 +1257,7 @@ function StoryCard({
         )}
         <p className="excerpt">{card.excerpt}</p>
         <div className="story-card-tags">
-          <span className={`topic ${article.category.toLowerCase()}`}>{card.channelLabel}</span>
+          <span className={`topic ${card.category.toLowerCase()}`}>{card.channelLabel}</span>
           {card.topicLabels.map((label) => (
             <span className="story-topic" key={label}>
               {label}
@@ -2649,7 +2650,7 @@ export function HomePage({
     if (!mergeReportAnchor) {
       setMergeReportAnchor(card);
       setMergeReportError(undefined);
-      setMergeReportAnnouncement(`Valgte «${card.primary.title}». Velg nå saken som hører sammen.`);
+      setMergeReportAnnouncement(`Valgte «${card.title}». Velg nå saken som hører sammen.`);
       return;
     }
     if (mergeReportAnchor.id === card.id) {
@@ -3242,8 +3243,7 @@ export function HomePage({
           {mergeReportAnchor ? (
             <div className="coverage-merge-report-banner" role="status">
               <span>
-                Valgt: <strong>{mergeReportAnchor.primary.title}</strong>. Velg saken som hører
-                sammen.
+                Valgt: <strong>{mergeReportAnchor.title}</strong>. Velg saken som hører sammen.
               </span>
               <button type="button" onClick={() => void reportMissedCoverage(mergeReportAnchor)}>
                 Avbryt
@@ -3258,7 +3258,7 @@ export function HomePage({
           {leadCard ? (
             <LeadStory
               card={leadCard}
-              saving={savingArticleIds.has(leadCard.primary.id)}
+              saving={savingArticleIds.has(leadCard.clickArticle.id)}
               onSave={updateSaved}
               canSave={canSave}
               canCorrect={canCorrect}
@@ -3277,7 +3277,7 @@ export function HomePage({
               <StoryCard
                 key={card.id}
                 card={card}
-                saving={savingArticleIds.has(card.primary.id)}
+                saving={savingArticleIds.has(card.clickArticle.id)}
                 onSave={updateSaved}
                 canSave={canSave}
                 canCorrect={canCorrect}
