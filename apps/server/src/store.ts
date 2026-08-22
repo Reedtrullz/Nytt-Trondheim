@@ -9385,80 +9385,86 @@ export class PgStore implements Store {
     status: Situation["status"],
     dismissalReason?: Situation["dismissalReason"],
   ) {
-    const current = await this.pool.query<{ payload: Situation }>(
-      "SELECT payload FROM situations WHERE id=$1",
-      [id],
-    );
-    if (!current.rows[0]) return undefined;
-    const existing = current.rows[0].payload;
-    const updatedAt = new Date().toISOString();
-    const updated: Situation = {
-      ...existing,
-      status,
-      updatedAt,
-      ...(status === "dismissed"
-        ? {
-            dismissedAt: updatedAt,
-            dismissalReason: dismissalReason ?? "owner_dismissed",
-            incidentSignature: existing.incidentSignature ?? `legacy:${id}`,
-            detectionVersion: existing.detectionVersion ?? "1-legacy",
-            activationBasis: existing.activationBasis ?? {
-              rule: "two_independent_sources",
-              sourceIds: [],
-              articleIds: existing.relatedArticleIds,
-              activatedAt: existing.createdAt,
-            },
-          }
-        : {}),
-    };
-    await this.pool.query(
-      "UPDATE situations SET status=$2, updated_at=$3, payload=$4 WHERE id=$1",
-      [id, status, updatedAt, updated],
-    );
-    if (status === "dismissed" && updated.incidentSignature && updated.activationBasis) {
-      await this.pool.query(
-        `INSERT INTO situation_activations
-         (situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at,
-          dismissed_at, dismissal_reason)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (situation_id) DO UPDATE SET dismissed_at=EXCLUDED.dismissed_at,
-         dismissal_reason=EXCLUDED.dismissal_reason`,
-        [
-          id,
-          updated.incidentSignature,
-          updated.detectionVersion ?? "2",
-          JSON.stringify(updated.activationBasis.sourceIds),
-          JSON.stringify(updated.activationBasis.articleIds),
-          updated.activationBasis.activatedAt,
-          updated.dismissedAt,
-          updated.dismissalReason,
-        ],
+    return withPgTransaction(this.pool, async (client) => {
+      const current = await client.query<{ payload: Situation }>(
+        "SELECT payload FROM situations WHERE id=$1 FOR UPDATE",
+        [id],
       );
-    }
-    return updated;
+      if (!current.rows[0]) return undefined;
+      const existing = current.rows[0].payload;
+      const updatedAt = new Date().toISOString();
+      const updated: Situation = {
+        ...existing,
+        status,
+        updatedAt,
+        ...(status === "dismissed"
+          ? {
+              dismissedAt: updatedAt,
+              dismissalReason: dismissalReason ?? "owner_dismissed",
+              incidentSignature: existing.incidentSignature ?? `legacy:${id}`,
+              detectionVersion: existing.detectionVersion ?? "1-legacy",
+              activationBasis: existing.activationBasis ?? {
+                rule: "two_independent_sources",
+                sourceIds: [],
+                articleIds: existing.relatedArticleIds,
+                activatedAt: existing.createdAt,
+              },
+            }
+          : {}),
+      };
+      await client.query("UPDATE situations SET status=$2, updated_at=$3, payload=$4 WHERE id=$1", [
+        id,
+        status,
+        updatedAt,
+        updated,
+      ]);
+      if (status === "dismissed" && updated.incidentSignature && updated.activationBasis) {
+        await client.query(
+          `INSERT INTO situation_activations
+           (situation_id, incident_signature, detection_version, source_ids, article_ids, activated_at,
+            dismissed_at, dismissal_reason)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (situation_id) DO UPDATE SET dismissed_at=EXCLUDED.dismissed_at,
+           dismissal_reason=EXCLUDED.dismissal_reason`,
+          [
+            id,
+            updated.incidentSignature,
+            updated.detectionVersion ?? "2",
+            JSON.stringify(updated.activationBasis.sourceIds),
+            JSON.stringify(updated.activationBasis.articleIds),
+            updated.activationBasis.activatedAt,
+            updated.dismissedAt,
+            updated.dismissalReason,
+          ],
+        );
+      }
+      return updated;
+    });
   }
 
   async setSituationPublicVisibility(
     id: string,
     publicVisibility: NonNullable<Situation["publicVisibility"]>,
   ) {
-    const current = await this.pool.query<{ payload: Situation }>(
-      "SELECT payload FROM situations WHERE id=$1",
-      [id],
-    );
-    if (!current.rows[0]) return undefined;
-    const updatedAt = new Date().toISOString();
-    const updated: Situation = {
-      ...current.rows[0].payload,
-      publicVisibility,
-      updatedAt,
-    };
-    await this.pool.query("UPDATE situations SET updated_at=$2, payload=$3 WHERE id=$1", [
-      id,
-      updatedAt,
-      updated,
-    ]);
-    return updated;
+    return withPgTransaction(this.pool, async (client) => {
+      const current = await client.query<{ payload: Situation }>(
+        "SELECT payload FROM situations WHERE id=$1 FOR UPDATE",
+        [id],
+      );
+      if (!current.rows[0]) return undefined;
+      const updatedAt = new Date().toISOString();
+      const updated: Situation = {
+        ...current.rows[0].payload,
+        publicVisibility,
+        updatedAt,
+      };
+      await client.query("UPDATE situations SET updated_at=$2, payload=$3 WHERE id=$1", [
+        id,
+        updatedAt,
+        updated,
+      ]);
+      return updated;
+    });
   }
 
   async getWorkspace(id: string, login?: string): Promise<SituationWorkspace | undefined> {
