@@ -499,14 +499,15 @@ function publicSituationSignalHighlight(
     return undefined;
   }
 
+  const confidenceWeight =
+    (situation.sourceConfidence?.score ??
+      confidenceLevelScore[situation.sourceConfidence?.level ?? "uncertain"]) * 0.28;
   const score = clampScore(
     0.16 +
       (situation.status === "active" ? 0.14 : 0.08) +
       (situation.verificationStatus === "Offentlig bekreftet" ? 0.16 : 0) +
-      (situation.sourceConfidence?.score ??
-        confidenceLevelScore[situation.sourceConfidence?.level ?? "uncertain"]) *
-        0.28 *
-        Math.min(0.18, matches.length * 0.06) +
+      confidenceWeight +
+      Math.min(0.18, matches.length * 0.06) +
       recencyBoost(situation.updatedAt, generatedAt),
   );
   if (score < 0.58) return undefined;
