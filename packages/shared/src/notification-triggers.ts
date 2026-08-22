@@ -505,8 +505,8 @@ function publicSituationSignalHighlight(
       (situation.verificationStatus === "Offentlig bekreftet" ? 0.16 : 0) +
       (situation.sourceConfidence?.score ??
         confidenceLevelScore[situation.sourceConfidence?.level ?? "uncertain"]) *
-        0.28 +
-      Math.min(0.18, matches.length * 0.06) +
+        0.28 *
+        Math.min(0.18, matches.length * 0.06) +
       recencyBoost(situation.updatedAt, generatedAt),
   );
   if (score < 0.58) return undefined;
