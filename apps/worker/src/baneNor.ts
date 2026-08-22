@@ -425,6 +425,7 @@ export function baneNorSourceItemInput(
   message: BaneNorRailMessage,
   options: { fetchedAt: string; rawItem: unknown },
 ): SourceItemInput {
+  const publishedAtIsFallback = message.publishedAt === message.receivedAt;
   return {
     id: sourceItemId("bane_nor", "official_event", message.guid),
     provider: "bane_nor",
@@ -443,7 +444,7 @@ export function baneNorSourceItemInput(
         "official_event",
         message.guid,
         message.title,
-        message.publishedAt,
+        ...(publishedAtIsFallback ? [] : [message.publishedAt]),
         message.description,
         message.validFrom,
         message.validTo,

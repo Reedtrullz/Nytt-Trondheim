@@ -2309,7 +2309,27 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     },
   );
 
-  const upload = multer({ dest: config.uploadDir, limits: { fileSize: 20 * 1024 * 1024 } });
+  const allowedAttachmentMimeTypes = new Set([
+    "application/pdf",
+    "application/json",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "text/plain",
+    "text/csv",
+  ]);
+  const upload = multer({
+    dest: config.uploadDir,
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (allowedAttachmentMimeTypes.has(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new multer.MulterError("LIMIT_UNEXPECTED_FILE", file.fieldname));
+      }
+    },
+  });
   app.post(
     "/api/situations/:id/attachments",
     requireOwner,
@@ -2579,7 +2599,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
     },
   );
 
-  app.get("/api/operations/coverage-corrections/export", async (req, res, next) => {
+  app.get("/api/operations/coverage-corrections/export", requireOwner, async (req, res, next) => {
     try {
       const query = coverageCorrectionExportQuerySchema.parse(req.query);
       const payload = await store.exportCoverageCorrections(query.sinceDays);

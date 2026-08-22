@@ -1240,7 +1240,14 @@ export const notificationTriggerPageSchema = z
 
 export const pushSubscriptionInputSchema = z
   .object({
-    endpoint: z.string().trim().url().max(2048),
+    endpoint: z
+      .string()
+      .trim()
+      .url()
+      .max(2048)
+      .refine((value) => value.startsWith("https://"), {
+        message: "Push endpoint must use HTTPS.",
+      }),
     expirationTime: z.number().int().nonnegative().nullable().optional(),
     keys: z
       .object({

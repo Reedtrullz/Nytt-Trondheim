@@ -469,7 +469,12 @@ export async function collectRss(
     const needsMetadata =
       (source.enrichEmptyExcerpt === true && excerpt.length === 0) ||
       (source.detectArticleAccess === true && !access);
-    if (detailFetches < maxDetailFetches && (needsEditorialExcerpt || needsMetadata)) {
+    const detailUrlIsPinned = samePublicHostname(url, source.url);
+    if (
+      detailFetches < maxDetailFetches &&
+      detailUrlIsPinned &&
+      (needsEditorialExcerpt || needsMetadata)
+    ) {
       detailFetches += 1;
       if (needsEditorialExcerpt) {
         const detail = await articlePageExcerpt(url, title, fetcher);
@@ -945,7 +950,9 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
       candidates.map(async ({ article, rawPayload }) => ({
         article,
         rawPayload,
-        publication: await municipalPublicationEvidence(article.url, fetcher),
+        publication: samePublicHostname(article.url, url)
+          ? await municipalPublicationEvidence(article.url, fetcher)
+          : undefined,
       })),
     )
   ).flatMap(({ article, rawPayload, publication }) =>
