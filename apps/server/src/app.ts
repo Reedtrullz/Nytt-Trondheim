@@ -1069,6 +1069,7 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
       status: "ok" as const,
       storage: pool ? "postgres" : "development-memory",
       coverageProjectionMode: config.coverageProjectionMode ?? "legacy",
+      ...(process.env.NYTT_BUILD_SHA?.trim() ? { buildSha: process.env.NYTT_BUILD_SHA.trim() } : {}),
       ...(pool
         ? {
             pool: {
