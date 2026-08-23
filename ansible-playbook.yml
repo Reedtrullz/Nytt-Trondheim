@@ -762,8 +762,9 @@
                 LEFT JOIN source_item_captures capture
                   ON capture.source_item_id = current.id
                 WHERE capture.id IS NULL
+                  AND current.created_at >= now() - interval '30 days'
               ) THEN
-                RAISE EXCEPTION 'current source item is missing append-only capture history';
+                RAISE EXCEPTION 'recent source item is missing append-only capture history';
               END IF;
             END $$;
             SQL

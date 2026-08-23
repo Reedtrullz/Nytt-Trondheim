@@ -230,7 +230,8 @@ describe("deployment playbook Entur verification", () => {
     expect(validationBlock).toContain("- name: Verify source item query sanity");
     expect(validationBlock).toContain("- name: Verify append-only source capture coverage");
     expect(validationBlock).toContain("LEFT JOIN source_item_captures capture");
-    expect(validationBlock).toContain("current source item is missing append-only capture history");
+    expect(validationBlock).toContain("recent source item is missing append-only capture history");
+    expect(validationBlock).toContain("AND current.created_at >= now() - interval '30 days'");
 
     const alwaysStart = playbook.indexOf("always:", rescueStart);
     const rescueBlock = playbook.slice(
