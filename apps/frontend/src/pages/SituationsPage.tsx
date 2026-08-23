@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo } from "react";
+import { type ChangeEvent, type KeyboardEvent, useCallback, useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -552,11 +552,10 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
       timeWindowKey,
     ],
   );
-  const fetcherKey = query;
-  const fetchWorkspace = (signal: AbortSignal) => {
-    void fetcherKey;
-    return api.situationMapWorkspace(query, signal);
-  };
+  const fetchWorkspace = useCallback(
+    (signal: AbortSignal) => api.situationMapWorkspace(query, signal),
+    [query],
+  );
   const workspaceResult = useApiResource({
     fetcher: fetchWorkspace,
     key: JSON.stringify(query),
