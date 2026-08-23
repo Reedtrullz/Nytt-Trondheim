@@ -1,4 +1,12 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -18,6 +26,7 @@ import type {
   TravelPlanLegMode,
   TravelPlanPayload,
 } from "@nytt/shared";
+import { nextSuggestionIndex, type RouteSuggestionKey } from "./routePlaceKeyboard.js";
 import { CorridorImpactCard } from "../components/map/CorridorImpactCard.js";
 import { MapBoundsWatcher } from "../components/map/MapBoundsWatcher.js";
 import {
@@ -3472,6 +3481,7 @@ function RoutePlaceInput({
   const [suggestions, setSuggestions] = useState<TravelPlaceSuggestion[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "empty" | "error">("idle");
   const requestRef = useRef(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const listId = `${id}-suggestions`;
   const trimmedValue = value.trim();
   const selectedIsCurrent = selectedSuggestion?.label === value;
@@ -3480,6 +3490,7 @@ function RoutePlaceInput({
     requestRef.current += 1;
     setSuggestions([]);
     setStatus("idle");
+    setActiveIndex(-1);
   }, [resetToken]);
 
   useEffect(() => {
@@ -3488,6 +3499,7 @@ function RoutePlaceInput({
     if (trimmedValue.length < 2 || selectedIsCurrent) {
       setSuggestions([]);
       setStatus("idle");
+      setActiveIndex(-1);
       return undefined;
     }
 
@@ -3499,6 +3511,7 @@ function RoutePlaceInput({
           if (requestRef.current !== requestId) return;
           setSuggestions(payload.suggestions);
           setStatus(payload.suggestions.length ? "idle" : "empty");
+          setActiveIndex(payload.suggestions.length ? 0 : -1);
         })
         .catch(() => {
           if (requestRef.current !== requestId || controller.signal.aborted) return;
@@ -3512,6 +3525,33 @@ function RoutePlaceInput({
       controller.abort();
     };
   }, [selectedIsCurrent, trimmedValue]);
+
+  function handleSuggestionKey(key: RouteSuggestionKey) {
+    const result = nextSuggestionIndex(activeIndex, suggestions.length, key);
+    setActiveIndex(result.index);
+    if (result.select) {
+      const selected = suggestions[result.index];
+      if (selected) onSelectSuggestion(selected);
+      setSuggestions([]);
+      setActiveIndex(-1);
+    }
+    if (result.close) {
+      setSuggestions([]);
+      setActiveIndex(-1);
+    }
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "Enter" &&
+      event.key !== "Escape"
+    )
+      return;
+    event.preventDefault();
+    handleSuggestionKey(event.key);
+  }
 
   return (
     <div className="route-place-input">
@@ -3527,6 +3567,10 @@ function RoutePlaceInput({
         aria-controls={listId}
         aria-expanded={suggestions.length > 0}
         role="combobox"
+        aria-activedescendant={
+          activeIndex >= 0 && suggestions[activeIndex] ? `${id}-option-${activeIndex}` : undefined
+        }
+        onKeyDown={handleKeyDown}
       />
       {selectedSuggestion ? (
         <p className="route-suggestion-selected">
@@ -3548,12 +3592,14 @@ function RoutePlaceInput({
       ) : null}
       {suggestions.length ? (
         <div id={listId} className="route-suggestion-list" role="listbox">
-          {suggestions.map((suggestion) => (
+          {suggestions.map((suggestion, index) => (
             <button
               key={`${suggestion.id}:${suggestion.coordinate.join(",")}`}
+              id={`${id}-option-${index}`}
+              tabIndex={-1}
               type="button"
               role="option"
-              aria-selected={selectedSuggestion?.id === suggestion.id}
+              aria-selected={index === activeIndex || selectedSuggestion?.id === suggestion.id}
               onClick={() => onSelectSuggestion(suggestion)}
             >
               <span>

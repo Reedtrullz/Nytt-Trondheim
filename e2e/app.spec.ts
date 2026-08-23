@@ -6626,3 +6626,13 @@ test("workspace mutation failures are visible to the owner", async ({ page }) =>
     "Skal ikke forsvinne stille.",
   );
 });
+
+test("auth routes render the access page without authentication", async ({ page }) => {
+  await page.goto("/logg-inn");
+  await expect(page.getByRole("heading", { name: "Logg inn" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Eier" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lesetilgang" })).toBeVisible();
+
+  await page.goto("/registrer");
+  await expect(page.getByRole("heading", { name: "Be om tilgang" })).toBeVisible();
+});
