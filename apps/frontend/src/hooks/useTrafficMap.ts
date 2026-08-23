@@ -109,7 +109,7 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
 
     setLoading(true);
     setError(undefined);
-    if (queryChanged) setData(undefined);
+    void queryChanged;
     try {
       const payload = await fetchTrafficMap(
         {
@@ -132,7 +132,6 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
     } catch (err) {
       if (isAbortError(err)) return;
       if (requestId === requestIdRef.current) {
-        if (queryChanged) setData(undefined);
         setError(err instanceof Error ? err.message : "Ukjent feil ved henting av trafikkdata.");
       }
     } finally {

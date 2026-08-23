@@ -286,7 +286,6 @@ function HomeRoute({
 }
 
 function AuthenticatedApp() {
-  const location = useLocation();
   const [data, setData] = useState<BootstrapPayload>();
   const [session, setSession] = useState<SessionPayload>();
   const [sessionError, setSessionError] = useState<string>();
@@ -348,11 +347,9 @@ function AuthenticatedApp() {
 
   return (
     <>
-      {location.pathname === "/" ? (
-        <a className="skip-link" href="#main-content">
-          Hopp til hovedinnhold
-        </a>
-      ) : null}
+      <a className="skip-link" href="#main-content">
+        Hopp til hovedinnhold
+      </a>
       {session ? <Header freshnessLabel={freshnessLabel} user={session.user} /> : null}
       {sessionLoading ? <LoadingPage message="Henter innlogging..." /> : null}
       {!sessionLoading && sessionError ? (

@@ -488,6 +488,17 @@ export function NotificationSettingsPage() {
   }
 
   if (!settings) {
+    if (error) {
+      return (
+        <main className="notification-settings-page" role="alert">
+          <h1>Kunne ikke hente varselinnstillinger</h1>
+          <p>{error}</p>
+          <button type="button" onClick={() => window.location.reload()}>
+            Prøv igjen
+          </button>
+        </main>
+      );
+    }
     return <main className="notification-settings-page">Henter varselinnstillinger...</main>;
   }
   return (
