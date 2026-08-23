@@ -447,6 +447,7 @@ export const api = {
       from?: string;
       to?: string;
     } = {},
+    signal?: AbortSignal,
   ) => {
     const parameters = new URLSearchParams();
     if (query.statuses?.length) parameters.set("statuses", query.statuses.join(","));
@@ -467,6 +468,7 @@ export const api = {
     const search = parameters.toString();
     return request<SituationMapWorkspace>(
       `/api/situations/workspace-map${search ? `?${search}` : ""}`,
+      { signal },
     );
   },
   savedArticles: () => request<ArticlePage["items"]>("/api/saved/articles"),
