@@ -83,6 +83,7 @@ import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 import { WorkerRepository } from "./repository.js";
 import { deliverPushNotifications, type PushDeliveryMetrics } from "./push-notifications.js";
+import { pruneExpiredData, retentionConfig } from "./retention.js";
 import {
   collectTrafficInfoMessages,
   defaultTrafficInfoEndpoint,
@@ -1932,6 +1933,14 @@ export async function runWorker(): Promise<void> {
   try {
     await guardedEnturVehicles();
     await guardedCollectAll();
+    try {
+      const pruned = await pruneExpiredData(pool, retentionConfig());
+      if (Object.values(pruned).some((count) => count > 0)) {
+        console.log(`[worker] retention pruned: ${JSON.stringify(pruned)}`);
+      }
+    } catch (error) {
+      console.warn(`[worker] retention prune failed: ${String(error)}`);
+    }
     if (!once) {
       setInterval(() => void guardedEnturVehicles().catch(console.error), enturVehicleIntervalMs);
       setInterval(() => void guardedCollectAll().catch(console.error), 10 * 60 * 1000);
