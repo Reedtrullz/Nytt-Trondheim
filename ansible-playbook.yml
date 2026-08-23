@@ -8,6 +8,7 @@
     app_port: "8090"
     canary_port: "8092"
     public_origin: "https://nytt.reidar.tech"
+    build_sha: "{{ lookup('env', 'NYTT_DEPLOY_REF') | default('', true) }}"
     coverage_projection_mode: "{{ lookup('env', 'NYTT_COVERAGE_PROJECTION_MODE') | default('legacy', true) }}"
     coverage_corrections_enabled: "{{ lookup('env', 'NYTT_COVERAGE_CORRECTIONS_ENABLED') | default('false', true) }}"
     coverage_matcher_version: "{{ lookup('env', 'NYTT_COVERAGE_MATCHER_VERSION') | default('v1', true) }}"
@@ -160,6 +161,7 @@
           COVERAGE_ACTIVE_MIN_ARTICLES=20
           COVERAGE_ACTIVE_MIN_PREVIOUS_RATIO=0.5
           COVERAGE_ACTIVE_VOLUME_GUARD_OVERRIDE=false
+          NYTT_BUILD_SHA={{ build_sha }}
           RUNTIME_STATUS_DIR=/data/runtime-status
       no_log: true
 
