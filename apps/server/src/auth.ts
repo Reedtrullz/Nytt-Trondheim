@@ -69,7 +69,7 @@ export function configureAuth(
   const PgSessionStore = connectPgSimple(session);
   app.use(
     session({
-      name: "nytt.sid",
+      name: config.nodeEnv === "production" ? "__Host-nytt.sid" : "nytt.sid",
       secret: config.sessionSecret,
       resave: false,
       saveUninitialized: false,
