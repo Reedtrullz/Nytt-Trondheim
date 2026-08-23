@@ -16,6 +16,7 @@ import type {
 } from "@nytt/shared";
 import { api } from "../api.js";
 import { DashboardGrid } from "../components/DashboardGrid.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 
 interface RawInspectorViewFilters extends RawInspectorAiRunFilters {
   sourceItem?: string;
@@ -901,70 +902,56 @@ export function RawDataInspectorDashboard({
 export function RawDataInspectorPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseRawInspectorFilters(searchParams.toString()), [searchParams]);
-  const [aiRuns, setAiRuns] = useState<RawInspectorAiRunPage>({ items: [] });
-  const [sourceItems, setSourceItems] = useState<SourceItemPage>({ items: [] });
-  const [telemetryPage, setTelemetryPage] = useState<RawInspectorTelemetryPage>({ items: [] });
-  const [sourceItem, setSourceItem] = useState<RawInspectorSourceItemDetail>();
-  const [telemetryDetail, setTelemetryDetail] = useState<RawInspectorTelemetryDetail>();
-  const [selectedAiRun, setSelectedAiRun] = useState<RawInspectorAiRunDetail>();
-  const [sourceError, setSourceError] = useState<string>();
-  const [sourceItemsError, setSourceItemsError] = useState<string>();
-  const [telemetryItemsError, setTelemetryItemsError] = useState<string>();
-  const [telemetryError, setTelemetryError] = useState<string>();
-  const [aiError, setAiError] = useState<string>();
+  const sourceItemsKey = JSON.stringify(sourceItemQuery(filters));
+  const sourceItemsResult = useApiResource({
+    fetcher: (signal) => api.sourceItems(JSON.parse(sourceItemsKey), signal),
+    key: sourceItemsKey,
+    debounceMs: 300,
+  });
+  const sourceItems = sourceItemsResult.data ?? { items: [] };
 
-  useEffect(() => {
-    setSourceItemsError(undefined);
-    void api
-      .sourceItems(sourceItemQuery(filters))
-      .then(setSourceItems)
-      .catch((reason: Error) => setSourceItemsError(reason.message));
-  }, [filters.sourceKind, filters.sourceQ, filters.sourceCursor]);
+  const telemetryKey = JSON.stringify(telemetryQuery(filters));
+  const telemetryResult = useApiResource({
+    fetcher: (signal) => api.rawTelemetryPage(JSON.parse(telemetryKey), signal),
+    key: telemetryKey,
+    debounceMs: 300,
+  });
+  const telemetryPage = telemetryResult.data ?? { items: [] };
 
-  useEffect(() => {
-    setTelemetryItemsError(undefined);
-    void api
-      .rawTelemetryPage(telemetryQuery(filters))
-      .then(setTelemetryPage)
-      .catch((reason: Error) => setTelemetryItemsError(reason.message));
-  }, [filters.telemetryCursor, filters.telemetryListSource, filters.telemetryQ]);
+  const aiRunsKey = JSON.stringify(aiRunQuery(filters));
+  const aiRunsResult = useApiResource({
+    fetcher: (signal) => api.rawAiRuns(JSON.parse(aiRunsKey), signal),
+    key: aiRunsKey,
+    debounceMs: 300,
+  });
+  const aiRuns = aiRunsResult.data ?? { items: [] };
 
-  useEffect(() => {
-    setAiError(undefined);
-    void api
-      .rawAiRuns(aiRunQuery(filters))
-      .then(setAiRuns)
-      .catch((reason: Error) => setAiError(reason.message));
-  }, [filters.provider, filters.status, filters.q, filters.cursor, filters.limit]);
+  const detailEnabled = Boolean(filters.sourceItem);
+  const sourceItemResult = useApiResource({
+    fetcher: (signal) =>
+      filters.sourceItem
+        ? api.rawSourceItem(filters.sourceItem, signal)
+        : Promise.resolve(undefined),
+    key: detailEnabled ? `source-item:${filters.sourceItem}` : "none",
+  });
 
-  useEffect(() => {
-    setSourceError(undefined);
-    setSourceItem(undefined);
-    if (!filters.sourceItem) return;
-    void api
-      .rawSourceItem(filters.sourceItem)
-      .then(setSourceItem)
-      .catch((reason: Error) => setSourceError(reason.message));
-  }, [filters.sourceItem]);
+  const telemetryDetailEnabled = Boolean(filters.telemetrySource && filters.telemetryId);
+  const telemetryDetailResult = useApiResource({
+    fetcher: (signal) =>
+      filters.telemetrySource && filters.telemetryId
+        ? api.rawTelemetry(filters.telemetrySource, filters.telemetryId, signal)
+        : Promise.resolve(undefined),
+    key: telemetryDetailEnabled
+      ? `telemetry:${filters.telemetrySource}:${filters.telemetryId}`
+      : "none",
+  });
 
-  useEffect(() => {
-    setTelemetryError(undefined);
-    setTelemetryDetail(undefined);
-    if (!filters.telemetrySource || !filters.telemetryId) return;
-    void api
-      .rawTelemetry(filters.telemetrySource, filters.telemetryId)
-      .then(setTelemetryDetail)
-      .catch((reason: Error) => setTelemetryError(reason.message));
-  }, [filters.telemetryId, filters.telemetrySource]);
-
-  useEffect(() => {
-    setSelectedAiRun(undefined);
-    if (!filters.run) return;
-    void api
-      .rawAiRun(filters.run)
-      .then(setSelectedAiRun)
-      .catch((reason: Error) => setAiError(reason.message));
-  }, [filters.run]);
+  const aiRunEnabled = Boolean(filters.run);
+  const selectedAiRunResult = useApiResource({
+    fetcher: (signal) =>
+      filters.run ? api.rawAiRun(filters.run, signal) : Promise.resolve(undefined),
+    key: aiRunEnabled ? `ai-run:${filters.run}` : "none",
+  });
 
   function setFilters(next: RawInspectorViewFilters) {
     setSearchParams(buildRawInspectorSearch(next));
@@ -972,18 +959,18 @@ export function RawDataInspectorPage() {
 
   return (
     <RawDataInspectorDashboard
-      aiError={aiError}
+      aiError={aiRunsResult.error}
+      selectedAiRun={selectedAiRunResult.data}
+      sourceItem={sourceItemResult.data}
+      telemetryDetail={telemetryDetailResult.data}
       aiRuns={aiRuns}
       filters={filters}
-      selectedAiRun={selectedAiRun}
-      sourceError={sourceError}
-      sourceItem={sourceItem}
+      sourceError={sourceItemResult.error}
       sourceItems={sourceItems}
-      sourceItemsError={sourceItemsError}
-      telemetryDetail={telemetryDetail}
-      telemetryItemsError={telemetryItemsError}
+      sourceItemsError={sourceItemsResult.error}
+      telemetryItemsError={telemetryResult.error}
       telemetryPage={telemetryPage}
-      telemetryError={telemetryError}
+      telemetryError={telemetryDetailResult.error}
       onFiltersChange={setFilters}
     />
   );

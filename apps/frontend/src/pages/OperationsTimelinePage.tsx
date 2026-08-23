@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { OperationsTimelineEvent, OperationsTimelineResponse } from "@nytt/shared";
 import { api } from "../api.js";
@@ -26,6 +26,7 @@ import {
   osloTimeFormatter,
 } from "../operationsTimelineRows.js";
 import { safeExternalUrl } from "../safeExternalUrl.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 
 function time(value: string) {
   return osloTimeFormatter.format(new Date(value));
@@ -413,30 +414,18 @@ export function OperationsTimelinePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchText = searchParams.toString();
   const filters = useMemo(() => parseOperationsTimelineFilters(searchText), [searchText]);
-  const [timeline, setTimeline] = useState<OperationsTimelineResponse>();
-  const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(true);
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let ignore = false;
-    setLoading(true);
-    setError(undefined);
-    api
-      .operationsTimeline(operationsTimelineQueryFromFilters(filters))
-      .then((payload) => {
-        if (!ignore) setTimeline(payload);
-      })
-      .catch((reason: Error) => {
-        if (!ignore) setError(reason.message);
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [filters, attempt]);
+  const queryKey = JSON.stringify(operationsTimelineQueryFromFilters(filters));
+  const timelineResult = useApiResource({
+    fetcher: (signal) => {
+      void queryKey;
+      return api.operationsTimeline(JSON.parse(queryKey), signal);
+    },
+    key: queryKey,
+    debounceMs: 250,
+  });
+  const timeline = timelineResult.data;
+  const error = timelineResult.error;
+  const loading = timelineResult.loading && !timeline;
 
   function updateFilters(next: OperationsTimelineFilters) {
     setSearchParams(buildOperationsTimelineSearch(next), { replace: true });
@@ -449,7 +438,7 @@ export function OperationsTimelinePage() {
       <main className="operations-timeline-page operations-timeline-error" role="alert">
         <h1>Operasjonstidslinjen kunne ikke hentes</h1>
         <p>{error}</p>
-        <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+        <button type="button" onClick={timelineResult.retry}>
           Prøv igjen
         </button>
       </main>

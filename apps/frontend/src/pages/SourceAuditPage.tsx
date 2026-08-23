@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   provenanceLabels,
@@ -25,6 +25,7 @@ import {
   toggleAuditFilterValue,
   type SourceAuditFilters,
 } from "../sourceAuditFilters.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 
 const osloFormatter = new Intl.DateTimeFormat("nb-NO", {
   dateStyle: "medium",
@@ -659,30 +660,18 @@ export function SourceAuditPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchText = searchParams.toString();
   const filters = useMemo(() => parseSourceAuditFilters(searchText), [searchText]);
-  const [audit, setAudit] = useState<SourceAuditWorkspaceResponse>();
-  const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(true);
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let ignore = false;
-    setLoading(true);
-    setError(undefined);
-    api
-      .sourceAudit(sourceAuditQueryFromFilters(filters))
-      .then((payload) => {
-        if (!ignore) setAudit(payload);
-      })
-      .catch((reason: Error) => {
-        if (!ignore) setError(reason.message);
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [filters, attempt]);
+  const queryKey = JSON.stringify(sourceAuditQueryFromFilters(filters));
+  const auditResult = useApiResource({
+    fetcher: (signal) => {
+      void queryKey;
+      return api.sourceAudit(JSON.parse(queryKey), signal);
+    },
+    key: queryKey,
+    debounceMs: 250,
+  });
+  const audit = auditResult.data;
+  const error = auditResult.error;
+  const loading = auditResult.loading && !audit;
 
   function updateFilters(next: SourceAuditFilters) {
     const search = buildSourceAuditSearch(next);
@@ -695,7 +684,7 @@ export function SourceAuditPage() {
       <main className="source-audit-page source-audit-error" role="alert">
         <h1>Kilderevisjon kunne ikke hentes</h1>
         <p>{error}</p>
-        <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+        <button type="button" onClick={auditResult.retry}>
           Prøv igjen
         </button>
       </main>

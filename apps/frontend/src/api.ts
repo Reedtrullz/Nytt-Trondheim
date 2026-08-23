@@ -247,14 +247,14 @@ export const api = {
     return request<CityPulseStoryPage>(`/api/city-pulse/stories?${parameters.toString()}`);
   },
   worldCupDashboard: () => request<WorldCupDashboardPayload>("/api/sport/world-cup"),
-  sourceItems: (query: SourceItemFilters = {}) => {
+  sourceItems: (query: SourceItemFilters = {}, signal?: AbortSignal) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined) parameters.set(key, String(value));
     }
-    return request<SourceItemPage>(`/api/source-items?${parameters.toString()}`);
+    return request<SourceItemPage>(`/api/source-items?${parameters.toString()}`, { signal });
   },
-  sourceAudit: (query: SourceAuditFilterQuery = {}) => {
+  sourceAudit: (query: SourceAuditFilterQuery = {}, signal?: AbortSignal) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (Array.isArray(value) && value.length > 0) {
@@ -268,6 +268,7 @@ export const api = {
     const search = parameters.toString();
     return request<SourceAuditWorkspaceResponse>(
       `/api/operations/source-audit${search ? `?${search}` : ""}`,
+      { signal },
     );
   },
   coverageBundles: (query: CoverageBundleRequestQuery = { limit: 30 }) => {
@@ -353,15 +354,17 @@ export const api = {
       `/api/operations/spatial-analytics${search ? `?${search}` : ""}`,
     );
   },
-  rawSourceItem: (id: string) =>
+  rawSourceItem: (id: string, signal?: AbortSignal) =>
     request<RawInspectorSourceItemDetail>(
       `/api/operations/raw/source-items/${encodeURIComponent(id)}`,
+      { signal },
     ),
-  rawTelemetry: (source: RawInspectorTelemetrySource, id: string) =>
+  rawTelemetry: (source: RawInspectorTelemetrySource, id: string, signal?: AbortSignal) =>
     request<RawInspectorTelemetryDetail>(
       `/api/operations/raw/telemetry/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
+      { signal },
     ),
-  rawTelemetryPage: (query: RawInspectorTelemetryFilters = { limit: 20 }) => {
+  rawTelemetryPage: (query: RawInspectorTelemetryFilters = { limit: 20 }, signal?: AbortSignal) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (typeof value === "number") {
@@ -373,9 +376,10 @@ export const api = {
     const search = parameters.toString();
     return request<RawInspectorTelemetryPage>(
       `/api/operations/raw/telemetry${search ? `?${search}` : ""}`,
+      { signal },
     );
   },
-  rawAiRuns: (query: RawInspectorAiRunFilters = { limit: 20 }) => {
+  rawAiRuns: (query: RawInspectorAiRunFilters = { limit: 20 }, signal?: AbortSignal) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (typeof value === "number") {
@@ -387,11 +391,14 @@ export const api = {
     const search = parameters.toString();
     return request<RawInspectorAiRunPage>(
       `/api/operations/raw/ai-runs${search ? `?${search}` : ""}`,
+      { signal },
     );
   },
-  rawAiRun: (id: string) =>
-    request<RawInspectorAiRunDetail>(`/api/operations/raw/ai-runs/${encodeURIComponent(id)}`),
-  operationsTimeline: (query: OperationsTimelineQuery = {}) => {
+  rawAiRun: (id: string, signal?: AbortSignal) =>
+    request<RawInspectorAiRunDetail>(`/api/operations/raw/ai-runs/${encodeURIComponent(id)}`, {
+      signal,
+    }),
+  operationsTimeline: (query: OperationsTimelineQuery = {}, signal?: AbortSignal) => {
     const parameters = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (Array.isArray(value) && value.length > 0) {
@@ -405,6 +412,7 @@ export const api = {
     const search = parameters.toString();
     return request<OperationsTimelineResponse>(
       `/api/operations/timeline${search ? `?${search}` : ""}`,
+      { signal },
     );
   },
   situationSourceItems: (id: string) => request<SourceItem[]>(`${situationPath(id)}/source-items`),
