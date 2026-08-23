@@ -436,4 +436,38 @@ describe("official traffic situation promotion", () => {
       situations[0]?.evidence.some((evidence) => evidence.claimType === "official_warning_context"),
     ).toBe(false);
   });
+
+  it("classifies kø headlines as traffic incidents", () => {
+    const article: Article = {
+      id: "nrk-ko",
+      source: "nrk",
+      sourceLabel: "NRK Trøndelag",
+      title: "Kø etter trafikkulykke på E6",
+      excerpt: "Det er lang kø ved Tiller etter en trafikkulykke.",
+      url: "https://example.test/nrk-ko",
+      publishedAt: "2026-05-28T11:00:00.000Z",
+      scope: "trondheim",
+      category: "Transport",
+      places: ["Tiller"],
+      location: { label: "Tiller", lat: 63.361, lng: 10.376 },
+    };
+    const situations = detectPreliminarySituations(
+      [
+        article,
+        {
+          ...article,
+          id: "adressa-ko",
+          source: "adressa",
+          sourceLabel: "Adresseavisen",
+          url: "https://example.test/adressa-ko",
+          publishedAt: "2026-05-28T11:10:00.000Z",
+        },
+      ],
+      [],
+      [],
+    );
+
+    expect(situations).toHaveLength(1);
+    expect(situations[0]?.type).toBe("traffic");
+  });
 });

@@ -822,7 +822,7 @@ function detectType(article: Article): Situation["type"] | undefined {
   if (/\b(jordskred|ras)\b/.test(text)) return "landslide";
   if (/\bflom\b/.test(text)) return "flood";
   if (
-    /\b(trafikkulykke|trafikkhendelse|kollisjon|sammenstøt|påkjør\w*|syklist|sykkelulykke|bilstans|veiarbeid|kø)\b/.test(
+    /\b(trafikkulykke|trafikkhendelse|kollisjon|sammenstøt|påkjør\w*|syklist|sykkelulykke|bilstans|veiarbeid|kø)\b/u.test(
       text,
     )
   ) {

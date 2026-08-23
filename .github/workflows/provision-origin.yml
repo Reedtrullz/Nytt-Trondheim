@@ -38,7 +38,7 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa_racknerd
           chmod 600 ~/.ssh/id_rsa_racknerd
-          ssh-keyscan -H 198.23.137.16 >> ~/.ssh/known_hosts
+          cat ops/ssh/known_hosts >> ~/.ssh/known_hosts
       - name: Smoke test bootstrap SSH
         run: ssh -i ~/.ssh/id_rsa_racknerd deploy@198.23.137.16 "echo SSH_OK"
       - name: Provision permanent access and public TLS route

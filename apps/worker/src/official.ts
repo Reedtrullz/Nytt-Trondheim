@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as cheerio from "cheerio";
 import type { Geometry } from "geojson";
 import type { OfficialEvent, SituationType } from "@nytt/shared";
 import { XMLParser } from "fast-xml-parser";
@@ -66,6 +67,10 @@ function capReferences(value: unknown): string[] {
     });
 }
 
+function xmlDisplayText(value: unknown): string {
+  return cheerio.load(xmlText(value), null, false).text().replace(/s+/g, " ").trim();
+}
+
 export async function collectMetWarnings(
   fetcher: typeof fetch = fetch,
   _knownIds?: Set<string>,
@@ -101,7 +106,7 @@ export async function collectMetWarnings(
     );
     const cap = object(parsedCap.alert);
     const info = object(cap.info);
-    const title = xmlText(info.headline) || xmlText(item.title) || "Farevarsel fra MET";
+    const title = xmlDisplayText(info.headline) || xmlText(item.title) || "Farevarsel fra MET";
     const event = xmlText(info.event) || title;
     const publishedAt = iso(xmlText(cap.sent) || xmlText(item.pubDate));
     const validFrom = iso(xmlText(info.onset) || xmlText(info.effective), publishedAt);
@@ -112,9 +117,9 @@ export async function collectMetWarnings(
       source: "met",
       eventType: metEventType(event),
       title,
-      detail: xmlText(info.description) || xmlText(item.description) || title,
+      detail: xmlDisplayText(info.description) || xmlText(item.description) || title,
       sourceUrl,
-      areaLabel: xmlText(object(info.area).areaDesc) || "Trøndelag",
+      areaLabel: xmlDisplayText(object(info.area).areaDesc) || "Trøndelag",
       state: msgType === "cancel" ? "cancelled" : msgType === "update" ? "updated" : "active",
       severity: xmlText(info.severity),
       publishedAt,
@@ -183,7 +188,7 @@ export async function collectNveWarnings(fetcher: typeof fetch = fetch): Promise
         const warning = object(rawWarning);
         const level = Number(warning.ActivityLevel ?? 0);
         if (level < 2) return [];
-        const identity = `${label}:${string(warning.MasterId)}:${string(warning.Id)}:${string(warning.ValidFrom)}`;
+        const identity = `${label}:${string(warning.MasterId)}:${string(warning.ValidFrom)}`;
         const title = string(warning.MainText, label);
         return [
           {

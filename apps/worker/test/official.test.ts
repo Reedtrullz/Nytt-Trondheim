@@ -5,7 +5,7 @@ describe("official warning collection", () => {
   it("retains RSS geometry and CAP cancellation provenance once per MET identifier", async () => {
     const rss = `<?xml version="1.0"?>
       <rss version="2.0" xmlns:georss="http://www.georss.org/georss"><channel><item>
-        <title>Skogbrannfare i Trøndelag</title>
+        <title>Skogbrannfare &amp; tørke i Trøndelag</title>
         <description>Fare i området.</description>
         <link>https://api.met.no/weatherapi/metalerts/2.0/current?cap=cap-1</link>
         <guid>cap-1</guid>
@@ -17,9 +17,9 @@ describe("official warning collection", () => {
         <identifier>cap-1</identifier><sent>2026-05-26T10:00:00Z</sent><msgType>Cancel</msgType>
         <references>met.no,cap-original,2026-05-25T10:00:00Z</references>
         <info><event>forestFire</event><headline>Skogbrannfare</headline>
-          <description>Fare i området.</description><severity>Moderate</severity>
+          <description>Fare for glødende &amp; nye branner.</description><severity>Moderate</severity>
           <onset>2026-05-26T10:00:00Z</onset><expires>2026-05-27T10:00:00Z</expires>
-          <area><areaDesc>Trøndelag</areaDesc></area>
+          <area><areaDesc>Trøndelag &amp; Nordmøre</areaDesc></area>
         </info>
       </alert>`;
     const requestInits: RequestInit[] = [];
@@ -30,6 +30,9 @@ describe("official warning collection", () => {
         : new Response(cap, { status: 200 });
     });
     expect(events[0]?.eventType).toBe("fire");
+    expect(events[0]?.title).toBe("Skogbrannfare");
+    expect(events[0]?.detail).toBe("Fare for glødende & nye branner.");
+    expect(events[0]?.areaLabel).toBe("Trøndelag & Nordmøre");
     expect(events[0]?.state).toBe("cancelled");
     expect(events[0]?.geometry?.type).toBe("Polygon");
     expect(events[0]?.replacesIds).toEqual([officialId("met", "cap-original")]);
@@ -75,5 +78,39 @@ describe("official warning collection", () => {
     expect(events.every((event) => event.geometry === undefined)).toBe(true);
     expect(events[0]?.areaLabel).toBe("Trondheim");
     expect(events.map((event) => event.eventType)).toEqual(["flood", "landslide"]);
+  });
+
+  it("keeps one active NVE event when a revision supersedes the same master warning", async () => {
+    const events = await collectNveWarnings(async () =>
+      Response.json([
+        {
+          Id: "nve-2",
+          MasterId: "nve-master-1",
+          ActivityLevel: "2",
+          MainText: "Gult nivå, oppdatert tekst",
+          CapStatus: "actual",
+          PublishTime: "2026-05-26T11:00:00Z",
+          ValidFrom: "2026-05-26T10:00:00Z",
+          ValidTo: "2026-05-27T10:00:00Z",
+        },
+        {
+          Id: "nve-1",
+          MasterId: "nve-master-1",
+          ActivityLevel: "2",
+          MainText: "Gult nivå",
+          CapStatus: "actual",
+          PublishTime: "2026-05-26T10:00:00Z",
+          ValidFrom: "2026-05-26T10:00:00Z",
+          ValidTo: "2026-05-27T10:00:00Z",
+        },
+      ]),
+    );
+
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.eventType)).toEqual(["flood", "landslide"]);
+    expect(events.map((event) => event.title)).toEqual([
+      "Gult nivå, oppdatert tekst",
+      "Gult nivå, oppdatert tekst",
+    ]);
   });
 });
