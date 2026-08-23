@@ -25,7 +25,9 @@ describe("retentionConfig", () => {
     expect(retentionConfig({ RETENTION_SOURCE_ITEM_CAPTURES_DAYS: "0" }).capturesDays).toBe(30);
     expect(retentionConfig({ RETENTION_COLLECTOR_RUNS_DAYS: "1.5" }).collectorRunsDays).toBe(90);
     expect(retentionConfig({ RETENTION_PUSH_DELIVERIES_DAYS: "-3" }).pushDeliveriesDays).toBe(180);
-    expect(retentionConfig({ RETENTION_TELEMETRY_HISTORY_DAYS: "14" }).telemetryHistoryDays).toBe(14);
+    expect(retentionConfig({ RETENTION_TELEMETRY_HISTORY_DAYS: "14" }).telemetryHistoryDays).toBe(
+      14,
+    );
   });
 });
 
