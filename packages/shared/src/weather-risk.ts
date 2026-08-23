@@ -26,7 +26,7 @@ export function roadWeatherObservationLevel(observation: RoadWeatherObservation)
     (typeof roadTemperature === "number" && roadTemperature <= 0 && precipitation > 0) ||
     (typeof visibility === "number" && visibility < 200) ||
     wind >= 17 ||
-    /is|glatt|stengt|fare/.test(summary)
+    /(?<![a-zæøå])(is|glatt|stengt|fare)(?![a-zæøå])/.test(summary)
   ) {
     return "severe";
   }

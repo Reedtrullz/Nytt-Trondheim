@@ -136,8 +136,13 @@ function categoryFromMessage(message: TrafficInfoObject): TrafficEventCategory {
   if (/restriction|weight|height|width|length|restriksjon|begrensning|kolonne/.test(haystack)) {
     return "restriction";
   }
-  if (/obstruction|hindring|debris|gjenstand|dyr|animal|stein|ras/.test(haystack))
+  if (
+    /obstruction|hindring|debris|gjenstand|dyr|animal|stein|(?<![a-zæøå])ras(?![a-zæøå])/.test(
+      haystack,
+    )
+  ) {
     return "obstruction";
+  }
   return "other";
 }
 

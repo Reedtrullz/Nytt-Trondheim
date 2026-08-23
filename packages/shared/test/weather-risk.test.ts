@@ -34,6 +34,18 @@ describe("weather risk engine", () => {
         roadSurfaceTemperatureC: -0.4,
       }),
     ).toBe("severe");
+    expect(
+      roadWeatherObservationLevel({
+        ...baseObservation,
+        rawSummary: "Is på veien",
+      }),
+    ).toBe("severe");
+    expect(
+      roadWeatherObservationLevel({
+        ...baseObservation,
+        rawSummary: "Visning av risikomelding",
+      }),
+    ).toBe("normal");
     expect(roadWeatherObservationStatus({ ...baseObservation, visibilityMeters: 150 })).toBe(
       "Krevende føre",
     );

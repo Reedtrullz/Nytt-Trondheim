@@ -22,6 +22,24 @@ describe("Vegvesen TrafficInfo", () => {
     });
   });
 
+  it("classifies landslide words without matching ras inside unrelated compounds", () => {
+    const base = {
+      id: "test-ras-boundary",
+      icon: { position: { coordinates: [10.39, 63.43] } },
+      location: { counties: [{ name: "Trøndelag" }] },
+      activityStatus: "active",
+    };
+    const parse = (message: Record<string, unknown>) =>
+      parseTrafficInfoMessages(JSON.stringify({ trafficMessages: [message] }), {
+        endpoint: defaultTrafficInfoEndpoint,
+        receivedAt: "2026-08-23T12:00:00.000Z",
+      }).events[0]?.category;
+
+    expect(parse({ ...base, publicCommentDescription: "Steinras over veien" })).toBe("obstruction");
+    expect(parse({ ...base, publicCommentDescription: "Ras i vegskjæringen" })).toBe("obstruction");
+    expect(parse({ ...base, publicCommentDescription: "Planlagt operasjon på E6" })).toBe("other");
+  });
+
   it("normalizes relevant Trondheim messages into traffic map events", async () => {
     const payload = await readFile(fixturePath, "utf8");
     const parsedPayload = JSON.parse(payload) as {
