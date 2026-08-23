@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -10,6 +10,7 @@ import { SituationPublicationBadge } from "../components/situations/SituationPub
 import { boundsFromLatLngs, latLngsFromGeometry, type LeafletBounds } from "../mapCoordinates.js";
 import { resolveSelectedSituation } from "../situationMapSelection.js";
 import { formatSituationTimestamp } from "../situationTime.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 import {
   buildSituationWorkspaceSearch,
   parseSituationWorkspaceFilters,
@@ -551,35 +552,19 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
       timeWindowKey,
     ],
   );
-  const [workspace, setWorkspace] =
-    useState<Awaited<ReturnType<typeof api.situationMapWorkspace>>>();
-  const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(true);
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let ignore = false;
-    setLoading(true);
-    setError(undefined);
-    setWorkspace(undefined);
-    void api
-      .situationMapWorkspace(query)
-      .then((payload) => {
-        if (!ignore) setWorkspace(payload);
-      })
-      .catch((reason: Error) => {
-        if (!ignore) {
-          setWorkspace(undefined);
-          setError(reason.message);
-        }
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [query, attempt]);
+  const fetcherKey = query;
+  const fetchWorkspace = (signal: AbortSignal) => {
+    void fetcherKey;
+    return api.situationMapWorkspace(query, signal);
+  };
+  const workspaceResult = useApiResource({
+    fetcher: fetchWorkspace,
+    key: JSON.stringify(query),
+    debounceMs: 300,
+  });
+  const workspace = workspaceResult.data;
+  const error = workspaceResult.error;
+  const loading = workspaceResult.loading;
 
   const situations = workspace?.situations ?? [];
   const selectedSituationResult = resolveSelectedSituation(situations, filters.selectedSituationId);
@@ -677,7 +662,7 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
           {error ? (
             <div className="map-state error" role="alert">
               <p>Kunne ikke hente situasjonskart: {error}</p>
-              <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+              <button type="button" onClick={workspaceResult.retry}>
                 Prøv igjen
               </button>
             </div>
@@ -710,7 +695,7 @@ export function SituationsPage({ canSeePrivate = true }: { canSeePrivate?: boole
           timeline={workspace?.timeline ?? []}
           loading={loading}
           error={error}
-          onRetry={() => setAttempt((value) => value + 1)}
+          onRetry={workspaceResult.retry}
         />
       </section>
     </main>
