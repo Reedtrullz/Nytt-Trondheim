@@ -19,10 +19,12 @@ import {
   isEntityBackedNotificationFailureFollowUp,
   isFatalTrafficIncidentFollowUp,
   isHighDetailCrossSourceNearDuplicate,
+  isHighInformationTrafficCollisionMatch,
   isPropertyCrimeCoveragePair,
   isPropertyCrimeEventMatch,
   propertyCrimeEvidenceConflicts,
   sharedExactEventFingerprints,
+  trafficCollisionEvidenceConflicts,
 } from "./article-coverage-evidence.js";
 import type {
   ArticleCoverageDecisionSignal,
@@ -745,6 +747,8 @@ function compatibleDifferentSituationSignal(
 
 function articlesConflict(left: Article, right: Article): boolean {
   if (isFatalTrafficIncidentFollowUp(left, right)) return false;
+  if (isHighInformationTrafficCollisionMatch(left, right)) return false;
+  if (trafficCollisionEvidenceConflicts(left, right)) return true;
   if (propertyCrimeEvidenceConflicts(left, right)) return true;
   if (left.situationId && right.situationId && left.situationId !== right.situationId) {
     if (compatibleDifferentSituationSignal(left, right)) return false;
@@ -844,6 +848,17 @@ function articlePairSignals(left: Article, right: Article): ArticleCoverageDecis
       kind: "cross_source_incident",
       articleIds: [left.id, right.id],
       detail: "fatal_traffic_follow_up",
+      overlap: body.overlap,
+      score: body.score,
+    });
+    return signals;
+  }
+  if (isHighInformationTrafficCollisionMatch(left, right)) {
+    const body = tokenSimilarity(articleTextTokens(left), articleTextTokens(right));
+    signals.push({
+      kind: "cross_source_incident",
+      articleIds: [left.id, right.id],
+      detail: "traffic_collision:road_clock_participants",
       overlap: body.overlap,
       score: body.score,
     });

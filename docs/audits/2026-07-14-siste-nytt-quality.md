@@ -252,6 +252,43 @@ boundaries when adding capture/revision and editorial fields.
   only the completed-cycle poll budget from 18 to 30 bounded attempts. Do not weaken the required
   post-promotion cycle identity or source-health gates.
 
+## Wave 2 candidate — Rotvoll collision recall
+
+Status: local candidate only. It does not change the active coverage projection, corrections, or
+any neighborhood alias.
+
+### Candidate implementation
+
+- Add a cross-source high-information traffic-collision fingerprint with a two-hour publication
+  window. Both reports must independently contain traffic-collision language, the same normalized
+  exact road, the same explicit reported incident clock, and the same explicit involved-person
+  count.
+- Normalize the observed `Haakon VIIs gate` / `Håkon VIIs gate` spelling inside the road evidence;
+  do not equate `Lade` and `Rotvoll`. Only the complete fingerprint can narrowly override their
+  otherwise blocking structured-place conflict.
+- Treat an explicit mismatch in road, reported clock, or involved-person count as blocking event
+  evidence. This prevents the existing generic place/text paths from admitting a nearby but
+  contradictory collision report.
+- Align v2 collision vocabulary with legacy for `trafikkuhell` and contextual `sammenstøt` or bare
+  `ulykke`. Bare `ulykke` needs transport, vehicle, or traffic context; an identically timed
+  workplace accident does not satisfy the fingerprint.
+- Keep the rule cross-source and fail closed when a road, clock, participant count, category, time
+  bound, or situation identity is missing or incompatible.
+
+### TDD and candidate verification
+
+- The production-shaped fixture first failed with six split within-event pairs and three false
+  positive control pairs. It then passed in legacy and v2 across original, reversed, and rotated
+  input orders.
+- The fixture groups the four sanitized NRK, Politiloggen, Adressa, and Nidaros reports. Controls
+  with a different clock, participant count, or exact road remain separate; same-source and
+  non-traffic `ulykke` variants do not satisfy the new fingerprint.
+- Corpus: 25 cases, 90 articles, 127 labeled pairs; pair precision `1.0`, pair recall `1.0`, group
+  precision `1.0`, grouping coverage `1.0`, false positives `0`, false negatives `0`, bridge errors
+  `0`, and critical failures `0`.
+- Canonical matcher gate: 79/79 passed. Full shared suite: 196/196 passed. Shared TypeScript and
+  focused ESLint passed. Prettier and `git diff --check` passed after formatting.
+
 ## Visual evidence
 
 - Desktop baseline:
@@ -273,8 +310,9 @@ boundaries when adding capture/revision and editorial fields.
 - Green health endpoints do not contradict the visible wrong merge or mobile overflow.
 - The expanded corpus includes the new theft topology but still does not cover extraction quality
   or editorial copy quality.
-- The 109 labels are correlated examples from a small topology corpus, not 109 independent
-  production events and not promotion evidence for matcher v2.
+- The 109 Wave 1 labels, or 127 labels with the Wave 2 candidate, are correlated examples from a
+  small topology corpus, not independent production events and not promotion evidence for matcher
+  v2.
 - The production worker strips incoming bundle metadata before analysis. Direct-analyzer ID tests
   prove deterministic one-to-one handling, but do not by themselves prove that a fresh deployed
   legacy generation will retain the historical `coverage:0g728te` ID.
