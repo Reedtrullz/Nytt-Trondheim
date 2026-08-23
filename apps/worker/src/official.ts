@@ -183,7 +183,7 @@ export async function collectNveWarnings(fetcher: typeof fetch = fetch): Promise
         const warning = object(rawWarning);
         const level = Number(warning.ActivityLevel ?? 0);
         if (level < 2) return [];
-        const identity = `${label}:${string(warning.MasterId)}:${string(warning.Id)}:${string(warning.ValidFrom)}`;
+        const identity = `${label}:${string(warning.MasterId)}:${string(warning.ValidFrom)}`;
         const title = string(warning.MainText, label);
         return [
           {

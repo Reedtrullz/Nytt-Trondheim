@@ -76,4 +76,38 @@ describe("official warning collection", () => {
     expect(events[0]?.areaLabel).toBe("Trondheim");
     expect(events.map((event) => event.eventType)).toEqual(["flood", "landslide"]);
   });
+
+  it("keeps one active NVE event when a revision supersedes the same master warning", async () => {
+    const events = await collectNveWarnings(async () =>
+      Response.json([
+        {
+          Id: "nve-2",
+          MasterId: "nve-master-1",
+          ActivityLevel: "2",
+          MainText: "Gult nivå, oppdatert tekst",
+          CapStatus: "actual",
+          PublishTime: "2026-05-26T11:00:00Z",
+          ValidFrom: "2026-05-26T10:00:00Z",
+          ValidTo: "2026-05-27T10:00:00Z",
+        },
+        {
+          Id: "nve-1",
+          MasterId: "nve-master-1",
+          ActivityLevel: "2",
+          MainText: "Gult nivå",
+          CapStatus: "actual",
+          PublishTime: "2026-05-26T10:00:00Z",
+          ValidFrom: "2026-05-26T10:00:00Z",
+          ValidTo: "2026-05-27T10:00:00Z",
+        },
+      ]),
+    );
+
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.eventType)).toEqual(["flood", "landslide"]);
+    expect(events.map((event) => event.title)).toEqual([
+      "Gult nivå, oppdatert tekst",
+      "Gult nivå, oppdatert tekst",
+    ]);
+  });
 });
