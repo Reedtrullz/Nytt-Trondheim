@@ -2231,7 +2231,7 @@ function mergeSituation(existing: Situation | undefined, incoming: Situation): S
   };
 }
 
-export function articleDedupeKey(article: Article): string {
+export function legacyArticleSimilarityKey(article: Article): string {
   const normalizedTitle = article.title
     .normalize("NFKD")
     .replace(/\p{Diacritic}/gu, "")
@@ -2242,6 +2242,13 @@ export function articleDedupeKey(article: Article): string {
   return createHash("sha256")
     .update(`${article.source}:${normalizedTitle}:${publishedHour}`)
     .digest("hex");
+}
+
+export function articleDedupeKey(article: Article): string {
+  const digest = createHash("sha256")
+    .update(`article-url-v2\0${article.source}\0${article.url}`)
+    .digest("hex");
+  return `article-url-v2:${digest}`;
 }
 
 function sourceItemHash(parts: unknown[]): string {

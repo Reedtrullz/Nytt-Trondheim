@@ -17,9 +17,17 @@
 ## Identity and Retention
 
 - Durable upstream identity: Politiloggen thread/message ID.
+- Article admission requires a parseable upstream thread or published-message creation timestamp.
+  Invalid or missing timestamps are never replaced with collection time. Unusable threads are
+  skipped; if a non-empty response contains no usable thread, collection fails and source health
+  degrades.
 - Raw payload retention: public message-thread fields required for provenance and update detection.
 - Provenance: `official`.
 
 ## Verification
 
 - Tests must cover activation, update, resolved-state handling and place specificity.
+- HTTP `204` is the only explicit empty-snapshot success. A `200` response must contain a non-empty
+  `messageThreads` array with at least one structurally usable, timestamped thread; malformed or
+  empty `200` payloads fail the collection so they cannot report healthy source status.
+- Mixed payloads skip malformed or untimestamped threads while preserving valid threads.

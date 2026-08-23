@@ -188,11 +188,6 @@ export function canonicalUrl(rawUrl: string, base?: string): string {
   return url.toString();
 }
 
-function feedPublishedAt(value: unknown): string {
-  const parsed = Date.parse(textValue(value));
-  return new Date(Number.isFinite(parsed) ? parsed : Date.now()).toISOString();
-}
-
 function parsePublishedAt(value: unknown): string | undefined {
   const rawValue = textValue(value).trim();
   if (!rawValue) return undefined;
@@ -285,6 +280,13 @@ export async function collectRss(
   const items = (
     source.format === "atom" ? asArray(feed.feed?.entry) : asArray(feed.rss?.channel?.item)
   ).slice(0, source.maxItems ?? 60);
+  if (items.length === 0) {
+    throw new Error(
+      `${source.label} ${source.format === "atom" ? "Atom" : "RSS"} har ingen oppføringer`,
+    );
+  }
+  let articleCandidates = 0;
+  let timestampedCandidates = 0;
   for (const item of items) {
     const title = textValue(item.title).trim();
     let excerpt = textValue(item.description || item.summary || item.content)
@@ -300,6 +302,10 @@ export async function collectRss(
     } catch {
       continue;
     }
+    articleCandidates += 1;
+    const publishedAt = parsePublishedAt(item.pubDate || item.published || item.updated);
+    if (!publishedAt) continue;
+    timestampedCandidates += 1;
     const categories = source.format === "atom" ? atomCategories(item) : itemCategories(item);
     if (
       detailFetches < maxDetailFetches &&
@@ -319,13 +325,18 @@ export async function collectRss(
       title,
       excerpt: excerpt.slice(0, 300),
       url,
-      publishedAt:
-        parsePublishedAt(item.pubDate || item.published || item.updated) ?? feedPublishedAt(""),
+      publishedAt,
       scope: scope ?? "trondelag",
       category,
       topics: articleTopics(articleText, category),
       places: extractPlaces(articleText),
     });
+  }
+  if (articleCandidates === 0) {
+    throw new Error(`${source.label} har ingen brukbare artikkelkandidater i feeden`);
+  }
+  if (timestampedCandidates === 0) {
+    throw new Error(`${source.label} har ingen brukbare tidsstempler i feeden`);
   }
   return articles;
 }
@@ -513,9 +524,13 @@ export async function collectFrontpage(
   ]) {
     if (!byUrl.has(candidate.url)) byUrl.set(candidate.url, candidate);
   }
+  if (byUrl.size === 0) {
+    throw new Error(`${source.label} har ingen artikkelkandidater på forsiden`);
+  }
 
   const articles: Article[] = [];
   let detailFetches = 0;
+  let timestampedCandidates = 0;
   for (const candidate of [...byUrl.values()].slice(0, source.maxArticles ?? 24)) {
     const storyId = frontpageStoryId(candidate.url);
     let publishedAt =
@@ -532,6 +547,7 @@ export async function collectFrontpage(
       categories = [...new Set([...categories, ...(detail?.categories ?? [])])];
     }
     if (!publishedAt) continue;
+    timestampedCandidates += 1;
     const articleText = `${title} ${excerpt} ${categories.join(" ")}`;
     const scope = detectScope(articleText);
     if (!scope && !source.retainRegionalUnmatched) continue;
@@ -549,6 +565,9 @@ export async function collectFrontpage(
       topics: articleTopics(articleText, category),
       places: extractPlaces(articleText),
     });
+  }
+  if (timestampedCandidates === 0) {
+    throw new Error(`${source.label} har ingen brukbare tidsstempler på forsiden`);
   }
   return articles;
 }
@@ -578,15 +597,18 @@ function parseNorwegianDate(value: string): string | undefined {
   return new Date(wallClockUtc - offset * 60_000).toISOString();
 }
 
-async function municipalPublishedAt(url: string, fetcher: typeof fetch): Promise<string> {
+async function municipalPublishedAt(
+  url: string,
+  fetcher: typeof fetch,
+): Promise<string | undefined> {
   try {
     const response = await fetchWithSourcePolicy(fetcher, url);
-    if (!response.ok) return new Date().toISOString();
+    if (!response.ok) return undefined;
     const detail = cheerio.load(await response.text());
     const value = detail('meta[property="article:published_time"]').attr("content") ?? "";
-    return parseNorwegianDate(value) ?? new Date().toISOString();
+    return parseNorwegianDate(value);
   } catch {
-    return new Date().toISOString();
+    return undefined;
   }
 }
 
@@ -625,12 +647,23 @@ export async function collectMunicipality(fetcher: typeof fetch = fetch): Promis
       places: extractPlaces(`${title} ${excerpt}`),
     });
   });
-  return Promise.all(
-    candidates.map(async (article) => ({
-      ...article,
-      publishedAt: await municipalPublishedAt(article.url, fetcher),
-    })),
+  if (candidates.length === 0) {
+    throw new Error("Trondheim kommune nyhetsliste har ingen brukbare artikkelkandidater");
+  }
+  const timestamped = (
+    await Promise.all(
+      candidates.map(async (article) => ({
+        ...article,
+        publishedAt: await municipalPublishedAt(article.url, fetcher),
+      })),
+    )
+  ).flatMap((article) =>
+    article.publishedAt ? [{ ...article, publishedAt: article.publishedAt }] : [],
   );
+  if (timestamped.length === 0) {
+    throw new Error("Trondheim kommune har ingen brukbare tidsstempler i nyhetslisten");
+  }
+  return timestamped;
 }
 
 export interface OfficialProbeResult {
