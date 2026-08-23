@@ -2549,6 +2549,10 @@ function TrafficMapFocus({
   selectedItineraryId?: string;
 }) {
   const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => map.invalidateSize(), 150);
+    return () => clearTimeout(timer);
+  }, [map]);
   const selectedEventFocusKey = selectedEvent?.id;
   const selectedEventGeometryKey = selectedEvent ? JSON.stringify(selectedEvent.geometry) : "";
   const selectedEventBounds = useMemo(

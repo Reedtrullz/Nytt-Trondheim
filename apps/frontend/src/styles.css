@@ -15263,11 +15263,15 @@ button.journey-context-chip {
   font-weight: 800;
   transform: translateY(-180%);
   transition: transform 120ms ease-out;
+  clip-path: inset(0 0 100% 0);
+  visibility: hidden;
 }
 
 .skip-link:focus,
 .skip-link:focus-visible {
   transform: translateY(0);
+  clip-path: inset(0);
+  visibility: visible;
 }
 
 #main-content {

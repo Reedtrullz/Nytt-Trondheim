@@ -348,11 +348,9 @@ function AuthenticatedApp() {
 
   return (
     <>
-      {location.pathname === "/" ? (
-        <a className="skip-link" href="#main-content">
-          Hopp til hovedinnhold
-        </a>
-      ) : null}
+      <a className="skip-link" href="#main-content">
+        Hopp til hovedinnhold
+      </a>
       {session ? <Header freshnessLabel={freshnessLabel} user={session.user} /> : null}
       {sessionLoading ? <LoadingPage message="Henter innlogging..." /> : null}
       {!sessionLoading && sessionError ? (
