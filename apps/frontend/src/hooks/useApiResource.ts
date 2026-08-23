@@ -83,7 +83,7 @@ export function useApiResource<T>({
     }
     run();
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- data is intentionally read once per effect run
+    // data is intentionally read once per effect run to decide fresh-vs-refreshing state.
   }, [key, attempt, fetcher]);
 
   return { data, loading, refreshing, error, retry };

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { useApiResource } from "./useApiResource.js";
 
 function Probe({
@@ -22,8 +22,8 @@ function Probe({
 }
 
 describe("useApiResource", () => {
-  it("renders without crashing and reports initial loading state", () => {
-    const fetcher = vi.fn(async () => ({ items: [] }));
+  it("renders without crashing and reports initial loading state", async () => {
+    const fetcher = async () => ({ items: [] });
     const markup = renderToStaticMarkup(<Probe fetcher={fetcher} key="initial" />);
     expect(markup).toContain("loading");
   });
