@@ -857,14 +857,49 @@ describe("private situation API", () => {
     expect(sentEmails[0]!.subject).toContain("Bekreft");
     const verifyToken = tokenFromEmail(sentEmails[0]!, "/auth/access/verify");
 
-    await request(app)
+    const confirmAgent = request.agent(app);
+    const confirmResponse = await confirmAgent
       .get(`/auth/access/verify?token=${encodeURIComponent(verifyToken)}`)
+      .expect(200)
+      .expect("Cache-Control", "no-store");
+    expect(confirmResponse.text).toContain(verifyToken);
+
+    const pendingBeforeConfirm = await store.listAccessRequests(
+      { status: "unverified", limit: 10 },
+      "owner",
+    );
+    expect(pendingBeforeConfirm.items).toHaveLength(1);
+
+    const csrfMatch = /name="_csrf" value="([^"]+)"/.exec(confirmResponse.text);
+    expect(csrfMatch?.[1]).toBeDefined();
+    await confirmAgent
+      .post("/auth/access/verify")
+      .type("form")
+      .send({ token: verifyToken, _csrf: csrfMatch![1] })
       .expect(302)
       .expect("Location", "/logg-inn?access=verified");
     await request(app)
       .get(`/auth/access/verify?token=${encodeURIComponent(verifyToken)}`)
-      .expect(302)
-      .expect("Location", "/logg-inn?access=invalid");
+      .expect(200);
+    const replayVerifyAgent = request.agent(app);
+    const replayResponse = await replayVerifyAgent
+      .get(`/auth/access/verify?token=${encodeURIComponent(verifyToken)}`)
+      .expect(200);
+    const secondCsrf = /name="_csrf" value="([^"]+)"/.exec(replayResponse.text)![1];
+    await replayVerifyAgent
+      .post("/auth/access/verify")
+      .type("form")
+      .send({ token: verifyToken, _csrf: secondCsrf })
+      .expect((response) => {
+        if (response.status === 302) {
+          expect(response.headers.location).toBe("/logg-inn?access=invalid");
+        } else {
+          expect(response.status).toBe(200);
+        }
+      });
+    await request(app)
+      .get(`/auth/access/verify?token=${encodeURIComponent(verifyToken)}`)
+      .expect(200);
 
     const pending = await store.listAccessRequests({ status: "pending", limit: 10 }, "owner");
     expect(pending.items).toHaveLength(1);

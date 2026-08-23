@@ -455,13 +455,18 @@ function createRateLimiter(): express.RequestHandler {
     }
 
     const now = Date.now();
-    if (buckets.size > 10_000) {
+    if (buckets.size >= 10_000) {
       for (const [key, bucket] of buckets) {
         if (bucket.resetAt <= now) buckets.delete(key);
       }
     }
 
     const key = `${rule.name}:${req.ip ?? req.socket.remoteAddress ?? "unknown"}`;
+    if (buckets.size >= 10_000 && !buckets.has(key)) {
+      const oldestKey = buckets.keys().next().value;
+      if (oldestKey !== undefined && oldestKey !== key) buckets.delete(oldestKey);
+    }
+
     const current = buckets.get(key);
     const bucket =
       !current || current.resetAt <= now ? { count: 0, resetAt: now + rule.windowMs } : current;
@@ -1121,14 +1126,51 @@ export async function createApp(config: AppConfig): Promise<AppRuntime> {
   app.get("/auth/access/verify", async (req, res, next) => {
     try {
       const token = typeof req.query.token === "string" ? req.query.token : "";
-      const result = token ? await store.verifyAccessRequestToken(token) : "invalid";
-      res.redirect(
-        result === "verified" ? "/logg-inn?access=verified" : "/logg-inn?access=invalid",
-      );
+      if (!token) {
+        res.redirect("/logg-inn?access=invalid");
+        return;
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.status(200).type("html").send(`<!doctype html>
+<html lang="nb">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bekreft e-post – Nytt Trondheim</title>
+  </head>
+  <body>
+    <main>
+      <h1>Bekreft e-postadressen</h1>
+      <p>Trykk på knappen for å bekrefte e-postadressen din.</p>
+      <form method="post" action="/auth/access/verify">
+        <input type="hidden" name="token" value="${escapeHtmlAttribute(token)}">
+        <input type="hidden" name="_csrf" value="${escapeHtmlAttribute(csrfToken(req))}">
+        <button type="submit">Bekreft</button>
+      </form>
+    </main>
+  </body>
+</html>`);
     } catch (error) {
       next(error);
     }
   });
+
+  app.post(
+    "/auth/access/verify",
+    requirePublicSameOrigin(config),
+    requireCsrf(config),
+    async (req, res, next) => {
+      try {
+        const token = typeof req.body.token === "string" ? req.body.token : "";
+        const result = token ? await store.verifyAccessRequestToken(token) : "invalid";
+        res.redirect(
+          result === "verified" ? "/logg-inn?access=verified" : "/logg-inn?access=invalid",
+        );
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   app.post("/auth/email/request", requirePublicSameOrigin(config), async (req, res, next) => {
     try {
