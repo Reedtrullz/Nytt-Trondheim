@@ -286,7 +286,6 @@ function HomeRoute({
 }
 
 function AuthenticatedApp() {
-  const location = useLocation();
   const [data, setData] = useState<BootstrapPayload>();
   const [session, setSession] = useState<SessionPayload>();
   const [sessionError, setSessionError] = useState<string>();
