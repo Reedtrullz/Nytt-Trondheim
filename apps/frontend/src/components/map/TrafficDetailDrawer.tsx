@@ -1,3 +1,4 @@
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { TrafficCorridorImpact, TrafficMapEvent } from "@nytt/shared";
 import { safeExternalUrl } from "../../safeExternalUrl.js";
 import { badgesForTrafficEvent, sourceDisplayLabel } from "../../trafficProvenance.js";
@@ -82,17 +83,46 @@ export function TrafficDetailDrawer({
   corridorImpacts: TrafficCorridorImpact[];
   onClose: () => void;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (event) {
+      closeButtonRef.current?.focus();
+      const previous = document.activeElement as HTMLElement | null;
+      return () => {
+        previous?.focus();
+      };
+    }
+    return undefined;
+  }, [event]);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      onClose();
+    }
+  }
+
   if (!event) return null;
   const impact = impactForEvent(event, corridorImpacts);
   const sourceUrl = safeExternalUrl(event.sourceUrl);
   const confidence = confidenceLabel(event.confidence);
 
   return (
-    <aside className="traffic-detail-drawer" aria-label="Detaljer om trafikkhendelse">
+    <aside
+      className="traffic-detail-drawer"
+      aria-label="Detaljer om trafikkhendelse"
+      onKeyDown={handleKeyDown}
+    >
       <header>
         <p className="label">Hvorfor ser jeg dette?</p>
         <h2>{event.title}</h2>
-        <button type="button" onClick={onClose} aria-label="Lukk trafikkdetaljer">
+        <button
+          ref={closeButtonRef}
+          type="button"
+          onClick={onClose}
+          aria-label="Lukk trafikkdetaljer"
+        >
           Lukk
         </button>
       </header>

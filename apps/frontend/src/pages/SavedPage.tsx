@@ -13,25 +13,15 @@ function time(value: string) {
   }).format(new Date(value));
 }
 
-export function SavedPage() {
-  const [articles, setArticles] = useState<Article[]>([]);
-  const [situations, setSituations] = useState<Situation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
-  const [attempt, setAttempt] = useState(0);
+export type SavedViewProps = {
+  articles: Article[];
+  situations: Situation[];
+  loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
+};
 
-  useEffect(() => {
-    setError(undefined);
-    setLoading(true);
-    void Promise.all([api.savedArticles(), api.situations({ saved: true })])
-      .then(([savedArticles, savedSituations]) => {
-        setArticles(savedArticles);
-        setSituations(savedSituations.items);
-      })
-      .catch((reason: Error) => setError(reason.message))
-      .finally(() => setLoading(false));
-  }, [attempt]);
-
+export function SavedView({ articles, situations, loading, error, onRetry }: SavedViewProps) {
   return (
     <main className="saved-page">
       <header className="page-heading">
@@ -43,7 +33,7 @@ export function SavedPage() {
       {error ? (
         <div className="feed-state error" role="alert">
           <p>Kunne ikke hente lagret: {error}</p>
-          <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+          <button type="button" onClick={onRetry}>
             Prøv igjen
           </button>
         </div>
@@ -94,5 +84,35 @@ export function SavedPage() {
         </section>
       ) : null}
     </main>
+  );
+}
+
+export function SavedPage() {
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [situations, setSituations] = useState<Situation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    setError(undefined);
+    setLoading(true);
+    void Promise.all([api.savedArticles(), api.situations({ saved: true })])
+      .then(([savedArticles, savedSituations]) => {
+        setArticles(savedArticles);
+        setSituations(savedSituations.items);
+      })
+      .catch((reason: Error) => setError(reason.message))
+      .finally(() => setLoading(false));
+  }, [attempt]);
+
+  return (
+    <SavedView
+      articles={articles}
+      situations={situations}
+      loading={loading}
+      error={error}
+      onRetry={() => setAttempt((value) => value + 1)}
+    />
   );
 }

@@ -1241,6 +1241,7 @@ export function SpatialAnalyticsDashboard({
   filters,
   onFiltersChange,
   isRefreshing = false,
+  refreshError,
   onRefresh,
   showMap = true,
 }: {
@@ -1248,6 +1249,7 @@ export function SpatialAnalyticsDashboard({
   filters: SpatialAnalyticsFilters;
   onFiltersChange: (filters: SpatialAnalyticsFilters) => void;
   isRefreshing?: boolean;
+  refreshError?: string;
   onRefresh?: () => void;
   showMap?: boolean;
 }) {
@@ -1350,6 +1352,16 @@ export function SpatialAnalyticsDashboard({
 
   return (
     <main className="spatial-analytics-page">
+      {refreshError ? (
+        <div className="inline-error" role="alert">
+          <p>Kunne ikke oppdatere data: {refreshError}</p>
+          {onRefresh ? (
+            <button type="button" onClick={onRefresh}>
+              Prøv igjen
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <header className="coverage-bundles-hero spatial-analytics-hero">
         <div>
           <p className="label">Privat kommandosenter</p>
@@ -1410,12 +1422,14 @@ export function SpatialAnalyticsPage() {
   const filters = useMemo(() => parseFilters(search), [search]);
   const [payload, setPayload] = useState<CommandCenterSpatialAnalyticsPayload>();
   const [error, setError] = useState<string>();
+  const [refreshError, setRefreshError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     let ignore = false;
     setError(undefined);
+    setRefreshError(undefined);
     setRefreshing(true);
     api
       .spatialAnalytics(spatialAnalyticsLiveFilters(filters))
@@ -1423,7 +1437,10 @@ export function SpatialAnalyticsPage() {
         if (!ignore) setPayload(nextPayload);
       })
       .catch((reason: Error) => {
-        if (!ignore) setError(reason.message);
+        if (!ignore) {
+          if (payload) setRefreshError(reason.message);
+          else setError(reason.message);
+        }
       })
       .finally(() => {
         if (!ignore) setRefreshing(false);
@@ -1448,7 +1465,7 @@ export function SpatialAnalyticsPage() {
     setSearchParams(buildSearch(nextFilters), { replace: true });
   }
 
-  if (error) {
+  if (error && !payload) {
     return (
       <main className="fatal-error coverage-bundles-error" role="alert">
         <p>{error}</p>
@@ -1475,6 +1492,7 @@ export function SpatialAnalyticsPage() {
       onRefresh={() => setAttempt((value) => value + 1)}
       onFiltersChange={updateFilters}
       payload={payload}
+      refreshError={error ?? refreshError}
     />
   );
 }
