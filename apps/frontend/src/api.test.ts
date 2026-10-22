@@ -250,6 +250,20 @@ describe("frontend source item API helpers", () => {
     );
   });
 
+  it("keeps Retry-After on traffic map ApiError failures", async () => {
+    const limited = new Response(JSON.stringify({ error: "Vent litt" }), {
+      status: 429,
+      headers: { "Retry-After": "7" },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(limited));
+    await expect(fetchTrafficMap()).rejects.toMatchObject({
+      name: "ApiError",
+      message: "Vent litt",
+      status: 429,
+      retryAfter: "7",
+    });
+  });
+
   it("requests weather preparedness with included credentials and abort signal", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       okResponse({

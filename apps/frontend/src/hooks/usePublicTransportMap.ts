@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicTransportMapPayload, PublicTransportVehicleMode } from "@nytt/shared";
 import { fetchPublicTransportMap } from "../api/publicTransportMap.js";
 import type { MapBounds } from "../mapBounds.js";
-import { useVisiblePolling } from "./useVisiblePolling.js";
+import { MapPolling, useVisiblePolling } from "./useVisiblePolling.js";
 
 export interface UsePublicTransportMapOptions {
   modes?: PublicTransportVehicleMode[];
@@ -46,8 +46,7 @@ export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}
   const [data, setData] = useState<PublicTransportMapPayload | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  const requestIdRef = useRef(0);
-  const abortRef = useRef<AbortController | undefined>(undefined);
+  const polling = useRef(new MapPolling()).current;
 
   const modesKey = options.modes?.join(",") ?? "";
   const includeAlertsKey = options.includeAlerts === undefined ? "" : String(options.includeAlerts);
@@ -55,18 +54,15 @@ export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}
   const enabled = options.enabled ?? true;
 
   const reload = useCallback(async () => {
-    requestIdRef.current += 1;
-    const requestId = requestIdRef.current;
-    abortRef.current?.abort();
-
     if (!enabled) {
+      polling.cancel();
       setLoading(false);
       setError(undefined);
       return;
     }
 
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const controller = polling.start(`${modesKey}|${includeAlertsKey}|${currentBoundsKey}`);
+    if (!controller) return;
 
     setLoading(true);
     setError(undefined);
@@ -79,21 +75,25 @@ export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}
         },
         { signal: controller.signal },
       );
-      if (requestId === requestIdRef.current) setData(payload);
+      if (polling.owns(controller)) {
+        setData(payload);
+        polling.succeeded(controller);
+      }
     } catch (err) {
       if (isAbortError(err)) return;
-      if (requestId === requestIdRef.current) {
+      if (polling.owns(controller)) {
+        polling.failed(controller, err);
         setError(
           err instanceof Error ? err.message : "Ukjent feil ved henting av kollektivtrafikk.",
         );
       }
     } finally {
-      if (requestId === requestIdRef.current) {
+      if (polling.owns(controller)) {
         setLoading(false);
-        abortRef.current = undefined;
+        polling.finished(controller);
       }
     }
-  }, [currentBoundsKey, enabled, includeAlertsKey, modesKey]);
+  }, [currentBoundsKey, enabled, includeAlertsKey, modesKey, polling]);
 
   useEffect(() => {
     void reload();
@@ -107,10 +107,9 @@ export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}
 
   useEffect(() => {
     return () => {
-      requestIdRef.current += 1;
-      abortRef.current?.abort();
+      polling.cancel();
     };
-  }, []);
+  }, [polling]);
 
   return {
     data,

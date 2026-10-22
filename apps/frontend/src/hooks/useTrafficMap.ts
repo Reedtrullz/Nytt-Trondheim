@@ -7,7 +7,7 @@ import type {
 } from "@nytt/shared";
 import { fetchTrafficMap } from "../api/trafficMap.js";
 import type { MapBounds } from "../mapBounds.js";
-import { useVisiblePolling } from "./useVisiblePolling.js";
+import { MapPolling, useVisiblePolling } from "./useVisiblePolling.js";
 
 export interface UseTrafficMapOptions {
   categories: TrafficEventCategory[];
@@ -73,9 +73,7 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
   const [data, setData] = useState<TrafficMapPayload | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  const requestIdRef = useRef(0);
-  const abortRef = useRef<AbortController | undefined>(undefined);
-  const settledQueryKeyRef = useRef("");
+  const polling = useRef(new MapPolling()).current;
 
   const categoriesKey = options.categories.join(",");
   const severitiesKey = options.severities.join(",");
@@ -99,17 +97,11 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
   ].join("|");
 
   const reload = useCallback(async () => {
-    requestIdRef.current += 1;
-    const requestId = requestIdRef.current;
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const queryChanged =
-      settledQueryKeyRef.current !== "" && settledQueryKeyRef.current !== queryKey;
+    const controller = polling.start(queryKey);
+    if (!controller) return;
 
     setLoading(true);
     setError(undefined);
-    void queryChanged;
     try {
       const payload = await fetchTrafficMap(
         {
@@ -125,19 +117,20 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
         },
         { signal: controller.signal },
       );
-      if (requestId === requestIdRef.current) {
+      if (polling.owns(controller)) {
         setData(payload);
-        settledQueryKeyRef.current = queryKey;
+        polling.succeeded(controller);
       }
     } catch (err) {
       if (isAbortError(err)) return;
-      if (requestId === requestIdRef.current) {
+      if (polling.owns(controller)) {
+        polling.failed(controller, err);
         setError(err instanceof Error ? err.message : "Ukjent feil ved henting av trafikkdata.");
       }
     } finally {
-      if (requestId === requestIdRef.current) {
+      if (polling.owns(controller)) {
         setLoading(false);
-        abortRef.current = undefined;
+        polling.finished(controller);
       }
     }
   }, [
@@ -147,6 +140,7 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
     fromKey,
     includeRoadContextKey,
     includeTravelTimeKey,
+    polling,
     queryKey,
     severitiesKey,
     statesKey,
@@ -164,10 +158,9 @@ export function useTrafficMap(options: UseTrafficMapOptions) {
 
   useEffect(() => {
     return () => {
-      requestIdRef.current += 1;
-      abortRef.current?.abort();
+      polling.cancel();
     };
-  }, []);
+  }, [polling]);
 
   return {
     data,

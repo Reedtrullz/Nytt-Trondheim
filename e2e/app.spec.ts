@@ -2721,6 +2721,38 @@ test("raw inspector explains degraded AI recovery attempts", async ({ page }) =>
   await expectNoHorizontalPageOverflow(page);
 });
 
+test("slow map refreshes keep one request per visible map hook while triggers repeat", async ({
+  page,
+}) => {
+  const counts = { traffic: 0, transport: 0 };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const hold = (key: keyof typeof counts, pathname: string) => async (route: Route) => {
+    if (new URL(route.request().url()).pathname !== pathname) return route.fallback();
+    counts[key] += 1;
+    await gate;
+    await route.continue().catch(() => undefined);
+  };
+  await page.route("**/api/map/traffic-events**", hold("traffic", "/api/map/traffic-events"));
+  await page.route("**/api/map/public-transport**", hold("transport", "/api/map/public-transport"));
+
+  await page.goto("/trafikk");
+  await expect.poll(() => counts.traffic).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  const before = { ...counts };
+
+  await page.evaluate(() => {
+    for (let i = 0; i < 5; i += 1) document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForTimeout(500);
+  expect(counts).toEqual(before);
+
+  release();
+  await page.waitForLoadState("networkidle");
+});
+
 test("traffic page shows summary cards semantic layers ranked list and detail drawer", async ({
   page,
 }) => {
