@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicTransportMapPayload, PublicTransportVehicleMode } from "@nytt/shared";
 import { fetchPublicTransportMap } from "../api/publicTransportMap.js";
 import type { MapBounds } from "../mapBounds.js";
-import { MapPolling, useVisiblePolling } from "./useVisiblePolling.js";
+import { boundsFromKey, boundsKey, MapPolling, useVisiblePolling } from "./useVisiblePolling.js";
 
 export interface UsePublicTransportMapOptions {
   modes?: PublicTransportVehicleMode[];
@@ -11,35 +11,8 @@ export interface UsePublicTransportMapOptions {
   enabled?: boolean;
 }
 
-function boundsKey(bounds: UsePublicTransportMapOptions["bounds"]): string {
-  return bounds
-    ? [bounds.north, bounds.south, bounds.east, bounds.west]
-        .map((value) => value.toFixed(6))
-        .join(",")
-    : "";
-}
-
-function boundsFromKey(key: string): UsePublicTransportMapOptions["bounds"] {
-  if (!key) return undefined;
-  const [north, south, east, west] = key.split(",").map(Number);
-  if (
-    north === undefined ||
-    south === undefined ||
-    east === undefined ||
-    west === undefined ||
-    ![north, south, east, west].every(Number.isFinite)
-  ) {
-    return undefined;
-  }
-  return { north, south, east, west };
-}
-
 function modesFromKey(key: string): PublicTransportVehicleMode[] | undefined {
   return key ? (key.split(",") as PublicTransportVehicleMode[]) : undefined;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}) {
@@ -61,38 +34,22 @@ export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}
       return;
     }
 
-    const controller = polling.start(`${modesKey}|${includeAlertsKey}|${currentBoundsKey}`);
-    if (!controller) return;
-
-    setLoading(true);
-    setError(undefined);
-    try {
-      const payload = await fetchPublicTransportMap(
-        {
-          modes: modesFromKey(modesKey),
-          includeAlerts: includeAlertsKey ? includeAlertsKey === "true" : undefined,
-          bounds: boundsFromKey(currentBoundsKey),
-        },
-        { signal: controller.signal },
-      );
-      if (polling.owns(controller)) {
-        setData(payload);
-        polling.succeeded(controller);
-      }
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (polling.owns(controller)) {
-        polling.failed(controller, err);
-        setError(
-          err instanceof Error ? err.message : "Ukjent feil ved henting av kollektivtrafikk.",
-        );
-      }
-    } finally {
-      if (polling.owns(controller)) {
-        setLoading(false);
-        polling.finished(controller);
-      }
-    }
+    await polling.run(
+      `${modesKey}|${includeAlertsKey}|${currentBoundsKey}`,
+      (signal) =>
+        fetchPublicTransportMap(
+          {
+            modes: modesFromKey(modesKey),
+            includeAlerts: includeAlertsKey ? includeAlertsKey === "true" : undefined,
+            bounds: boundsFromKey(currentBoundsKey),
+          },
+          { signal },
+        ),
+      setData,
+      setLoading,
+      setError,
+      "Ukjent feil ved henting av kollektivtrafikk.",
+    );
   }, [currentBoundsKey, enabled, includeAlertsKey, modesKey, polling]);
 
   useEffect(() => {
@@ -105,11 +62,7 @@ export function usePublicTransportMap(options: UsePublicTransportMapOptions = {}
     reload,
   });
 
-  useEffect(() => {
-    return () => {
-      polling.cancel();
-    };
-  }, [polling]);
+  useEffect(() => () => polling.cancel(), [polling]);
 
   return {
     data,

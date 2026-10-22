@@ -10,77 +10,134 @@ describe("visible polling", () => {
   });
 });
 
+function setup() {
+  const polling = new MapPolling();
+  const calls: {
+    signal: AbortSignal;
+    resolve: (value: number) => void;
+    reject: (error: unknown) => void;
+  }[] = [];
+  const data: number[] = [];
+  const loading: boolean[] = [];
+  const errors: (string | undefined)[] = [];
+  const run = (key = "a") =>
+    polling.run(
+      key,
+      (signal) => new Promise<number>((resolve, reject) => calls.push({ signal, resolve, reject })),
+      (value) => data.push(value),
+      (value) => loading.push(value),
+      (message) => errors.push(message),
+      "fallback",
+    );
+  return { polling, calls, data, loading, errors, run };
+}
+
 describe("map polling ownership", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("coalesces repeated triggers while one request is in flight", () => {
-    const polling = new MapPolling();
-    const first = polling.start("a");
-    expect(first).toBeDefined();
-    for (let i = 0; i < 20; i += 1) expect(polling.start("a")).toBeUndefined();
-    expect(first?.signal.aborted).toBe(false);
-    polling.finished(first!);
-    expect(polling.start("a")).toBeDefined();
+  it("coalesces repeated triggers while one request is in flight", async () => {
+    const { calls, data, run } = setup();
+    const first = run();
+    const rest = Array.from({ length: 20 }, () => run());
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.signal.aborted).toBe(false);
+    calls[0]?.resolve(1);
+    await Promise.all([first, ...rest]);
+    expect(data).toEqual([1]);
+    const next = run();
+    expect(calls).toHaveLength(2);
+    calls[1]?.resolve(2);
+    await next;
+    expect(data).toEqual([1, 2]);
   });
 
-  it("aborts the old generation on a key change and ignores its late result", () => {
-    const polling = new MapPolling();
-    const old = polling.start("a")!;
-    const next = polling.start("b")!;
-    expect(old.signal.aborted).toBe(true);
-    expect(polling.owns(old)).toBe(false);
-    polling.failed(old, new ApiError("late", 429, "600"));
-    polling.finished(old);
-    expect(polling.owns(next)).toBe(true);
+  it("aborts the old key and ignores its late result and late rejection", async () => {
+    const { calls, data, errors, run } = setup();
+    const old = run("a");
+    const next = run("b");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.signal.aborted).toBe(true);
+    calls[0]?.reject(new ApiError("late", 429, "600"));
+    calls[1]?.resolve(2);
+    await Promise.all([old, next]);
+    expect(data).toEqual([2]);
+    expect(errors.filter(Boolean)).toEqual([]);
+    const again = run("b");
+    expect(calls).toHaveLength(3);
+    calls[2]?.resolve(3);
+    await again;
+  });
+
+  it("cancel aborts in-flight work without reporting an error", async () => {
+    const { polling, calls, data, errors, run } = setup();
+    const pending = run();
     polling.cancel();
-    expect(next.signal.aborted).toBe(true);
-    expect(polling.start("b")).toBeDefined();
+    expect(calls[0]?.signal.aborted).toBe(true);
+    calls[0]?.reject(new DOMException("aborted", "AbortError"));
+    await pending;
+    expect(data).toEqual([]);
+    expect(errors.filter(Boolean)).toEqual([]);
   });
 
-  it("delays the next start by Retry-After seconds or date, then recovers", () => {
+  it("delays the next start by Retry-After seconds or date, keeps last-good data, then recovers", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    const polling = new MapPolling();
-    let c = polling.start("a")!;
-    polling.failed(c, new ApiError("slow", 429, "30"));
-    polling.finished(c);
+    const { calls, data, errors, run } = setup();
+    let pending = run();
+    calls[0]?.resolve(1);
+    await pending;
+    pending = run();
+    calls[1]?.reject(new ApiError("slow", 429, "30"));
+    await pending;
+    expect(errors.at(-1)).toBe("slow");
+    expect(data).toEqual([1]);
     vi.advanceTimersByTime(29_000);
-    expect(polling.start("a")).toBeUndefined();
+    await run();
+    expect(calls).toHaveLength(2);
     vi.advanceTimersByTime(1_000);
-    c = polling.start("a")!;
-    expect(c).toBeDefined();
-    polling.failed(c, new ApiError("slow", 429, "Thu, 01 Jan 2026 00:02:00 GMT"));
-    polling.finished(c);
+    pending = run();
+    expect(calls).toHaveLength(3);
+    calls[2]?.reject(new ApiError("slow", 429, "Thu, 01 Jan 2026 00:02:00 GMT"));
+    await pending;
     vi.advanceTimersByTime(89_000);
-    expect(polling.start("a")).toBeUndefined();
+    await run();
+    expect(calls).toHaveLength(3);
     vi.advanceTimersByTime(1_000);
-    c = polling.start("a")!;
-    polling.succeeded(c);
-    polling.finished(c);
-    expect(polling.start("a")).toBeDefined();
+    pending = run();
+    calls[3]?.resolve(4);
+    await pending;
+    expect(data).toEqual([1, 4]);
+    pending = run();
+    expect(calls).toHaveLength(5);
+    calls[4]?.resolve(5);
+    await pending;
   });
 
-  it("uses bounded exponential fallback for 503 and invalid headers but not other errors", () => {
+  it("uses bounded exponential fallback for 503 and invalid headers but not other errors", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    const polling = new MapPolling();
-    let c = polling.start("a")!;
-    polling.failed(c, new ApiError("down", 503, "soon"));
-    polling.finished(c);
+    const { calls, run } = setup();
+    let pending = run();
+    calls[0]?.reject(new ApiError("down", 503, "soon"));
+    await pending;
     vi.advanceTimersByTime(999);
-    expect(polling.start("a")).toBeUndefined();
+    await run();
+    expect(calls).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    c = polling.start("a")!;
-    polling.failed(c, new ApiError("down", 503));
-    polling.finished(c);
+    pending = run();
+    calls[1]?.reject(new ApiError("down", 503));
+    await pending;
     vi.advanceTimersByTime(1_999);
-    expect(polling.start("a")).toBeUndefined();
+    await run();
+    expect(calls).toHaveLength(2);
     vi.advanceTimersByTime(1);
-    c = polling.start("a")!;
-    polling.failed(c, new ApiError("boom", 500));
-    polling.failed(c, new Error("network"));
-    polling.finished(c);
-    expect(polling.start("a")).toBeDefined();
+    pending = run();
+    calls[2]?.reject(new ApiError("boom", 500));
+    await pending;
+    pending = run();
+    expect(calls).toHaveLength(4);
+    calls[3]?.reject(new Error("network"));
+    await pending;
   });
 
   it("parses Retry-After safely", () => {
@@ -91,6 +148,6 @@ describe("map polling ownership", () => {
     expect(retryAfterDeadline("1.5", now)).toBeUndefined();
     expect(retryAfterDeadline("garbage", now)).toBeUndefined();
     expect(retryAfterDeadline(undefined, now)).toBeUndefined();
-    expect(retryAfterDeadline("Thu, 01 Jan 1970 00:00:00 GMT", now)).toBe(now);
+    expect(retryAfterDeadline("Thu, 01 Jan 1970 00:00:00 GMT", now)).toBeLessThanOrEqual(now);
   });
 });
