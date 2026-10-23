@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp } from "../src/app.js";
+import { createListeningApp } from "./http-test-app.js";
 import {
   clearEnturDepartureBoardCache,
   enrichDepartureBoardWithServiceAlerts,
@@ -29,7 +29,7 @@ import type {
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",

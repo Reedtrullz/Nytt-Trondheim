@@ -3,11 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
+import { createListeningApp } from "./http-test-app.js";
 
 async function testApp(devAuthBypass = true) {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-source-items-"));
-  return createApp({
+  return createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",

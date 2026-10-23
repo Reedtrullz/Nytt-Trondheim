@@ -7,7 +7,8 @@ import { promisify } from "node:util";
 import request from "supertest";
 import type { Response as SuperAgentResponse } from "superagent";
 import { describe, expect, it, vi } from "vitest";
-import { buildSituationExplanation, createApp } from "../src/app.js";
+import { buildSituationExplanation } from "../src/app.js";
+import { createListeningApp } from "./http-test-app.js";
 import { authorizeGitHubProfile } from "../src/auth.js";
 import { safeFilename } from "../src/export.js";
 import { loadConfig, type EmailMessage } from "../src/config.js";
@@ -50,7 +51,7 @@ function parseBinaryResponse(
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
@@ -92,7 +93,7 @@ async function ownerAgentWithCoverageCorrections(
   coverageProjectionMode?: "legacy" | "normalized-shadow" | "normalized-active",
 ) {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-coverage-corrections-"));
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
@@ -118,7 +119,7 @@ async function ownerAgentWithCoverageCorrections(
 
 async function ownerAgentWithE2ECoverageFixtures() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-e2e-coverage-fixtures-"));
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
@@ -144,7 +145,7 @@ async function ownerAgentWithE2ECoverageFixtures() {
 
 async function testAppWithRateLimit(rateLimitEnabled: boolean) {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
@@ -161,7 +162,7 @@ async function testAppWithRateLimit(rateLimitEnabled: boolean) {
 
 async function testAppWithPushPublicKey(publicKey = "test-public-vapid-key") {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
@@ -181,7 +182,7 @@ async function testAppWithPushPublicKey(publicKey = "test-public-vapid-key") {
 async function testAppWithEmail(devAuthBypass = true, coverageCorrectionsEnabled = false) {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
   const sentEmails: EmailMessage[] = [];
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
@@ -720,7 +721,7 @@ describe("private situation API", () => {
 
   it("rejects incident data requests without an authenticated owner session", async () => {
     const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-    const { app } = await createApp({
+    const { app } = await createListeningApp({
       port: 0,
       nodeEnv: "development",
       publicOrigin: "http://localhost",
@@ -806,7 +807,7 @@ describe("private situation API", () => {
 
   it("keeps public email endpoints generic when email delivery fails", async () => {
     const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-    const runtime = await createApp({
+    const runtime = await createListeningApp({
       port: 0,
       nodeEnv: "development",
       publicOrigin: "http://localhost",
@@ -2013,7 +2014,7 @@ describe("private situation API", () => {
 
   it("starts GitHub OAuth with a session-backed state nonce", async () => {
     const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-uploads-"));
-    const { app } = await createApp({
+    const { app } = await createListeningApp({
       port: 0,
       nodeEnv: "development",
       publicOrigin: "http://localhost",
