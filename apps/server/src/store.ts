@@ -459,20 +459,8 @@ function sportCategorySqlPredicate(categoryParam: string): string {
     OR (
       a.category = 'Nyheter'
       AND (
-        a.payload->>'title' ILIKE '%ranheim%'
-        OR a.payload->>'excerpt' ILIKE '%ranheim%'
-        OR a.payload->>'title' ILIKE '%rosenborg%'
-        OR a.payload->>'excerpt' ILIKE '%rosenborg%'
-        OR a.payload->>'title' ILIKE '%rbk%'
-        OR a.payload->>'excerpt' ILIKE '%rbk%'
-        OR a.payload->>'title' ILIKE '%kolstad%'
-        OR a.payload->>'excerpt' ILIKE '%kolstad%'
-        OR a.payload->>'title' ILIKE '%byåsen%'
-        OR a.payload->>'excerpt' ILIKE '%byåsen%'
-        OR a.payload->>'title' ILIKE '%nardo%'
-        OR a.payload->>'excerpt' ILIKE '%nardo%'
-        OR a.payload->>'title' ILIKE '%strindheim%'
-        OR a.payload->>'excerpt' ILIKE '%strindheim%'
+        lower(a.payload->>'title') ~ 'ranheim|rosenborg|rbk|kolstad|byåsen|nardo|strindheim'
+        OR lower(a.payload->>'excerpt') ~ 'ranheim|rosenborg|rbk|kolstad|byåsen|nardo|strindheim'
       )
       AND (
         a.payload->>'title' ILIKE '%bortesmell%'
