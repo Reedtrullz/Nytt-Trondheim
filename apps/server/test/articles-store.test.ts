@@ -759,6 +759,27 @@ describe("article store", () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the place search one EXISTS term and only gates it on place text when the pattern has no escapable characters", async () => {
+    const gate =
+      "WHERE (jsonb_typeof(a.payload->'places') IS DISTINCT FROM 'array' OR (a.payload->'places')::text ILIKE $2) AND place_name.value ILIKE $2 ))";
+    for (const [q, expected] of [
+      ["Flatåsen", true],
+      ["a%b", true],
+      ["Flat_sen", false],
+      ['a"b', false],
+      ["a\\b", false],
+      ["a\tb", false],
+    ] as const) {
+      const query = vi.fn(async () => ({ rows: [] }));
+      await new PgStore({ query } as unknown as pg.Pool).listArticles({ q }, "Reedtrullz");
+      const sql = (query.mock.calls[0] as unknown as [string])[0].replace(/\s+/g, " ");
+      expect(sql, q).toContain("OR EXISTS ( SELECT 1 FROM jsonb_array_elements_text(");
+      expect(sql, q).not.toMatch(/ILIKE \$2 AND EXISTS/);
+      expect(sql.includes(gate), q).toBe(expected);
+      expect(sql).toContain("a.category ILIKE $2");
+    }
+  });
+
   it("filters production articles by Rosenborg topic without requiring a category migration", async () => {
     const article: Article = {
       id: "rosenborg-trener",
