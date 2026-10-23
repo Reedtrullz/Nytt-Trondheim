@@ -83,7 +83,7 @@ import { collectMetWarnings, collectNveWarnings } from "./official.js";
 import { fetchWithSourcePolicy, sourceUserAgent } from "./fetchPolicy.js";
 import { WorkerRepository } from "./repository.js";
 import { deliverPushNotifications, type PushDeliveryMetrics } from "./push-notifications.js";
-import { pruneExpiredData, retentionConfig } from "./retention.js";
+import { createRetentionScheduler, pruneExpiredData, retentionConfig } from "./retention.js";
 import {
   collectTrafficInfoMessages,
   defaultTrafficInfoEndpoint,
@@ -1898,6 +1898,7 @@ export async function runWorker(): Promise<void> {
   const repository = new WorkerRepository(pool);
   const analyzer = createAnalyzer();
   const once = process.argv.includes("--once");
+  const retention = createRetentionScheduler(() => pruneExpiredData(pool, retentionConfig()));
   const guardedCollectAll = createCollectionGuard(() => collectAll({ repository, analyzer, once }));
   const enturClientName = process.env.ENTUR_CLIENT_NAME?.trim() || "reidar-nytt-trondheim";
   const enturCodespaceIds = enturCodespacesFromEnv(process.env.ENTUR_CODESPACES);
@@ -1933,18 +1934,13 @@ export async function runWorker(): Promise<void> {
   try {
     await guardedEnturVehicles();
     await guardedCollectAll();
-    try {
-      const pruned = await pruneExpiredData(pool, retentionConfig());
-      if (Object.values(pruned).some((count) => count > 0)) {
-        console.log(`[worker] retention pruned: ${JSON.stringify(pruned)}`);
-      }
-    } catch (error) {
-      console.warn(`[worker] retention prune failed: ${String(error)}`);
-    }
+    await retention.runNow();
     if (!once) {
+      retention.start();
       setInterval(() => void guardedEnturVehicles().catch(console.error), enturVehicleIntervalMs);
       setInterval(() => void guardedCollectAll().catch(console.error), 10 * 60 * 1000);
       process.on("SIGTERM", async () => {
+        await retention.stop();
         await pool.end();
         process.exit(0);
       });
