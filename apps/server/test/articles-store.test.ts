@@ -871,7 +871,10 @@ describe("article store", () => {
       const normalized = sql.replace(/\s+/g, " ").trim();
       expect(normalized).toContain("a.category = $2");
       expect(normalized).toContain("a.category = 'Nyheter'");
-      expect(normalized).toContain("a.payload->>'title' ILIKE '%ranheim%'");
+      expect(normalized).toContain(
+        "lower(a.payload->>'title') ~ 'ranheim|rosenborg|rbk|kolstad|byåsen|nardo|strindheim'",
+      );
+      expect(normalized).not.toContain("ILIKE '%ranheim%'");
       expect(normalized).toContain("a.payload->>'excerpt' ILIKE '%bortetap%'");
       expect(normalized).toContain("a.payload->>'title' ILIKE '%profil%'");
       expect(normalized).toContain("a.payload->>'title' ~* '\\d+\\s*[–-]\\s*\\d+'");
