@@ -6795,6 +6795,13 @@ export class PgStore implements Store {
     }
     if (filters.q) {
       params.push(`%${filters.q}%`);
+      // The JSON text holds each place verbatim unless it needs escaping; "_" could then span the escape,
+      // so skip this cheap gate for those patterns and let the per-place scan decide. The gate lives inside
+      // the EXISTS (not as an AND around it) so the planner still sees one opaque term and keeps the ordered
+      // published_at index scan; non-array places skip the gate so jsonb_array_elements_text still raises.
+      const placesGate = [...filters.q].some((c) => c === "_" || c === '"' || c === "\\" || c < " ")
+        ? ""
+        : `(jsonb_typeof(a.payload->'places') IS DISTINCT FROM 'array' OR (a.payload->'places')::text ILIKE $${params.length}) AND `;
       where.push(
         `(a.payload->>'title' ILIKE $${params.length}
           OR a.payload->>'excerpt' ILIKE $${params.length}
@@ -6803,7 +6810,7 @@ export class PgStore implements Store {
           OR EXISTS (
             SELECT 1
             FROM jsonb_array_elements_text(COALESCE(a.payload->'places', '[]'::jsonb)) place_name(value)
-            WHERE place_name.value ILIKE $${params.length}
+            WHERE ${placesGate}place_name.value ILIKE $${params.length}
           ))`,
       );
     }
