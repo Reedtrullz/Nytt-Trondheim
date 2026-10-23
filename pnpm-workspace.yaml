@@ -1,0 +1,10 @@
+packages:
+  - packages/shared
+  - apps/frontend
+  - apps/server
+  - apps/worker
+
+# Only packages with real install scripts that must run (npm lock: hasInstallScript).
+# fsevents (macOS-only, optional) ships a prebuilt binary, so its node-gyp step is not needed.
+allowBuilds:
+  esbuild: true
