@@ -107,10 +107,11 @@ export function createRetentionScheduler(
         log.log(`[worker] retention pruned: ${JSON.stringify(await prune())}`);
       } catch (error) {
         log.warn(`[worker] retention prune failed: ${String(error)}`);
-      } finally {
-        running = undefined;
       }
-    })();
+    })().finally(() => {
+      // Cleared after the assignment above, so a synchronous prune throw cannot leave it set.
+      running = undefined;
+    });
     return running;
   };
   return {

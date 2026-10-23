@@ -135,6 +135,25 @@ describe("createRetentionScheduler", () => {
     await scheduler.stop();
   });
 
+  it("reports a synchronously thrown pass and retries on the next tick", async () => {
+    vi.useFakeTimers();
+    const log = { log: vi.fn(), warn: vi.fn() };
+    const prune = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("sync boom");
+      })
+      .mockResolvedValue({ sourceItemCaptures: 0 });
+    const scheduler = createRetentionScheduler(prune, log);
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(RETENTION_INTERVAL_MS);
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("sync boom"));
+    await vi.advanceTimersByTimeAsync(RETENTION_INTERVAL_MS);
+    expect(prune).toHaveBeenCalledTimes(2);
+    expect(log.log).toHaveBeenCalledTimes(1);
+    await scheduler.stop();
+  });
+
   it("does not schedule anything unless started (--once)", async () => {
     const { prune, scheduler } = setup();
     await scheduler.runNow();
