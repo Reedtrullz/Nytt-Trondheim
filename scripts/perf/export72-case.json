@@ -1,0 +1,122 @@
+{
+  "schema": "nytt-export72-case-v1",
+  "base": "fdd37882e3e41db98af8d8ed2e1b0afb03798aca",
+  "tree": "24a1abeabbdac053b3516eb0a789efd63bc17233",
+  "branch": "codex/perf-nytt-export72-20261024-2119",
+  "ref": "refs/heads/codex/perf-nytt-export72-20261024-2119",
+  "imageTag": "nytt-trondheim-api:test",
+  "runtimeUser": "1000:1000",
+  "clock": "2026-01-15T12:00:00.000Z",
+  "packageManager": "pnpm@10.34.5",
+  "privateWarning": "Private analyser er ikke offentlig verifisert og må ikke leses som operativ sannhet.",
+  "limits": {
+    "memoryBytes": 536870912,
+    "memorySwapBytes": 536870912,
+    "tmpfsBytes": 16777216,
+    "denyScratchBytes": 17825792,
+    "timeoutSeconds": 120,
+    "outputBytes": 1048576,
+    "pids": 128,
+    "cpus": 1
+  },
+  "backing": {
+    "bytes": 2097152,
+    "recipe": "sha256-counter-v1",
+    "sha256": "814208244fa3c9713b80877ba9c0e19be292d49ad9ebe76a3c7f97d183651b08"
+  },
+  "maxAttachments": {
+    "count": 25,
+    "logicalBytes": 52428800,
+    "names": [
+      "e72-01.bin",
+      "e72-02.bin",
+      "e72-03.bin",
+      "e72-04.bin",
+      "e72-05.bin",
+      "e72-06.bin",
+      "e72-07.bin",
+      "e72-08.bin",
+      "e72-09.bin",
+      "e72-10.bin",
+      "e72-11.bin",
+      "e72-12.bin",
+      "e72-13.bin",
+      "e72-14.bin",
+      "e72-15.bin",
+      "e72-16.bin",
+      "e72-17.bin",
+      "e72-18.bin",
+      "e72-19.bin",
+      "e72-20.bin",
+      "e72-21.bin",
+      "e72-22.bin",
+      "e72-23.bin",
+      "e72-24.bin",
+      "e72-25.bin"
+    ]
+  },
+  "fixtures": [
+    {
+      "id": "empty",
+      "attachments": 0,
+      "payloadBytes": 0
+    },
+    {
+      "id": "small",
+      "attachments": 1,
+      "payloadBytes": 32,
+      "name": "e72-small.bin"
+    },
+    {
+      "id": "max",
+      "attachments": 25,
+      "payloadBytes": 2097152
+    }
+  ],
+  "fixedMembers": [
+    "situasjonsbrief.pdf",
+    "utvikling.json",
+    "kilder-og-evidens.json",
+    "privat/arbeidsnotater.json",
+    "manifest.json",
+    "README.txt",
+    "kartlag/official.geojson",
+    "kartlag/reporting_estimate.geojson",
+    "kartlag/preparedness_context.geojson",
+    "kartlag/private_annotation.geojson"
+  ],
+  "sources": [
+    {
+      "path": "Dockerfile",
+      "sha256": "aee07d9b1e8a038afd43cf249e944402b621d952e9df6b7c985803ea490efc19"
+    },
+    {
+      "path": "package.json",
+      "sha256": "b76b112c5e1aa7fff95eefa81104894cf4644234ec72a5ad1ad7ff904725392a"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "5bb70336d8093116abec6e2302bcef81d01e5c81403919f26df11005534f90e3"
+    },
+    {
+      "path": "apps/server/package.json",
+      "sha256": "fe5ca3a9a8a616eb3ee9d8b9b7718d5bcaa40676800e45cbccb84d297d8159a5"
+    },
+    {
+      "path": "apps/server/src/export.ts",
+      "sha256": "1d9af5df4ab03f59c881166d262f0b80bb251157ae50b147bd346efba61fae82"
+    },
+    {
+      "path": "apps/server/src/store.ts",
+      "sha256": "195ef03f3ab12553055ec970ddb8ec8d0a163816a2e27834667f3361eaa8cc29"
+    }
+  ],
+  "module": {
+    "serverPackage": "@nytt/server",
+    "exportModule": "/app/apps/server/dist/export.js",
+    "storeModule": "/app/apps/server/dist/store.js",
+    "exportFunction": "buildWorkspaceExport",
+    "storeClass": "MemoryStore"
+  }
+}
+
