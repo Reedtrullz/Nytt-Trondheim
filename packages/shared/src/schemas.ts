@@ -484,7 +484,7 @@ export const incidentSourceTraceabilitySummarySchema = z
     primarySources: z.array(sourceIdSchema).max(40),
     activationSourceIds: z.array(sourceIdSchema).max(40).optional(),
     officialSource: z.enum(["datex", "politiloggen"]).optional(),
-    provenanceCounts: z.record(provenanceSchema, z.number().int().nonnegative()).default({}),
+    provenanceCounts: z.partialRecord(provenanceSchema, z.number().int().nonnegative()).default({}),
     links: z.array(incidentSourceTraceabilityLinkSchema).max(200),
     missingLinks: z
       .array(
