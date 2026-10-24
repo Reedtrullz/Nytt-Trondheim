@@ -4,12 +4,12 @@ Private Bokmål news dashboard and situation workspace for Trondheim. It collect
 
 ## Local Development
 
-Requirements: Node.js 20.19+ and npm. CI and production images use Node.js 22.
+Requirements: Node.js 20.19+ and pnpm 10 (run `corepack enable`; the exact version is pinned by `packageManager` in `package.json`). CI and production images use Node.js 22.
 
 ```bash
-npm install
-npm run build -w @nytt/shared
-npm run dev
+pnpm install
+pnpm --filter @nytt/shared run build
+pnpm run dev
 ```
 
 The development API uses seeded in-memory data and bypasses GitHub authentication unless `DEV_AUTH_BYPASS=false` is set. Open `http://127.0.0.1:5173`.
@@ -21,7 +21,7 @@ For PostgreSQL/PostGIS-backed development:
 ```bash
 cp .env.example .env.production
 docker compose --env-file .env.production up -d postgres
-DATABASE_URL=postgres://nytt:nytt@localhost:5432/nytt npm run db:migrate
+DATABASE_URL=postgres://nytt:nytt@localhost:5432/nytt pnpm run db:migrate
 ```
 
 ## Application Areas

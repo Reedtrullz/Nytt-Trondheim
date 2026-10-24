@@ -124,15 +124,15 @@ describe("deployment playbook Entur verification", () => {
   });
 
   it("keeps exact matcher, test, build, browser and PostgreSQL lifecycle gates in CI", () => {
-    expect(ciWorkflow).toContain("run: npm run check:coverage-matcher");
-    expect(ciWorkflow).toContain("run: npm test");
-    expect(ciWorkflow).toContain("run: npm run build");
-    expect(ciWorkflow).toContain("run: npm run test:e2e");
+    expect(ciWorkflow).toContain("run: pnpm run check:coverage-matcher");
+    expect(ciWorkflow).toContain("run: pnpm test");
+    expect(ciWorkflow).toContain("run: pnpm run build");
+    expect(ciWorkflow).toContain("run: pnpm run test:e2e");
     expect(ciWorkflow).toContain("Run normalized coverage lifecycle smoke");
     expect(ciWorkflow).toContain("coverage-lifecycle-smoke.ts");
     expect(ciWorkflow).toContain("Run coverage promotion control-flow smoke");
     expect(ciWorkflow).toContain("coverage-promotion-control-flow.sql");
-    expect(ciWorkflow.match(/npm run db:migrate/g)).toHaveLength(2);
+    expect(ciWorkflow.match(/pnpm run db:migrate/g)).toHaveLength(2);
     expect(ciWorkflow).toContain("docker build --target api");
     expect(ciWorkflow).toContain("docker build --target worker");
   });

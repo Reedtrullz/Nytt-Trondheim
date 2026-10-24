@@ -6,7 +6,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${frontendP
 const readinessURL = process.env.PLAYWRIGHT_READY_URL ?? `http://127.0.0.1:${apiPort}/health/live`;
 const webServerCommand =
   process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ??
-  `concurrently -n api,web "PORT=${apiPort} npm run dev -w @nytt/server" "VITE_API_TARGET=http://127.0.0.1:${apiPort} npm run dev -w @nytt/frontend -- --host 127.0.0.1 --port ${frontendPort} --strictPort"`;
+  `concurrently -n api,web "PORT=${apiPort} pnpm --filter @nytt/server run dev" "VITE_API_TARGET=http://127.0.0.1:${apiPort} pnpm --filter @nytt/frontend run dev --host 127.0.0.1 --port ${frontendPort} --strictPort"`;
 
 export default defineConfig({
   testDir: "./e2e",

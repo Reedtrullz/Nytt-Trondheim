@@ -19,16 +19,17 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run format:check
-      - run: npm test
+      - name: Enable pnpm via Corepack (version pinned by packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run format:check
+      - run: pnpm test
       - name: Check coverage matcher quality
-        run: npm run check:coverage-matcher
-      - run: npm run build
-      - run: npm audit --omit=dev --audit-level=high
+        run: pnpm run check:coverage-matcher
+      - run: pnpm run build
+      - run: pnpm audit --prod --audit-level high
 
   e2e:
     name: Browser Smoke and Accessibility
@@ -38,11 +39,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build -w @nytt/shared
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - name: Enable pnpm via Corepack (version pinned by packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nytt/shared run build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run test:e2e
 
   migration-smoke:
     name: PostGIS Migration Smoke
@@ -68,14 +70,15 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build -w @nytt/shared
-      - run: npm run build -w @nytt/server
-      - run: npm run db:migrate
-      - run: npm run db:migrate
+      - name: Enable pnpm via Corepack (version pinned by packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nytt/shared run build
+      - run: pnpm --filter @nytt/server run build
+      - run: pnpm run db:migrate
+      - run: pnpm run db:migrate
       - name: Verify faithful append-only source captures
-        run: npm run smoke:source-captures
+        run: pnpm run smoke:source-captures
       - name: Run migration sanity queries
         run: |
           sudo apt-get update
@@ -315,7 +318,7 @@ jobs:
           SQL
 
       - name: Run actual PgStore coverage lifecycle smoke
-        run: npx tsx scripts/coverage-lifecycle-smoke.ts
+        run: pnpm exec tsx scripts/coverage-lifecycle-smoke.ts
       - name: Run coverage promotion control-flow smoke
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/coverage-promotion-control-flow.sql
 

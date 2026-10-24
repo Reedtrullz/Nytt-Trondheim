@@ -3,18 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "packages/shared",
-    "apps/frontend",
-    "apps/server",
-    "apps/worker"
-  ],
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
-    "build": "npm run build -w @nytt/shared && npm run build -w @nytt/frontend && npm run build -w @nytt/server && npm run build -w @nytt/worker",
-    "dev": "concurrently -n api,web \"npm run dev -w @nytt/server\" \"npm run dev -w @nytt/frontend\"",
-    "dev:worker": "npm run dev -w @nytt/worker",
-    "db:migrate": "npm run db:migrate -w @nytt/server",
-    "typecheck": "npm run build -w @nytt/shared && npm run typecheck --workspaces --if-present",
+    "build": "pnpm --filter @nytt/shared run build && pnpm --filter @nytt/frontend run build && pnpm --filter @nytt/server run build && pnpm --filter @nytt/worker run build",
+    "dev": "concurrently -n api,web \"pnpm --filter @nytt/server run dev\" \"pnpm --filter @nytt/frontend run dev\"",
+    "dev:worker": "pnpm --filter @nytt/worker run dev",
+    "db:migrate": "pnpm --filter @nytt/server run db:migrate",
+    "typecheck": "pnpm --filter @nytt/shared run build && pnpm -r --workspace-concurrency=1 --if-present run typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -22,7 +17,7 @@
     "check:coverage-matcher": "vitest run packages/shared/test/article-coverage-golden.test.ts packages/shared/test/article-coverage-invariance.test.ts packages/shared/test/article-coverage-evidence.test.ts packages/shared/test/article-coverage-clustering.test.ts packages/shared/test/article-coverage-corrections.test.ts packages/shared/test/public-verification.test.ts",
     "smoke:source-captures": "tsx scripts/source-capture-smoke.ts",
     "test:e2e": "playwright test",
-    "audit:production": "npm audit --omit=dev --audit-level=high"
+    "audit:production": "pnpm audit --prod --audit-level high"
   },
   "engines": {
     "node": ">=20.19.0"
@@ -40,6 +35,9 @@
     "supertest": "^7.1.1",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.34.0",
-    "vitest": "^3.2.3"
+    "vitest": "^3.2.3",
+    "@nytt/shared": "workspace:*",
+    "pg": "^8.16.0",
+    "tsx": "^4.20.3"
   }
 }
