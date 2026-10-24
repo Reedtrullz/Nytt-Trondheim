@@ -4,11 +4,11 @@ import path from "node:path";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OfficialEvent, RoadWeatherObservation, SourceHealth } from "@nytt/shared";
-import { createApp } from "../src/app.js";
+import { createListeningApp } from "./http-test-app.js";
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-weather-"));
-  const runtime = await createApp({
+  const runtime = await createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",

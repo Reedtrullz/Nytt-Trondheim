@@ -8,7 +8,7 @@ import {
   loadWorldCupDashboard,
   normalizeWorldCupDashboard,
 } from "../src/sport/world-cup.js";
-import { createApp } from "../src/app.js";
+import { createListeningApp } from "./http-test-app.js";
 
 const scoreboardFixture = {
   events: [
@@ -149,7 +149,7 @@ const standingsFixture = {
 
 async function testApp() {
   const uploadDir = await mkdtemp(path.join(os.tmpdir(), "nytt-world-cup-"));
-  return createApp({
+  return createListeningApp({
     port: 0,
     nodeEnv: "development",
     publicOrigin: "http://localhost",
