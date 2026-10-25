@@ -4,6 +4,7 @@ import type {
   TrafficEventState,
   TrafficMapPayload,
 } from "@nytt/shared";
+import { ApiError } from "../api.js";
 
 export interface TrafficMapRequest {
   categories?: TrafficEventCategory[];
@@ -52,13 +53,17 @@ export async function fetchTrafficMap(
   });
   if (response.status === 401) {
     window.location.href = "/logg-inn";
-    throw new Error("Innlogging kreves");
+    throw new ApiError("Innlogging kreves", 401);
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
       error?: string;
     };
-    throw new Error(body.error ?? "Kunne ikke hente trafikkdata.");
+    throw new ApiError(
+      body.error ?? "Kunne ikke hente trafikkdata.",
+      response.status,
+      response.headers.get("Retry-After") ?? undefined,
+    );
   }
   return (await response.json()) as TrafficMapPayload;
 }
