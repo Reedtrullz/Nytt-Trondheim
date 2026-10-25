@@ -1,10 +1,21 @@
 import { createHash } from "node:crypto";
 import { createSocket } from "node:dgram";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
+import process from "node:process";
 import { crc32, deflateRawSync, deflateSync, inflateRawSync, inflateSync } from "node:zlib";
-import { fileURLToPath } from "node:url";
+import { Buffer } from "node:buffer";
+import { URL, fileURLToPath } from "node:url";
 
 const CLOCK_TITLE = "EXPORT72 FIXTURE";
 const PROVENANCE = ["official", "reporting_estimate", "preparedness_context", "private_annotation"];
@@ -40,7 +51,8 @@ function backingBytes() {
 
 function assertCase(caseFile, raw) {
   if (caseFile.schema !== "nytt-export72-case-v1") fail("malformed", "schema");
-  if (caseFile.backing.bytes !== 2097152 || raw.length !== 2097152) fail("malformed", "backing length");
+  if (caseFile.backing.bytes !== 2097152 || raw.length !== 2097152)
+    fail("malformed", "backing length");
   if (sha256(raw) !== caseFile.backing.sha256) fail("digest", "backing digest");
   if (caseFile.maxAttachments.count !== 25) fail("malformed", "attachment count");
   if (caseFile.maxAttachments.logicalBytes !== 25 * raw.length) fail("logical", "logical size");
@@ -51,8 +63,10 @@ function assertCase(caseFile, raw) {
   }
   const names = caseFile.maxAttachments.names.map((name) => safeFilename(name));
   if (names.length !== 25 || new Set(names).size !== 25) fail("names", "unique names");
-  if (names.some((name, index) => name !== caseFile.maxAttachments.names[index])) fail("names", "unsafe name");
-  if (deflateRawSync(raw, { level: 9 }).length < raw.length) fail("digest", "backing is compressible");
+  if (names.some((name, index) => name !== caseFile.maxAttachments.names[index]))
+    fail("names", "unsafe name");
+  if (deflateRawSync(raw, { level: 9 }).length < raw.length)
+    fail("digest", "backing is compressible");
   if (caseFile.fixedMembers.length !== 10) fail("malformed", "fixed members");
 }
 
@@ -88,8 +102,10 @@ function readZip(buffer) {
       const localExtra = buffer.readUInt16LE(localOffset + 28);
       const start = localOffset + 30 + localName + localExtra;
       const compressed = buffer.subarray(start, start + compressedSize);
-      data = method === 0 ? Buffer.from(compressed) : method === 8 ? inflateRawSync(compressed) : null;
-      if (!data || data.length !== size || (crc32(data) >>> 0) !== checksum) fail("zip", `checksum ${name}`);
+      data =
+        method === 0 ? Buffer.from(compressed) : method === 8 ? inflateRawSync(compressed) : null;
+      if (!data || data.length !== size || crc32(data) >>> 0 !== checksum)
+        fail("zip", `checksum ${name}`);
     }
     entries.push({ name, data });
   }
@@ -136,32 +152,51 @@ function model(caseFile, attachments) {
     geometry: { type: "Point", coordinates: [10 + index, 63.43] },
     properties: { label: provenance, provenance, updatedAt: caseFile.clock },
   }));
-  const evidence = [{
-    id: "e1",
-    situationId: "export72",
-    source: "nrk",
-    sourceLabel: "NRK",
-    sourceUrl: "https://example.invalid/export72",
-    supportingSnippet: "synthetic",
-    claim: "export72 fixture",
-    claimType: "status",
-    provenance: "official",
-    confidence: 1,
-    extractedAt: caseFile.clock,
-    publishedAt: caseFile.clock,
-  }];
-  const timeline = [{
-    id: "t1",
-    situationId: "export72",
-    timestamp: caseFile.clock,
-    title: "Fixture",
-    detail: "synthetic baseline",
-    sourceLabel: "NRK",
-    sourceUrl: "https://example.invalid/export72",
-    official: true,
-  }];
-  const tasks = [{ id: "task-1", situationId: "export72", text: "check export", completed: false, createdAt: caseFile.clock }];
-  const notes = [{ id: "note-1", situationId: "export72", text: caseFile.privateWarning, createdAt: caseFile.clock }];
+  const evidence = [
+    {
+      id: "e1",
+      situationId: "export72",
+      source: "nrk",
+      sourceLabel: "NRK",
+      sourceUrl: "https://example.invalid/export72",
+      supportingSnippet: "synthetic",
+      claim: "export72 fixture",
+      claimType: "status",
+      provenance: "official",
+      confidence: 1,
+      extractedAt: caseFile.clock,
+      publishedAt: caseFile.clock,
+    },
+  ];
+  const timeline = [
+    {
+      id: "t1",
+      situationId: "export72",
+      timestamp: caseFile.clock,
+      title: "Fixture",
+      detail: "synthetic baseline",
+      sourceLabel: "NRK",
+      sourceUrl: "https://example.invalid/export72",
+      official: true,
+    },
+  ];
+  const tasks = [
+    {
+      id: "task-1",
+      situationId: "export72",
+      text: "check export",
+      completed: false,
+      createdAt: caseFile.clock,
+    },
+  ];
+  const notes = [
+    {
+      id: "note-1",
+      situationId: "export72",
+      text: caseFile.privateWarning,
+      createdAt: caseFile.clock,
+    },
+  ];
   return {
     workspace: {
       situation: {
@@ -194,11 +229,12 @@ function model(caseFile, attachments) {
 }
 
 function expectedRegular(caseFile, fixture) {
-  const names = fixture.attachments === 25
-    ? caseFile.maxAttachments.names
-    : fixture.attachments === 1
-      ? [fixture.name]
-      : [];
+  const names =
+    fixture.attachments === 25
+      ? caseFile.maxAttachments.names
+      : fixture.attachments === 1
+        ? [fixture.name]
+        : [];
   return [...caseFile.fixedMembers, ...names.map((name) => `vedlegg/${name}`)];
 }
 
@@ -256,7 +292,9 @@ function textFromContent(content) {
           cursor = end;
           continue;
         }
-        literal += { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", "(": "(", ")": ")", "\\": "\\" }[next] ?? next;
+        literal +=
+          { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", "(": "(", ")": ")", "\\": "\\" }[next] ??
+          next;
         cursor += 2;
         continue;
       }
@@ -338,7 +376,11 @@ function assertStableMembers(left, right) {
   for (let index = 0; index < left.length; index += 1) {
     const first = left[index];
     const second = right[index];
-    if (first.name !== second.name || first.size !== second.size || first.sha256 !== second.sha256) {
+    if (
+      first.name !== second.name ||
+      first.size !== second.size ||
+      first.sha256 !== second.sha256
+    ) {
       fail("oracle", `unstable ${first.name}`);
     }
   }
@@ -367,7 +409,8 @@ function assertMembers(entries, caseFile, fixture, attachmentSha) {
   const regular = [];
   for (const entry of entries) {
     if (entry.name.endsWith("/")) {
-      if (!["privat/", "kartlag/", "vedlegg/"].includes(entry.name)) fail("oracle", `unexpected ${entry.name}`);
+      if (!["privat/", "kartlag/", "vedlegg/"].includes(entry.name))
+        fail("oracle", `unexpected ${entry.name}`);
     } else {
       regular.push(entry);
     }
@@ -392,54 +435,84 @@ function assertMembers(entries, caseFile, fixture, attachmentSha) {
   const pdf = byName.get("situasjonsbrief.pdf");
   assertPdf(pdf, caseFile);
   for (const provenance of PROVENANCE) {
-    const expected = Buffer.from(JSON.stringify({
-      type: "FeatureCollection",
-      features: built.features.filter((feature) => feature.properties.provenance === provenance),
-    }, null, 2));
-    if (!byName.get(`kartlag/${provenance}.geojson`).equals(expected)) fail("oracle", `geojson ${provenance}`);
+    const expected = Buffer.from(
+      JSON.stringify(
+        {
+          type: "FeatureCollection",
+          features: built.features.filter(
+            (feature) => feature.properties.provenance === provenance,
+          ),
+        },
+        null,
+        2,
+      ),
+    );
+    if (!byName.get(`kartlag/${provenance}.geojson`).equals(expected))
+      fail("oracle", `geojson ${provenance}`);
   }
   const manifest = JSON.parse(byName.get("manifest.json").toString("utf8"));
-  const expectedManifestBytes = Buffer.from(`${JSON.stringify(expectedManifest(caseFile, fixture, attachmentSha), null, 2)}`);
+  const expectedManifestBytes = Buffer.from(
+    `${JSON.stringify(expectedManifest(caseFile, fixture, attachmentSha), null, 2)}`,
+  );
   if (!byName.get("manifest.json").equals(expectedManifestBytes)) fail("oracle", "manifest");
-  if (manifest.situationId !== "export72" || manifest.privateAnalysisWarning !== caseFile.privateWarning) {
+  if (
+    manifest.situationId !== "export72" ||
+    manifest.privateAnalysisWarning !== caseFile.privateWarning
+  ) {
     fail("oracle", "manifest");
   }
   for (const name of wanted.filter((item) => item.startsWith("vedlegg/"))) {
     const data = byName.get(name);
-    if (data.length !== fixture.payloadBytes || sha256(data) !== attachmentSha) fail("oracle", `attachment ${name}`);
+    if (data.length !== fixture.payloadBytes || sha256(data) !== attachmentSha)
+      fail("oracle", `attachment ${name}`);
   }
-  return regular.map((entry) => ({ name: entry.name, size: entry.data.length, sha256: sha256(entry.data) }));
+  return regular.map((entry) => ({
+    name: entry.name,
+    size: entry.data.length,
+    sha256: sha256(entry.data),
+  }));
 }
 
 function expectError(fn, text) {
   try {
     fn();
   } catch (error) {
-    if (!String(error.message).includes(text)) fail("self-check", `wrong error ${error.message} for ${text}`);
+    if (!String(error.message).includes(text))
+      fail("self-check", `wrong error ${error.message} for ${text}`);
     return;
   }
   fail("self-check", `accepted bad input ${text}`);
 }
 
 function witnessDirectory(root, capacity) {
-  const files = readdirSync(root).sort().map((name) => {
-    const info = statSync(root + "/" + name);
-    const type = info.isFile() ? "file" : info.isDirectory() ? "dir" : "other";
-    return { name, type, size: info.size };
-  });
+  const files = readdirSync(root)
+    .sort()
+    .map((name) => {
+      const info = statSync(root + "/" + name);
+      const type = info.isFile() ? "file" : info.isDirectory() ? "dir" : "other";
+      return { name, type, size: info.size };
+    });
   const total = files.reduce((sum, file) => sum + (file.type === "file" ? file.size : 0), 0);
-  const persistedZip = files.some((file) => file.type === "file" && file.name.toLowerCase().endsWith(".zip"));
+  const persistedZip = files.some(
+    (file) => file.type === "file" && file.name.toLowerCase().endsWith(".zip"),
+  );
   return { files, total, capacity, persistedZip };
 }
 
 function assertWitness(witness, allowed) {
-  const derived = witness.files.some((file) => file.type === "file" && file.name.toLowerCase().endsWith(".zip"));
+  const derived = witness.files.some(
+    (file) => file.type === "file" && file.name.toLowerCase().endsWith(".zip"),
+  );
   if (witness.persistedZip !== derived) fail("identity", "persisted zip");
-  const total = witness.files.reduce((sum, file) => sum + (file.type === "file" ? file.size : 0), 0);
+  const total = witness.files.reduce(
+    (sum, file) => sum + (file.type === "file" ? file.size : 0),
+    0,
+  );
   if (witness.total !== total) fail("identity", "witness total");
   if (total > witness.capacity) fail("oracle", "persisted capacity");
   for (const file of witness.files) {
-    if (!allowed.has(file.name) || file.type !== "file" || file.size > witness.capacity) fail("oracle", "persisted " + file.name);
+    if (!allowed.has(file.name) || file.type !== "file" || file.size > witness.capacity)
+      fail("oracle", "persisted " + file.name);
   }
   if (witness.persistedZip) fail("oracle", "persisted zip");
 }
@@ -458,10 +531,23 @@ function identityRecord(parts) {
 }
 
 function assertIdentity(identity) {
-  for (const key of ["node", "arch", "platform", "packageName", "probe", "case", "exportSha256", "storeSha256"]) {
+  for (const key of [
+    "node",
+    "arch",
+    "platform",
+    "packageName",
+    "probe",
+    "case",
+    "exportSha256",
+    "storeSha256",
+  ]) {
     if (typeof identity[key] !== "string" || identity[key].length === 0) fail("identity", key);
   }
-  if (identity.node !== process.version || identity.arch !== process.arch || identity.platform !== process.platform) {
+  if (
+    identity.node !== process.version ||
+    identity.arch !== process.arch ||
+    identity.platform !== process.platform
+  ) {
     fail("identity", "false identity");
   }
 }
@@ -490,7 +576,8 @@ function pdfPhrases(caseFile) {
 }
 
 function oracleEntries(caseFile, fixture, raw, pdfBody = pdfPhrases(caseFile)) {
-  const payload = fixture.payloadBytes === 0 ? Buffer.alloc(0) : raw.subarray(0, fixture.payloadBytes);
+  const payload =
+    fixture.payloadBytes === 0 ? Buffer.alloc(0) : raw.subarray(0, fixture.payloadBytes);
   const digest = sha256(payload);
   const built = model(caseFile, []);
   const entries = caseFile.fixedMembers.map((name) => {
@@ -505,13 +592,17 @@ function oracleEntries(caseFile, fixture, raw, pdfBody = pdfPhrases(caseFile)) {
       return { name, data: Buffer.from(JSON.stringify(body, null, 2)) };
     }
     if (name === "manifest.json") {
-      return { name, data: Buffer.from(JSON.stringify(expectedManifest(caseFile, fixture, digest), null, 2)) };
+      return {
+        name,
+        data: Buffer.from(JSON.stringify(expectedManifest(caseFile, fixture, digest), null, 2)),
+      };
     }
-    const value = name === "utvikling.json"
-      ? built.timeline
-      : name === "kilder-og-evidens.json"
-        ? built.evidence
-        : { tasks: built.tasks, notes: built.notes };
+    const value =
+      name === "utvikling.json"
+        ? built.timeline
+        : name === "kilder-og-evidens.json"
+          ? built.evidence
+          : { tasks: built.tasks, notes: built.notes };
     return { name, data: Buffer.from(JSON.stringify(value, null, 2)) };
   });
   for (const name of attachmentNames(caseFile, fixture)) {
@@ -525,19 +616,23 @@ async function selfCheck() {
   const caseFile = JSON.parse(readFileSync(casePath, "utf8"));
   const raw = backingBytes();
   assertCase(caseFile, raw);
-  const badDigest = structuredClone(caseFile);
+  const badDigest = globalThis.structuredClone(caseFile);
   badDigest.backing.sha256 = "0".repeat(64);
   expectError(() => assertCase(badDigest, raw), "backing digest");
-  const badNames = structuredClone(caseFile);
-  badNames.maxAttachments.names = ["same.bin", "dir/same.bin", ...caseFile.maxAttachments.names.slice(2)];
+  const badNames = globalThis.structuredClone(caseFile);
+  badNames.maxAttachments.names = [
+    "same.bin",
+    "dir/same.bin",
+    ...caseFile.maxAttachments.names.slice(2),
+  ];
   expectError(() => assertCase(badNames, raw), "unique names");
-  const badLogical = structuredClone(caseFile);
+  const badLogical = globalThis.structuredClone(caseFile);
   badLogical.maxAttachments.logicalBytes = 1;
   expectError(() => assertCase(badLogical, raw), "logical size");
-  const badScratch = structuredClone(caseFile);
+  const badScratch = globalThis.structuredClone(caseFile);
   badScratch.limits.denyScratchBytes = 100;
   expectError(() => assertCase(badScratch, raw), "deny size");
-  const badSchema = structuredClone(caseFile);
+  const badSchema = globalThis.structuredClone(caseFile);
   badSchema.schema = "nope";
   expectError(() => assertCase(badSchema, raw), "schema");
   const hello = Buffer.from("hello");
@@ -548,7 +643,10 @@ async function selfCheck() {
   const eocdOffset = broken.length - 22;
   if (broken.readUInt32LE(eocdOffset) !== 0x06054b50) fail("self-check", "fixture eocd");
   const centralOffset = broken.readUInt32LE(eocdOffset + 16);
-  broken.writeUInt32LE((broken.readUInt32LE(centralOffset + 16) ^ 0xffffffff) >>> 0, centralOffset + 16);
+  broken.writeUInt32LE(
+    (broken.readUInt32LE(centralOffset + 16) ^ 0xffffffff) >>> 0,
+    centralOffset + 16,
+  );
   expectError(() => readZip(broken), "checksum");
   const empty = { attachments: 0, payloadBytes: 0 };
   const built = oracleEntries(caseFile, empty, raw);
@@ -558,49 +656,90 @@ async function selfCheck() {
   const literalReadme = Buffer.from(caseFile.privateWarning + "\n");
   const readme = entries.find((entry) => entry.name === "README.txt").data;
   if (!readme.equals(literalReadme)) fail("self-check", "readme literal");
-  const literalOfficial = Buffer.from(JSON.stringify({
-    type: "FeatureCollection",
-    features: [{
-      type: "Feature",
-      id: "f-official",
-      geometry: { type: "Point", coordinates: [10, 63.43] },
-      properties: { label: "official", provenance: "official", updatedAt: caseFile.clock },
-    }],
-  }, null, 2));
+  const literalOfficial = Buffer.from(
+    JSON.stringify(
+      {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: "f-official",
+            geometry: { type: "Point", coordinates: [10, 63.43] },
+            properties: { label: "official", provenance: "official", updatedAt: caseFile.clock },
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
   const official = entries.find((entry) => entry.name === "kartlag/official.geojson").data;
   if (!official.equals(literalOfficial)) fail("self-check", "geojson literal");
-  const literalManifest = Buffer.from(JSON.stringify({
-    situationId: "export72",
-    attachmentChecksums: [],
-    privateAnalysisWarning: caseFile.privateWarning,
-  }, null, 2));
+  const literalManifest = Buffer.from(
+    JSON.stringify(
+      {
+        situationId: "export72",
+        attachmentChecksums: [],
+        privateAnalysisWarning: caseFile.privateWarning,
+      },
+      null,
+      2,
+    ),
+  );
   const manifestBytes = entries.find((entry) => entry.name === "manifest.json").data;
   if (!manifestBytes.equals(literalManifest)) fail("self-check", "manifest literal");
   const members = assertMembers(entries, caseFile, empty, built.digest);
-  expectError(() => assertMembers(entries.slice(1), caseFile, empty, sha256(Buffer.alloc(0))), "count");
+  expectError(
+    () => assertMembers(entries.slice(1), caseFile, empty, sha256(Buffer.alloc(0))),
+    "count",
+  );
   const extra = [...entries, { name: "vedlegg/extra.bin", data: Buffer.from("x") }];
   expectError(() => assertMembers(extra, caseFile, empty, sha256(Buffer.alloc(0))), "count");
-  const plain = entries.map((entry) => entry.name === "situasjonsbrief.pdf"
-    ? { name: entry.name, data: Buffer.from(`%PDF-1.4\n${CLOCK_TITLE} ${caseFile.clock}\n%%EOF\n`) }
-    : entry);
+  const plain = entries.map((entry) =>
+    entry.name === "situasjonsbrief.pdf"
+      ? {
+          name: entry.name,
+          data: Buffer.from(`%PDF-1.4\n${CLOCK_TITLE} ${caseFile.clock}\n%%EOF\n`),
+        }
+      : entry,
+  );
   expectError(() => assertMembers(plain, caseFile, empty, built.digest), "pdf");
-  const truncated = entries.map((entry) => entry.name === "situasjonsbrief.pdf"
-    ? { name: entry.name, data: entry.data.subarray(0, entry.data.length - 12) }
-    : entry);
+  const truncated = entries.map((entry) =>
+    entry.name === "situasjonsbrief.pdf"
+      ? { name: entry.name, data: entry.data.subarray(0, entry.data.length - 12) }
+      : entry,
+  );
   expectError(() => assertMembers(truncated, caseFile, empty, built.digest), "pdf");
-  const alteredPdf = oracleEntries(caseFile, empty, raw, pdfPhrases(caseFile).replace(CLOCK_TITLE, "EXPORT72 ALTERED")).entries;
+  const alteredPdf = oracleEntries(
+    caseFile,
+    empty,
+    raw,
+    pdfPhrases(caseFile).replace(CLOCK_TITLE, "EXPORT72 ALTERED"),
+  ).entries;
   expectError(() => assertMembers(alteredPdf, caseFile, empty, built.digest), "pdf text");
-  const moved = entries.map((entry) => entry.name === "kartlag/official.geojson"
-    ? { name: entry.name, data: Buffer.from(entry.data.toString("utf8").replace("63.43", "0.01")) }
-    : entry);
+  const moved = entries.map((entry) =>
+    entry.name === "kartlag/official.geojson"
+      ? {
+          name: entry.name,
+          data: Buffer.from(entry.data.toString("utf8").replace("63.43", "0.01")),
+        }
+      : entry,
+  );
   expectError(() => assertMembers(moved, caseFile, empty, built.digest), "geojson");
-  const relabeled = entries.map((entry) => entry.name === "kartlag/official.geojson"
-    ? { name: entry.name, data: Buffer.from(entry.data.toString("utf8").replace("\"label\": \"official\"", "\"label\": \"changed\"")) }
-    : entry);
+  const relabeled = entries.map((entry) =>
+    entry.name === "kartlag/official.geojson"
+      ? {
+          name: entry.name,
+          data: Buffer.from(
+            entry.data.toString("utf8").replace('"label": "official"', '"label": "changed"'),
+          ),
+        }
+      : entry,
+  );
   expectError(() => assertMembers(relabeled, caseFile, empty, built.digest), "geojson");
   const small = caseFile.fixtures[1];
   const smallBuilt = oracleEntries(caseFile, small, raw);
-  const smallMembers = assertMembers(smallBuilt.entries, caseFile, small, smallBuilt.digest);
+  assertMembers(smallBuilt.entries, caseFile, small, smallBuilt.digest);
   const renamed = smallBuilt.entries.map((entry) => {
     if (entry.name !== "manifest.json") return entry;
     const manifest = JSON.parse(entry.data.toString("utf8"));
@@ -629,16 +768,35 @@ async function selfCheck() {
     return { name: entry.name, data: Buffer.from(JSON.stringify(manifest, null, 2)) };
   });
   expectError(() => assertMembers(shaMutated, caseFile, small, wrongSha), "attachment");
-  const shortened = smallBuilt.entries.map((entry) => entry.name === attachmentName
-    ? { name: entry.name, data: entry.data.subarray(0, entry.data.length - 1) }
-    : entry);
+  const shortened = smallBuilt.entries.map((entry) =>
+    entry.name === attachmentName
+      ? { name: entry.name, data: entry.data.subarray(0, entry.data.length - 1) }
+      : entry,
+  );
   expectError(() => assertMembers(shortened, caseFile, small, smallBuilt.digest), "attachment");
   const literalSha = "d1e7d52d9a8922ed805601a8f3b8f40fed0e0e535b288b6d968c928c57eaae79";
   const literalMember = { name: "vedlegg/e72-small.bin", size: 13, sha256: literalSha };
   if (sha256(Buffer.from("export72-byte")) !== literalSha) fail("self-check", "literal sha");
-  assertStableMembers([literalMember], [{ name: "vedlegg/e72-small.bin", size: 13, sha256: literalSha }]);
-  expectError(() => assertStableMembers([literalMember], [{ name: literalMember.name, size: 13, sha256: "0".repeat(64) }]), "unstable");
-  expectError(() => assertStableMembers([literalMember], [{ name: literalMember.name, size: 12, sha256: literalSha }]), "unstable");
+  assertStableMembers(
+    [literalMember],
+    [{ name: "vedlegg/e72-small.bin", size: 13, sha256: literalSha }],
+  );
+  expectError(
+    () =>
+      assertStableMembers(
+        [literalMember],
+        [{ name: literalMember.name, size: 13, sha256: "0".repeat(64) }],
+      ),
+    "unstable",
+  );
+  expectError(
+    () =>
+      assertStableMembers(
+        [literalMember],
+        [{ name: literalMember.name, size: 12, sha256: literalSha }],
+      ),
+    "unstable",
+  );
   const witnessRoot = mkdtempSync(tmpdir() + "/export72-witness-");
   try {
     writeFileSync(witnessRoot + "/export72-ok", "ok");
@@ -646,15 +804,53 @@ async function selfCheck() {
     assertWitness(clean, new Set(["export72-ok"]));
     if (clean.persistedZip !== false || clean.total !== 2) fail("self-check", "witness");
     writeFileSync(witnessRoot + "/out.zip", "PK");
-    expectError(() => assertWitness(witnessDirectory(witnessRoot, 16777216), new Set(["export72-ok", "out.zip"])), "persisted zip");
+    expectError(
+      () =>
+        assertWitness(witnessDirectory(witnessRoot, 16777216), new Set(["export72-ok", "out.zip"])),
+      "persisted zip",
+    );
     unlinkSync(witnessRoot + "/out.zip");
     writeFileSync(witnessRoot + "/stray.bin", "x");
-    expectError(() => assertWitness(witnessDirectory(witnessRoot, 16777216), new Set(["export72-ok"])), "persisted stray.bin");
+    expectError(
+      () => assertWitness(witnessDirectory(witnessRoot, 16777216), new Set(["export72-ok"])),
+      "persisted stray.bin",
+    );
+    if (releaseCanary(witnessRoot + "/export72-absent")) fail("self-check", "missing canary");
+    const canaryPath = witnessRoot + "/export72-canary";
+    writeFileSync(canaryPath, "x");
+    if (releaseCanary(canaryPath) || statSync(canaryPath, { throwIfNoEntry: false })) {
+      fail("self-check", "canary teardown");
+    }
+    let paired = false;
+    try {
+      raiseCanary(
+        Object.assign(new Error("write-visible"), { code: "EIO" }),
+        Object.assign(new Error("cleanup-visible"), { code: "EPERM" }),
+      );
+    } catch (error) {
+      paired =
+        error.message === "write-visible" &&
+        error.cause &&
+        error.cause.message === "cleanup-visible";
+    }
+    if (!paired) fail("self-check", "canary errors hidden");
+    let cleanupOnly = false;
+    try {
+      raiseCanary(null, Object.assign(new Error("cleanup-only"), { code: "EPERM" }));
+    } catch (error) {
+      cleanupOnly = error.message === "cleanup-only";
+    }
+    if (!cleanupOnly) fail("self-check", "cleanup error hidden");
   } finally {
     rmSync(witnessRoot, { recursive: true, force: false });
     if (statSync(witnessRoot, { throwIfNoEntry: false })) fail("self-check", "witness cleanup");
   }
-  const recorded = identityRecord({ pkg: "@nytt/server", hashes: { probe: "a".repeat(64), case: "b".repeat(64) }, exportSha: "c".repeat(64), storeSha: "d".repeat(64) });
+  const recorded = identityRecord({
+    pkg: "@nytt/server",
+    hashes: { probe: "a".repeat(64), case: "b".repeat(64) },
+    exportSha: "c".repeat(64),
+    storeSha: "d".repeat(64),
+  });
   assertIdentity(recorded);
   expectError(() => assertIdentity({ ...recorded, arch: "not-the-arch" }), "false identity");
   const dropped = { ...recorded };
@@ -670,7 +866,8 @@ async function selfCheck() {
   } finally {
     restoreClock();
   }
-  if (members[0].name !== "situasjonsbrief.pdf" || members[0].size !== pdf.length) fail("self-check", "pdf witness");
+  if (members[0].name !== "situasjonsbrief.pdf" || members[0].size !== pdf.length)
+    fail("self-check", "pdf witness");
   process.stdout.write("probe self-check passed\n");
 }
 
@@ -746,30 +943,44 @@ async function attempt(host, port) {
   return { tcp, udp, dns };
 }
 
+function releaseCanary(path) {
+  try {
+    unlinkSync(path);
+    return null;
+  } catch (error) {
+    return error && error.code === "ENOENT" ? null : error;
+  }
+}
+
+function raiseCanary(writeError, cleanupError) {
+  if (writeError && cleanupError) writeError.cause = cleanupError;
+  if (writeError) throw writeError;
+  if (cleanupError) throw cleanupError;
+}
+
 function kernelControls(caseFile, release, hashes) {
   expectDenied("/app/export72-deny");
   expectDenied("/perf/export72-deny");
-  const again = { probe: sha256(readFileSync(fileURLToPath(import.meta.url))), case: sha256(readFileSync(process.argv[4])) };
-  if (again.probe !== hashes.probe || again.case !== hashes.case) fail("kernel", "source hash changed");
+  const again = {
+    probe: sha256(readFileSync(fileURLToPath(import.meta.url))),
+    case: sha256(readFileSync(process.argv[4])),
+  };
+  if (again.probe !== hashes.probe || again.case !== hashes.case)
+    fail("kernel", "source hash changed");
   writeFileSync("/tmp/export72-ok", "ok");
   let denied = false;
+  let writeError = null;
   try {
     writeFileSync("/tmp/export72-big", Buffer.alloc(caseFile.limits.denyScratchBytes));
   } catch (error) {
-    if (!["ENOSPC", "EIO", "EDQUOT", "EFBIG"].includes(error.code)) throw error;
-    denied = true;
-  } finally {
-    for (const name of ["export72-big"]) {
-      try {
-        unlinkSync(`/tmp/${name}`);
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
-      }
-    }
+    if (!["ENOSPC", "EIO", "EDQUOT", "EFBIG"].includes(error.code)) writeError = error;
+    else denied = true;
   }
+  raiseCanary(writeError, releaseCanary("/tmp/export72-big"));
   if (!denied) fail("kernel", "17MiB tmp write was allowed");
   for (const [name, addresses] of Object.entries(networkInterfaces())) {
-    if (name !== "lo" && addresses?.some((item) => !item.internal)) fail("kernel", `non-loopback ${name}`);
+    if (name !== "lo" && addresses?.some((item) => !item.internal))
+      fail("kernel", `non-loopback ${name}`);
   }
   const route = readFileSync("/proc/net/route", "utf8").trim().split("\n").slice(1);
   for (const line of route) {
@@ -779,8 +990,14 @@ function kernelControls(caseFile, release, hashes) {
 }
 
 async function runFixture(modules, caseFile, fixture, raw) {
-  const payload = fixture.payloadBytes === 0 ? Buffer.alloc(0) : raw.subarray(0, fixture.payloadBytes);
-  const names = fixture.attachments === 25 ? caseFile.maxAttachments.names : fixture.attachments === 1 ? [fixture.name] : [];
+  const payload =
+    fixture.payloadBytes === 0 ? Buffer.alloc(0) : raw.subarray(0, fixture.payloadBytes);
+  const names =
+    fixture.attachments === 25
+      ? caseFile.maxAttachments.names
+      : fixture.attachments === 1
+        ? [fixture.name]
+        : [];
   const store = new modules.store.MemoryStore();
   const digest = sha256(payload);
   const storagePath = `/tmp/export72-${fixture.id}.bin`;
@@ -803,7 +1020,11 @@ async function runFixture(modules, caseFile, fixture, raw) {
     };
     const added = await store.addAttachment(record);
     const stored = await store.getAttachment(record.id);
-    if (added.filename !== record.filename || stored?.sha256 !== digest || stored.storagePath !== storagePath) {
+    if (
+      added.filename !== record.filename ||
+      stored?.sha256 !== digest ||
+      stored.storagePath !== storagePath
+    ) {
       fail("identity", "MemoryStore attachment roundtrip");
     }
     attachments.push({
@@ -818,7 +1039,8 @@ async function runFixture(modules, caseFile, fixture, raw) {
   }
   const built = model(caseFile, attachments);
   const zip = await modules.export.buildWorkspaceExport(store, built.workspace);
-  if (!Buffer.isBuffer(zip) || zip.length > caseFile.limits.memoryBytes) fail("oracle", "zip buffer");
+  if (!Buffer.isBuffer(zip) || zip.length > caseFile.limits.memoryBytes)
+    fail("oracle", "zip buffer");
   const members = assertMembers(readZip(zip), caseFile, fixture, digest);
   return { id: fixture.id, regular: members.length, members, zipBytes: zip.length };
 }
@@ -831,7 +1053,8 @@ function hwmBytes() {
 }
 
 async function qualify() {
-  if (process.argv[3] !== "--case" || !process.argv[4]) fail("usage", "expected --qualify --case PATH");
+  if (process.argv[3] !== "--case" || !process.argv[4])
+    fail("usage", "expected --qualify --case PATH");
   const caseFile = JSON.parse(readFileSync(process.argv[4], "utf8"));
   const raw = backingBytes();
   assertCase(caseFile, raw);
@@ -839,9 +1062,15 @@ async function qualify() {
     probe: sha256(readFileSync(fileURLToPath(import.meta.url))),
     case: sha256(readFileSync(process.argv[4])),
   };
-  process.stdout.write(`${JSON.stringify({ kind: "READY", uid: process.getuid(), gid: process.getgid(), pid: process.pid, ...hashes })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ kind: "READY", uid: process.getuid(), gid: process.getgid(), pid: process.pid, ...hashes })}\n`,
+  );
   const release = JSON.parse(await readLine());
-  if (release.kind !== "RELEASE" || typeof release.nonce !== "string" || release.nonce.length < 16) {
+  if (
+    release.kind !== "RELEASE" ||
+    typeof release.nonce !== "string" ||
+    release.nonce.length < 16
+  ) {
     fail("protocol", "release");
   }
   const network = await kernelControls(caseFile, release, hashes);
@@ -849,55 +1078,64 @@ async function qualify() {
   if (pkg.name !== caseFile.module.serverPackage) fail("identity", "package");
   const restoreClock = freezeFixtureClock(caseFile);
   try {
-  const exportModule = await import(caseFile.module.exportModule);
-  const storeModule = await import(caseFile.module.storeModule);
-  if (typeof exportModule[caseFile.module.exportFunction] !== "function") fail("identity", "export function");
-  if (typeof storeModule[caseFile.module.storeClass] !== "function") fail("identity", "MemoryStore");
-  const modules = { export: exportModule, store: storeModule };
-  const baseline = [];
-  for (const fixture of caseFile.fixtures) {
-    const first = await runFixture(modules, caseFile, fixture, raw);
-    const second = await runFixture(modules, caseFile, fixture, raw);
-    assertStableMembers(first.members, second.members);
-    baseline.push(first, second);
-  }
-  if (baseline.length !== 6) fail("oracle", "baseline count");
-  const pdfByteStable = baseline.every((item, index) => {
-    if (index % 2 === 1) return true;
-    const left = item.members.find((member) => member.name === "situasjonsbrief.pdf");
-    const right = baseline[index + 1].members.find((member) => member.name === "situasjonsbrief.pdf");
-    return Boolean(left && right && left.sha256 === right.sha256 && left.size === right.size);
-  });
-  if (!pdfByteStable) fail("oracle", "pdf bytes differ");
-  const peak = hwmBytes();
-  if (peak > caseFile.limits.memoryBytes) fail("oracle", "peak memory");
-  const allowedScratch = new Set(["export72-ok"]);
-  for (const fixture of caseFile.fixtures) {
-    if (fixture.payloadBytes > 0) allowedScratch.add("export72-" + fixture.id + ".bin");
-  }
-  const witness = witnessDirectory("/tmp", caseFile.limits.tmpfsBytes);
-  assertWitness(witness, allowedScratch);
-  const identity = identityRecord({
-    pkg: pkg.name,
-    hashes,
-    exportSha: sha256(readFileSync(caseFile.module.exportModule)),
-    storeSha: sha256(readFileSync(caseFile.module.storeModule)),
-  });
-  assertIdentity(identity);
-  const receipt = {
-    kind: "QUALIFIED",
-    nonce: release.nonce,
-    uid: process.getuid(),
-    network,
-    identity,
-    witness,
-    fixtures: baseline.map(({ id, regular, zipBytes, members }) => ({ id, regular, zipBytes, members })),
-    logicalBytes: caseFile.maxAttachments.logicalBytes,
-    persistedZip: witness.persistedZip,
-    hwmBytes: peak,
-    pdfByteStable,
-  };
-  process.stdout.write(`${JSON.stringify(receipt)}\n`);
+    const exportModule = await import(caseFile.module.exportModule);
+    const storeModule = await import(caseFile.module.storeModule);
+    if (typeof exportModule[caseFile.module.exportFunction] !== "function")
+      fail("identity", "export function");
+    if (typeof storeModule[caseFile.module.storeClass] !== "function")
+      fail("identity", "MemoryStore");
+    const modules = { export: exportModule, store: storeModule };
+    const baseline = [];
+    for (const fixture of caseFile.fixtures) {
+      const first = await runFixture(modules, caseFile, fixture, raw);
+      const second = await runFixture(modules, caseFile, fixture, raw);
+      assertStableMembers(first.members, second.members);
+      baseline.push(first, second);
+    }
+    if (baseline.length !== 6) fail("oracle", "baseline count");
+    const pdfByteStable = baseline.every((item, index) => {
+      if (index % 2 === 1) return true;
+      const left = item.members.find((member) => member.name === "situasjonsbrief.pdf");
+      const right = baseline[index + 1].members.find(
+        (member) => member.name === "situasjonsbrief.pdf",
+      );
+      return Boolean(left && right && left.sha256 === right.sha256 && left.size === right.size);
+    });
+    if (!pdfByteStable) fail("oracle", "pdf bytes differ");
+    const peak = hwmBytes();
+    if (peak > caseFile.limits.memoryBytes) fail("oracle", "peak memory");
+    const allowedScratch = new Set(["export72-ok"]);
+    for (const fixture of caseFile.fixtures) {
+      if (fixture.payloadBytes > 0) allowedScratch.add("export72-" + fixture.id + ".bin");
+    }
+    const witness = witnessDirectory("/tmp", caseFile.limits.tmpfsBytes);
+    assertWitness(witness, allowedScratch);
+    const identity = identityRecord({
+      pkg: pkg.name,
+      hashes,
+      exportSha: sha256(readFileSync(caseFile.module.exportModule)),
+      storeSha: sha256(readFileSync(caseFile.module.storeModule)),
+    });
+    assertIdentity(identity);
+    const receipt = {
+      kind: "QUALIFIED",
+      nonce: release.nonce,
+      uid: process.getuid(),
+      network,
+      identity,
+      witness,
+      fixtures: baseline.map(({ id, regular, zipBytes, members }) => ({
+        id,
+        regular,
+        zipBytes,
+        members,
+      })),
+      logicalBytes: caseFile.maxAttachments.logicalBytes,
+      persistedZip: witness.persistedZip,
+      hwmBytes: peak,
+      pdfByteStable,
+    };
+    process.stdout.write(`${JSON.stringify(receipt)}\n`);
   } finally {
     restoreClock();
   }
@@ -918,4 +1156,3 @@ if (command === "--self-check") {
   process.stderr.write("expected --self-check or --qualify --case PATH\n");
   process.exitCode = 2;
 }
-
