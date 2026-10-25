@@ -257,7 +257,7 @@ def admit_host_config(info: dict[str, object], *, image_id: str, user: str, prob
     if host_mounts is not None:
         if not isinstance(host_mounts, list):
             raise Rejection("source", "mount allowlist")
-        admit_mount_list([mapping(item) for item in host_mounts], probe_dir)
+        admit_mount_list([mapping(item) for item in host_mounts], probe_dir, requested=True)
 
 
 ADMITTED_TMPFS: Final = {
@@ -285,15 +285,25 @@ def parse_tmpfs(options: object) -> None:
         raise Rejection("scratch", "tmpfs")
 
 
-def admit_mount_list(mounts: list[dict[str, object]], probe_dir: str) -> None:
+def admit_mount_list(mounts: list[dict[str, object]], probe_dir: str, *, requested: bool = False) -> None:
+    # Docker request mounts use Target/ReadOnly; inspect mountpoints use Destination/RW.
     saw_probe = False
     for item in mounts:
         source = item.get("Source")
-        destination = item.get("Destination")
         if isinstance(source, str) and (source.endswith(".sock") or ".git" in source.split("/")):
             raise Rejection("source", "forbidden mount")
+        if requested:
+            if "Destination" in item or "RW" in item:
+                raise Rejection("source", "malformed mount")
+            destination = item.get("Target")
+            readonly = item.get("ReadOnly") is True
+        else:
+            if "Target" in item or "ReadOnly" in item:
+                raise Rejection("source", "malformed mount")
+            destination = item.get("Destination")
+            readonly = item.get("RW") is False
         if destination == "/perf":
-            if saw_probe or item.get("Type") != "bind" or item.get("RW") is not False or source != probe_dir:
+            if saw_probe or item.get("Type") != "bind" or not readonly or source != probe_dir:
                 raise Rejection("source", "probe mount")
             saw_probe = True
             continue
@@ -912,6 +922,23 @@ def sample_host() -> dict[str, object]:
     }
 
 
+def native_mount_host() -> dict[str, object]:
+    host = sample_host()
+    host["Mounts"] = [{
+        "Type": "bind",
+        "Source": "/owned",
+        "Destination": "/perf",
+        "Mode": "",
+        "RW": False,
+        "Propagation": "rprivate",
+    }]
+    host_config = mapping(host.get("HostConfig"))
+    host_config["Binds"] = None
+    host_config["Mounts"] = [{"Type": "bind", "Source": "/owned", "Target": "/perf", "ReadOnly": True}]
+    host["HostConfig"] = host_config
+    return host
+
+
 def expect(code: str, fn) -> None:
     try:
         fn()
@@ -1051,6 +1078,74 @@ def self_check() -> None:
     host_config["Binds"] = ["/owned:/perf:ro", "/var/run/docker.sock:/var/run/docker.sock"]
     host["HostConfig"] = host_config
     expect("source", lambda: admit_host_config(host, image_id="sha256:abc", user="1000:1000", probe_dir="/owned"))
+    admit_host_config(native_mount_host(), image_id="sha256:abc", user="1000:1000", probe_dir="/owned")
+    print("PASS native mount schema", flush=True)
+    beside = native_mount_host()
+    raw_mounts = beside.get("Mounts")
+    beside_mounts = [mapping(item) for item in raw_mounts] if isinstance(raw_mounts, list) else []
+    beside_mounts.append({"Type": "tmpfs", "Source": "", "Destination": "/tmp", "RW": True})
+    beside["Mounts"] = beside_mounts
+    beside_config = mapping(beside.get("HostConfig"))
+    raw_requested = beside_config.get("Mounts")
+    beside_requested = [mapping(item) for item in raw_requested] if isinstance(raw_requested, list) else []
+    beside_requested.append({"Type": "tmpfs", "Target": "/tmp", "Source": ""})
+    beside_config["Mounts"] = beside_requested
+    beside["HostConfig"] = beside_config
+    admit_host_config(beside, image_id="sha256:abc", user="1000:1000", probe_dir="/owned")
+    print("PASS tmpfs beside probe", flush=True)
+    probe_request = {"Type": "bind", "Source": "/owned", "Target": "/perf", "ReadOnly": True}
+
+    def admit_changed(change: Callable[[dict[str, object]], None]) -> None:
+        current = native_mount_host()
+        change(current)
+        admit_host_config(current, image_id="sha256:abc", user="1000:1000", probe_dir="/owned")
+
+    def replace_requested(current: dict[str, object], mounts: list[object]) -> None:
+        config = mapping(current.get("HostConfig"))
+        config["Mounts"] = mounts
+        current["HostConfig"] = config
+
+    print("CASE requested-writable", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [{**probe_request, "ReadOnly": False}])))
+    print("CASE requested-readonly-missing", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [{"Type": "bind", "Source": "/owned", "Target": "/perf"}])))
+    print("CASE requested-source", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [{**probe_request, "Source": "/etc"}])))
+    print("CASE requested-target", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [{**probe_request, "Target": "/opt"}])))
+    print("CASE requested-type", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [{**probe_request, "Type": "volume"}])))
+    print("CASE requested-duplicate", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [probe_request, dict(probe_request)])))
+    print("CASE requested-extra-bind", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [probe_request, {"Type": "bind", "Source": "/etc/hosts", "Target": "/etc/hosts", "ReadOnly": True}])))
+    print("CASE requested-socket", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [probe_request, {"Type": "bind", "Source": "/var/run/docker.sock", "Target": "/var/run/docker.sock", "ReadOnly": True}])))
+    print("CASE requested-git", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [probe_request, {"Type": "bind", "Source": "/src/.git", "Target": "/src/.git", "ReadOnly": True}])))
+    print("CASE requested-missing", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [probe_request, {}])))
+    print("CASE requested-malformed-schema", flush=True)
+    expect("source", lambda: admit_changed(lambda current: replace_requested(current, [{**probe_request, "Destination": "/perf", "RW": False}])))
+    print("CASE requested-malformed-item", flush=True)
+    expect("malformed", lambda: admit_changed(lambda current: replace_requested(current, [probe_request, "nope"])))
+    print("CASE effective-readonly-missing", flush=True)
+    expect("source", lambda: admit_changed(lambda current: current.__setitem__("Mounts", [{"Type": "bind", "Source": "/owned", "Destination": "/perf"}])))
+    print("CASE effective-source", flush=True)
+    expect("source", lambda: admit_changed(lambda current: current.__setitem__("Mounts", [{"Type": "bind", "Source": "/etc", "Destination": "/perf", "RW": False}])))
+    print("CASE effective-destination", flush=True)
+    expect("source", lambda: admit_changed(lambda current: current.__setitem__("Mounts", [{"Type": "bind", "Source": "/owned", "Destination": "/opt", "RW": False}])))
+    print("CASE effective-type", flush=True)
+    expect("source", lambda: admit_changed(lambda current: current.__setitem__("Mounts", [{"Type": "npipe", "Source": "/owned", "Destination": "/perf", "RW": False}])))
+    print("CASE effective-duplicate", flush=True)
+    expect("source", lambda: admit_changed(lambda current: current.__setitem__("Mounts", [
+        {"Type": "bind", "Source": "/owned", "Destination": "/perf", "RW": False},
+        {"Type": "bind", "Source": "/owned", "Destination": "/perf", "RW": False},
+    ])))
+    print("CASE effective-malformed-schema", flush=True)
+    expect("source", lambda: admit_changed(lambda current: current.__setitem__("Mounts", [{
+        "Type": "bind", "Source": "/owned", "Destination": "/perf", "RW": False, "Target": "/perf", "ReadOnly": True,
+    }])))
     cid = "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd"
     prove_absent(1, f"Error: No such object: {cid}\n", True, cid)
     expect("teardown", lambda: prove_absent(0, "", True, cid))

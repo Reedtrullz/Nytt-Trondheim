@@ -331,5 +331,5 @@ jobs:
       - run: docker build --target api -t nytt-trondheim-api:test .
       - run: docker build --target worker -t nytt-trondheim-worker:test .
       - name: Export72 runtime preflight
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/perf-nytt-export72-ci2-20261025-0023'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/fix-nytt-export72-mounts-20261025-1120'
         run: python3 scripts/perf/export72-runner.py --qualify --case scripts/perf/export72-case.json
