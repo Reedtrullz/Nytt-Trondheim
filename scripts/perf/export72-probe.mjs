@@ -1073,11 +1073,15 @@ async function qualify() {
   ) {
     fail("protocol", "release");
   }
+  const trace = (stage) => process.stdout.write(`${JSON.stringify({ kind: "TRACE", stage })}\n`);
+  trace("release");
+  trace("kernel");
   const network = await kernelControls(caseFile, release, hashes);
   const pkg = JSON.parse(readFileSync("/app/apps/server/package.json", "utf8"));
   if (pkg.name !== caseFile.module.serverPackage) fail("identity", "package");
   const restoreClock = freezeFixtureClock(caseFile);
   try {
+    trace("imports");
     const exportModule = await import(caseFile.module.exportModule);
     const storeModule = await import(caseFile.module.storeModule);
     if (typeof exportModule[caseFile.module.exportFunction] !== "function")
@@ -1087,6 +1091,7 @@ async function qualify() {
     const modules = { export: exportModule, store: storeModule };
     const baseline = [];
     for (const fixture of caseFile.fixtures) {
+      trace(`fixture-${fixture.id}`);
       const first = await runFixture(modules, caseFile, fixture, raw);
       const second = await runFixture(modules, caseFile, fixture, raw);
       assertStableMembers(first.members, second.members);
@@ -1108,6 +1113,7 @@ async function qualify() {
     for (const fixture of caseFile.fixtures) {
       if (fixture.payloadBytes > 0) allowedScratch.add("export72-" + fixture.id + ".bin");
     }
+    trace("witness");
     const witness = witnessDirectory("/tmp", caseFile.limits.tmpfsBytes);
     assertWitness(witness, allowedScratch);
     const identity = identityRecord({
@@ -1135,6 +1141,7 @@ async function qualify() {
       hwmBytes: peak,
       pdfByteStable,
     };
+    trace("complete");
     process.stdout.write(`${JSON.stringify(receipt)}\n`);
   } finally {
     restoreClock();

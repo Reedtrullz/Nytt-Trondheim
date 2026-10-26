@@ -11,6 +11,8 @@ import hashlib
 import json
 import os
 import secrets
+import selectors
+import signal
 import shutil
 import socket
 import subprocess
@@ -22,7 +24,10 @@ import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, TypedDict
+from unittest.mock import patch
+from contextlib import redirect_stdout, redirect_stderr
+from io import StringIO
 
 ADMITTED_BASE: Final = "fdd37882e3e41db98af8d8ed2e1b0afb03798aca"
 ADMITTED_TREE: Final = "24a1abeabbdac053b3516eb0a789efd63bc17233"
@@ -430,12 +435,63 @@ def parse_lines(snapshot: bytes) -> list[dict[str, object]]:
         raise Rejection("protocol", "non-json output") from exc
 
 
+class TraceFacts(TypedDict, total=False):
+    id: str
+    label: str
+    uid: int
+    gid: int
+    pid: int
+    workSeconds: int
+    totalSeconds: int
+    requestedMounts: list[dict[str, object]]
+    effectiveMounts: list[dict[str, object]]
+    hostConfig: dict[str, object]
+    state: dict[str, object]
+    failed: bool
+    canaryClosed: bool
+    stageRemoved: bool
+
+
 class Budget:
-    def __init__(self, deadline: float, cap: int) -> None:
-        self.deadline = deadline
-        self.cap = cap
+    def __init__(self, deadline: float, cap: int, *, cleanup_seconds: float = 0) -> None:
+        self.total_deadline = deadline
+        self.deadline = deadline - cleanup_seconds
+        self.total_cap = cap
+        # Reserve teardown output inside the original cap, sharing the same counter.
+        self.cap = cap - 131072 if cleanup_seconds else cap
         self.used = 0
         self._lock = threading.Lock()
+
+    def begin_cleanup(self) -> None:
+        self.deadline = self.total_deadline
+        self.cap = self.total_cap
+
+    def trace(self, stage: str, *, id: str | None = None, label: str | None = None,
+              uid: int | None = None, gid: int | None = None, pid: int | None = None,
+              workSeconds: int | None = None, totalSeconds: int | None = None,
+              requestedMounts: list[dict[str, object]] | None = None,
+              effectiveMounts: list[dict[str, object]] | None = None,
+              hostConfig: dict[str, object] | None = None,
+              state: dict[str, object] | None = None,
+              failed: bool | None = None, canaryClosed: bool | None = None,
+              stageRemoved: bool | None = None) -> None:
+        facts = {key: value for key, value in {
+            "id": id, "label": label, "uid": uid, "gid": gid, "pid": pid,
+            "workSeconds": workSeconds, "totalSeconds": totalSeconds,
+            "requestedMounts": requestedMounts, "effectiveMounts": effectiveMounts,
+            "hostConfig": hostConfig, "state": state,
+            "failed": failed, "canaryClosed": canaryClosed, "stageRemoved": stageRemoved,
+        }.items() if value is not None}
+        line = (json.dumps({"kind": "TRACE", "stage": stage, **facts}, sort_keys=True) + "\n").encode()
+        if len(line) > 4096:
+            line = (json.dumps({"kind": "TRACE", "stage": stage, "factsTruncated": True}) + "\n").encode()
+        if not self.claim(len(line)):
+            try:
+                sys.stderr.write(line.decode())
+                sys.stderr.flush()
+            except OSError:
+                # Diagnostic output must not interrupt resource cleanup.
+                pass
 
     def expired(self) -> bool:
         return time.monotonic() >= self.deadline
@@ -448,24 +504,58 @@ class Budget:
 
     def claim(self, size: int) -> bool:
         with self._lock:
+            if size > self.cap - self.used:
+                return True
             self.used += size
-            return self.used > self.cap
+            return False
 
 
 def run_bounded(argv: list[str], budget: Budget) -> subprocess.CompletedProcess[bytes]:
-    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    budget.remaining()
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    output = [bytearray(), bytearray()]
+    failure: Rejection | None = None
     try:
-        out, err = proc.communicate(timeout=budget.remaining())
+        with selectors.DefaultSelector() as selector:
+            for index, stream in enumerate((proc.stdout, proc.stderr)):
+                assert stream is not None
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ, index)
+            while selector.get_map():
+                remaining = min(budget.remaining(), budget.total_deadline - time.monotonic() - 0.05)
+                if remaining <= 0:
+                    raise Rejection("timeout", "unit exceeded timeout")
+                for key, _ in selector.select(remaining):
+                    chunk = os.read(key.fd, 4096)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    elif budget.claim(len(chunk)):
+                        raise Rejection("output", "stdout plus stderr exceeded cap")
+                    else:
+                        output[key.data].extend(chunk)
+            proc.wait(timeout=budget.remaining())
+    except Rejection as exc:
+        failure = exc
     except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
-        budget.claim(len(out) + len(err))
-        raise Rejection("timeout", "unit exceeded timeout")
-    if budget.claim(len(out) + len(err)):
-        raise Rejection("output", "stdout plus stderr exceeded cap")
-    if budget.expired():
-        raise Rejection("timeout", "unit exceeded timeout")
-    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+        failure = Rejection("timeout", "unit exceeded timeout")
+    finally:
+        # The unreaped child anchors the session ID, including inherited pipe holders.
+        if failure is not None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=max(0, budget.total_deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                failure.cleanup = "owned cli did not reap within total deadline"
+                failure = Rejection(failure.code, failure.detail, failure.cleanup)
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
+    if failure is not None:
+        raise failure
+    return subprocess.CompletedProcess(argv, proc.returncode, bytes(output[0]), bytes(output[1]))
 
 
 def reap(proc: subprocess.Popen[bytes]) -> str | None:
@@ -558,7 +648,19 @@ def cleanup_owned(container_id: str, label: str, budget: Budget) -> None:
     config = mapping(info.get("Config"), "teardown")
     labels = mapping(config.get("Labels"), "teardown") if config.get("Labels") is not None else {}
     require_owned_label(labels, label)
-    delete_owned(text_id(info), budget)
+    exact_id = text_id(info)
+    budget.trace("cleanup-owned", id=exact_id, label=label)
+    stopped = run_bounded(["docker", "stop", "--time", "1", exact_id], budget)
+    if stopped.returncode != 0:
+        raise Rejection("teardown", "owned stop failed")
+    terminal = docker_json(["docker", "inspect", exact_id], budget)[0]
+    require_owned_label(mapping(mapping(terminal.get("Config")).get("Labels")), label)
+    state = mapping(terminal.get("State"), "teardown")
+    budget.trace("cleanup-stopped", id=exact_id, label=label, state={key: state.get(key) for key in ("Status", "ExitCode", "OOMKilled", "Pid")})
+    if text_id(terminal) != exact_id or state.get("Status") not in {"exited", "dead"} or state.get("Pid") != 0:
+        raise Rejection("teardown", "owned container did not stop")
+    delete_owned(exact_id, budget)
+    budget.trace("cleanup-absent", id=exact_id, label=label)
 
 
 def assert_canary_closed(canary: Canary) -> None:
@@ -654,6 +756,7 @@ def dialog(
     budget: Budget | None = None,
     timeout_s: float | None = None,
     output_cap: int | None = None,
+    diagnostic: bool = False,
 ) -> dict[str, object]:
     if budget is None:
         if timeout_s is None or output_cap is None:
@@ -687,6 +790,28 @@ def dialog(
         thread.start()
     released = False
     qualified: dict[str, object] | None = None
+    traced = 0
+
+    def trace_events(events: list[dict[str, object]]) -> None:
+        nonlocal traced
+        if diagnostic:
+            for event in events[traced:]:
+                kind = event.get("kind")
+                if kind in {"READY", "QUALIFIED"}:
+                    identity: TraceFacts = {}
+                    for key in ("uid", "gid", "pid"):
+                        value = event.get(key)
+                        if type(value) is int:
+                            if key == "uid":
+                                identity["uid"] = value
+                            elif key == "gid":
+                                identity["gid"] = value
+                            else:
+                                identity["pid"] = value
+                    budget.trace("probe-" + str(kind), uid=identity.get("uid"), gid=identity.get("gid"), pid=identity.get("pid"))
+                if kind == "TRACE" and event.get("stage") in {"release", "kernel", "imports", "fixture-empty", "fixture-small", "fixture-max", "witness", "complete"}:
+                    budget.trace("probe-" + str(event["stage"]))
+            traced = len(events)
     try:
         while True:
             if budget.expired():
@@ -696,6 +821,7 @@ def dialog(
             with lock:
                 snapshot = bytes(out)
             parsed = parse_lines(snapshot)
+            trace_events(parsed)
             if any(item.get("kind") == "QUALIFIED" for item in parsed) and not released:
                 raise Rejection("premature", "success before release")
             for item in parsed:
@@ -708,11 +834,14 @@ def dialog(
                     raise Rejection("protocol", "stdin closed")
                 proc.stdin.write((json.dumps({"kind": "RELEASE", "nonce": nonce, **extra}) + "\n").encode())
                 proc.stdin.flush()
+                # RELEASE is a single message; EOF lets the real Node pipe terminate.
+                proc.stdin.close()
                 released = True
             if proc.poll() is not None:
                 time.sleep(0.05)
                 with lock:
                     qualified_now = parse_lines(bytes(out))
+                trace_events(qualified_now)
                 if any(item.get("kind") == "QUALIFIED" for item in qualified_now) and not released:
                     raise Rejection("premature", "success before release")
                 for item in qualified_now:
@@ -734,6 +863,8 @@ def dialog(
             raise Rejection("nonce", "receipt nonce mismatch")
         return qualified
     finally:
+        if proc.stdin is not None and not proc.stdin.closed:
+            proc.stdin.close()
         cleanup = reap(proc)
         if cleanup:
             current = sys.exc_info()[1]
@@ -790,7 +921,8 @@ def qualify(case_path: Path) -> None:
     probe = ROOT / "scripts/perf/export72-probe.mjs"
     raw_case = mapping(json.loads(case_path.read_text()))
     package_name = required_str(mapping(raw_case.get("module"), "malformed"), "serverPackage")
-    budget = Budget(time.monotonic() + case.limits.timeout_seconds, case.limits.output_bytes)
+    budget = Budget(time.monotonic() + case.limits.timeout_seconds, case.limits.output_bytes, cleanup_seconds=10)
+    budget.trace("image-inspect", workSeconds=110, totalSeconds=120)
     image = docker_json(["docker", "image", "inspect", case.image_tag], budget)[0]
     image_id = text_id(image)
     label = secrets.token_hex(8)
@@ -803,6 +935,7 @@ def qualify(case_path: Path) -> None:
     primary: Rejection | None = None
     payload: dict[str, object] | None = None
     try:
+        budget.trace("canary-positive")
         probe_sha = file_sha256(owned / "export72-probe.mjs")
         case_sha = file_sha256(owned / "export72-case.json")
         canary.positive()
@@ -814,7 +947,27 @@ def qualify(case_path: Path) -> None:
         if created.returncode != 0:
             raise Rejection("docker", created.stderr.decode()[-400:])
         container_id = created.stdout.decode().strip()
+        budget.trace("created", id=container_id, label=label)
         info = docker_json(["docker", "inspect", container_id], budget)[0]
+        config = mapping(info.get("HostConfig"))
+        mount_facts: TraceFacts = {}
+        for key, value, fields in (
+            ("requestedMounts", config.get("Mounts"), ("Type", "Target", "ReadOnly")),
+            ("effectiveMounts", info.get("Mounts"), ("Type", "Destination", "RW")),
+        ):
+            if isinstance(value, list):
+                projected: list[dict[str, object]] = []
+                for item in value[:4]:
+                    mount = mapping(item)
+                    record = {field: mount.get(field) for field in fields}
+                    for destination in ("Target", "Destination"):
+                        if destination in record and record[destination] not in {"/perf", "/tmp"}:
+                            record[destination] = "<other>"
+                    record["sourceMatchesOwned"] = mount.get("Source") == str(owned)
+                    projected.append(record)
+                mount_facts[key] = projected
+        mount_facts["hostConfig"] = {key: config.get(key) for key in ("Memory", "MemorySwap", "PidsLimit", "NanoCpus", "NetworkMode", "IpcMode", "ReadonlyRootfs", "Privileged", "CapDrop", "SecurityOpt", "Tmpfs")}
+        budget.trace("admission", requestedMounts=mount_facts.get("requestedMounts"), effectiveMounts=mount_facts.get("effectiveMounts"), hostConfig=mount_facts.get("hostConfig"))
         admit_host_config(info, image_id=image_id, user=case.runtime_user, probe_dir=str(owned))
 
         def on_ready(ready: dict[str, object]) -> dict[str, object]:
@@ -830,6 +983,7 @@ def qualify(case_path: Path) -> None:
                 raise Rejection("pid", "missing host pid")
             pid = pid_value
             observed_pid = pid
+            budget.trace("host-pid", pid=pid)
             if pid <= 0 or os.getpgid(pid) <= 0:
                 raise Rejection("pid", "missing host pid")
             comm, ppid = proc_identity(pid)
@@ -844,12 +998,16 @@ def qualify(case_path: Path) -> None:
             nonce=nonce,
             budget=budget,
             on_ready=on_ready,
+            diagnostic=True,
         )
         after = canary.snapshot()
         assert_quiet(before, after)
         descendants = count_descendants(observed_pid, Path("/proc"))
         handles = count_handles(observed_pid, Path("/proc"))
+        budget.begin_cleanup()
+        budget.trace("terminal-cleanup", id=container_id, label=label)
         stopped = remove_exact(container_id, label, budget, descendants=descendants, handles=handles)
+        budget.trace("terminal-absent", state=stopped)
         container_id = ""
         again = text_id(docker_json(["docker", "image", "inspect", image_id], budget)[0])
         if again != image_id:
@@ -872,10 +1030,13 @@ def qualify(case_path: Path) -> None:
     except Exception as exc:
         primary = Rejection("docker", str(exc))
     cleanup_errors: list[str] = []
+    budget.begin_cleanup()
+    budget.trace("cleanup", failed=primary is not None)
     if any(thread.is_alive() for thread in canary._threads) or any(sock.fileno() != -1 for sock in (canary._tcp, canary._udp, canary._dns)):
         try:
             canary.close()
             assert_canary_closed(canary)
+            budget.trace("canary-closed")
         except (Rejection, OSError) as exc:
             cleanup_errors.append(str(exc))
     if container_id:
@@ -889,13 +1050,20 @@ def qualify(case_path: Path) -> None:
         except Rejection as exc:
             cleanup_errors.append(exc.detail)
     cleanup = "; ".join(item for item in cleanup_errors if item)
+    budget.trace("finished", failed=primary is not None or bool(cleanup), canaryClosed=not any(thread.is_alive() for thread in canary._threads), stageRemoved=not owned.exists())
     if primary is not None:
         raise Rejection(primary.code, primary.detail, cleanup=cleanup or None)
     if cleanup:
         raise Rejection("teardown", "cleanup failed", cleanup=cleanup)
     if payload is None:
         raise Rejection("protocol", "missing qualified receipt")
-    print(json.dumps(payload, sort_keys=True))
+    budget.remaining()
+    if budget.used > budget.cap:
+        raise Rejection("output", "stdout plus stderr exceeded cap")
+    serialized = json.dumps(payload, sort_keys=True) + "\n"
+    if budget.claim(len(serialized.encode())):
+        raise Rejection("output", "stdout plus stderr exceeded cap")
+    sys.stdout.write(serialized)
 
 
 def sample_host() -> dict[str, object]:
@@ -952,6 +1120,297 @@ def expect(code: str, fn) -> None:
 
 def child(code: str) -> list[str]:
     return [sys.executable, "-c", code]
+
+
+def check_qualification_cleanup(receipt: Mapping[str, object]) -> None:
+    """Exercise qualify and its cleanup against real processes at the Docker boundary."""
+    real_run = run_bounded
+    real_dialog = dialog
+    case_path = ROOT / "scripts/perf/export72-case.json"
+    class BrokenDiagnostics(StringIO):
+        def write(self, text: str) -> int:
+            raise OSError("diagnostic sink closed")
+
+    for fail, broken_trace in ((False, False), (True, False), (False, True), (True, True)):
+        target = subprocess.Popen(child("import sys; sys.stdin.readline()"), stdin=subprocess.PIPE, start_new_session=True)
+        foreign = subprocess.Popen(child("import time; time.sleep(20)"), start_new_session=True)
+        stage: Path | None = None
+        removed = False
+        canaries: list[Canary] = []
+        real_canary = Canary
+
+        def make_canary() -> Canary:
+            current = real_canary()
+            canaries.append(current)
+            return current
+
+        def docker_adapter(argv: list[str], budget: Budget) -> subprocess.CompletedProcess[bytes]:
+            nonlocal stage, removed
+            if argv[0] != "docker":
+                return real_run(argv, budget)
+            budget.remaining()
+            output = b""
+            error = b""
+            code = 0
+            if argv[1:3] == ["image", "inspect"]:
+                output = b'[{"Id":"sha256:abc"}]'
+            elif argv[1] == "create":
+                mount = argv[argv.index("--mount") + 1]
+                stage = Path(mount.split("src=", 1)[1].split(",", 1)[0])
+                output = b"container\n"
+            elif argv[1] == "inspect":
+                if removed:
+                    code, error = 1, b"Error: No such object: container\n"
+                else:
+                    info = native_mount_host()
+                    inspected = foreign if argv[-1] == "foreign" else target
+                    info["Id"] = "foreign" if inspected is foreign else "container"
+                    config = mapping(info["Config"])
+                    label = "foreign" if argv[-1] == "foreign" else current_label[0]
+                    config["Labels"] = {"portfolio.run": label}
+                    info["Config"] = config
+                    host_config = mapping(info["HostConfig"])
+                    host_config["Mounts"] = [{"Type": "bind", "Source": str(stage), "Target": "/perf", "ReadOnly": True}]
+                    info["HostConfig"] = host_config
+                    info["Mounts"] = [{"Type": "bind", "Source": str(stage), "Destination": "/perf", "RW": False}]
+                    exit_code = inspected.poll()
+                    info["State"] = {"Status": "running" if exit_code is None else "exited", "ExitCode": exit_code if exit_code is not None else 0, "OOMKilled": False, "Pid": inspected.pid if exit_code is None else 0}
+                    output = json.dumps([info]).encode()
+            elif argv[1] == "stop":
+                if argv[-1] != "container":
+                    raise Rejection("self-check", "adapter stop identity")
+                target.terminate()
+                target.wait(timeout=budget.remaining())
+            elif argv[1] == "rm":
+                if argv[-1] != "container" or target.poll() is None:
+                    raise Rejection("self-check", "adapter deletion before terminal stop")
+                removed = True
+            elif argv[1] == "version":
+                output = b"1.48\n"
+            else:
+                raise Rejection("self-check", f"unexpected Docker boundary: {argv[1:]}")
+            if budget.claim(len(output) + len(error)):
+                raise Rejection("output", "adapter output exceeded cap")
+            return subprocess.CompletedProcess(argv, code, output, error)
+
+        current_label = [""]
+        def create_adapter(argv: list[str], budget: Budget) -> subprocess.CompletedProcess[bytes]:
+            if argv[:2] == ["docker", "create"]:
+                current_label[0] = argv[argv.index("--label") + 1].split("=", 1)[1]
+            return docker_adapter(argv, budget)
+
+        def probe_adapter(argv: list[str], *, nonce: str, budget: Budget,
+                          on_ready: Callable[[dict[str, object]], dict[str, object]], diagnostic: bool) -> dict[str, object]:
+            assert stage is not None
+            ready = {"kind": "READY", "uid": 1000, "gid": 1000,
+                     "probe": file_sha256(stage / "export72-probe.mjs"),
+                     "case": file_sha256(stage / "export72-case.json")}
+            if fail:
+                real_run(child("import sys; sys.stdout.buffer.write(b'x'*2097152)"), budget)
+                raise Rejection("self-check", "overflow accepted")
+            payload = copy.deepcopy(dict(receipt))
+            payload["identity"] = {**mapping(payload["identity"]), "probe": ready["probe"], "case": ready["case"]}
+            script = ("import json,sys\n"
+                      f"print({json.dumps(ready)!r}, flush=True)\n"
+                      "msg=json.loads(sys.stdin.readline())\n"
+                      f"result=json.loads({json.dumps(payload)!r})\n"
+                      "result.update(kind='QUALIFIED',nonce=msg['nonce'])\n"
+                      "print(json.dumps(result),flush=True)\n")
+            result = real_dialog(child(script), nonce=nonce, budget=budget,
+                                 on_ready=on_ready, diagnostic=diagnostic)
+            assert target.stdin is not None
+            target.stdin.write(b"finish\n")
+            target.stdin.close()
+            target.wait(timeout=budget.remaining())
+            return result
+
+        # Given real owned/foreign targets, adapt only unavailable Docker/host observations.
+        try:
+            with patch.dict(globals(), {"run_bounded": create_adapter, "dialog": probe_adapter,
+                            "outbound_ip": lambda: "192.0.2.1", "Canary": make_canary,
+                            "proc_identity": lambda _pid: ("node", os.getpid()),
+                            "count_descendants": lambda _pid, _root: 0,
+                            "count_handles": lambda _pid, _root: 0}):
+                expect("teardown", lambda: cleanup_owned("foreign", "owned", Budget(time.monotonic() + 1, 1048576)))
+                captured = StringIO()
+                with redirect_stdout(captured), redirect_stderr(BrokenDiagnostics() if broken_trace else sys.stderr):
+                    if fail:
+                        expect("output", lambda: qualify(case_path))
+                    else:
+                        qualify(case_path)
+            # Then production cleanup must have removed the target and real resources.
+            if not removed or target.poll() is None or foreign.poll() is not None:
+                raise Rejection("self-check", "qualification cleanup/foreign preservation")
+            try:
+                os.kill(target.pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise Rejection("self-check", "qualification target remains")
+            if stage is None or stage.exists() or not canaries:
+                raise Rejection("self-check", "qualification stage cleanup")
+            for canary in canaries:
+                assert_canary_closed(canary)
+            if not fail and json.loads(captured.getvalue())["kind"] != "QUALIFIED":
+                raise Rejection("self-check", "qualified receipt lost")
+            if not fail:
+                print(captured.getvalue(), end="", flush=True)
+            print(json.dumps({"case": "qualification-overflow" if fail else "qualification-success",
+                              "ownedPid": target.pid, "ownedReapedAbsent": True,
+                              "foreignPid": foreign.pid, "foreignAlive": True,
+                              "stageRemoved": True, "canaryClosed": True,
+                              "receiptRetained": not fail, "brokenDiagnostics": broken_trace}), flush=True)
+        finally:
+            for process in (target, foreign):
+                if process.stdin is not None and not process.stdin.closed:
+                    process.stdin.close()
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=1)
+                try:
+                    os.kill(process.pid, 0)
+                except ProcessLookupError:
+                    pass
+                else:
+                    raise Rejection("self-check", "owned fixture cleanup left a process")
+            for canary in canaries:
+                if any(sock.fileno() != -1 for sock in (canary._tcp, canary._udp, canary._dns)):
+                    canary.close()
+            if stage is not None and stage.exists():
+                release_owned(stage)
+            print(json.dumps({"case": "qualification-fixture-cleanup", "ownedPid": target.pid,
+                              "foreignPid": foreign.pid, "bothReapedAbsent": True}), flush=True)
+
+
+def check_pipe_holder() -> None:
+    """Prove the inherited pipe owner is gone, not merely that reading timed out."""
+    owned = Path(tempfile.mkdtemp(prefix="export72-pipe-"))
+    identity_path = owned / "holder.json"
+    holder = 0
+    leader = 0
+    start = ""
+    # Linux subreaping makes the orphan's terminal wait observable even under a non-reaping PID 1.
+    restore_subreaper: Callable[[], None] = lambda: None
+    if sys.platform == "linux":
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        previous = ctypes.c_int()
+        if libc.prctl(37, ctypes.byref(previous), 0, 0, 0) != 0 or libc.prctl(36, 1, 0, 0, 0) != 0:
+            raise Rejection("self-check", "cannot establish owned pipe reaper")
+        def restore_subreaper() -> None:
+            if libc.prctl(36, previous.value, 0, 0, 0) != 0:
+                raise Rejection("self-check", "cannot restore pipe reaper")
+    foreign = subprocess.Popen(child("import time; time.sleep(10)"), start_new_session=True)
+    pipe_budget = Budget(time.monotonic() + 1, 1048576, cleanup_seconds=0.6)
+    try:
+        # Given a holder with a synchronized real PID/start identity, let its immediate parent exit.
+        script = ("import os,time,json,subprocess\n"
+                  "r,w=os.pipe()\n"
+                  "if os.fork()==0:\n"
+                  " os.close(r)\n"
+                  " start=subprocess.check_output(['ps','-o','lstart=','-p',str(os.getpid())],timeout=0.2).decode().strip()\n"
+                  f" with open({str(identity_path)!r},'w') as f: json.dump(dict(pid=os.getpid(),leader=os.getppid(),start=start),f)\n"
+                  " os.write(w,b'1');os.close(w);time.sleep(5);os._exit(0)\n"
+                  "os.close(w);os.read(r,1);os.close(r);os._exit(0)\n")
+        expect("timeout", lambda: run_bounded(child(script), pipe_budget))
+        record = mapping(json.loads(identity_path.read_text()))
+        holder = required_int(record, "pid")
+        leader = required_int(record, "leader")
+        start = required_str(record, "start")
+        if not start:
+            raise Rejection("self-check", "holder start identity missing")
+        reaped = False
+        absence_deadline = min(pipe_budget.total_deadline, time.monotonic() + 0.15)
+        while time.monotonic() < absence_deadline:
+            try:
+                waited, _status = os.waitpid(holder, os.WNOHANG)
+                reaped = waited == holder
+            except ChildProcessError:
+                pass
+            try:
+                os.kill(holder, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(min(0.01, max(0, pipe_budget.total_deadline - time.monotonic())))
+        else:
+            raise Rejection("self-check", "inherited pipe holder remains after timeout")
+        if time.monotonic() >= pipe_budget.total_deadline or foreign.poll() is not None:
+            raise Rejection("self-check", "pipe holder deadline/foreign preservation")
+        print(json.dumps({"case": "retained-pipe", "holderPid": holder, "leaderPid": leader,
+                          "start": start, "holderAbsent": True, "holderReaped": reaped,
+                          "foreignPid": foreign.pid, "foreignAlive": True,
+                          "withinTotalDeadline": True}), flush=True)
+        print("PASS real retained pipe holder after immediate child death", flush=True)
+    finally:
+        primary = sys.exc_info()[1]
+        cleanup_errors: list[str] = []
+        try:
+            if identity_path.exists():
+                record = mapping(json.loads(identity_path.read_text()))
+                holder = required_int(record, "pid")
+                leader = required_int(record, "leader")
+                start = required_str(record, "start")
+                remaining = pipe_budget.total_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise Rejection("self-check", "pipe cleanup deadline exhausted")
+                try:
+                    current = subprocess.run(["ps", "-o", "lstart=", "-p", str(holder)], capture_output=True,
+                                             timeout=min(0.1, remaining))
+                    if current.stdout.decode().strip() == start and os.getpgid(holder) == leader:
+                        os.kill(holder, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                while time.monotonic() < pipe_budget.total_deadline:
+                    try:
+                        os.waitpid(holder, os.WNOHANG)
+                    except ChildProcessError:
+                        pass
+                    try:
+                        os.kill(holder, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(min(0.005, max(0, pipe_budget.total_deadline - time.monotonic())))
+                else:
+                    raise Rejection("self-check", "owned holder did not become absent")
+        except Exception as exc:
+            cleanup_errors.append(f"holder: {exc}")
+        try:
+            restore_subreaper()
+        except Exception as exc:
+            cleanup_errors.append(f"restore: {exc}")
+        try:
+            if foreign.poll() is None:
+                foreign.kill()
+            remaining = pipe_budget.total_deadline - time.monotonic()
+            if remaining <= 0:
+                raise Rejection("self-check", "foreign cleanup deadline exhausted")
+            foreign.wait(timeout=remaining)
+            try:
+                os.kill(foreign.pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise Rejection("self-check", "foreign fixture owner cleanup failed")
+        except Exception as exc:
+            cleanup_errors.append(f"foreign: {exc}")
+        try:
+            release_owned(owned)
+        except Exception as exc:
+            cleanup_errors.append(f"scratch: {exc}")
+        if cleanup_errors:
+            detail = "; ".join(cleanup_errors)
+            if primary is None:
+                raise Rejection("self-check", detail)
+            primary.add_note(f"pipe fixture cleanup: {detail}")
+            try:
+                print(f"FAIL pipe fixture cleanup: {detail}", file=sys.stderr, flush=True)
+            except Exception as exc:
+                primary.add_note(f"cleanup diagnostic failed: {exc}")
+        else:
+            print(json.dumps({"case": "pipe-fixture-cleanup", "foreignPid": foreign.pid,
+                              "holderPid": holder, "holderAbsent": True,
+                              "foreignReapedAbsent": True, "scratchRemoved": not owned.exists(),
+                              "withinTotalDeadline": time.monotonic() < pipe_budget.total_deadline}), flush=True)
 
 
 def self_check() -> None:
@@ -1188,6 +1647,50 @@ def self_check() -> None:
         "print(json.dumps({'kind':'QUALIFIED','nonce':msg['nonce']}), flush=True)\n"
     ), nonce=nonce, timeout_s=2, output_cap=65536, on_ready=lambda _ready: {})
     print("PASS release handshake", flush=True)
+    node = shutil.which("node")
+    if node is None:
+        raise Rejection("self-check", "Node is required for the real release lifecycle")
+    source = probe.read_text()
+    read_line = source[source.index("function readLine()"):source.index("\nfunction expectDenied")]
+    dialog([node, "--input-type=module", "--eval", read_line + "\n"
+        "console.log(JSON.stringify({kind:'READY'}));\n"
+        "const release=JSON.parse(await readLine());\n"
+        "console.log(JSON.stringify({kind:'QUALIFIED',nonce:release.nonce}));\n"
+    ], nonce=nonce, timeout_s=2, output_cap=65536, on_ready=lambda _ready: {})
+    print("PASS real Node release terminal exit", flush=True)
+    reserved = Budget(time.monotonic() + 1, 1048576, cleanup_seconds=0.6)
+    expect("timeout", lambda: run_bounded(child("import time; time.sleep(2)"), reserved))
+    spent = reserved.used
+    reserved.begin_cleanup()
+    cleaned = run_bounded(child("print('owned cleanup')"), reserved)
+    if cleaned.returncode != 0 or cleaned.stdout != b"owned cleanup\n" or reserved.used != spent + len(cleaned.stdout):
+        raise Rejection("self-check", "cleanup reserve or shared output accounting")
+    print("PASS reserved cleanup within total deadline", flush=True)
+    target = subprocess.Popen(child("import time; time.sleep(10)"))
+    try:
+        reserved = Budget(time.monotonic() + 2, 1048576, cleanup_seconds=1)
+        expect("output", lambda: run_bounded(child("import sys; sys.stdout.buffer.write(b'x'*2097152)"), reserved))
+        if reserved.used > reserved.cap:
+            raise Rejection("self-check", "overflow consumed cleanup reserve")
+        expect("teardown", lambda: require_owned_label({"portfolio.run": "foreign"}, "owned"))
+        if target.poll() is not None:
+            raise Rejection("self-check", "foreign rejection changed target")
+        reserved.begin_cleanup()
+        require_owned_label({"portfolio.run": "owned"}, "owned")
+        run_bounded(child(f"import os,signal; os.kill({target.pid}, signal.SIGTERM)"), reserved)
+        target.wait(timeout=reserved.remaining())
+        try:
+            os.kill(target.pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise Rejection("self-check", "owned target remains")
+        print("PASS real overflow owned target stop reap absence foreign guard", flush=True)
+    finally:
+        if target.poll() is None:
+            target.kill()
+        target.wait(timeout=1)
+    check_pipe_holder()
     expect("premature", lambda: dialog(child(
         "print('{\"kind\":\"READY\"}', flush=True)\n"
         "print('{\"kind\":\"QUALIFIED\",\"nonce\":\"early\"}', flush=True)\n"
@@ -1241,6 +1744,7 @@ def self_check() -> None:
     }
     witness = {"files": [{"name": "export72-ok", "type": "file", "size": 2}], "total": 2, "persistedZip": False}
     receipt = {"identity": identity, "witness": witness, "persistedZip": False, "logicalBytes": 1, "fixtures": [], "hwmBytes": 1, "network": {}}
+    check_qualification_cleanup(receipt)
     retained = retain_receipt(
         receipt, image_id="sha256:abc", probe_sha="a" * 64, case_sha="b" * 64, package_name="@nytt/server",
         canary_before=(0, 0, 0), canary_after=(0, 0, 0), stopped={"Status": "exited", "ExitCode": 0, "OOMKilled": False, "Pid": 0},
