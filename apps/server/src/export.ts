@@ -103,7 +103,8 @@ export async function buildWorkspaceExport(
   manifest?: unknown,
 ): Promise<Buffer> {
   const pdf = await renderBrief(workspace);
-  const archive = archiver("zip", { zlib: { level: 9 } });
+  // Stat callbacks must enter the archive queue in workspace order.
+  const archive = archiver("zip", { statConcurrency: 1, zlib: { level: 9 } });
   const output = new PassThrough();
   const chunks: Buffer[] = [];
   const finished = new Promise<Buffer>((resolve, reject) => {
