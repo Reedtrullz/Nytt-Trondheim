@@ -33,7 +33,7 @@ jobs:
 
   e2e:
     name: Browser Smoke and Accessibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -331,7 +331,7 @@ jobs:
       - run: docker build --target api -t nytt-trondheim-api:test .
       - run: docker build --target worker -t nytt-trondheim-worker:test .
       - name: Export72 runtime preflight
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/fix-nytt-export72-final-bounds-20261026-0245'
+        if: github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/codex/fix-nytt-export72-final-bounds-20261026-0245' || github.ref == 'refs/heads/codex/fix-nytt-pdf-rejection-20261027')
         run: |
           python3 scripts/perf/export72-runner.py --self-check
           python3 scripts/perf/export72-runner.py --qualify --case scripts/perf/export72-case.json

@@ -30,18 +30,16 @@ it("rejects the export when the PDF document emits an error", async () => {
   const pdfError = new Error("synthetic PDF failure");
   const originalEnd = PDFDocument.prototype.end;
   let emitPdfError: (() => void) | undefined;
-  const end = vi
-    .spyOn(PDFDocument.prototype, "end")
-    .mockImplementation(function (
-      this: PDFDocument,
-      ...args: Parameters<PDFDocument["end"]>
-    ) {
-      // Keep the unchanged baseline from crashing Vitest; only the product promise can reject.
-      this.once("error", () => undefined);
-      emitPdfError = () => this.emit("error", pdfError);
-      setImmediate(() => Reflect.apply(originalEnd, this, args));
-      return this;
-    });
+  const end = vi.spyOn(PDFDocument.prototype, "end").mockImplementation(function (
+    this: PDFDocument,
+    ...args: Parameters<PDFDocument["end"]>
+  ) {
+    // Keep the unchanged baseline from crashing Vitest; only the product promise can reject.
+    this.once("error", () => undefined);
+    emitPdfError = () => this.emit("error", pdfError);
+    setImmediate(() => Reflect.apply(originalEnd, this, args));
+    return this;
+  });
 
   try {
     const result = buildWorkspaceExport(store, workspace);
