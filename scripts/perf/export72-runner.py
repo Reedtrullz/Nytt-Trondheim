@@ -575,6 +575,7 @@ def prove_absent(code: int, stderr: str, daemon_reachable: bool, container_id: s
     exact = {
         f"Error: No such object: {container_id}",
         f"Error response from daemon: No such object: {container_id}",
+        f"error: no such object: {container_id}",
     }
     lines = [line.strip() for line in stderr.splitlines() if line.strip()]
     if len(lines) != 1 or lines[0] not in exact:
@@ -1696,6 +1697,10 @@ def self_check() -> None:
     }])))
     cid = "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd"
     prove_absent(1, f"Error: No such object: {cid}\n", True, cid)
+    prove_absent(1, f"error: no such object: {cid}\n", True, cid)
+    expect("docker", lambda: prove_absent(1, f"error: no such object: {'d' * 64}\n", True, cid))
+    expect("docker", lambda: prove_absent(1, f"warning: probe\nerror: no such object: {cid}\n", True, cid))
+    expect("docker", lambda: prove_absent(1, f"error: no such object: {cid}\ntrailing\n", True, cid))
     expect("teardown", lambda: prove_absent(0, "", True, cid))
     expect("docker", lambda: prove_absent(1, "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n", False, cid))
     expect("docker", lambda: prove_absent(1, f"Error: No such object: {cid}\n", False, cid))
