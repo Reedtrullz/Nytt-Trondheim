@@ -856,7 +856,17 @@ def dialog(
         if qualified is not None and code != 0:
             raise Rejection("premature", "qualified receipt then non-zero exit")
         if code != 0:
-            raise Rejection("exit", f"exit {code}")
+            detail = f"exit {code}"
+            for item in qualified_now:
+                error = item.get("error")
+                if item.get("kind") == "FAILED" and isinstance(error, str) and error:
+                    # Escape terminal controls and charge the rendered diagnostic to the shared cap.
+                    safe = json.dumps(error[:512], ensure_ascii=True)
+                    failure = f"{detail}; probe FAILED error={safe}"
+                    if not budget.claim(len(f"FAIL exit: {failure}\n".encode())):
+                        detail = failure
+                    break
+            raise Rejection("exit", detail)
         if qualified is None:
             raise Rejection("protocol", "missing qualified receipt")
         if qualified.get("nonce") != nonce:
@@ -1122,6 +1132,71 @@ def child(code: str) -> list[str]:
     return [sys.executable, "-c", code]
 
 
+def check_failure_diagnostics() -> None:
+    """Run actual failing children; diagnostics must preserve rejection and budgets."""
+    cases = [
+        ("actual-error", {"kind": "FAILED", "error": "native max fixture sentinel"}, "native max fixture sentinel"),
+        ("large-error", {"kind": "FAILED", "error": "x" * 20000}, "x" * 512),
+        ("controls", {"kind": "FAILED", "error": "bad\n\r\t\x00\x1b\x7f\u0085\u202e"}, "bad\n\r\t\x00\x1b\x7f\u0085\u202e"),
+        ("malformed-error", {"kind": "FAILED", "error": {"secret": "not a string"}}, None),
+        ("missing-error", {"kind": "FAILED"}, None),
+        ("empty-error", {"kind": "FAILED", "error": ""}, None),
+        ("foreign-kind", {"kind": "OTHER", "error": "untrusted"}, None),
+        ("missing-failed", {"kind": "TRACE", "stage": "fixture-max"}, None),
+    ]
+    for name, frame, wanted in cases:
+        wire = (json.dumps(frame) + "\n").encode()
+        script = f"import sys; sys.stdout.buffer.write({wire!r}); sys.stdout.flush(); sys.exit(1)"
+        budget = Budget(time.monotonic() + 2, 1048576, cleanup_seconds=0.5)
+        try:
+            dialog(child(script), nonce="test", budget=budget, on_ready=lambda _ready: {})
+        except Rejection as exc:
+            if exc.code != "exit" or not exc.detail.startswith("exit 1"):
+                raise Rejection("self-check", f"changed rejection for {name}: {exc}") from exc
+            if wanted is not None:
+                safe = json.dumps(wanted, ensure_ascii=True)
+                if safe not in exc.detail:
+                    raise Rejection("self-check", f"child failure detail lost for {name}: {exc}") from exc
+                if len(exc.detail) > 3200 or any(ord(c) < 32 or ord(c) >= 127 for c in exc.detail):
+                    raise Rejection("self-check", f"unsafe failure detail for {name}")
+                if budget.used != len(wire) + len(f"FAIL {exc}\n".encode()):
+                    raise Rejection("self-check", "failure diagnostic not charged to shared budget")
+            elif exc.detail != "exit 1" or budget.used != len(wire):
+                raise Rejection("self-check", f"unvalidated failure detail for {name}")
+            print(f"PASS failure diagnostic {name}: {exc}", flush=True)
+        else:
+            raise Rejection("self-check", f"accepted failed child for {name}")
+    wire = b'{"kind":"FAILED","error":"no diagnostic allowance"}\n'
+    tight = Budget(time.monotonic() + 2, len(wire))
+    expect("exit", lambda: dialog(child(f"import sys; sys.stdout.buffer.write({wire!r}); sys.exit(1)"),
+                                   nonce="test", budget=tight, on_ready=lambda _ready: {}))
+    if tight.used != len(wire):
+        raise Rejection("self-check", "diagnostic exceeded shared cap")
+    print("PASS failure diagnostic exhausted shared budget", flush=True)
+    expect("protocol", lambda: dialog(child("print('{broken',flush=True); raise SystemExit(1)"),
+                                       nonce="test", timeout_s=2, output_cap=1048576, on_ready=lambda _ready: {}))
+    expect("output", lambda: dialog(child("import json,sys; print(json.dumps({'kind':'FAILED','error':'x'*2097152}),flush=True); sys.exit(1)"),
+                                     nonce="test", timeout_s=2, output_cap=1048576, on_ready=lambda _ready: {}))
+    expect("timeout", lambda: dialog(child("import time; print('{\"kind\":\"FAILED\",\"error\":\"still running\"}',flush=True); time.sleep(3)"),
+                                      nonce="test", timeout_s=0.3, output_cap=1048576, on_ready=lambda _ready: {}))
+    expect("premature", lambda: dialog(child(
+        "import json,sys\nprint('{\"kind\":\"READY\"}',flush=True)\n"
+        "msg=json.loads(sys.stdin.readline())\n"
+        "print(json.dumps({'kind':'QUALIFIED','nonce':msg['nonce']}),flush=True)\n"
+        "print('{\"kind\":\"FAILED\",\"error\":\"must not override premature\"}',flush=True)\nsys.exit(1)\n"
+    ), nonce="test", timeout_s=2, output_cap=1048576, on_ready=lambda _ready: {}))
+    with patch.dict(globals(), {"reap": lambda _proc: "injected cleanup failure"}):
+        try:
+            dialog(child("print('{\"kind\":\"FAILED\",\"error\":\"primary sentinel\"}',flush=True); raise SystemExit(1)"),
+                   nonce="test", timeout_s=2, output_cap=1048576, on_ready=lambda _ready: {})
+        except Rejection as exc:
+            if exc.code != "exit" or "primary sentinel" not in exc.detail or exc.cleanup != "injected cleanup failure":
+                raise Rejection("self-check", "cleanup replaced child failure") from exc
+        else:
+            raise Rejection("self-check", "cleanup accepted child failure")
+    print("PASS failure diagnostic primary preserved during cleanup", flush=True)
+
+
 def check_qualification_cleanup(receipt: Mapping[str, object]) -> None:
     """Exercise qualify and its cleanup against real processes at the Docker boundary."""
     real_run = run_bounded
@@ -1131,7 +1206,7 @@ def check_qualification_cleanup(receipt: Mapping[str, object]) -> None:
         def write(self, text: str) -> int:
             raise OSError("diagnostic sink closed")
 
-    for fail, broken_trace in ((False, False), (True, False), (False, True), (True, True)):
+    for fail, broken_trace in ((False, False), (True, False), (False, True), (True, True), ("native", False), ("native", True)):
         target = subprocess.Popen(child("import sys; sys.stdin.readline()"), stdin=subprocess.PIPE, start_new_session=True)
         foreign = subprocess.Popen(child("import time; time.sleep(20)"), start_new_session=True)
         stage: Path | None = None
@@ -1205,6 +1280,12 @@ def check_qualification_cleanup(receipt: Mapping[str, object]) -> None:
             ready = {"kind": "READY", "uid": 1000, "gid": 1000,
                      "probe": file_sha256(stage / "export72-probe.mjs"),
                      "case": file_sha256(stage / "export72-case.json")}
+            if fail == "native":
+                return real_dialog(child("import json,sys\n"
+                    f"print({json.dumps(ready)!r},flush=True)\n"
+                    "sys.stdin.readline()\n"
+                    "print('{\"kind\":\"FAILED\",\"error\":\"native cleanup sentinel\"}',flush=True)\nsys.exit(1)\n"),
+                    nonce=nonce, budget=budget, on_ready=on_ready, diagnostic=diagnostic)
             if fail:
                 real_run(child("import sys; sys.stdout.buffer.write(b'x'*2097152)"), budget)
                 raise Rejection("self-check", "overflow accepted")
@@ -1234,7 +1315,15 @@ def check_qualification_cleanup(receipt: Mapping[str, object]) -> None:
                 expect("teardown", lambda: cleanup_owned("foreign", "owned", Budget(time.monotonic() + 1, 1048576)))
                 captured = StringIO()
                 with redirect_stdout(captured), redirect_stderr(BrokenDiagnostics() if broken_trace else sys.stderr):
-                    if fail:
+                    if fail == "native":
+                        try:
+                            qualify(case_path)
+                        except Rejection as exc:
+                            if exc.code != "exit" or "native cleanup sentinel" not in exc.detail:
+                                raise Rejection("self-check", "qualification lost native failure detail") from exc
+                        else:
+                            raise Rejection("self-check", "qualification accepted native failure")
+                    elif fail:
                         expect("output", lambda: qualify(case_path))
                     else:
                         qualify(case_path)
@@ -1255,7 +1344,7 @@ def check_qualification_cleanup(receipt: Mapping[str, object]) -> None:
                 raise Rejection("self-check", "qualified receipt lost")
             if not fail:
                 print(captured.getvalue(), end="", flush=True)
-            print(json.dumps({"case": "qualification-overflow" if fail else "qualification-success",
+            print(json.dumps({"case": "qualification-native-failure" if fail == "native" else "qualification-overflow" if fail else "qualification-success",
                               "ownedPid": target.pid, "ownedReapedAbsent": True,
                               "foreignPid": foreign.pid, "foreignAlive": True,
                               "stageRemoved": True, "canaryClosed": True,
@@ -1639,6 +1728,7 @@ def self_check() -> None:
     if any(" " in item for item in argv):
         raise Rejection("self-check", "argv item contains a space")
     print("PASS docker argv", flush=True)
+    check_failure_diagnostics()
     nonce = "abc123abc123abc123"
     dialog(child(
         "import json,sys\n"
