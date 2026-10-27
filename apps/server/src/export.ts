@@ -19,9 +19,10 @@ export function safeFilename(filename: string): string {
 }
 
 function renderBrief(workspace: SituationWorkspace): Promise<Buffer> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const buffers: Buffer[] = [];
     const doc = new PDFDocument({ margin: 48, size: "A4" });
+    doc.on("error", reject);
     doc.on("data", (chunk: Buffer) => buffers.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(buffers)));
     doc.fontSize(11).fillColor("#37536a").text("NYTT TRONDHEIM / SITUASJONSROM");
