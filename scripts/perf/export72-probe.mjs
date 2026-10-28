@@ -1161,7 +1161,7 @@ async function qualify() {
     ) {
       fail("identity", "baseline fixture leaked into the production image");
     }
-    if (isBaseline) trace("baseline-graph", baselineGraph());
+    const graph = isBaseline ? baselineGraph() : null;
     const exportPath = isBaseline
       ? "/app/apps/server/dist/export.baseline.js"
       : caseFile.module.exportModule;
@@ -1223,6 +1223,7 @@ async function qualify() {
       persistedZip: witness.persistedZip,
       hwmBytes: peak,
       pdfByteStable,
+      ...(graph ? { baseline: graph } : {}),
     };
     trace("complete");
     process.stdout.write(`${JSON.stringify(receipt)}\n`);
