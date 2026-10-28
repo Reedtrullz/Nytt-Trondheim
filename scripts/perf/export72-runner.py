@@ -927,14 +927,15 @@ def remove_exact(container_id: str, label: str, budget: Budget, *, descendants: 
     return stopped
 
 
-def qualify(case_path: Path) -> None:
+def qualify(case_path: Path, *, baseline: bool = False) -> None:
     case = parse_case(case_path)
     probe = ROOT / "scripts/perf/export72-probe.mjs"
     raw_case = mapping(json.loads(case_path.read_text()))
     package_name = required_str(mapping(raw_case.get("module"), "malformed"), "serverPackage")
     budget = Budget(time.monotonic() + case.limits.timeout_seconds, case.limits.output_bytes, cleanup_seconds=10)
     budget.trace("image-inspect", workSeconds=110, totalSeconds=120)
-    image = docker_json(["docker", "image", "inspect", case.image_tag], budget)[0]
+    image_tag = "nytt-trondheim-api-baseline:test" if baseline else case.image_tag
+    image = docker_json(["docker", "image", "inspect", image_tag], budget)[0]
     image_id = text_id(image)
     label = secrets.token_hex(8)
     nonce = secrets.token_hex(16)
@@ -952,6 +953,8 @@ def qualify(case_path: Path) -> None:
         canary.positive()
         before = canary.snapshot()
         argv = create_argv(case, name=f"export72-{label}", label=label, image_id=image_id, probe_dir=owned)
+        if baseline:
+            argv.append("--baseline")
         if any(" " in item for item in argv[1:]):
             raise Rejection("malformed", "docker argv contains a joined flag")
         created = run_bounded(argv, budget)
@@ -1938,6 +1941,9 @@ def main(argv: list[str]) -> int:
             return 0
         case ["--qualify", "--case", path]:
             qualify(Path(path))
+            return 0
+        case ["--qualify-baseline", "--case", path]:
+            qualify(Path(path), baseline=True)
             return 0
         case _:
             raise Rejection("usage", "expected --self-check or --qualify --case PATH")

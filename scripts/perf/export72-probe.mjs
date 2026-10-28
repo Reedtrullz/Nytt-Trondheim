@@ -13,6 +13,8 @@ import {
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import process from "node:process";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { crc32, deflateRawSync, deflateSync, inflateRawSync, inflateSync } from "node:zlib";
 import { Buffer } from "node:buffer";
 import { URL, fileURLToPath } from "node:url";
@@ -612,6 +614,25 @@ function oracleEntries(caseFile, fixture, raw, pdfBody = pdfPhrases(caseFile)) {
 }
 
 async function selfCheck() {
+  const validBaseline = {
+    productionSha256: "a",
+    baselineSha256: "a",
+    byteIdentical: true,
+    sourceSha256: "963a91bf22ff3bb5f967301fbbf38f2de55ce9301547db386f1176e9e8f70930",
+  };
+  assertBaselineIdentity(validBaseline, "a", "a");
+  expectError(
+    () => assertBaselineIdentity(validBaseline, "a", "tampered"),
+    "compiled before snapshot",
+  );
+  expectError(
+    () => assertBaselineIdentity({ ...validBaseline, sourceSha256: "wrong" }, "a", "a"),
+    "compiled before snapshot",
+  );
+  expectError(
+    () => assertBaselineIdentity({ ...validBaseline, byteIdentical: false }, "a", "a"),
+    "compiled before snapshot",
+  );
   const casePath = fileURLToPath(new URL("./export72-case.json", import.meta.url));
   const caseFile = JSON.parse(readFileSync(casePath, "utf8"));
   const raw = backingBytes();
@@ -1052,6 +1073,56 @@ function hwmBytes() {
   return Number(match[1]) * 1024;
 }
 
+function assertBaselineIdentity(compiler, productionSha256, baselineSha256) {
+  if (
+    productionSha256 !== baselineSha256 ||
+    compiler.productionSha256 !== productionSha256 ||
+    compiler.baselineSha256 !== baselineSha256 ||
+    compiler.byteIdentical !== true ||
+    compiler.sourceSha256 !== "963a91bf22ff3bb5f967301fbbf38f2de55ce9301547db386f1176e9e8f70930"
+  ) {
+    fail("identity", "baseline does not match the actual compiled before snapshot");
+  }
+}
+
+function baselineGraph() {
+  const production = "/app/apps/server/dist/export.js";
+  const baseline = "/app/apps/server/dist/export.baseline.js";
+  const compiler = JSON.parse(
+    readFileSync("/app/apps/server/dist/export.baseline.compiler.json", "utf8"),
+  );
+  const productionSha256 = sha256(readFileSync(production));
+  const baselineSha256 = sha256(readFileSync(baseline));
+  assertBaselineIdentity(compiler, productionSha256, baselineSha256);
+  const dependencies = [];
+  for (const name of ["archiver", "pdfkit"]) {
+    const resolved = [production, baseline].map((file) => createRequire(file).resolve(name));
+    if (resolved[0] !== resolved[1]) fail("identity", "baseline dependency graph differs");
+    let directory = dirname(resolved[0]);
+    let pkg;
+    while (directory.startsWith("/app/")) {
+      try {
+        const candidate = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+        if (candidate.name === name) {
+          pkg = candidate;
+          break;
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      directory = dirname(directory);
+    }
+    if (!pkg || typeof pkg.version !== "string") fail("identity", "dependency package metadata");
+    dependencies.push({
+      name,
+      path: resolved[0],
+      version: pkg.version,
+      sha256: sha256(readFileSync(resolved[0])),
+    });
+  }
+  return { productionSha256, baselineSha256, compiler, dependencies };
+}
+
 async function qualify() {
   if (process.argv[3] !== "--case" || !process.argv[4])
     fail("usage", "expected --qualify --case PATH");
@@ -1073,7 +1144,8 @@ async function qualify() {
   ) {
     fail("protocol", "release");
   }
-  const trace = (stage) => process.stdout.write(`${JSON.stringify({ kind: "TRACE", stage })}\n`);
+  const trace = (stage, facts = {}) =>
+    process.stdout.write(`${JSON.stringify({ kind: "TRACE", stage, ...facts })}\n`);
   trace("release");
   trace("kernel");
   const network = await kernelControls(caseFile, release, hashes);
@@ -1082,7 +1154,18 @@ async function qualify() {
   const restoreClock = freezeFixtureClock(caseFile);
   try {
     trace("imports");
-    const exportModule = await import(caseFile.module.exportModule);
+    const isBaseline = process.argv[5] === "--baseline";
+    if (
+      !isBaseline &&
+      readdirSync("/app/apps/server/dist").some((name) => name.startsWith("export.baseline"))
+    ) {
+      fail("identity", "baseline fixture leaked into the production image");
+    }
+    if (isBaseline) trace("baseline-graph", baselineGraph());
+    const exportPath = isBaseline
+      ? "/app/apps/server/dist/export.baseline.js"
+      : caseFile.module.exportModule;
+    const exportModule = await import(exportPath);
     const storeModule = await import(caseFile.module.storeModule);
     if (typeof exportModule[caseFile.module.exportFunction] !== "function")
       fail("identity", "export function");
@@ -1119,7 +1202,7 @@ async function qualify() {
     const identity = identityRecord({
       pkg: pkg.name,
       hashes,
-      exportSha: sha256(readFileSync(caseFile.module.exportModule)),
+      exportSha: sha256(readFileSync(exportPath)),
       storeSha: sha256(readFileSync(caseFile.module.storeModule)),
     });
     assertIdentity(identity);
