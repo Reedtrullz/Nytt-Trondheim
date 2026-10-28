@@ -733,6 +733,21 @@ def retain_receipt(
         raise Rejection("identity", "persisted zip not from witness")
     if derived or total > 16777216:
         raise Rejection("oracle", "persisted zip")
+    graph = receipt.get("baseline")
+    if graph is not None:
+        graph_map = mapping(graph, "identity")
+        if graph_map.get("productionSha256") != kept["exportSha256"] or graph_map.get("baselineSha256") != kept["exportSha256"]:
+            raise Rejection("identity", "baseline identity")
+        if mapping(graph_map.get("compiler"), "identity").get("baselineSha256") != kept["exportSha256"]:
+            raise Rejection("identity", "baseline compiler identity")
+        dependencies = graph_map.get("dependencies")
+        if not isinstance(dependencies, list) or [mapping(item, "identity").get("name") for item in dependencies] != ["archiver", "pdfkit"]:
+            raise Rejection("identity", "baseline dependencies")
+        for item in dependencies:
+            dependency = mapping(item, "identity")
+            entry, version, digest = (required_str(dependency, key) for key in ("path", "version", "sha256"))
+            if not entry.startswith("/app/apps/server/node_modules/") or not version or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise Rejection("identity", "baseline dependency metadata")
     return {
         "kind": "QUALIFIED",
         "image": image_id,
@@ -746,6 +761,7 @@ def retain_receipt(
         "hwmBytes": receipt.get("hwmBytes"),
         "persistedZip": derived,
         "network": receipt.get("network"),
+        **({"baseline": graph} if graph is not None else {}),
     }
 
 
@@ -927,14 +943,15 @@ def remove_exact(container_id: str, label: str, budget: Budget, *, descendants: 
     return stopped
 
 
-def qualify(case_path: Path) -> None:
+def qualify(case_path: Path, *, baseline: bool = False) -> None:
     case = parse_case(case_path)
     probe = ROOT / "scripts/perf/export72-probe.mjs"
     raw_case = mapping(json.loads(case_path.read_text()))
     package_name = required_str(mapping(raw_case.get("module"), "malformed"), "serverPackage")
     budget = Budget(time.monotonic() + case.limits.timeout_seconds, case.limits.output_bytes, cleanup_seconds=10)
     budget.trace("image-inspect", workSeconds=110, totalSeconds=120)
-    image = docker_json(["docker", "image", "inspect", case.image_tag], budget)[0]
+    image_tag = "nytt-trondheim-api-baseline:test" if baseline else case.image_tag
+    image = docker_json(["docker", "image", "inspect", image_tag], budget)[0]
     image_id = text_id(image)
     label = secrets.token_hex(8)
     nonce = secrets.token_hex(16)
@@ -952,6 +969,8 @@ def qualify(case_path: Path) -> None:
         canary.positive()
         before = canary.snapshot()
         argv = create_argv(case, name=f"export72-{label}", label=label, image_id=image_id, probe_dir=owned)
+        if baseline:
+            argv.append("--baseline")
         if any(" " in item for item in argv[1:]):
             raise Rejection("malformed", "docker argv contains a joined flag")
         created = run_bounded(argv, budget)
@@ -1845,6 +1864,26 @@ def self_check() -> None:
         canary_before=(0, 0, 0), canary_after=(0, 0, 0), stopped={"Status": "exited", "ExitCode": 0, "OOMKilled": False, "Pid": 0},
     )
     retained_identity = mapping(retained.get("identity"), "self-check")
+    with_graph = copy.deepcopy(receipt)
+    with_graph["baseline"] = {
+        "productionSha256": "c" * 64,
+        "baselineSha256": "c" * 64,
+        "compiler": {"baselineSha256": "c" * 64},
+        "dependencies": [
+            {"name": name, "path": f"/app/apps/server/node_modules/{name}/index.js", "version": "1.0.0", "sha256": "e" * 64}
+            for name in ("archiver", "pdfkit")
+        ],
+    }
+    graph_kept = retain_receipt(with_graph, image_id="sha256:abc", probe_sha="a" * 64, case_sha="b" * 64,
+                                package_name="@nytt/server", canary_before=(0, 0, 0), canary_after=(0, 0, 0), stopped={"Pid": 0})
+    if graph_kept.get("baseline") != with_graph["baseline"]:
+        raise Rejection("self-check", "baseline dependency graph was discarded")
+    malformed_graph = copy.deepcopy(with_graph)
+    broken_baseline = mapping(malformed_graph["baseline"])
+    broken_baseline["baselineSha256"] = "f" * 64
+    malformed_graph["baseline"] = broken_baseline
+    expect("identity", lambda: retain_receipt(malformed_graph, image_id="sha256:abc", probe_sha="a" * 64,
+           case_sha="b" * 64, package_name="@nytt/server", canary_before=(0, 0, 0), canary_after=(0, 0, 0), stopped={"Pid": 0}))
     if retained.get("persistedZip") is not False or retained_identity.get("image") != "sha256:abc" or retained_identity.get("node") != "v22.22.3" or retained_identity.get("arch") != "arm64":
         raise Rejection("self-check", "identity dropped")
     lied = mapping(json.loads(json.dumps(receipt)))
@@ -1938,6 +1977,9 @@ def main(argv: list[str]) -> int:
             return 0
         case ["--qualify", "--case", path]:
             qualify(Path(path))
+            return 0
+        case ["--qualify-baseline", "--case", path]:
+            qualify(Path(path), baseline=True)
             return 0
         case _:
             raise Rejection("usage", "expected --self-check or --qualify --case PATH")
