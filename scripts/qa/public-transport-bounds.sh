@@ -11,7 +11,10 @@ mkdir -p "$output" packages/shared/dist
 fixture="nytt-bounds-${GITHUB_RUN_ID:?}"
 socket_root="$(mktemp -d "$RUNNER_TEMP/nytt-bounds.XXXXXX")"
 chmod 755 "$socket_root"
+sudo chown 999:999 "$socket_root"
 cleanup() {
+  docker logs "$fixture" > "$output/database-log.txt" 2>&1 || true
+  docker inspect "$fixture" > "$output/container-final.json" 2>/dev/null || true
   docker rm -f -v "$fixture" > "$output/removed.txt" 2>&1 || true
   remaining="$(docker ps -aq --filter "name=^/${fixture}$")"
   if [[ -n "$remaining" ]]; then
@@ -33,11 +36,15 @@ docker create --name "$fixture" --pull never --network none --read-only \
   --log-driver local --log-opt max-size=1m --log-opt max-file=1 --log-opt compress=false \
   -e POSTGRES_USER=fixture_admin -e POSTGRES_PASSWORD=authored-fixture-only \
   -e POSTGRES_DB=fixture_db -e POSTGRES_INITDB_ARGS=--auth-local=scram-sha-256 \
-  "$image" -c max_wal_size=48MB -c min_wal_size=32MB -c unix_socket_directories=/sock \
+  "$image" -c max_wal_size=48MB -c min_wal_size=32MB -c unix_socket_directories=/var/run/postgresql,/sock \
   -c listen_addresses='' > "$output/container-id.txt"
 docker inspect "$fixture" > "$output/container-inspect.json"
 docker start "$fixture" > "$output/started.txt"
 for attempt in {1..40}; do
+  if [[ "$(docker inspect --format '{{.State.Running}}' "$fixture")" != true ]]; then
+    echo "PostGIS fixture exited during initialization" >&2
+    exit 1
+  fi
   if docker exec "$fixture" sh -c '[ "$(cat /proc/1/comm)" = postgres ]' && \
     docker exec "$fixture" pg_isready -h /sock -U fixture_admin -d fixture_db >/dev/null 2>&1; then
     # PID 1 must be the final server, after the temporary initdb server has stopped.
@@ -49,6 +56,11 @@ for attempt in {1..40}; do
 done
 docker exec -e PGPASSWORD=authored-fixture-only "$fixture" psql -X -h /sock -U fixture_admin -d fixture_db -v ON_ERROR_STOP=1 -c \
   "CREATE ROLE fixture_reader LOGIN NOSUPERUSER PASSWORD 'authored-reader-only';" > "$output/role.txt"
+if docker exec -e PGPASSWORD=authored-wrong-password "$fixture" psql -X -h /sock -U fixture_reader -d fixture_db -c 'SELECT 1' > "$output/wrong-password.txt" 2>&1; then
+  echo "Fixture unexpectedly accepted the wrong reader password" >&2
+  exit 1
+fi
+grep -q 'password authentication failed' "$output/wrong-password.txt"
 export source_root node_binary socket_root
 set +e
 (
@@ -79,7 +91,7 @@ set +e
       bash -euo pipefail -c '\''
         node scripts/qa/portfolio-hosted-admission.mjs
         node node_modules/typescript/bin/tsc -p packages/shared/tsconfig.json
-        node node_modules/vitest/vitest.mjs run --no-cache apps/server/test/api.test.ts -t "PgStore hides expired|PgStore keeps line-only"
+        node node_modules/vitest/vitest.mjs run --config scripts/qa/vitest-bounds.config.ts --configLoader runner --no-cache apps/server/test/api.test.ts -t "PgStore hides expired|PgStore keeps line-only"
         node --import tsx scripts/public-transport-bounds-smoke.ts
       '\''
   '
