@@ -8,8 +8,7 @@ mkdir -p "$output"
 export source_root node_binary
 set +e
 (
-  ulimit -f 512
-  sudo --preserve-env=source_root,node_binary unshare --mount --net --pid --fork --mount-proc bash -euo pipefail -c '
+  node scripts/qa/bounded-output.mjs "$output" 110000 sudo --preserve-env=source_root,node_binary unshare --mount --net --pid --fork --kill-child=KILL --mount-proc bash -euo pipefail -c '
     mount --make-rprivate /
     mount --bind / /
     mount -o remount,bind,ro /
@@ -29,13 +28,16 @@ set +e
     exec setpriv --reuid=65534 --regid=65534 --clear-groups --bounding-set=-all --no-new-privs \
       env -i PATH="$(dirname "$node_binary"):/usr/bin:/bin" HOME=/tmp/home TMPDIR=/tmp \
       XDG_CACHE_HOME=/tmp/home/cache CI=true \
-      "$node_binary" scripts/qa/portfolio-hosted-admission.mjs
+      bash -euo pipefail -c '\''
+        node scripts/qa/portfolio-hosted-admission.mjs
+        node scripts/qa/bounded-output-checks.mjs
+      '\''
   '
-) > "$output/stdout.json" 2> "$output/stderr.txt"
+)
 status=$?
 set -e
 printf '{"exitCode":%d,"applicationExecuted":false,"scratchLimitBytes":16777216,"timeoutSeconds":120}\n' "$status" > "$output/result.json"
-cat "$output/stdout.json"
+cat "$output/stdout.txt"
 if [[ "$status" != 0 ]]; then
   cat "$output/stderr.txt" >&2
 fi
