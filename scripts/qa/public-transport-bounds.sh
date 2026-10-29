@@ -89,6 +89,7 @@ set +e
       DATABASE_URL="postgresql://fixture_reader:authored-reader-only@localhost/fixture_db?host=/tmp/pgsocket" \
       bash -euo pipefail -c '\''
         node scripts/qa/portfolio-hosted-admission.mjs
+        node scripts/qa/bounded-output-checks.mjs
         node node_modules/typescript/bin/tsc -p packages/shared/tsconfig.json
         node node_modules/vitest/vitest.mjs run --config scripts/qa/vitest-bounds.config.ts --configLoader runner --no-cache apps/server/test/api.test.ts -t "PgStore hides expired|PgStore keeps line-only"
         node --import tsx scripts/public-transport-bounds-smoke.ts

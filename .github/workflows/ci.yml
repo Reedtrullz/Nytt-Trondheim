@@ -23,12 +23,11 @@ concurrency:
 jobs:
   portfolio-admission:
     name: Isolated Runtime Admission
-    if: ${{ inputs.portfolio_admission == true || inputs.portfolio_bounds == 'baseline' || inputs.portfolio_bounds == 'candidate' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     services:
       postgres:
-        image: ${{ (inputs.portfolio_bounds == 'baseline' || inputs.portfolio_bounds == 'candidate') && 'postgis/postgis:16-3.4' || '' }}
+        image: ${{ inputs.portfolio_admission != true && 'postgis/postgis:16-3.4' || '' }}
         env:
           POSTGRES_DB: nytt
           POSTGRES_USER: nytt
@@ -53,19 +52,19 @@ jobs:
         if: ${{ inputs.portfolio_admission == true }}
         run: timeout --signal=TERM --kill-after=5s 120s bash scripts/qa/portfolio-hosted-admission.sh
       - name: Run isolated actual PgStore bounds regression
-        if: ${{ inputs.portfolio_bounds == 'baseline' || inputs.portfolio_bounds == 'candidate' }}
+        if: ${{ inputs.portfolio_admission != true }}
         env:
           FIXTURE_SERVICE_ID: ${{ job.services.postgres.id }}
-          BOUNDS_EXPECTATION: ${{ inputs.portfolio_bounds }}
+          BOUNDS_EXPECTATION: ${{ inputs.portfolio_bounds == 'baseline' && 'baseline' || 'candidate' }}
         run: timeout --signal=TERM --kill-after=5s 120s bash scripts/qa/public-transport-bounds.sh
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: ${{ always() && inputs.portfolio_admission == true }}
         with:
           name: portfolio-runtime-admission
           path: .artifacts/portfolio-runtime-admission
           retention-days: 7
       - uses: actions/upload-artifact@v7
-        if: ${{ always() && (inputs.portfolio_bounds == 'baseline' || inputs.portfolio_bounds == 'candidate') }}
+        if: ${{ always() && inputs.portfolio_admission != true }}
         with:
           name: portfolio-bounds
           path: .artifacts/portfolio-bounds
@@ -111,6 +110,7 @@ jobs:
   migration-smoke:
     name: PostGIS Migration Smoke
     if: ${{ inputs.portfolio_admission != true && inputs.portfolio_bounds != 'baseline' && inputs.portfolio_bounds != 'candidate' }}
+    needs: portfolio-admission
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -122,6 +122,11 @@ jobs:
         ports:
           - 5432:5432
         options: >-
+          --memory 512m --memory-swap 512m --pids-limit 128 --cpus 1
+          --read-only
+          --tmpfs /var/lib/postgresql/data:rw,size=128m,uid=999,gid=999,mode=0700
+          --tmpfs /var/run/postgresql:rw,size=4m,uid=999,gid=999
+          --tmpfs /tmp:rw,size=16m
           --health-cmd "pg_isready -U nytt -d nytt"
           --health-interval 10s
           --health-timeout 5s

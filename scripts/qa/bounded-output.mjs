@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
+import process from "node:process";
+import { Buffer } from "node:buffer";
 
 const [output, rawTimeout, command, ...args] = process.argv.slice(2);
 const timeout = Number(rawTimeout);

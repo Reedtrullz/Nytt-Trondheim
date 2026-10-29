@@ -4,6 +4,9 @@ import net from "node:net";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import process from "node:process";
+import console from "node:console";
+import { Buffer } from "node:buffer";
 
 assert.equal(process.getuid(), 65534);
 assert.equal(process.env.HOME, "/tmp/home");

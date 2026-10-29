@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
+import process from "node:process";
+import console from "node:console";
 
 const directory = fs.mkdtempSync("/tmp/home/output-guard-");
 const collector = fileURLToPath(new URL("./bounded-output.mjs", import.meta.url));
