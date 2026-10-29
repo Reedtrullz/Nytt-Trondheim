@@ -64,8 +64,7 @@ grep -q 'password authentication failed' "$output/wrong-password.txt"
 export source_root node_binary socket_root
 set +e
 (
-  ulimit -f 512
-  sudo --preserve-env=source_root,node_binary,socket_root unshare --mount --net --pid --fork --kill-child=KILL --mount-proc bash -euo pipefail -c '
+  node scripts/qa/bounded-output.mjs "$output" 110000 sudo --preserve-env=source_root,node_binary,socket_root unshare --mount --net --pid --fork --kill-child=KILL --mount-proc bash -euo pipefail -c '
     mount --make-rprivate /
     mount --bind / /
     mount -o remount,bind,ro /
@@ -95,7 +94,7 @@ set +e
         node --import tsx scripts/public-transport-bounds-smoke.ts
       '\''
   '
-) > "$output/stdout.txt" 2> "$output/stderr.txt"
+)
 status=$?
 set -e
 printf '{"exitCode":%d,"expectation":"%s","scratchLimitBytes":16777216,"timeoutSeconds":120}\n' "$status" "$BOUNDS_EXPECTATION" > "$output/result.json"
