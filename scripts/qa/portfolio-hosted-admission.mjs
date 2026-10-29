@@ -9,7 +9,9 @@ assert.equal(process.getuid(), 65534);
 assert.equal(process.env.HOME, "/tmp/home");
 assert.equal(process.platform, "linux");
 const mounts = fs.readFileSync("/proc/self/mountinfo", "utf8").split("\n");
-assert(mounts.some((line) => line.split(" ")[4] === "/" && line.split(" ")[5].split(",").includes("ro")));
+assert(
+  mounts.some((line) => line.split(" ")[4] === "/" && line.split(" ")[5].split(",").includes("ro")),
+);
 assert(mounts.some((line) => line.split(" ")[4] === "/tmp" && line.includes("tmpfs")));
 const scratch = fs.statfsSync("/tmp");
 assert(scratch.blocks * scratch.bsize <= 16 * 1024 * 1024);
@@ -58,13 +60,35 @@ const fromVitest = createRequire(import.meta.resolve("vitest/package.json"));
 const fromVite = createRequire(fromVitest.resolve("vite/package.json"));
 assert.equal(fromVite("rollup/parseAst").parseAst("const authored = 1;").body.length, 1);
 const fromTsx = createRequire(import.meta.resolve("tsx/package.json"));
-assert(fromTsx("esbuild").transformSync("const authored: number = 1;", { loader: "ts" }).code.includes("authored"));
-const hashes = Object.fromEntries(["pnpm-lock.yaml", "package.json", "apps/server/src/store.ts"].map((path) => [path, createHash("sha256").update(fs.readFileSync(path)).digest("hex")]));
-console.log(JSON.stringify({
-  scope: "Kernel/private-file/native-addon capability only; no application or performance acceptance",
-  node: process.version, platform: process.platform, arch: process.arch,
-  uid: process.getuid(), readOnlyRoot: true, privateReadDenied: true, outsideWriteDenied: true,
-  ownedWritePassed: true, loopbackPassed: true, externalConnectDenied: denied,
-  rollupNativeParser: true, esbuildNativeTransform: true, hashes,
-  applicationImported: false, serversClosed: true,
-}));
+assert(
+  fromTsx("esbuild")
+    .transformSync("const authored: number = 1;", { loader: "ts" })
+    .code.includes("authored"),
+);
+const hashes = Object.fromEntries(
+  ["pnpm-lock.yaml", "package.json", "apps/server/src/store.ts"].map((path) => [
+    path,
+    createHash("sha256").update(fs.readFileSync(path)).digest("hex"),
+  ]),
+);
+console.log(
+  JSON.stringify({
+    scope:
+      "Kernel/private-file/native-addon capability only; no application or performance acceptance",
+    node: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    uid: process.getuid(),
+    readOnlyRoot: true,
+    privateReadDenied: true,
+    outsideWriteDenied: true,
+    ownedWritePassed: true,
+    loopbackPassed: true,
+    externalConnectDenied: denied,
+    rollupNativeParser: true,
+    esbuildNativeTransform: true,
+    hashes,
+    applicationImported: false,
+    serversClosed: true,
+  }),
+);
