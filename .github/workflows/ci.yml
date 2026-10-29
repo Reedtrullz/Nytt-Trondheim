@@ -41,6 +41,9 @@ jobs:
           --health-cmd "pg_isready -U nytt -d nytt"
           --health-interval 10s --health-timeout 5s --health-retries 10
     steps:
+      - name: Keep diagnostic-only runs off the deployment branch
+        if: ${{ inputs.portfolio_admission == true || inputs.portfolio_bounds == 'baseline' || inputs.portfolio_bounds == 'candidate' }}
+        run: test "$GITHUB_REF" != refs/heads/main
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
@@ -94,7 +97,7 @@ jobs:
   e2e:
     name: Browser Smoke and Accessibility
     if: ${{ inputs.portfolio_admission != true && inputs.portfolio_bounds != 'baseline' && inputs.portfolio_bounds != 'candidate' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -105,7 +108,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nytt/shared run build
       - run: pnpm exec playwright install --with-deps chromium
+      - name: Qualify native fixture controls on the supported browser host
+        run: timeout --signal=TERM --kill-after=5s 120s bash scripts/qa/portfolio-hosted-admission.sh
       - run: pnpm run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: portfolio-browser-runtime-admission
+          path: .artifacts/portfolio-runtime-admission
+          retention-days: 7
 
   migration-smoke:
     name: PostGIS Migration Smoke
