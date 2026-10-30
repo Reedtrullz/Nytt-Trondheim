@@ -7,6 +7,7 @@ import {
   type PublicTransportServiceAlert,
 } from "@nytt/shared";
 import { PgStore } from "../apps/server/src/store.js";
+import { runO12Acceptance } from "./o12-query-acceptance-smoke.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
@@ -218,16 +219,18 @@ try {
       [aa, nullable, cancelled],
     ),
   );
+  const acceptance = await runO12Acceptance(databaseUrl);
   console.log(
     JSON.stringify({
       scope: "Actual PgStore/PostGIS correctness; no performance claim",
       role: identity.rows[0]?.current_user,
       results,
       failures: results.filter((row) => !row.passed).map((row) => row.id),
+      acceptance,
     }),
   );
   assert.equal(
-    results.filter((row) => !row.passed).length,
+    results.filter((row) => !row.passed).length + acceptance.failures.length,
     0,
     "public transport bounds regression",
   );
@@ -235,3 +238,5 @@ try {
   await pool.query("ROLLBACK");
   await pool.end();
 }
+// createApp leaves timers behind; reaching here means every assertion passed.
+process.exit(0);

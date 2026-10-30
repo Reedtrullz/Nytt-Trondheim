@@ -111,6 +111,9 @@ const result=JSON.parse(line);
 assert.equal(result.role,'fixture_reader');
 assert.equal(result.results.length,21);
 assert.deepEqual(result.failures,expectation==='baseline'?['point-vehicles','point-alerts']:[]);
+assert.equal(result.acceptance.results.length,58);
+assert.equal(new Set(result.acceptance.results.map(row=>row.id)).size,58);
+if(expectation==='candidate')assert.deepEqual(result.acceptance.failures,[]);
 assert.equal(Number(status),expectation==='baseline'?1:0);
 fs.writeFileSync(output+'/pgstore-result.json',JSON.stringify(result,null,2)+'\n');
 JS
