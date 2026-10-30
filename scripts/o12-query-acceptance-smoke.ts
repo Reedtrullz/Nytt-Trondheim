@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -171,7 +171,10 @@ function expectAlerts(
   return rows.slice(0, limit ?? undefined);
 }
 const digest = (rows: Array<{ id: string }>) =>
-  createHash("sha256").update(rows.map((r) => r.id).join("\n")).digest("hex").slice(0, 16);
+  createHash("sha256")
+    .update(rows.map((r) => r.id).join("\n"))
+    .digest("hex")
+    .slice(0, 16);
 const query = (b: Bounds) => `north=${b.north}&south=${b.south}&east=${b.east}&west=${b.west}`;
 
 function planNodes(plan: Plan): Plan[] {
@@ -228,6 +231,23 @@ export async function runO12Acceptance(databaseUrl: string) {
     },
   });
   const server = http.createServer(runtime.app);
+  let closeSessionStore: (() => Promise<void>) | undefined;
+  server.on("request", (request, response) => {
+    response.once("finish", () => {
+      const sessionStore: unknown = Reflect.get(request, "sessionStore");
+      if (
+        typeof sessionStore === "object" &&
+        sessionStore !== null &&
+        "close" in sessionStore &&
+        typeof sessionStore.close === "function"
+      ) {
+        const close = sessionStore.close;
+        closeSessionStore = async () => {
+          await close.call(sessionStore);
+        };
+      }
+    });
+  });
   try {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -237,10 +257,22 @@ export async function runO12Acceptance(databaseUrl: string) {
       "utf8",
     );
     for (const [from, to] of [
-      ["CREATE TABLE IF NOT EXISTS public_transport_vehicles (", "CREATE TABLE IF NOT EXISTS collector_state ("],
-      ["CREATE TABLE IF NOT EXISTS access_requests (", "CREATE TABLE IF NOT EXISTS coverage_bundle_corrections ("],
-      ["CREATE TABLE IF NOT EXISTS user_identities (", "CREATE TABLE IF NOT EXISTS push_subscriptions ("],
-      ['CREATE TABLE IF NOT EXISTS "session" (', "INSERT INTO schema_migrations (version) VALUES ('001"],
+      [
+        "CREATE TABLE IF NOT EXISTS public_transport_vehicles (",
+        "CREATE TABLE IF NOT EXISTS collector_state (",
+      ],
+      [
+        "CREATE TABLE IF NOT EXISTS access_requests (",
+        "CREATE TABLE IF NOT EXISTS coverage_bundle_corrections (",
+      ],
+      [
+        "CREATE TABLE IF NOT EXISTS user_identities (",
+        "CREATE TABLE IF NOT EXISTS push_subscriptions (",
+      ],
+      [
+        'CREATE TABLE IF NOT EXISTS "session" (',
+        "INSERT INTO schema_migrations (version) VALUES ('001",
+      ],
     ] as const) {
       const start = schema.indexOf(from);
       const end = schema.indexOf(to, start + from.length);
@@ -270,7 +302,10 @@ export async function runO12Acceptance(databaseUrl: string) {
         redirect: "manual",
         signal: AbortSignal.timeout(20000),
         ...init,
-        headers: { ...(withCookie && cookies.size ? { cookie: cookieHeader() } : {}), ...init.headers },
+        headers: {
+          ...(withCookie && cookies.size ? { cookie: cookieHeader() } : {}),
+          ...init.headers,
+        },
       });
       remember(response);
       return { response, text: await response.text() };
@@ -281,8 +316,9 @@ export async function runO12Acceptance(databaseUrl: string) {
       const identity = await originalQuery(
         "SELECT current_user, (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS superuser",
       );
-      const row = (identity as unknown as { rows: Array<{ current_user: string; superuser: boolean }> })
-        .rows[0];
+      const row = (
+        identity as unknown as { rows: Array<{ current_user: string; superuser: boolean }> }
+      ).rows[0];
       assert.equal(row?.current_user, "fixture_reader");
       assert.equal(row?.superuser, false);
     });
@@ -299,7 +335,10 @@ export async function runO12Acceptance(databaseUrl: string) {
       assert(csrf);
       const login = await send("/auth/email/callback", {
         method: "POST",
-        headers: { origin: "http://localhost", "content-type": "application/x-www-form-urlencoded" },
+        headers: {
+          origin: "http://localhost",
+          "content-type": "application/x-www-form-urlencoded",
+        },
         body: new URLSearchParams({ token, _csrf: csrf }),
       });
       assert.equal(login.response.status, 302);
@@ -319,9 +358,13 @@ export async function runO12Acceptance(databaseUrl: string) {
       const anonymous = await send(`/api/map/public-transport?${wide}`, {}, false);
       assert.equal(anonymous.response.status, 401);
       assert.deepEqual(JSON.parse(anonymous.text), unauthorized);
-      const forged = await send(`/api/map/public-transport?${wide}`, {
-        headers: { cookie: "nytt.sid=s%3Aforged.invalid" },
-      }, false);
+      const forged = await send(
+        `/api/map/public-transport?${wide}`,
+        {
+          headers: { cookie: "nytt.sid=s%3Aforged.invalid" },
+        },
+        false,
+      );
       assert.equal(forged.response.status, 401);
       assert.deepEqual(JSON.parse(forged.text), unauthorized);
     });
@@ -337,7 +380,10 @@ export async function runO12Acceptance(databaseUrl: string) {
         assert.equal(bad.response.status, 400);
         const body = JSON.parse(bad.text) as { error: string; details: Array<{ path: string }> };
         assert.equal(body.error, "Ugyldig forespørsel.");
-        assert(body.details.some((detail) => detail.path.startsWith(path)), bad.text);
+        assert(
+          body.details.some((detail) => detail.path.startsWith(path)),
+          bad.text,
+        );
       });
     }
 
@@ -387,7 +433,12 @@ export async function runO12Acceptance(databaseUrl: string) {
     };
 
     let seed = 20261030;
-    for (const [shape, n] of [["dense", 1000], ["sparse", 1000], ["dense", 10000], ["sparse", 10000]] as const) {
+    for (const [shape, n] of [
+      ["dense", 1000],
+      ["sparse", 1000],
+      ["dense", 10000],
+      ["sparse", 10000],
+    ] as const) {
       const tag = `${shape}-${n / 1000}k`;
       const d = dataset(n, shape, seed++);
       await insert(d);
@@ -411,7 +462,12 @@ export async function runO12Acceptance(databaseUrl: string) {
             sources: unknown[];
             generatedAt: string;
           };
-          assert.deepEqual(Object.keys(body).sort(), ["alerts", "generatedAt", "sources", "vehicles"]);
+          assert.deepEqual(Object.keys(body).sort(), [
+            "alerts",
+            "generatedAt",
+            "sources",
+            "vehicles",
+          ]);
           assert(!Number.isNaN(Date.parse(body.generatedAt)));
           const vehicles = expectVehicles(d, bounds, 1000, mode);
           const alertRows = alerts ? expectAlerts(d, bounds, 500).map((r) => r.payload) : [];
@@ -432,18 +488,27 @@ export async function runO12Acceptance(databaseUrl: string) {
       const direct = async (id: string, operation: () => Promise<string>) =>
         accept(`${tag}-store-${id}`, operation);
       await direct("vehicles-limit-100", async () => {
-        const rows = await runtime.store.listPublicTransportVehicles({ bounds: b.wide, limit: 100 });
+        const rows = await runtime.store.listPublicTransportVehicles({
+          bounds: b.wide,
+          limit: 100,
+        });
         assert.deepEqual(rows, expectVehicles(d, b.wide, 100));
         return `v=${rows.length}:${digest(rows)}`;
       });
       await direct("vehicles-limit-null", async () => {
-        const rows = await runtime.store.listPublicTransportVehicles({ bounds: b.wide, limit: null });
+        const rows = await runtime.store.listPublicTransportVehicles({
+          bounds: b.wide,
+          limit: null,
+        });
         assert.deepEqual(rows, expectVehicles(d, b.wide, null));
-        assert(rows.length > 1000);
+        assert.equal(rows.length, (n * 7) / 10);
         return `v=${rows.length}:${digest(rows)}`;
       });
       await direct("vehicles-edge-point", async () => {
-        const rows = await runtime.store.listPublicTransportVehicles({ bounds: b.edge, limit: 200 });
+        const rows = await runtime.store.listPublicTransportVehicles({
+          bounds: b.edge,
+          limit: 200,
+        });
         assert.deepEqual(rows, expectVehicles(d, b.edge, 200));
         assert(rows.length > 0);
         return `v=${rows.length}:${digest(rows)}`;
@@ -455,12 +520,21 @@ export async function runO12Acceptance(databaseUrl: string) {
           states: [...states],
           limit: 200,
         });
-        assert.deepEqual(rows, expectAlerts(d, b.wide, 200, [...states]).map((r) => r.payload));
+        assert.deepEqual(
+          rows,
+          expectAlerts(d, b.wide, 200, [...states]).map((r) => r.payload),
+        );
         return `a=${rows.length}:${digest(rows)}`;
       });
       await direct("alerts-limit-null", async () => {
-        const rows = await runtime.store.listPublicTransportServiceAlerts({ bounds: b.wide, limit: null });
-        assert.deepEqual(rows, expectAlerts(d, b.wide, null).map((r) => r.payload));
+        const rows = await runtime.store.listPublicTransportServiceAlerts({
+          bounds: b.wide,
+          limit: null,
+        });
+        assert.deepEqual(
+          rows,
+          expectAlerts(d, b.wide, null).map((r) => r.payload),
+        );
         assert(rows.length > 500);
         return `a=${rows.length}:${digest(rows)}`;
       });
@@ -472,10 +546,16 @@ export async function runO12Acceptance(databaseUrl: string) {
       ] as const) {
         await accept(`${tag}-explain-${id}`, async () => {
           captured.length = 0;
-          assert.equal((await api(`/api/map/public-transport?${query(b.wide)}`)).response.status, 200);
+          assert.equal(
+            (await api(`/api/map/public-transport?${query(b.wide)}`)).response.status,
+            200,
+          );
           const sql = captured.find((entry) => entry.sql.includes(`FROM ${table}`));
           assert(sql, "HTTP request did not reach the PgStore query");
-          const explain = (await originalQuery(`EXPLAIN (FORMAT JSON) ${sql.sql}`, sql.params)) as unknown as {
+          const explain = (await originalQuery(
+            `EXPLAIN (FORMAT JSON) ${sql.sql}`,
+            sql.params,
+          )) as unknown as {
             rows: Array<{ "QUERY PLAN": Array<{ Plan: Plan }> }>;
           };
           const root = explain.rows[0]?.["QUERY PLAN"][0]?.Plan;
@@ -489,9 +569,21 @@ export async function runO12Acceptance(databaseUrl: string) {
     }
   } finally {
     server.closeAllConnections();
-    await new Promise((resolve) => server.close(resolve));
-    await originalQuery("SELECT 1").catch(() => undefined);
-    await pool.end();
+    try {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    } finally {
+      try {
+        await closeSessionStore?.();
+      } finally {
+        try {
+          await pool.end();
+        } finally {
+          await rm(uploadDir, { recursive: true });
+        }
+      }
+    }
   }
   return { results, failures: results.filter((row) => !row.passed).map((row) => row.id) };
 }

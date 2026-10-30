@@ -238,5 +238,3 @@ try {
   await pool.query("ROLLBACK");
   await pool.end();
 }
-// createApp leaves timers behind; reaching here means every assertion passed.
-process.exit(0);
