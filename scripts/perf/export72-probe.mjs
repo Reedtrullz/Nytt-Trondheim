@@ -897,6 +897,61 @@ async function selfCheck() {
   persistedOrder(order, ["a", "b"]);
   expectError(() => persistedOrder(order, ["b", "a"]), "persisted member order");
   expectError(() => persistedOrder(order, ["a"]), "persisted member order");
+  const idle = { Timeout: 0, TCPServerWrap: 0, TCPSocketWrap: 0 };
+  assertLifecycle(idle, ownedResources());
+  expectError(() => assertLifecycle(idle, { ...idle, Timeout: 1 }), "lifecycle leaked Timeout");
+  expectError(() => assertLifecycle(idle, { ...idle, TCPServerWrap: 1 }), "lifecycle leaked TCP");
+  expectError(() => assertLifecycle(idle, { Timeout: 0 }), "lifecycle receipt");
+  const handle = setInterval(() => {}, 60000);
+  try {
+    expectError(() => assertLifecycle(idle, ownedResources()), "lifecycle leaked Timeout");
+  } finally {
+    clearInterval(handle);
+  }
+  const seenOnce = { requestsObserved: 1, responseFinished: false, responseClosedEarly: true };
+  assertDisconnect({ ...seenOnce, persisted: 1, partials: 0 });
+  expectError(() => assertDisconnect({ ...seenOnce, requestsObserved: 0 }), "request not observed");
+  expectError(
+    () => assertDisconnect({ ...seenOnce, responseClosedEarly: false }),
+    "before response finish",
+  );
+  expectError(
+    () => assertDisconnect({ ...seenOnce, responseFinished: true }),
+    "before response finish",
+  );
+  expectError(() => assertDisconnect({ ...seenOnce, persisted: 0 }), "disconnect disposition");
+  expectError(() => assertDisconnect({ ...seenOnce, partials: 1 }), "disconnect disposition");
+  const note = [{ text: PRIVATE_NOTE }];
+  const zipMembers = (overrides = {}) =>
+    new Map(
+      Object.entries({
+        "privat/arbeidsnotater.json": Buffer.from(PRIVATE_NOTE),
+        "utvikling.json": Buffer.from("[]"),
+        "kartlag/official.geojson": Buffer.from("{}"),
+        ...overrides,
+      }),
+    );
+  assertPrivacy(zipMembers(), note, "Private arbeidsnotater - " + PRIVATE_NOTE);
+  expectError(() => assertPrivacy(zipMembers(), [], "x"), "not authored");
+  expectError(() => assertPrivacy(zipMembers(), note, "no note here"), "missing from private pdf");
+  expectError(
+    () =>
+      assertPrivacy(
+        zipMembers({ "privat/arbeidsnotater.json": Buffer.from("[]") }),
+        note,
+        PRIVATE_NOTE,
+      ),
+    "missing from privat json",
+  );
+  expectError(
+    () =>
+      assertPrivacy(
+        zipMembers({ "kartlag/official.geojson": Buffer.from(PRIVATE_NOTE) }),
+        note,
+        PRIVATE_NOTE,
+      ),
+    "leaked into kartlag/official.geojson",
+  );
   process.stdout.write("probe self-check passed\n");
 }
 
@@ -1079,6 +1134,9 @@ const OUTPUT_MOUNT = "/export-output";
 const OUTPUT_CAP = 67108864;
 const SITUATION = "skogbrann-bymarka";
 const LOGIN = "Reedtrullz";
+// Authored private note: must appear only in the private PDF and privat/ JSON.
+const PRIVATE_NOTE = "Privat notat export72 kanarifugl 4d1c9e";
+const DISCONNECT_DEADLINE_MS = 20000;
 
 function persistedOrder(entries, expected) {
   const regular = entries.filter((entry) => !entry.name.endsWith("/")).map((entry) => entry.name);
@@ -1086,16 +1144,60 @@ function persistedOrder(entries, expected) {
     fail("oracle", "persisted member order");
 }
 
+function assertPrivacy(byName, notes, pdfDecoded) {
+  if (notes.length === 0 || notes.some((note) => !note.text))
+    fail("oracle", "private note not authored");
+  for (const note of notes) {
+    if (!pdfDecoded.includes(note.text)) fail("oracle", "private note missing from private pdf");
+    if (!byName.get("privat/arbeidsnotater.json")?.includes(note.text))
+      fail("oracle", "private note missing from privat json");
+    for (const [name, data] of byName) {
+      if (name === "situasjonsbrief.pdf" || name === "privat/arbeidsnotater.json") continue;
+      if (data.includes(note.text)) fail("oracle", "private note leaked into " + name);
+    }
+  }
+}
+
+const OWNED_RESOURCES = ["Timeout", "TCPServerWrap", "TCPSocketWrap"];
+
+function ownedResources() {
+  const counts = Object.fromEntries(OWNED_RESOURCES.map((name) => [name, 0]));
+  for (const name of process.getActiveResourcesInfo()) if (name in counts) counts[name] += 1;
+  return counts;
+}
+
+// Natural termination needs every server, socket and timer the profile opened to be gone.
+function assertLifecycle(before, after) {
+  for (const name of OWNED_RESOURCES) {
+    if (!Number.isInteger(before?.[name]) || !Number.isInteger(after?.[name]))
+      fail("oracle", "lifecycle receipt " + name);
+    if (after[name] > before[name]) fail("oracle", "lifecycle leaked " + name);
+  }
+}
+
+// A disconnect is only meaningful if the server saw the request and the client left before
+// the response finished; the app has no cancel path, so the export must complete whole.
+function assertDisconnect(facts) {
+  if (facts.requestsObserved !== 1) fail("oracle", "disconnect request not observed");
+  if (facts.responseFinished !== false || facts.responseClosedEarly !== true)
+    fail("oracle", "disconnect not observed before response finish");
+  if (facts.persisted !== 1 || facts.partials !== 0)
+    fail("oracle", "disconnect disposition " + facts.persisted + "/" + facts.partials);
+}
+
 function call(port, method, path, { headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () =>
-        resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }),
-      );
-      res.on("error", reject);
-    });
+    const req = httpRequest(
+      { host: "127.0.0.1", port, method, path, headers, agent: false },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }),
+        );
+        res.on("error", reject);
+      },
+    );
     req.on("error", reject);
     req.end(body);
   });
@@ -1144,8 +1246,11 @@ async function startApp(appModule, dir, devAuthBypass, extra = {}) {
   return { runtime, server, port: server.address().port };
 }
 
-function stopApp(started) {
-  return new Promise((resolve) => started.server.close(() => resolve()));
+async function stopApp(started) {
+  const closed = new Promise((resolve) => started.server.close(() => resolve()));
+  started.server.closeAllConnections();
+  await closed;
+  await started.runtime.pool?.end();
 }
 
 function dirBytes(dir) {
@@ -1193,18 +1298,19 @@ function assertPersistedMembers(entries, caseFile, workspace, names, digest, siz
     !text.includes("Sist oppdatert " + situation.updatedAt)
   )
     fail("oracle", "pdf");
-  // Privacy: private notes appear only under privat/ (README carries the fixed warning only).
-  for (const note of workspace.notes) {
-    for (const [name, data] of byName) {
-      if (!name.startsWith("privat/") && name !== "README.txt" && data.includes(note.text))
-        fail("oracle", "private note leaked into " + name);
-    }
-  }
+  // Privacy: the private PDF and privat/ JSON carry the note; nothing else may.
+  assertPrivacy(byName, workspace.notes, text);
   for (const name of expected.filter((item) => item.startsWith("vedlegg/"))) {
     const data = byName.get(name);
     if (data.length !== size || sha256(data) !== digest) fail("oracle", "attachment " + name);
   }
-  return entries.length;
+  const attached = expected.filter((item) => item.startsWith("vedlegg/"));
+  return {
+    members: entries.length,
+    memberNames: entries.filter((e) => !e.name.endsWith("/")).map((e) => e.name),
+    attachmentSizes: attached.map((name) => byName.get(name).length),
+    attachmentCrc32: attached.map((name) => crc32(byName.get(name)) >>> 0),
+  };
 }
 
 async function runPersistedFixture(appModule, caseFile, fixture, raw) {
@@ -1231,6 +1337,9 @@ async function runPersistedFixture(appModule, caseFile, fixture, raw) {
     }
     const workspace = await store.getWorkspace(SITUATION, LOGIN);
     if (workspace.attachments.length !== names.length) fail("oracle", "attachment setup");
+    await store.addNote(SITUATION, PRIVATE_NOTE);
+    workspace.notes = (await store.getWorkspace(SITUATION, LOGIN)).notes;
+    if (!workspace.notes.some((note) => note.text === PRIVATE_NOTE)) fail("oracle", "note setup");
     const cookies = jar();
     const { csrf } = await csrfFor(started.port, cookies);
     const post = await call(started.port, "POST", "/api/situations/" + SITUATION + "/exports", {
@@ -1248,11 +1357,13 @@ async function runPersistedFixture(appModule, caseFile, fixture, raw) {
     if (!readFileSync(join(dir, files[0])).equals(post.body)) fail("oracle", "persisted bytes");
     const record = await store.getExport(exportId, SITUATION, LOGIN);
     if (record?.storagePath !== join(dir, files[0])) fail("oracle", "export record");
-    const get = await call(started.port, "GET", location, { headers: { cookie: cookies.header() } });
+    const get = await call(started.port, "GET", location, {
+      headers: { cookie: cookies.header() },
+    });
     if (get.status !== 200 || !get.body.equals(post.body)) fail("oracle", "GET bytes");
     const zipBytes = post.body.length;
     const outputPeakBytes = dirBytes(dir);
-    const members = assertPersistedMembers(
+    const checked = assertPersistedMembers(
       readZip(post.body),
       caseFile,
       workspace,
@@ -1268,11 +1379,12 @@ async function runPersistedFixture(appModule, caseFile, fixture, raw) {
       getExact: true,
       zipBytes,
       outputPeakBytes,
-      members,
+      ...checked,
       cleaned: !statSync(dir, { throwIfNoEntry: false }),
     };
   } finally {
     await stopApp(started);
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -1384,39 +1496,77 @@ async function persistedControls(appModule, caseFile, raw) {
     rmSync(errDir, { recursive: true, force: true });
     rmSync(filler, { force: true });
   }
-  // Real client disconnect: abort right after sending; no partial export may remain.
+  // Real client disconnect on the authored max fixture: the client leaves once the server has
+  // observed the request, before the response can finish. The app has no cancel path, so a
+  // whole recorded export must appear; any partial or missing result fails.
   const dropDir = OUTPUT_MOUNT + "/disconnect";
   const dropApp = await startApp(appModule, dropDir, true);
   let disconnectPartials;
   let disconnectPersisted;
+  const seen = { requestsObserved: 0, responseFinished: false, responseClosedEarly: false };
   try {
+    for (const [index, filename] of caseFile.maxAttachments.names.entries()) {
+      await dropApp.runtime.store.addAttachment({
+        id: "export72-drop-" + index,
+        situationId: SITUATION,
+        filename,
+        contentType: "application/octet-stream",
+        size: maxFixture.payloadBytes,
+        sha256: sha256(raw),
+        createdAt: caseFile.clock,
+        storagePath: "/tmp/export72-max.bin",
+      });
+    }
     const cookies = jar();
     const { csrf } = await csrfFor(dropApp.port, cookies);
-    await new Promise((resolve) => {
+    const exportPath = "/api/situations/" + SITUATION + "/exports";
+    let requestSeen;
+    const observed = new Promise((resolve) => (requestSeen = resolve));
+    dropApp.server.on("request", (req, res) => {
+      if (req.method !== "POST" || req.url !== exportPath) return;
+      seen.requestsObserved += 1;
+      res.on("finish", () => (seen.responseFinished = true));
+      res.on("close", () => (seen.responseClosedEarly = !res.writableFinished));
+      requestSeen();
+    });
+    const client = new Promise((resolve) => {
       const req = httpRequest({
         host: "127.0.0.1",
         port: dropApp.port,
         method: "POST",
-        path: "/api/situations/" + SITUATION + "/exports",
+        path: exportPath,
         headers: { cookie: cookies.header(), "x-csrf-token": csrf },
+        agent: false,
       });
       req.on("error", () => resolve());
-      req.end(() => setImmediate(() => req.destroy()));
+      req.end();
+      observed.then(() => {
+        req.destroy();
+        resolve();
+      });
     });
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    disconnectPartials = 0;
-    disconnectPersisted = 0;
-    for (const name of readdirSync(dropDir)) {
-      const id = name.replace(/^export-|\.zip$/g, "");
-      const record = await dropApp.runtime.store.getExport(id, SITUATION, LOGIN);
-      try {
-        readZip(readFileSync(join(dropDir, name)));
-        if (!record) throw new Error("unrecorded");
-        disconnectPersisted += 1;
-      } catch {
-        disconnectPartials += 1;
+    await client;
+    const deadline = Date.now() + DISCONNECT_DEADLINE_MS;
+    for (;;) {
+      disconnectPartials = 0;
+      disconnectPersisted = 0;
+      for (const name of readdirSync(dropDir)) {
+        const id = name.replace(/^export-|\.zip$/g, "");
+        const record = await dropApp.runtime.store.getExport(id, SITUATION, LOGIN);
+        try {
+          const entries = readZip(readFileSync(join(dropDir, name)));
+          if (!record || entries.length < caseFile.fixedMembers.length)
+            throw new Error("incomplete");
+          disconnectPersisted += 1;
+        } catch {
+          disconnectPartials += 1;
+        }
       }
+      if (disconnectPersisted > 0 && disconnectPartials === 0) break;
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    assertDisconnect({ ...seen, persisted: disconnectPersisted, partials: disconnectPartials });
   } finally {
     await stopApp(dropApp);
     rmSync(dropDir, { recursive: true, force: true });
@@ -1431,22 +1581,31 @@ async function persistedControls(appModule, caseFile, raw) {
       writeErrorLeftovers,
       disconnectPartials,
       disconnectPersisted,
+      disconnectRequestsObserved: seen.requestsObserved,
+      disconnectResponseFinished: seen.responseFinished,
+      disconnectResponseClosedEarly: seen.responseClosedEarly,
+      disconnectOutcome: "completed-after-disconnect",
     },
   };
 }
 
 async function runPersisted(appModule, caseFile, raw) {
+  const resourcesBefore = ownedResources();
   const fixtures = [];
   for (const fixture of caseFile.fixtures) {
     fixtures.push(await runPersistedFixture(appModule, caseFile, fixture, raw));
   }
   const controls = await persistedControls(appModule, caseFile, raw); // needs /tmp max backing file
   if (readdirSync(OUTPUT_MOUNT).length !== 0) fail("oracle", "output mount not clean");
+  await new Promise((resolve) => setImmediate(resolve));
+  const lifecycle = { before: resourcesBefore, after: ownedResources() };
+  assertLifecycle(lifecycle.before, lifecycle.after);
   return {
     backend: "MemoryStore",
     devAuthBypassLabel: "authored-development-owner-fixture",
     capBytes: OUTPUT_CAP,
     scratchOverRejected: true,
+    lifecycle,
     ...controls,
     fixtures,
   };
@@ -1573,14 +1732,16 @@ async function qualify() {
       baseline.push(first, second);
     }
     if (!isPersisted && baseline.length !== 6) fail("oracle", "baseline count");
-    const pdfByteStable = isPersisted || baseline.every((item, index) => {
-      if (index % 2 === 1) return true;
-      const left = item.members.find((member) => member.name === "situasjonsbrief.pdf");
-      const right = baseline[index + 1].members.find(
-        (member) => member.name === "situasjonsbrief.pdf",
-      );
-      return Boolean(left && right && left.sha256 === right.sha256 && left.size === right.size);
-    });
+    const pdfByteStable =
+      isPersisted ||
+      baseline.every((item, index) => {
+        if (index % 2 === 1) return true;
+        const left = item.members.find((member) => member.name === "situasjonsbrief.pdf");
+        const right = baseline[index + 1].members.find(
+          (member) => member.name === "situasjonsbrief.pdf",
+        );
+        return Boolean(left && right && left.sha256 === right.sha256 && left.size === right.size);
+      });
     if (!pdfByteStable) fail("oracle", "pdf bytes differ");
     const peak = hwmBytes();
     if (peak > caseFile.limits.memoryBytes) fail("oracle", "peak memory");
@@ -1619,9 +1780,7 @@ async function qualify() {
       ...(persisted ? { persisted } : {}),
     };
     trace("complete");
-    process.stdout.write(`${JSON.stringify(receipt)}\n`, () => {
-      if (isPersisted) process.exit(0); // createApp leaves timers running
-    });
+    process.stdout.write(`${JSON.stringify(receipt)}\n`);
   } finally {
     restoreClock();
   }

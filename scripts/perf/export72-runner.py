@@ -24,7 +24,7 @@ import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, TypedDict
+from typing import Any, Final, TypedDict
 from unittest.mock import patch
 from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
@@ -701,6 +701,7 @@ def retain_receipt(
     canary_after: tuple[int, int, int],
     stopped: Mapping[str, object],
     persisted: bool = False,
+    expected: Mapping[str, tuple[list[str], int, int]] | None = None,
 ) -> dict[str, object]:
     if not image_id.startswith("sha256:"):
         raise Rejection("image", "image identity")
@@ -745,7 +746,7 @@ def retain_receipt(
     if (output is not None) != persisted:
         raise Rejection("oracle", "persisted profile receipt mismatch")
     if output is not None:
-        check_persisted_receipt(mapping(output, "oracle"))
+        check_persisted_receipt(mapping(output, "oracle"), expected)
     graph = receipt.get("baseline")
     if graph is not None:
         graph_map = mapping(graph, "identity")
@@ -779,7 +780,26 @@ def retain_receipt(
     }
 
 
-def check_persisted_receipt(output: Mapping[str, object]) -> None:
+def persisted_expectations(case: Case, raw_case: Mapping[str, object]) -> dict[str, tuple[list[str], int, int]]:
+    # Per fixture: ordered regular members, attachment size, attachment CRC32 from the authored backing.
+    fixed = raw_case.get("fixedMembers")
+    fixtures = raw_case.get("fixtures")
+    if not isinstance(fixed, list) or not isinstance(fixtures, list):
+        raise Rejection("malformed", "persisted expectations")
+    result: dict[str, tuple[list[str], int, int]] = {}
+    for item in fixtures:
+        fixture = mapping(item)
+        count = fixture.get("attachments")
+        names = list(case.names) if count == 25 else [str(fixture.get("name"))] if count == 1 else []
+        size = fixture.get("payloadBytes")
+        if type(size) is not int:
+            raise Rejection("malformed", "persisted expectations")
+        members = [str(name) for name in fixed] + ["vedlegg/" + safe_filename(name) for name in names]
+        result[str(fixture.get("id"))] = (members, size, zlib.crc32(backing_bytes()[:size]))
+    return result
+
+
+def check_persisted_receipt(output: Mapping[str, object], expected: Mapping[str, tuple[list[str], int, int]] | None = None) -> None:
     cap = int(OUTPUT_BYTES)
     if output.get("backend") != "MemoryStore" or output.get("devAuthBypassLabel") != "authored-development-owner-fixture":
         raise Rejection("oracle", "persisted labels")
@@ -798,11 +818,36 @@ def check_persisted_receipt(output: Mapping[str, object]) -> None:
             raise Rejection("oracle", f"persisted fixture {entry.get('id')}")
         if type(zip_bytes) is not int or type(peak) is not int or not 0 < zip_bytes <= peak <= cap:
             raise Rejection("oracle", "persisted output size")
+        if expected is not None:
+            names, size, crc = expected[str(entry.get("id"))]
+            sizes, crcs = entry.get("attachmentSizes"), entry.get("attachmentCrc32")
+            attached = sum(name.startswith("vedlegg/") for name in names)
+            members_seen = entry.get("members")
+            if entry.get("memberNames") != names or sizes != [size] * attached or crcs != [crc] * attached:
+                raise Rejection("oracle", f"persisted members {entry.get('id')}")
+            if type(members_seen) is not int or members_seen < len(names):
+                raise Rejection("oracle", "persisted member count")
+            if attached == 25 and (size * attached != 52428800 or zip_bytes < 52428800):
+                raise Rejection("oracle", "persisted max size")
     controls = mapping(output.get("controls"), "oracle")
     if controls.get("anonymous") not in {401, 403} or controls.get("viewer") != 403 or controls.get("writeErrorStatus") != 500:
         raise Rejection("oracle", "persisted denial controls")
     if controls.get("writeErrorLeftovers") != 0 or controls.get("disconnectPartials") != 0:
         raise Rejection("oracle", "persisted cleanup controls")
+    if (
+        controls.get("disconnectPersisted") != 1
+        or controls.get("disconnectRequestsObserved") != 1
+        or controls.get("disconnectResponseFinished") is not False
+        or controls.get("disconnectResponseClosedEarly") is not True
+        or controls.get("disconnectOutcome") != "completed-after-disconnect"
+    ):
+        raise Rejection("oracle", "persisted disconnect disposition")
+    life = mapping(output.get("lifecycle"), "oracle")
+    before, after = mapping(life.get("before"), "oracle"), mapping(life.get("after"), "oracle")
+    for name in ("Timeout", "TCPServerWrap", "TCPSocketWrap"):
+        was, now = before.get(name), after.get(name)
+        if type(was) is not int or type(now) is not int or now > was:
+            raise Rejection("oracle", f"persisted lifecycle {name}")
 
 
 def dialog(
@@ -1095,6 +1140,7 @@ def qualify(case_path: Path, *, baseline: bool = False, persisted: bool = False)
             canary_after=after,
             stopped=stopped,
             persisted=persisted,
+            expected=persisted_expectations(case, raw_case) if persisted else None,
         )
     except Rejection as exc:
         primary = exc
@@ -1720,6 +1766,45 @@ def self_check() -> None:
     expect("scratch", lambda: persisted_host({**persisted_tmpfs, "/tmp": persisted_tmpfs["/tmp"].replace("16777216", OUTPUT_BYTES)}))
     expect("scratch", lambda: persisted_host({**persisted_tmpfs, "/var": persisted_tmpfs["/tmp"]}))
     print("PASS persisted output cap negatives", flush=True)
+    cap = int(OUTPUT_BYTES)
+    names_by_id = {"empty": ["a"], "small": ["a", "vedlegg/s"], "max": ["a"] + [f"vedlegg/{index}" for index in range(25)]}
+    sizes_by_id = {"empty": 0, "small": 32, "max": 2097152}
+    expected_persisted = {key: (names, sizes_by_id[key], 7) for key, names in names_by_id.items()}
+
+    def sample_persisted() -> dict[str, object]:
+        fixtures = []
+        for key, names in names_by_id.items():
+            count = sum(name.startswith("vedlegg/") for name in names)
+            fixtures.append({"id": key, "status": 200, "getExact": True, "cleaned": True, "zipBytes": 60000000 if key == "max" else 100, "outputPeakBytes": 60000000 if key == "max" else 100,
+                             "members": len(names), "memberNames": names, "attachmentSizes": [sizes_by_id[key]] * count, "attachmentCrc32": [7] * count})
+        idle = {"Timeout": 0, "TCPServerWrap": 0, "TCPSocketWrap": 0}
+        return {"backend": "MemoryStore", "devAuthBypassLabel": "authored-development-owner-fixture", "capBytes": cap, "overcapErrno": "ENOSPC", "scratchOverRejected": True,
+                "overcapPartialBytes": 1, "fixtures": fixtures, "lifecycle": {"before": dict(idle), "after": dict(idle)},
+                "controls": {"anonymous": 401, "viewer": 403, "writeErrorStatus": 500, "writeErrorLeftovers": 0, "disconnectPartials": 0, "disconnectPersisted": 1,
+                             "disconnectRequestsObserved": 1, "disconnectResponseFinished": False, "disconnectResponseClosedEarly": True, "disconnectOutcome": "completed-after-disconnect"}}
+
+    def mutated_persisted(path: tuple[str | int, ...], value: object = None, *, drop: bool = False) -> None:
+        receipt = sample_persisted()
+        target: Any = receipt
+        for step in path[:-1]:
+            target = target[step]
+        if drop:
+            del target[path[-1]]
+        else:
+            target[path[-1]] = value
+        check_persisted_receipt(receipt, expected_persisted)
+
+    check_persisted_receipt(sample_persisted(), expected_persisted)
+    print("PASS persisted receipt oracle", flush=True)
+    expect("oracle", lambda: mutated_persisted(("controls", "disconnectRequestsObserved"), 0))
+    expect("oracle", lambda: mutated_persisted(("controls", "disconnectResponseClosedEarly"), False))
+    expect("oracle", lambda: mutated_persisted(("controls", "disconnectPersisted"), 0))
+    expect("oracle", lambda: mutated_persisted(("lifecycle", "after", "Timeout"), 1))
+    expect("oracle", lambda: mutated_persisted(("lifecycle",), drop=True))
+    expect("oracle", lambda: mutated_persisted(("fixtures", 2, "attachmentCrc32"), [7] * 24 + [8]))
+    expect("oracle", lambda: mutated_persisted(("fixtures", 2, "memberNames"), list(reversed(names_by_id["max"]))))
+    expect("oracle", lambda: mutated_persisted(("fixtures", 2, "attachmentSizes"), [2097152] * 24))
+    print("PASS persisted receipt negatives", flush=True)
     probe_request = {"Type": "bind", "Source": "/owned", "Target": "/perf", "ReadOnly": True}
 
     def admit_changed(change: Callable[[dict[str, object]], None]) -> None:
