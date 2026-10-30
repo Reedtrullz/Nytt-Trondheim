@@ -9074,7 +9074,7 @@ export class PgStore implements Store {
     const eastIndex = params.length - 1;
     const northIndex = params.length;
     where.push(
-      `ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))`,
+      `ST_Intersects(geometry, ST_Envelope(ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326)))`,
     );
 
     const limitClause =
@@ -9125,7 +9125,7 @@ export class PgStore implements Store {
     const eastIndex = params.length - 1;
     const northIndex = params.length;
     where.push(
-      `(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326)))`,
+      `(geometry IS NULL OR ST_Intersects(geometry, ST_Envelope(ST_MakeEnvelope($${westIndex}, $${southIndex}, $${eastIndex}, $${northIndex}, 4326))))`,
     );
 
     const limitClause =

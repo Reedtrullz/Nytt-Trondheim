@@ -4803,7 +4803,7 @@ describe("private situation API", () => {
     expect(capturedSql).toContain("(valid_to IS NULL OR valid_to >= now())");
     expect(capturedSql).toContain("(valid_from IS NULL OR valid_from <= now())");
     expect(capturedSql).toContain(
-      "(geometry IS NULL OR ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326)))",
+      "(geometry IS NULL OR ST_Intersects(geometry, ST_Envelope(ST_MakeEnvelope($2, $3, $4, $5, 4326))))",
     );
     expect(capturedParams).toEqual([["active"], 10.2, 63.3, 10.5, 63.5]);
     expect(alerts).toEqual([alert]);
