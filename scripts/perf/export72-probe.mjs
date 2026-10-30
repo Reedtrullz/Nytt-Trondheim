@@ -17,6 +17,8 @@ import { request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import process from "node:process";
+import { performance } from "node:perf_hooks";
+import { clearInterval, setImmediate, setInterval, setTimeout } from "node:timers";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { crc32, deflateRawSync, deflateSync, inflateRawSync, inflateSync } from "node:zlib";
