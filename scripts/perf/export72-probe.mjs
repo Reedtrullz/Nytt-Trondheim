@@ -1546,7 +1546,7 @@ async function persistedControls(appModule, caseFile, raw) {
       });
     });
     await client;
-    const deadline = Date.now() + DISCONNECT_DEADLINE_MS;
+    const deadline = performance.now() + DISCONNECT_DEADLINE_MS;
     for (;;) {
       disconnectPartials = 0;
       disconnectPersisted = 0;
@@ -1563,7 +1563,7 @@ async function persistedControls(appModule, caseFile, raw) {
         }
       }
       if (disconnectPersisted > 0 && disconnectPartials === 0) break;
-      if (Date.now() > deadline) break;
+      if (performance.now() > deadline) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assertDisconnect({ ...seen, persisted: disconnectPersisted, partials: disconnectPartials });
