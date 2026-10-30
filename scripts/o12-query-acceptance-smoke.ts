@@ -388,8 +388,8 @@ export async function runO12Acceptance(databaseUrl: string) {
     }
 
     const insert = async (d: Dataset) => {
-      await originalQuery("DELETE FROM public_transport_vehicles");
-      await originalQuery("DELETE FROM public_transport_service_alerts");
+      // TRUNCATE (not DELETE) reclaims the previous dataset's connection-local TEMP heap storage.
+      await originalQuery("TRUNCATE public_transport_vehicles, public_transport_service_alerts");
       await originalQuery(
         `INSERT INTO public_transport_vehicles
          (id,source,codespace_id,vehicle_id,mode,last_updated,expires_at,geometry,payload,payload_hash,last_seen_at,stale)
@@ -441,7 +441,17 @@ export async function runO12Acceptance(databaseUrl: string) {
     ] as const) {
       const tag = `${shape}-${n / 1000}k`;
       const d = dataset(n, shape, seed++);
+      const size = async () =>
+        (
+          (await originalQuery("SELECT pg_database_size(current_database())::text AS bytes")) as {
+            rows: Array<{ bytes: string }>;
+          }
+        ).rows[0].bytes;
+      const sizeBefore = await size();
       await insert(d);
+      console.error(
+        `stage seed shape=${shape} n=${n} dbBytesBefore=${sizeBefore} dbBytesAfter=${await size()}`,
+      );
       const b = d.bounds;
       const http = async (
         id: string,
