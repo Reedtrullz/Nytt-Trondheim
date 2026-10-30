@@ -350,3 +350,15 @@ jobs:
         run: |
           python3 scripts/perf/export72-runner.py --self-check
           python3 scripts/perf/export72-runner.py --qualify --case scripts/perf/export72-case.json
+      - name: Qualify persisted export acceptance profile
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/nytt-o12-export-20261030'
+        run: |
+          mkdir -p artifacts/export-persisted
+          python3 scripts/perf/export72-runner.py --self-check
+          python3 scripts/perf/export72-runner.py --qualify-persisted --case scripts/perf/export72-case.json > artifacts/export-persisted/receipt.json 2> artifacts/export-persisted/stderr.txt
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/nytt-o12-export-20261030'
+        with:
+          name: export-persisted-profile
+          path: artifacts/export-persisted
+          if-no-files-found: error

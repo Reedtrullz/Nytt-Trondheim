@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { createSocket } from "node:dgram";
 import {
+  closeSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -9,7 +11,9 @@ import {
   unlinkSync,
   utimesSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import process from "node:process";
@@ -889,6 +893,10 @@ async function selfCheck() {
   }
   if (members[0].name !== "situasjonsbrief.pdf" || members[0].size !== pdf.length)
     fail("self-check", "pdf witness");
+  const order = [{ name: "a" }, { name: "b" }];
+  persistedOrder(order, ["a", "b"]);
+  expectError(() => persistedOrder(order, ["b", "a"]), "persisted member order");
+  expectError(() => persistedOrder(order, ["a"]), "persisted member order");
   process.stdout.write("probe self-check passed\n");
 }
 
@@ -1066,6 +1074,384 @@ async function runFixture(modules, caseFile, fixture, raw) {
   return { id: fixture.id, regular: members.length, members, zipBytes: zip.length };
 }
 
+// ---- Persisted profile (owner-approved 2026-10-30): real createApp POST/GET exports. ----
+const OUTPUT_MOUNT = "/export-output";
+const OUTPUT_CAP = 67108864;
+const SITUATION = "skogbrann-bymarka";
+const LOGIN = "Reedtrullz";
+
+function persistedOrder(entries, expected) {
+  const regular = entries.filter((entry) => !entry.name.endsWith("/")).map((entry) => entry.name);
+  if (regular.length !== expected.length || regular.some((name, index) => name !== expected[index]))
+    fail("oracle", "persisted member order");
+}
+
+function call(port, method, path, { headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () =>
+        resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }),
+      );
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+function jar() {
+  const cookies = new Map();
+  return {
+    take(response) {
+      for (const line of response.headers["set-cookie"] ?? []) {
+        const [pair] = line.split(";");
+        const index = pair.indexOf("=");
+        cookies.set(pair.slice(0, index), pair.slice(index + 1));
+      }
+    },
+    header: () => [...cookies].map(([name, value]) => name + "=" + value).join("; "),
+  };
+}
+
+async function csrfFor(port, cookies) {
+  const response = await call(port, "GET", "/api/session", {
+    headers: { cookie: cookies.header() },
+  });
+  cookies.take(response);
+  if (response.status !== 200) return { status: response.status, csrf: undefined };
+  return { status: 200, csrf: JSON.parse(response.body.toString("utf8")).csrfToken };
+}
+
+async function startApp(appModule, dir, devAuthBypass, extra = {}) {
+  const runtime = await appModule.createApp({
+    port: 0,
+    nodeEnv: "development",
+    publicOrigin: "http://localhost",
+    seedDemo: true,
+    devAuthBypass,
+    githubAllowedLogin: LOGIN,
+    sessionSecret: "export72-persisted-fixture-secret",
+    uploadDir: dir,
+    runtimeStatusDir: dir,
+    rateLimitEnabled: false,
+    ...extra,
+  });
+  const server = await new Promise((resolve) => {
+    const listening = runtime.app.listen(0, "127.0.0.1", () => resolve(listening));
+  });
+  return { runtime, server, port: server.address().port };
+}
+
+function stopApp(started) {
+  return new Promise((resolve) => started.server.close(() => resolve()));
+}
+
+function dirBytes(dir) {
+  return readdirSync(dir).reduce((sum, name) => sum + statSync(join(dir, name)).size, 0);
+}
+
+function assertPersistedMembers(entries, caseFile, workspace, names, digest, size, exportId) {
+  const expected = [...caseFile.fixedMembers, ...names.map((name) => "vedlegg/" + name)];
+  for (const entry of entries) {
+    if (entry.name.endsWith("/") && !["privat/", "kartlag/", "vedlegg/"].includes(entry.name))
+      fail("oracle", "unexpected " + entry.name);
+  }
+  persistedOrder(entries, expected);
+  const byName = new Map(entries.filter((e) => !e.name.endsWith("/")).map((e) => [e.name, e.data]));
+  const pretty = (value) => Buffer.from(JSON.stringify(value, null, 2));
+  const { situation } = workspace;
+  for (const [name, bytes] of [
+    ["utvikling.json", pretty(situation.timeline)],
+    ["kilder-og-evidens.json", pretty(situation.evidence)],
+    ["privat/arbeidsnotater.json", pretty({ tasks: workspace.tasks, notes: workspace.notes })],
+    ["README.txt", Buffer.from(caseFile.privateWarning + "\n")],
+  ]) {
+    if (!byName.get(name).equals(bytes)) fail("oracle", "content " + name);
+  }
+  for (const provenance of PROVENANCE) {
+    const features = situation.features.filter((f) => f.properties.provenance === provenance);
+    const expectedGeo = pretty({ type: "FeatureCollection", features });
+    if (!byName.get("kartlag/" + provenance + ".geojson").equals(expectedGeo))
+      fail("oracle", "geojson " + provenance);
+  }
+  const manifest = JSON.parse(byName.get("manifest.json").toString("utf8"));
+  const checksums = names.map((filename) => ({ filename, sha256: digest, size }));
+  if (
+    manifest.exportId !== exportId ||
+    manifest.situationId !== SITUATION ||
+    manifest.privateAnalysisWarning !== caseFile.privateWarning ||
+    JSON.stringify(manifest.attachmentChecksums) !== JSON.stringify(checksums)
+  )
+    fail("oracle", "manifest");
+  const pdf = byName.get("situasjonsbrief.pdf");
+  const text = pdfText(pdf);
+  if (
+    pdf.subarray(0, 5).toString("latin1") !== "%PDF-" ||
+    !text.includes("NYTT TRONDHEIM / SITUASJONSROM") ||
+    !text.includes("Sist oppdatert " + situation.updatedAt)
+  )
+    fail("oracle", "pdf");
+  // Privacy: private notes appear only under privat/ (README carries the fixed warning only).
+  for (const note of workspace.notes) {
+    for (const [name, data] of byName) {
+      if (!name.startsWith("privat/") && name !== "README.txt" && data.includes(note.text))
+        fail("oracle", "private note leaked into " + name);
+    }
+  }
+  for (const name of expected.filter((item) => item.startsWith("vedlegg/"))) {
+    const data = byName.get(name);
+    if (data.length !== size || sha256(data) !== digest) fail("oracle", "attachment " + name);
+  }
+  return entries.length;
+}
+
+async function runPersistedFixture(appModule, caseFile, fixture, raw) {
+  const dir = OUTPUT_MOUNT + "/" + fixture.id;
+  const started = await startApp(appModule, dir, true);
+  try {
+    const { store } = started.runtime;
+    const payload = raw.subarray(0, fixture.payloadBytes);
+    const digest = sha256(payload);
+    const names = attachmentNames(caseFile, fixture);
+    const storagePath = "/tmp/export72-" + fixture.id + ".bin";
+    if (payload.length > 0) writeFileSync(storagePath, payload);
+    for (const [index, filename] of names.entries()) {
+      await store.addAttachment({
+        id: "export72-" + fixture.id + "-" + index,
+        situationId: SITUATION,
+        filename,
+        contentType: "application/octet-stream",
+        size: payload.length,
+        sha256: digest,
+        createdAt: caseFile.clock,
+        storagePath,
+      });
+    }
+    const workspace = await store.getWorkspace(SITUATION, LOGIN);
+    if (workspace.attachments.length !== names.length) fail("oracle", "attachment setup");
+    const cookies = jar();
+    const { csrf } = await csrfFor(started.port, cookies);
+    const post = await call(started.port, "POST", "/api/situations/" + SITUATION + "/exports", {
+      headers: { cookie: cookies.header(), "x-csrf-token": csrf },
+    });
+    if (post.status !== 200) fail("oracle", "POST " + post.status);
+    const exportId = String(post.headers["x-export-id"]);
+    const location = String(post.headers.location);
+    if (location !== "/api/situations/" + SITUATION + "/exports/" + exportId)
+      fail("oracle", "location");
+    const files = readdirSync(dir);
+    if (files.length !== 1 || files[0] !== "export-" + exportId + ".zip")
+      fail("oracle", "persisted file set");
+    if (statSync(join(dir, files[0])).size !== post.body.length) fail("oracle", "persisted size");
+    if (!readFileSync(join(dir, files[0])).equals(post.body)) fail("oracle", "persisted bytes");
+    const record = await store.getExport(exportId, SITUATION, LOGIN);
+    if (record?.storagePath !== join(dir, files[0])) fail("oracle", "export record");
+    const get = await call(started.port, "GET", location, { headers: { cookie: cookies.header() } });
+    if (get.status !== 200 || !get.body.equals(post.body)) fail("oracle", "GET bytes");
+    const zipBytes = post.body.length;
+    const outputPeakBytes = dirBytes(dir);
+    const members = assertPersistedMembers(
+      readZip(post.body),
+      caseFile,
+      workspace,
+      names,
+      digest,
+      payload.length,
+      exportId,
+    );
+    rmSync(dir, { recursive: true });
+    return {
+      id: fixture.id,
+      status: post.status,
+      getExact: true,
+      zipBytes,
+      outputPeakBytes,
+      members,
+      cleaned: !statSync(dir, { throwIfNoEntry: false }),
+    };
+  } finally {
+    await stopApp(started);
+  }
+}
+
+function fillOutput(path, limit) {
+  const fd = openSync(path, "w");
+  let code = null;
+  try {
+    for (let written = 0; written < limit; written += 1048576) writeSync(fd, Buffer.alloc(1048576));
+  } catch (error) {
+    code = error.code;
+  } finally {
+    closeSync(fd);
+  }
+  return { code, bytes: statSync(path).size };
+}
+
+async function persistedControls(appModule, caseFile, raw) {
+  // Kernel cap: writes past 64MiB must stop with ENOSPC, with a counted partial file.
+  const over = fillOutput(OUTPUT_MOUNT + "/overcap.bin", OUTPUT_CAP + 2 * 1048576);
+  rmSync(OUTPUT_MOUNT + "/overcap.bin");
+  if (over.code !== "ENOSPC" || over.bytes <= 0 || over.bytes > OUTPUT_CAP)
+    fail("kernel", "output cap " + over.code + " " + over.bytes);
+  // Denial controls with real session/CSRF/owner checks and devAuthBypass:false.
+  const dir = OUTPUT_MOUNT + "/denied";
+  const started = await startApp(appModule, dir, false, {
+    githubClientId: "export72-fixture",
+    githubClientSecret: "export72-fixture",
+    emailSender: { async send() {} },
+  });
+  let anonymous;
+  let viewer;
+  try {
+    const exportPath = "/api/situations/" + SITUATION + "/exports";
+    const anon = jar();
+    const { csrf } = await csrfFor(started.port, anon);
+    anonymous = (
+      await call(started.port, "POST", exportPath, {
+        headers: { cookie: anon.header(), ...(csrf ? { "x-csrf-token": csrf } : {}) },
+      })
+    ).status;
+    const grant = await started.runtime.store.grantUserAccess(
+      { displayName: "Export72 Viewer", email: "export72-viewer@example.test" },
+      "owner",
+    );
+    const token = grant.invite.token;
+    const cookies = jar();
+    const page = await call(
+      started.port,
+      "GET",
+      "/auth/email/callback?token=" + encodeURIComponent(token),
+    );
+    cookies.take(page);
+    const form = page.body.toString("utf8").match(/name="_csrf" value="([^"]+)"/)?.[1];
+    if (!form) fail("oracle", "viewer login form");
+    const body = "token=" + encodeURIComponent(token) + "&_csrf=" + encodeURIComponent(form);
+    const login = await call(started.port, "POST", "/auth/email/callback", {
+      headers: {
+        cookie: cookies.header(),
+        origin: "http://localhost",
+        "content-type": "application/x-www-form-urlencoded",
+        "content-length": Buffer.byteLength(body),
+      },
+      body,
+    });
+    cookies.take(login);
+    if (login.status !== 302) fail("oracle", "viewer login " + login.status);
+    const session = await csrfFor(started.port, cookies);
+    viewer = (
+      await call(started.port, "POST", exportPath, {
+        headers: { cookie: cookies.header(), "x-csrf-token": session.csrf },
+      })
+    ).status;
+    if (readdirSync(dir).length !== 0) fail("oracle", "denied request persisted a file");
+  } finally {
+    await stopApp(started);
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // Visible write error: a max export that cannot fit in the remaining output space.
+  const filler = OUTPUT_MOUNT + "/filler.bin";
+  fillOutput(filler, OUTPUT_CAP - 1048576);
+  const maxFixture = caseFile.fixtures.find((item) => item.id === "max");
+  const errDir = OUTPUT_MOUNT + "/writeerr";
+  const errApp = await startApp(appModule, errDir, true);
+  let writeErrorStatus;
+  let writeErrorLeftovers;
+  try {
+    const storagePath = "/tmp/export72-max.bin";
+    for (const [index, filename] of caseFile.maxAttachments.names.entries()) {
+      await errApp.runtime.store.addAttachment({
+        id: "export72-writeerr-" + index,
+        situationId: SITUATION,
+        filename,
+        contentType: "application/octet-stream",
+        size: maxFixture.payloadBytes,
+        sha256: sha256(raw),
+        createdAt: caseFile.clock,
+        storagePath,
+      });
+    }
+    const cookies = jar();
+    const { csrf } = await csrfFor(errApp.port, cookies);
+    const response = await call(errApp.port, "POST", "/api/situations/" + SITUATION + "/exports", {
+      headers: { cookie: cookies.header(), "x-csrf-token": csrf },
+    });
+    writeErrorStatus = response.status;
+    writeErrorLeftovers = readdirSync(errDir).length;
+  } finally {
+    await stopApp(errApp);
+    rmSync(errDir, { recursive: true, force: true });
+    rmSync(filler, { force: true });
+  }
+  // Real client disconnect: abort right after sending; no partial export may remain.
+  const dropDir = OUTPUT_MOUNT + "/disconnect";
+  const dropApp = await startApp(appModule, dropDir, true);
+  let disconnectPartials;
+  let disconnectPersisted;
+  try {
+    const cookies = jar();
+    const { csrf } = await csrfFor(dropApp.port, cookies);
+    await new Promise((resolve) => {
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port: dropApp.port,
+        method: "POST",
+        path: "/api/situations/" + SITUATION + "/exports",
+        headers: { cookie: cookies.header(), "x-csrf-token": csrf },
+      });
+      req.on("error", () => resolve());
+      req.end(() => setImmediate(() => req.destroy()));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    disconnectPartials = 0;
+    disconnectPersisted = 0;
+    for (const name of readdirSync(dropDir)) {
+      const id = name.replace(/^export-|\.zip$/g, "");
+      const record = await dropApp.runtime.store.getExport(id, SITUATION, LOGIN);
+      try {
+        readZip(readFileSync(join(dropDir, name)));
+        if (!record) throw new Error("unrecorded");
+        disconnectPersisted += 1;
+      } catch {
+        disconnectPartials += 1;
+      }
+    }
+  } finally {
+    await stopApp(dropApp);
+    rmSync(dropDir, { recursive: true, force: true });
+  }
+  return {
+    overcapErrno: over.code,
+    overcapPartialBytes: over.bytes,
+    controls: {
+      anonymous,
+      viewer,
+      writeErrorStatus,
+      writeErrorLeftovers,
+      disconnectPartials,
+      disconnectPersisted,
+    },
+  };
+}
+
+async function runPersisted(appModule, caseFile, raw) {
+  const fixtures = [];
+  for (const fixture of caseFile.fixtures) {
+    fixtures.push(await runPersistedFixture(appModule, caseFile, fixture, raw));
+  }
+  const controls = await persistedControls(appModule, caseFile, raw); // needs /tmp max backing file
+  if (readdirSync(OUTPUT_MOUNT).length !== 0) fail("oracle", "output mount not clean");
+  return {
+    backend: "MemoryStore",
+    devAuthBypassLabel: "authored-development-owner-fixture",
+    capBytes: OUTPUT_CAP,
+    scratchOverRejected: true,
+    ...controls,
+    fixtures,
+  };
+}
+
 function hwmBytes() {
   const status = readFileSync("/proc/self/status", "utf8");
   const match = status.match(/^VmHWM:\s+(\d+)\s+kB$/m);
@@ -1155,6 +1541,7 @@ async function qualify() {
   try {
     trace("imports");
     const isBaseline = process.argv[5] === "--baseline";
+    const isPersisted = process.argv[5] === "--persisted";
     if (
       !isBaseline &&
       readdirSync("/app/apps/server/dist").some((name) => name.startsWith("export.baseline"))
@@ -1173,15 +1560,20 @@ async function qualify() {
       fail("identity", "MemoryStore");
     const modules = { export: exportModule, store: storeModule };
     const baseline = [];
-    for (const fixture of caseFile.fixtures) {
+    let persisted = null;
+    if (isPersisted) {
+      trace("persisted");
+      persisted = await runPersisted(await import("/app/apps/server/dist/app.js"), caseFile, raw);
+    }
+    for (const fixture of isPersisted ? [] : caseFile.fixtures) {
       trace(`fixture-${fixture.id}`);
       const first = await runFixture(modules, caseFile, fixture, raw);
       const second = await runFixture(modules, caseFile, fixture, raw);
       assertStableMembers(first.members, second.members);
       baseline.push(first, second);
     }
-    if (baseline.length !== 6) fail("oracle", "baseline count");
-    const pdfByteStable = baseline.every((item, index) => {
+    if (!isPersisted && baseline.length !== 6) fail("oracle", "baseline count");
+    const pdfByteStable = isPersisted || baseline.every((item, index) => {
       if (index % 2 === 1) return true;
       const left = item.members.find((member) => member.name === "situasjonsbrief.pdf");
       const right = baseline[index + 1].members.find(
@@ -1224,9 +1616,12 @@ async function qualify() {
       hwmBytes: peak,
       pdfByteStable,
       ...(graph ? { baseline: graph } : {}),
+      ...(persisted ? { persisted } : {}),
     };
     trace("complete");
-    process.stdout.write(`${JSON.stringify(receipt)}\n`);
+    process.stdout.write(`${JSON.stringify(receipt)}\n`, () => {
+      if (isPersisted) process.exit(0); // createApp leaves timers running
+    });
   } finally {
     restoreClock();
   }

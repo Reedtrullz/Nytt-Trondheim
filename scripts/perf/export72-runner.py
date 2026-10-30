@@ -207,7 +207,8 @@ def parse_case(path: Path) -> Case:
     )
 
 
-def create_argv(case: Case, *, name: str, label: str, image_id: str, probe_dir: Path) -> list[str]:
+def create_argv(case: Case, *, name: str, label: str, image_id: str, probe_dir: Path, persisted: bool = False) -> list[str]:
+    output = ["--tmpfs", f"{OUTPUT_MOUNT}:rw,nosuid,nodev,noexec,size={OUTPUT_BYTES},mode=1777"] if persisted else []
     return [
         "docker", "create", "--interactive", "--pull", "never", "--name", name,
         "--label", f"portfolio.run={label}", "--network", "none", "--read-only",
@@ -216,13 +217,15 @@ def create_argv(case: Case, *, name: str, label: str, image_id: str, probe_dir: 
         "--pids-limit", str(case.limits.pids), "--cpus", str(case.limits.cpus),
         "--ipc", "none", "--no-healthcheck", "--log-driver", "none", "--user", case.runtime_user,
         "--tmpfs", f"/tmp:rw,nosuid,nodev,noexec,size={case.limits.tmpfs_bytes},mode=1777",
+        *output,
         "--mount", f"type=bind,src={probe_dir},dst=/perf,readonly",
         "--entrypoint", "node", image_id, "/perf/export72-probe.mjs", "--qualify", "--case",
         "/perf/export72-case.json",
+        *(["--persisted"] if persisted else []),
     ]
 
 
-def admit_host_config(info: dict[str, object], *, image_id: str, user: str, probe_dir: str) -> None:
+def admit_host_config(info: dict[str, object], *, image_id: str, user: str, probe_dir: str, persisted: bool = False) -> None:
     host = mapping(info.get("HostConfig"))
     config = mapping(info.get("Config"))
     if host.get("NetworkMode") != "none":
@@ -243,9 +246,11 @@ def admit_host_config(info: dict[str, object], *, image_id: str, user: str, prob
     if log_config.get("Type") != "none" or host.get("PortBindings"):
         raise Rejection("limits", "logging or ports")
     tmpfs_map = mapping(host.get("Tmpfs")) if host.get("Tmpfs") is not None else {}
-    if set(tmpfs_map) != {"/tmp"}:
+    if set(tmpfs_map) != ({"/tmp", OUTPUT_MOUNT} if persisted else {"/tmp"}):
         raise Rejection("scratch", "tmpfs")
     parse_tmpfs(tmpfs_map.get("/tmp"))
+    if persisted:
+        parse_tmpfs(tmpfs_map.get(OUTPUT_MOUNT), OUTPUT_BYTES)
     if config.get("User") != user or info.get("Image") != image_id:
         raise Rejection("image", "user or image")
     health = mapping(config.get("Healthcheck")) if config.get("Healthcheck") is not None else {}
@@ -254,7 +259,7 @@ def admit_host_config(info: dict[str, object], *, image_id: str, user: str, prob
     mount_value = info.get("Mounts")
     if not isinstance(mount_value, list):
         raise Rejection("source", "mount allowlist")
-    admit_mount_list([mapping(item) for item in mount_value], probe_dir)
+    admit_mount_list([mapping(item) for item in mount_value], probe_dir, output=persisted)
     binds = host.get("Binds") if host.get("Binds") is not None else []
     if not isinstance(binds, list) or any(not isinstance(item, str) or item != f"{probe_dir}:/perf:ro" for item in binds):
         raise Rejection("source", "mount allowlist")
@@ -262,9 +267,11 @@ def admit_host_config(info: dict[str, object], *, image_id: str, user: str, prob
     if host_mounts is not None:
         if not isinstance(host_mounts, list):
             raise Rejection("source", "mount allowlist")
-        admit_mount_list([mapping(item) for item in host_mounts], probe_dir, requested=True)
+        admit_mount_list([mapping(item) for item in host_mounts], probe_dir, requested=True, output=persisted)
 
 
+OUTPUT_MOUNT: Final = "/export-output"
+OUTPUT_BYTES: Final = "67108864"  # owner-approved 2026-10-30, persisted profile only
 ADMITTED_TMPFS: Final = {
     "rw": None,
     "nosuid": None,
@@ -275,7 +282,7 @@ ADMITTED_TMPFS: Final = {
 }
 
 
-def parse_tmpfs(options: object) -> None:
+def parse_tmpfs(options: object, size: str = "16777216") -> None:
     if not isinstance(options, str) or not options:
         raise Rejection("scratch", "tmpfs")
     seen: dict[str, str | None] = {}
@@ -283,14 +290,14 @@ def parse_tmpfs(options: object) -> None:
         if not part or "=" in part[:-1] and part.endswith("="):
             raise Rejection("scratch", "tmpfs")
         key, value = part.split("=", 1) if "=" in part else (part, None)
-        if key not in ADMITTED_TMPFS or key in seen or ADMITTED_TMPFS[key] != value:
+        if key not in ADMITTED_TMPFS or key in seen or (size if key == "size" else ADMITTED_TMPFS[key]) != value:
             raise Rejection("scratch", "tmpfs")
         seen[key] = value
     if set(seen) != set(ADMITTED_TMPFS):
         raise Rejection("scratch", "tmpfs")
 
 
-def admit_mount_list(mounts: list[dict[str, object]], probe_dir: str, *, requested: bool = False) -> None:
+def admit_mount_list(mounts: list[dict[str, object]], probe_dir: str, *, requested: bool = False, output: bool = False) -> None:
     # Docker request mounts use Target/ReadOnly; inspect mountpoints use Destination/RW.
     saw_probe = False
     for item in mounts:
@@ -312,7 +319,7 @@ def admit_mount_list(mounts: list[dict[str, object]], probe_dir: str, *, request
                 raise Rejection("source", "probe mount")
             saw_probe = True
             continue
-        if destination == "/tmp" and item.get("Type") == "tmpfs":
+        if destination in ({"/tmp", OUTPUT_MOUNT} if output else {"/tmp"}) and item.get("Type") == "tmpfs":
             continue
         raise Rejection("source", "mount allowlist")
     if not saw_probe:
@@ -693,6 +700,7 @@ def retain_receipt(
     canary_before: tuple[int, int, int],
     canary_after: tuple[int, int, int],
     stopped: Mapping[str, object],
+    persisted: bool = False,
 ) -> dict[str, object]:
     if not image_id.startswith("sha256:"):
         raise Rejection("image", "image identity")
@@ -733,6 +741,11 @@ def retain_receipt(
         raise Rejection("identity", "persisted zip not from witness")
     if derived or total > 16777216:
         raise Rejection("oracle", "persisted zip")
+    output = receipt.get("persisted")
+    if (output is not None) != persisted:
+        raise Rejection("oracle", "persisted profile receipt mismatch")
+    if output is not None:
+        check_persisted_receipt(mapping(output, "oracle"))
     graph = receipt.get("baseline")
     if graph is not None:
         graph_map = mapping(graph, "identity")
@@ -762,7 +775,34 @@ def retain_receipt(
         "persistedZip": derived,
         "network": receipt.get("network"),
         **({"baseline": graph} if graph is not None else {}),
+        **({"persisted": output} if output is not None else {}),
     }
+
+
+def check_persisted_receipt(output: Mapping[str, object]) -> None:
+    cap = int(OUTPUT_BYTES)
+    if output.get("backend") != "MemoryStore" or output.get("devAuthBypassLabel") != "authored-development-owner-fixture":
+        raise Rejection("oracle", "persisted labels")
+    if output.get("capBytes") != cap or output.get("overcapErrno") != "ENOSPC" or output.get("scratchOverRejected") is not True:
+        raise Rejection("oracle", "persisted kernel cap")
+    partial = output.get("overcapPartialBytes")
+    if type(partial) is not int or not 0 < partial <= cap:
+        raise Rejection("oracle", "persisted partial witness")
+    fixtures = output.get("fixtures")
+    if not isinstance(fixtures, list) or [mapping(item, "oracle").get("id") for item in fixtures] != ["empty", "small", "max"]:
+        raise Rejection("oracle", "persisted fixtures")
+    for item in fixtures:
+        entry = mapping(item, "oracle")
+        zip_bytes, peak = entry.get("zipBytes"), entry.get("outputPeakBytes")
+        if entry.get("status") != 200 or entry.get("getExact") is not True or entry.get("cleaned") is not True:
+            raise Rejection("oracle", f"persisted fixture {entry.get('id')}")
+        if type(zip_bytes) is not int or type(peak) is not int or not 0 < zip_bytes <= peak <= cap:
+            raise Rejection("oracle", "persisted output size")
+    controls = mapping(output.get("controls"), "oracle")
+    if controls.get("anonymous") not in {401, 403} or controls.get("viewer") != 403 or controls.get("writeErrorStatus") != 500:
+        raise Rejection("oracle", "persisted denial controls")
+    if controls.get("writeErrorLeftovers") != 0 or controls.get("disconnectPartials") != 0:
+        raise Rejection("oracle", "persisted cleanup controls")
 
 
 def dialog(
@@ -943,7 +983,7 @@ def remove_exact(container_id: str, label: str, budget: Budget, *, descendants: 
     return stopped
 
 
-def qualify(case_path: Path, *, baseline: bool = False) -> None:
+def qualify(case_path: Path, *, baseline: bool = False, persisted: bool = False) -> None:
     case = parse_case(case_path)
     probe = ROOT / "scripts/perf/export72-probe.mjs"
     raw_case = mapping(json.loads(case_path.read_text()))
@@ -968,7 +1008,7 @@ def qualify(case_path: Path, *, baseline: bool = False) -> None:
         case_sha = file_sha256(owned / "export72-case.json")
         canary.positive()
         before = canary.snapshot()
-        argv = create_argv(case, name=f"export72-{label}", label=label, image_id=image_id, probe_dir=owned)
+        argv = create_argv(case, name=f"export72-{label}", label=label, image_id=image_id, probe_dir=owned, persisted=persisted)
         if baseline:
             argv.append("--baseline")
         if any(" " in item for item in argv[1:]):
@@ -991,14 +1031,14 @@ def qualify(case_path: Path, *, baseline: bool = False) -> None:
                     mount = mapping(item)
                     record = {field: mount.get(field) for field in fields}
                     for destination in ("Target", "Destination"):
-                        if destination in record and record[destination] not in {"/perf", "/tmp"}:
+                        if destination in record and record[destination] not in {"/perf", "/tmp", OUTPUT_MOUNT}:
                             record[destination] = "<other>"
                     record["sourceMatchesOwned"] = mount.get("Source") == str(owned)
                     projected.append(record)
                 mount_facts[key] = projected
         mount_facts["hostConfig"] = {key: config.get(key) for key in ("Memory", "MemorySwap", "PidsLimit", "NanoCpus", "NetworkMode", "IpcMode", "ReadonlyRootfs", "Privileged", "CapDrop", "SecurityOpt", "Tmpfs")}
         budget.trace("admission", requestedMounts=mount_facts.get("requestedMounts"), effectiveMounts=mount_facts.get("effectiveMounts"), hostConfig=mount_facts.get("hostConfig"))
-        admit_host_config(info, image_id=image_id, user=case.runtime_user, probe_dir=str(owned))
+        admit_host_config(info, image_id=image_id, user=case.runtime_user, probe_dir=str(owned), persisted=persisted)
 
         def on_ready(ready: dict[str, object]) -> dict[str, object]:
             nonlocal observed_pid
@@ -1054,6 +1094,7 @@ def qualify(case_path: Path, *, baseline: bool = False) -> None:
             canary_before=before,
             canary_after=after,
             stopped=stopped,
+            persisted=persisted,
         )
     except Rejection as exc:
         primary = exc
@@ -1661,6 +1702,24 @@ def self_check() -> None:
     beside["HostConfig"] = beside_config
     admit_host_config(beside, image_id="sha256:abc", user="1000:1000", probe_dir="/owned")
     print("PASS tmpfs beside probe", flush=True)
+    persisted_tmpfs = {"/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777", OUTPUT_MOUNT: f"rw,nosuid,nodev,noexec,size={OUTPUT_BYTES},mode=1777"}
+
+    def persisted_host(tmpfs: dict[str, str], persisted: bool = True) -> None:
+        current = sample_host()
+        config = mapping(current.get("HostConfig"))
+        config["Tmpfs"] = tmpfs
+        current["HostConfig"] = config
+        admit_host_config(current, image_id="sha256:abc", user="1000:1000", probe_dir="/owned", persisted=persisted)
+
+    persisted_host(persisted_tmpfs)
+    print("PASS persisted output mount", flush=True)
+    expect("scratch", lambda: persisted_host({"/tmp": persisted_tmpfs["/tmp"]}))
+    expect("scratch", lambda: persisted_host(persisted_tmpfs, persisted=False))
+    expect("scratch", lambda: persisted_host({**persisted_tmpfs, OUTPUT_MOUNT: persisted_tmpfs[OUTPUT_MOUNT].replace(OUTPUT_BYTES, "134217728")}))
+    expect("scratch", lambda: persisted_host({**persisted_tmpfs, OUTPUT_MOUNT: persisted_tmpfs[OUTPUT_MOUNT].replace("noexec,", "")}))
+    expect("scratch", lambda: persisted_host({**persisted_tmpfs, "/tmp": persisted_tmpfs["/tmp"].replace("16777216", OUTPUT_BYTES)}))
+    expect("scratch", lambda: persisted_host({**persisted_tmpfs, "/var": persisted_tmpfs["/tmp"]}))
+    print("PASS persisted output cap negatives", flush=True)
     probe_request = {"Type": "bind", "Source": "/owned", "Target": "/perf", "ReadOnly": True}
 
     def admit_changed(change: Callable[[dict[str, object]], None]) -> None:
@@ -1980,6 +2039,9 @@ def main(argv: list[str]) -> int:
             return 0
         case ["--qualify-baseline", "--case", path]:
             qualify(Path(path), baseline=True)
+            return 0
+        case ["--qualify-persisted", "--case", path]:
+            qualify(Path(path), persisted=True)
             return 0
         case _:
             raise Rejection("usage", "expected --self-check or --qualify --case PATH")
