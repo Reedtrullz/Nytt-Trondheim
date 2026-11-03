@@ -85,3 +85,44 @@ export async function pruneExpiredData(
   );
   return result;
 }
+
+// Hourly: windows are measured in days, so this bounds table growth without
+// adding load next to the 60s vehicle and 10min collection ticks.
+export const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
+
+export function createRetentionScheduler(
+  prune: () => Promise<unknown>,
+  log: Pick<Console, "log" | "warn"> = console,
+  intervalMs = RETENTION_INTERVAL_MS,
+) {
+  let running: Promise<void> | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  const runNow = (): Promise<void> => {
+    if (running) {
+      log.warn("[worker] skipping retention pass; previous pass still running");
+      return running;
+    }
+    running = (async () => {
+      try {
+        log.log(`[worker] retention pruned: ${JSON.stringify(await prune())}`);
+      } catch (error) {
+        log.warn(`[worker] retention prune failed: ${String(error)}`);
+      }
+    })().finally(() => {
+      // Cleared after the assignment above, so a synchronous prune throw cannot leave it set.
+      running = undefined;
+    });
+    return running;
+  };
+  return {
+    runNow,
+    start() {
+      timer ??= setInterval(() => void runNow(), intervalMs);
+    },
+    async stop() {
+      clearInterval(timer);
+      timer = undefined;
+      await running;
+    },
+  };
+}
