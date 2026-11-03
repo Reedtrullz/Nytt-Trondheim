@@ -13,7 +13,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import process from "node:process";
@@ -910,6 +910,26 @@ async function selfCheck() {
   } finally {
     clearInterval(handle);
   }
+  const beforeServer = ownedResources();
+  const server = createServer(() => {});
+  let client;
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    expectError(() => assertLifecycle(beforeServer, ownedResources()), "lifecycle leaked TCP");
+    client = connect({ host: "127.0.0.1", port: server.address().port });
+    await new Promise((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+    expectError(() => assertLifecycle(beforeServer, ownedResources()), "lifecycle leaked TCP");
+    client.destroy();
+    await new Promise((resolve) => client.once("close", resolve));
+    await stopApp({ runtime: {}, server });
+    assertLifecycle(beforeServer, ownedResources());
+  } finally {
+    client?.destroy();
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  }
   const seenOnce = { requestsObserved: 1, responseFinished: false, responseClosedEarly: true };
   assertDisconnect({ ...seenOnce, persisted: 1, partials: 0 });
   expectError(() => assertDisconnect({ ...seenOnce, requestsObserved: 0 }), "request not observed");
@@ -1252,6 +1272,7 @@ async function stopApp(started) {
   const closed = new Promise((resolve) => started.server.close(() => resolve()));
   started.server.closeAllConnections();
   await closed;
+  await new Promise((resolve) => setTimeout(resolve, 10));
   await started.runtime.pool?.end();
 }
 
