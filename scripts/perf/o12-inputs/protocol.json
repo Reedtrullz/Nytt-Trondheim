@@ -1,0 +1,299 @@
+{
+ "seriesId": "series-3-baseline-repair-20261023",
+ "status": "PRE_CANDIDATE_FROZEN",
+ "noCandidateObserved": true,
+ "workload": {
+  "id": "W1",
+  "domain": 10000,
+  "repeats": 3,
+  "scenarios": [
+   "A14",
+   "A15",
+   "A16",
+   "A17",
+   "A18",
+   "A19",
+   "A20",
+   "A21",
+   "A22",
+   "A23",
+   "A26",
+   "A27",
+   "A35",
+   "A09",
+   "A10",
+   "A13",
+   "A30",
+   "A31",
+   "A34",
+   "A01",
+   "A02",
+   "A04",
+   "A06",
+   "A07",
+   "A12",
+   "A33",
+   "B01"
+  ],
+  "textSet": [
+   "A14",
+   "A15",
+   "A16",
+   "A17",
+   "A18",
+   "A19",
+   "A20",
+   "A21",
+   "A22",
+   "A23",
+   "A26",
+   "A27",
+   "A35"
+  ],
+  "sportSet": [
+   "A09",
+   "A10",
+   "A13",
+   "A30",
+   "A31",
+   "A34"
+  ],
+  "ordinarySet": [
+   "A01",
+   "A02",
+   "A04",
+   "A06",
+   "A07",
+   "A12",
+   "A33",
+   "B01"
+  ]
+ },
+ "primaryMetric": "text_query_ms: sum over W1.textSet calls (3 repeats) of PgStore composed pg.Pool.query elapsed ms per invocation. The elapsed time includes the docker-exec stdio transport and the pg driver, so it is not database execution time (EXPLAIN is separate). No HTTP or production claim.",
+ "decisionRule": "ORIGINAL plan lines 98-106 via work/portfolio-performance/tools/decisions.py: 5 B/B pilot pairs -> median absolute relative difference noise per timing metric; 4 discarded warm; 10 AB/BA pairs; median paired relative improvement > max(5%, 2*noise) AND 95% paired bootstrap lower bound > 0 (2000 resamples, seed 1127); baselines finite and strictly positive; secondary timing regression beyond max(5%, 2*noise) rejects; deterministic counters (rows, bytes, query count: totals and per scenario over the full workload) must not increase; no product budget was found for this workload.",
+ "timingMetrics": [
+  "text_query_ms (primary)",
+  "text_driver_ms",
+  "sport_query_ms",
+  "ordinary_query_ms"
+ ],
+ "invocations": [
+  {
+   "n": 1,
+   "phase": "pilot-pair-1",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 2,
+   "phase": "pilot-pair-1",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 3,
+   "phase": "pilot-pair-2",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 4,
+   "phase": "pilot-pair-2",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 5,
+   "phase": "pilot-pair-3",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 6,
+   "phase": "pilot-pair-3",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 7,
+   "phase": "pilot-pair-4",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 8,
+   "phase": "pilot-pair-4",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 9,
+   "phase": "pilot-pair-5",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 10,
+   "phase": "pilot-pair-5",
+   "role": "B",
+   "kind": "pilot"
+  },
+  {
+   "n": 11,
+   "phase": "discarded-warm-1",
+   "role": "B",
+   "kind": "warm"
+  },
+  {
+   "n": 12,
+   "phase": "discarded-warm-2",
+   "role": "B",
+   "kind": "warm"
+  },
+  {
+   "n": 13,
+   "phase": "discarded-warm-3",
+   "role": "B",
+   "kind": "warm"
+  },
+  {
+   "n": 14,
+   "phase": "discarded-warm-4",
+   "role": "B",
+   "kind": "warm"
+  },
+  {
+   "n": 15,
+   "phase": "pair-1",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 16,
+   "phase": "pair-1",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 17,
+   "phase": "pair-2",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 18,
+   "phase": "pair-2",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 19,
+   "phase": "pair-3",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 20,
+   "phase": "pair-3",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 21,
+   "phase": "pair-4",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 22,
+   "phase": "pair-4",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 23,
+   "phase": "pair-5",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 24,
+   "phase": "pair-5",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 25,
+   "phase": "pair-6",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 26,
+   "phase": "pair-6",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 27,
+   "phase": "pair-7",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 28,
+   "phase": "pair-7",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 29,
+   "phase": "pair-8",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 30,
+   "phase": "pair-8",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 31,
+   "phase": "pair-9",
+   "role": "B",
+   "kind": "pair"
+  },
+  {
+   "n": 32,
+   "phase": "pair-9",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 33,
+   "phase": "pair-10",
+   "role": "A",
+   "kind": "pair"
+  },
+  {
+   "n": 34,
+   "phase": "pair-10",
+   "role": "B",
+   "kind": "pair"
+  }
+ ],
+ "invocationReceiptCount": 34,
+ "extensionPolicy": "none: count fixed before candidate measurement",
+ "perInvocationScratchCapBytes": 16777216,
+ "fixtureCapBytes": 134217728,
+ "unavailableDimensions": [
+  "HTTP/TCP transport",
+  "production or live provider data",
+  "cold cache",
+  "concurrency",
+  "real data volume (synthetic 10k only)",
+  "native arm64 execution (emulated amd64 fixture)",
+  "disk-backed storage (data dir is tmpfs)"
+ ]
+}

@@ -1,0 +1,54 @@
+{
+ "seriesId": "series-3-baseline-repair-20261023",
+ "frozenAt": "2026-10-23T03:46:46.592Z",
+ "supersedes": "baseline series-2 (statistics used mean and a fixed 2 ms floor; invocation path untested). Not pooled.",
+ "seed": 20261023,
+ "sourceCommit": "3da7c50df4794debc1a6d2854068f1cca611f7bb",
+ "sourceTree": "3dedcecfafe4559e9c8971427afffe4ab13a7fbe",
+ "sourceTrackedStatus": "clean",
+ "sourceStoreSha256": "195ef03f3ab12553055ec970ddb8ec8d0a163816a2e27834667f3361eaa8cc29",
+ "sourceSchemaSha256": "ef8b14de217a9becbabf0092ced91d73e164a59d1a668f0d00b31724a519cfc4",
+ "lockSha256": "0b723f8362fc451e9389b77604008aeda46d63abe3cfbfdc034eb4c0e040c7c1",
+ "node": "v22.22.3",
+ "image": "sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5",
+ "corpusDigest10000": "2ee939494670b19488bc653516cb8ebd3168414bb095ba52b30bdbc7bcb03f2f",
+ "fixtureDigest": {
+  "a": "607a51012c8e49321c472251275aa8ea",
+  "s": "c4f44ddb7b76a7befeff78fb80ff36fc",
+  "t": "e7f60ba3fc7dc1c8c51fa126da0b6c2a",
+  "n": 10000
+ },
+ "corpusGeneratorDigests": {
+  "1000": "f73577de836127553c40dd1dd132b1a56eb1f23b7987ae349c00bb46f157c4ef",
+  "10000": "2ee939494670b19488bc653516cb8ebd3168414bb095ba52b30bdbc7bcb03f2f"
+ },
+ "scenarioCatalogDigest": "86df8a308d31052d25fb6ad82b6be8b7e6856742d93d9187fc7f77f134d84699",
+ "harness": {
+  "corpus.mts": "c0d10c610a487198fd098a2bf8607adb50e86b0eb8e3bc340562b15ddf6b8143",
+  "run.mts": "235f572228c76117950b27041a8d784ceea18ffb34c2e749414414c30b599739",
+  "corpus-selftest.mts": "1606d05cfe9e65b34efbbea4325a0b6c4e7908a2b04b85c432c826eea8f9c73a",
+  "freeze.mts": "f71f5148f1dea53ec6e5eb73aabc361f42e3c9b41b01d2c6a10b05dca477b18b",
+  "analyze3.py": "c0b6024da9da4ca08483eafd2b00fa60835f58dec4375ccb8b79a5d2806570f8",
+  "test_analyze3.py": "166fadab3f723a6e3d79db6ff9d8c7bed25e01128a5ebfc87bb3dba4aa5f53d3",
+  "pyrightconfig.json": "fe529eeafdfdf5e3d985de5791136e8b74632055a676442ecd1c65473227ceb0",
+  "run-invocation.sh": "84e607e7e604bcc75a6016237d30eb68feed22928a4f5664ef1b5368b6711edc",
+  "tsconfig.json": "59ef7243964e3e8a33f9fd1bd7aef076c731e0f38409570a524c4d30331f7141",
+  "preload-pgstdio.cjs": "8d6d4e24bbb70be6a447bdbeeda7db1a1e682b640b793f7989ae7c9fe6edd38d",
+  "start-container.sh": "218b70258e8893ce36f3f9dcaf655b6eb616a9556d02fd91db2b08bbd3e77700",
+  "teardown.sh": "19360fabee0972dc26a86cd7fb4cb9dc48a2de0b340674dd87d487d9d92a1e0f",
+  "role-setup.sql": "8cf112ec6b49cc00065dd9148bde876751a2bb14608494ae157b5d987ccc49e8",
+  "env.sh": "df04465b59959337ae125fcb5aaddc2faf51f509c40f4efb7e5b3c1d582b71e2",
+  "rec.sh": "618661ffdf5ebc80ef89610a835eada240d94eb8699a3b85f608a16918d68970",
+  "protocol.json": "71fb9327989f7f7145cce9ed7d8e80edff542968b6a8d4c60496f48d274806ac",
+  "workload-W1.json": "eaff910baf80c9ba7b3433e0e70c42f5c3230eedc33d2f0e32ca7a15f07a840f",
+  "oracle-W1.json": "15c22cde244bffd9cef095cc6ff279d864d9e9d2905b39100761e4dda26ea815",
+  "seed.json": "40fef04a8e5683f30af3f5f39e125836178a02cd43d03f176db7118adb03c163"
+ },
+ "sharedHelpersReadOnly": {
+  "decisions.py": "eccab4d1fa39fb0fe2d5139be2af1dc5903ba9d311d780165798a571e11b0ffa",
+  "protocol.py": "d8e67e9eb19673fb8b54bead9f3a821298100864dc1d9c15320c7ddca72f4892",
+  "measure.py": "dc81f29edc72f1d9908eacf33d2b8559c77338e5fa7ae0039db0c5d4bd56ac3b",
+  "native.py": "e9fc7d46ce33bb4532d712df3d0107bad0d24f1b4c96c7c73a1671b5eefc9fe9",
+  "compare.py": "8c8c07bc9c33383cda3b68734076bbb9c73d4e694904a1d5a235fe239c713b4a"
+ }
+}

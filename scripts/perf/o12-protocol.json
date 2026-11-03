@@ -1,0 +1,74 @@
+{
+  "schema": "nytt-o12-measurement-preparation/v1",
+  "observation": "UNOBSERVED",
+  "task": 12,
+  "historicalT12Json": false,
+  "productPerformanceObservations": 0,
+  "caseReadAuthorized": false,
+  "scratchBytes": 16777216,
+  "exportOutputBytes": 67108864,
+  "dbRamBytes": 536870912,
+  "dbDataBytes": 134217728,
+  "outerTimeoutS": 120,
+  "innerTimeoutS": 110,
+  "streamBytes": 1048576,
+  "dbPids": 128,
+  "dbCpus": 1,
+  "pairs": 10,
+  "pilotPairs": 5,
+  "warmPairs": 2,
+  "bootstrapResamples": 2000,
+  "bootstrapSeed": 1127,
+  "expensivePairsAdmitted": false,
+  "phases": [
+    "baseline",
+    "candidate"
+  ],
+  "baseline": {
+    "storeSha256": "60a263f15d21fadcb63bddb1cf2b6e70d565f3491bbdb9981914793fa2a97b15",
+    "testSha256": "0ad16c3e50413f2c237fcc36168ef4c899bf71cd2c0ddf34805a5926e03f9545",
+    "querySource": "c1a7a5d9ebb775bcd50963684b0b0d16ea16c5a6",
+    "retentionSource": "424ebdae36db34cb02ed86afcad2710d92b3e7a4"
+  },
+  "candidate": {
+    "storeSha256": "0eaa087fa771b154481c16eafa984a6c0b92ebfaed82b6da4de20757f4cb5e37",
+    "testSha256": "d9334d5f4f9be7c79226f470d894fdaf409a04ed7090d8a6a7453e3dc0229a29",
+    "querySource": "424ebdae36db34cb02ed86afcad2710d92b3e7a4",
+    "retentionSource": "424ebdae36db34cb02ed86afcad2710d92b3e7a4"
+  },
+  "inputs": [
+    {
+      "name": "corpus.mts",
+      "sha256": "c0d10c610a487198fd098a2bf8607adb50e86b0eb8e3bc340562b15ddf6b8143"
+    },
+    {
+      "name": "run.mts",
+      "sha256": "235f572228c76117950b27041a8d784ceea18ffb34c2e749414414c30b599739"
+    },
+    {
+      "name": "protocol.json",
+      "sha256": "71fb9327989f7f7145cce9ed7d8e80edff542968b6a8d4c60496f48d274806ac"
+    },
+    {
+      "name": "frozen-manifest.json",
+      "sha256": "337ec0d8fadf291fb25def5623d4fca097f7ab41257bb0d7117955735ad2867f"
+    },
+    {
+      "name": "seed.json",
+      "sha256": "40fef04a8e5683f30af3f5f39e125836178a02cd43d03f176db7118adb03c163"
+    },
+    {
+      "name": "run-invocation.sh",
+      "sha256": "84e607e7e604bcc75a6016237d30eb68feed22928a4f5664ef1b5368b6711edc"
+    },
+    {
+      "name": "preload-pgstdio.cjs",
+      "sha256": "8d6d4e24bbb70be6a447bdbeeda7db1a1e682b640b793f7989ae7c9fe6edd38d"
+    }
+  ],
+  "decision": {
+    "tool": "work/portfolio-performance/tools/decisions.py",
+    "newTolerance": false,
+    "historicalArticleGain": "INCOMPATIBLE_OLD_SCOPE"
+  }
+}

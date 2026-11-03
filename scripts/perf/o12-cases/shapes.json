@@ -1,0 +1,158 @@
+{
+  "schema": "nytt-o12-shapes/v1",
+  "observation": "UNOBSERVED",
+  "shapes": [
+    {
+      "id": "article-text-1k",
+      "family": "article",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "scripts/perf/o12-inputs/corpus.mts buildCorpus(1000)",
+      "gap": null
+    },
+    {
+      "id": "article-text-10k",
+      "family": "article",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "scripts/perf/o12-inputs/corpus.mts buildCorpus(10000) and seed.json domain 10000",
+      "gap": null
+    },
+    {
+      "id": "article-text-maximum",
+      "family": "article",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "same frozen article generator; maximum n in seed.json is 10000",
+      "gap": "No source-supported article row count above 10000. Not extrapolated."
+    },
+    {
+      "id": "feed-pagination",
+      "family": "feed",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "PgStore.listArticles cursor and ORDER BY published_at DESC, id DESC; default limit 40",
+      "gap": null
+    },
+    {
+      "id": "map-transport-1k-10k",
+      "family": "map",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "scripts/o12-query-acceptance-smoke.ts dense/sparse datasets 1000 and 10000",
+      "gap": "Existing smoke is not rerun here and is not an M observation."
+    },
+    {
+      "id": "map-bounds-adverse",
+      "family": "map",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "original failure class empty/zero-area bounds",
+      "gap": "store.ts, o12-query-acceptance-smoke.ts and public-transport-bounds.sh in this checkout do not name a zero-area fixture."
+    },
+    {
+      "id": "operations-reads",
+      "family": "operations",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "PgStore.getOperationsStatus and getOperationsTimeline",
+      "gap": "No 1k/10k operations dataset exists in the current fixtures."
+    },
+    {
+      "id": "explain-article",
+      "family": "explain",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "listArticles SQL in apps/server/src/store.ts, future EXPLAIN (ANALYZE, BUFFERS)",
+      "gap": "Current transport smoke uses EXPLAIN (FORMAT JSON) only. Setup/seed/EXPLAIN timings stay separate from the named query metric. Not run."
+    },
+    {
+      "id": "explain-map",
+      "family": "explain",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "public-transport SQL exercised by scripts/o12-query-acceptance-smoke.ts",
+      "gap": "ANALYZE, BUFFERS is not in that smoke and is not run here."
+    },
+    {
+      "id": "retention-five-cycles",
+      "family": "retention",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "createRetentionScheduler.runNow; retention.test.ts covers one-pass behavior",
+      "gap": "Five isolated database cycles are not executed in this preparation."
+    },
+    {
+      "id": "retention-failure",
+      "family": "retention",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "createRetentionScheduler logs a rejected or thrown prune",
+      "gap": "Not executed as an M case."
+    },
+    {
+      "id": "retention-cancel",
+      "family": "retention",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "createRetentionScheduler.stop clears the timer and waits",
+      "gap": "Not executed as an M case."
+    },
+    {
+      "id": "retention-long-lived",
+      "family": "retention",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "RETENTION_INTERVAL_MS hourly start()",
+      "gap": "The hourly loop is not started here."
+    },
+    {
+      "id": "export-empty",
+      "family": "export",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "scripts/perf/export72-case.json fixture empty, 0 attachments",
+      "gap": "Runner not invoked."
+    },
+    {
+      "id": "export-small",
+      "family": "export",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "scripts/perf/export72-case.json fixture small, 1 attachment of 32 bytes",
+      "gap": "Runner not invoked."
+    },
+    {
+      "id": "export-maximum",
+      "family": "export",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "scripts/perf/export72-case.json fixture max, 25 attachments, logicalBytes 52428800; separate 64MiB output cap",
+      "gap": "Persisted ZIP size from native R13 is not an M high-water mark. Runner not invoked."
+    },
+    {
+      "id": "export-failure-visibility",
+      "family": "export",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "existing export72 error, privacy, order, CRC and disconnect checks",
+      "gap": "Not invoked. No physical IO or broad HTTP meaning is taken from preload-pgstdio.cjs."
+    },
+    {
+      "id": "geocode-reuse",
+      "family": "geocode",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "apps/worker/src/geocode.ts geocodeArticles(articles, injectedFetcher)",
+      "gap": "Reuse is the in-call Map only. No network call and no persistent cache are prepared as a measurement."
+    },
+    {
+      "id": "expand-contract",
+      "family": "parity",
+      "observation": "UNOBSERVED",
+      "measured": false,
+      "source": "no new index, schema or migration; only the two article query files differ between phases",
+      "gap": "Semantic parity is not executed in this unit."
+    }
+  ]
+}
