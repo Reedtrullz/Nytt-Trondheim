@@ -1,9 +1,10 @@
 // Real PgStore article-query workload. Frozen run.mts stays the byte reference; this file resolves pg and @nytt/shared from the selected checkout.
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { performance } from "node:perf_hooks";
+import { networkInterfaces } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as C from "./corpus.mts";
 
@@ -19,6 +20,7 @@ type Workload = { id: string; domain: number; repeats: number; scenarios: string
 type Receipt = Record<string, unknown>;
 const BIND = ["caseHash", "phase", "unit", "sample", "scenario", "revision", "fixtureDigest", "harnessDigest", "shape", "economicsDigest"] as const;
 const HERE = dirname(fileURLToPath(import.meta.url));
+let unixSocket: string | undefined;
 
 const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
 const fileSha = (p: string): string => sha(readFileSync(p).toString("utf8"));
@@ -178,6 +180,10 @@ export function completeReceipt(workload: Workload, calls: Call[], storeSha256: 
     observedFixtureDigest: observedFixture,
     corpusDigest,
   };
+  const metrics = receipt.metrics as Record<string, Receipt>;
+  for (const id of workload.scenarios) for (const field of ["rows", "bytes", "queryCount"] as const) {
+    metrics[id + "_" + field] = metric(field === "bytes" ? "bytes" : "count", sumCalls(calls, [id], field, workload.repeats));
+  }
   if (request) for (const key of BIND) receipt[key] = request[key];
   return receipt;
 }
@@ -203,6 +209,29 @@ function oracle(c: C.Corpus, sc: C.Scenario, f: C.Filters): C.Expected {
   try { return sc.kind === "list" ? C.oracleList(c, f, sc.login, fold) : { items: C.oracleSaved(c, sc.login) }; } catch (e) { return { error: errMsg(e) }; }
 }
 
+// Expected semantics are derived without PgStore, pools, SQL, or timing observations.
+export function expectedSemantics(workload: Workload, corpus: C.Corpus): string {
+  const exp: Record<string, C.Expected> = {};
+  for (const sc of C.SCENARIOS) exp[sc.id] = oracle(corpus, sc, resolveFilters(sc, exp));
+  const calls: { id: string; repeat: number; digest: string; expectedDigest: string }[] = [];
+  for (let repeat = 0; repeat < workload.repeats; repeat++) for (const id of workload.scenarios) {
+    const sc = C.SCENARIOS.find((s) => s.id === id), e = exp[id];
+    if (!sc || !e) throw new Error("unknown oracle scenario " + id);
+    const digest = outDigest(sc, e, e.error);
+    calls.push({ id, repeat, digest, expectedDigest: digest });
+  }
+  return sha(C.canon(calls));
+}
+
+export function requireSocketContext(socket: string): void {
+  if (socket !== "/tmp/pgsocket" || process.platform !== "linux" || process.getuid?.() !== 65534) throw new Error("isolated Unix socket context required");
+  if (!/^NoNewPrivs:\s+1$/m.test(readFileSync("/proc/self/status", "utf8"))) throw new Error("no-new-privileges required");
+  if (!statSync(join(socket, ".s.PGSQL.5432")).isSocket()) throw new Error("fixture socket missing");
+  const interfaces = readFileSync("/proc/net/dev", "utf8").split("\n").filter((s) => s.includes(":"));
+  if (interfaces.some((s) => s.split(":")[0]?.trim() !== "lo")) throw new Error("network namespace required");
+  if (Object.keys(networkInterfaces()).some((s) => s !== "lo")) throw new Error("external interface present");
+}
+
 type Runtime = { src: string; pgRoot: string; admin: PoolLike; serverPool: PoolLike; store: StoreLike; captured: Cap[]; realQuery: PoolLike["query"]; shared: C.Shared };
 
 function armTransport(src: string, pgRoot: string): void {
@@ -217,14 +246,17 @@ function armTransport(src: string, pgRoot: string): void {
 async function loadRuntime(src: string): Promise<Runtime> {
   const pgEntry = resolvePackageEntry(src, "pg", "import");
   const pgRoot = findPackageRoot(pgEntry, "pg");
-  armTransport(src, pgRoot);
+  if (unixSocket) requireSocketContext(unixSocket); else armTransport(src, pgRoot);
   const pgMod = await import(pathToFileURL(pgEntry).href) as { default?: PgCtor } & Partial<PgCtor>;
   const pg = pgMod.default ?? pgMod;
   if (!pg.Pool) throw new Error("pg.Pool missing");
   const shared = await import(pathToFileURL(resolvePackageEntry(src, "@nytt/shared", "default")).href) as C.Shared;
   const storeMod = await import(pathToFileURL(join(src, "apps/server/src/store.ts")).href) as { PgStore: new (pool: PoolLike, mode: string) => StoreLike };
-  const admin = new pg.Pool({ connectionString: url("fixture_admin", "fixture_admin_pw"), max: 2 });
-  const serverPool = new pg.Pool({ connectionString: url("fixture_server", "fixture_server_pw"), ...shared.buildDatabasePoolOptions("server") });
+  const connection = (user: string, password: string): Record<string, unknown> => unixSocket
+    ? { host: unixSocket, port: 5432, database: "fixture_db", user, password }
+    : { connectionString: url(user, password) };
+  const admin = new pg.Pool({ ...connection("fixture_admin", "fixture_admin_pw"), max: 2 });
+  const serverPool = new pg.Pool({ ...connection("fixture_server", "fixture_server_pw"), ...shared.buildDatabasePoolOptions("server") });
   const captured: Cap[] = [];
   const realQuery = serverPool.query.bind(serverPool);
   serverPool.query = async (text: string | { text: string }, params?: unknown[]): Promise<QueryResult> => {
@@ -351,6 +383,12 @@ async function selfCheck(): Promise<void> {
   expectThrow(() => acceptCalls([{ ...good, digest: "no" }], 1), "digest mismatch");
   expectThrow(() => acceptCalls([{ ...good, queryCount: 0 }], 1), "missing query count");
   const workload: Workload = { id: "W1", domain: 10000, repeats: 1, scenarios: ["A14", "A09", "A01"], textSet: ["A14"], sportSet: ["A09"], ordinarySet: ["A01"] };
+  const situations = C.genSituations(20);
+  const pure: C.Corpus = { n: 20, articles: C.genArticles(20, (s) => s), situations, saved: {}, featured: C.featuredSituations(situations) };
+  const oracleDigest = expectedSemantics(workload, pure);
+  if (!/^[0-9a-f]{64}$/.test(oracleDigest) || oracleDigest !== expectedSemantics(workload, pure)) throw new Error("self-check pure oracle digest");
+  expectThrow(() => expectedSemantics({ ...workload, scenarios: ["NOPE"] }, pure), "unknown oracle scenario");
+  expectThrow(() => requireSocketContext("/not-an-admitted-socket"), "isolated Unix socket context");
   const request = { caseHash: "c", phase: "baseline", unit: "pilot-0-0", sample: 0, scenario: "happy", revision: "r", fixtureDigest: "f", harnessDigest: "h", shape: "s", economicsDigest: "e" };
   const ok = completeReceipt(workload, [good, call("A09", "bb"), call("A01", "cc")], "store", "8.21.0", { a: "1", s: "2", t: "3", n: 1 }, "corpus", request);
   if (ok.status !== "complete" || ok.caseHash !== "c" || rejected("x").status === "complete") throw new Error("self-check receipt");
@@ -401,7 +439,21 @@ async function main(): Promise<void> {
   const request = process.env.MEASURE_REQUEST ? JSON.parse(process.env.MEASURE_REQUEST) as Receipt : undefined;
   bindRequest(request, phase);
   const workload = authoredWorkload(JSON.parse(readFileSync(protocolPath, "utf8")));
+  if (mode === "expected") {
+    boundStore(src, phase, storeSha);
+    const shared = await import(pathToFileURL(resolvePackageEntry(src, "@nytt/shared", "default")).href) as C.Shared;
+    const corpus = C.buildCorpus(workload.domain, shared);
+    const lock = readFileSync(join(src, "pnpm-lock.yaml"), "utf8");
+    const pgLock = lockedDependency(lock, "apps/server", "pg");
+    const pgRoot = findPackageRoot(resolvePackageEntry(src, "pg", "import"), "pg");
+    const installed = JSON.parse(readFileSync(join(pgRoot, "package.json"), "utf8")) as { version?: string };
+    if (installed.version !== pgLock) throw new Error("installed pg differs from locked graph");
+    process.stdout.write(JSON.stringify({ status: "expected", semanticDigest: expectedSemantics(workload, corpus), capabilities: { driver: "nytt-article-query", engine: "PgStore", pool: "pg", pgLock, roles: ["fixture_admin", "fixture_server"], workload: workload.id, domain: workload.domain, repeats: workload.repeats, scenarios: workload.scenarios.length, oracle: "corpus.mts" } }) + "\n");
+    return;
+  }
+  unixSocket = flag(argv, "--socket");
   if (mode === "invoke") {
+    if (unixSocket && !request) throw new Error("hosted invoke requires MEASURE_REQUEST");
     process.stdout.write(JSON.stringify(await runInvoke(src, phase, storeSha, workload, fixtureRaw, request)) + "\n");
     return;
   }

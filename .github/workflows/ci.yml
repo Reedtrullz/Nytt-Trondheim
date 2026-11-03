@@ -15,12 +15,42 @@ on:
         type: choice
         options: [none, baseline, candidate]
         default: none
+      portfolio_measure:
+        description: Run the isolated real W1 query engine on the candidate and its common parent
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  portfolio-o12-measure:
+    name: Opt-in isolated O12 W1 measurement
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.portfolio_measure == true && github.ref != 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+      - run: corepack enable
+      - name: Run the existing measure and compare engine on actual PgStore W1
+        run: bash scripts/perf/o12-hosted.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: o12-hosted-w1
+          path: .artifacts/o12-hosted-w1
+          if-no-files-found: error
+          retention-days: 7
+
   portfolio-admission:
     name: Isolated Runtime Admission
     runs-on: ubuntu-latest
