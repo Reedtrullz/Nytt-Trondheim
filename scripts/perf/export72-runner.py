@@ -1918,6 +1918,45 @@ def self_check(case_path: Path | None = None) -> None:
         "console.log(JSON.stringify({kind:'QUALIFIED',nonce:release.nonce}));\n"
     ], nonce=nonce, timeout_s=2, output_cap=65536, on_ready=lambda _ready: {})
     print("PASS real Node release terminal exit", flush=True)
+    def prove_node_release(stdin_bytes: bytes, *, reject_code: str, stderr_needle: bytes | None) -> None:
+        proc = subprocess.Popen(
+            [node, "--input-type=module", "--eval", read_line + "\n"
+             "try {\n"
+             "  const release = JSON.parse(await readLine());\n"
+             "  console.log(JSON.stringify({kind:'QUALIFIED',nonce:release.nonce}));\n"
+             "} catch (error) {\n"
+             "  console.error(error instanceof Error ? error.message : String(error));\n"
+             "  process.exitCode = 1;\n"
+             "}\n"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        try:
+            try:
+                out, err = proc.communicate(stdin_bytes, timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=1)
+                raise Rejection("timeout", "real Node release child exceeded 2s")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=1)
+        if proc.poll() is None:
+            raise Rejection("teardown", "real Node release child remains")
+        try:
+            os.kill(proc.pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise Rejection("teardown", "real Node release pid remains")
+        if proc.returncode == 0 or b"QUALIFIED" in out:
+            raise Rejection(reject_code, "real Node release accepted bad stdin")
+        if stderr_needle is not None and stderr_needle not in err:
+            raise Rejection(reject_code, "real Node release missed early close")
+    prove_node_release(b"", reject_code="protocol", stderr_needle=b"stdin closed before release")
+    print("PASS real Node early EOF rejection", flush=True)
+    prove_node_release(b"not-json\n", reject_code="protocol", stderr_needle=None)
+    print("PASS real Node malformed release rejection", flush=True)
     reserved = Budget(time.monotonic() + 1, 1048576, cleanup_seconds=0.6)
     expect("timeout", lambda: run_bounded(child("import time; time.sleep(2)"), reserved))
     spent = reserved.used

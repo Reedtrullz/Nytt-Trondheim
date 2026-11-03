@@ -980,18 +980,25 @@ async function selfCheck() {
 function readLine() {
   return new Promise((resolve, reject) => {
     let buffer = "";
+    let accepted = false;
     process.stdin.setEncoding("utf8");
+    const onEnd = () => {
+      if (!accepted) reject(new Error("stdin closed before release"));
+    };
     const onData = (chunk) => {
       buffer += chunk;
       const index = buffer.indexOf("\n");
       if (index >= 0) {
+        accepted = true;
         process.stdin.off("data", onData);
-        process.stdin.pause();
+        process.stdin.off("end", onEnd);
+        // off(data) pauses stdin and would hold the controller EOF open.
+        process.stdin.resume();
         resolve(buffer.slice(0, index));
       }
     };
     process.stdin.on("data", onData);
-    process.stdin.on("end", () => reject(new Error("stdin closed before release")));
+    process.stdin.on("end", onEnd);
   });
 }
 
