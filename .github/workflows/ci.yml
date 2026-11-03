@@ -15,10 +15,6 @@ on:
         type: choice
         options: [none, baseline, candidate]
         default: none
-      portfolio_measure:
-        description: Opt-in O12 measurement preflight on a non-main branch. Does not run a workload.
-        type: boolean
-        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -465,13 +461,3 @@ jobs:
           name: export-persisted-profile
           path: artifacts/export-persisted
           if-no-files-found: error
-
-  portfolio-o12-measure:
-    name: Opt-in O12 measurement preflight
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.portfolio_measure == true && github.ref != 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@v6
-      - name: Run the metadata adapter self-check
-        run: python3 scripts/perf/o12-measurement-adapter.py --self-check
