@@ -1304,11 +1304,12 @@ def check_failure_diagnostics() -> None:
     print("PASS failure diagnostic primary preserved during cleanup", flush=True)
 
 
-def check_qualification_cleanup(receipt: Mapping[str, object]) -> None:
+def check_qualification_cleanup(receipt: Mapping[str, object], case_path: Path | None = None) -> None:
     """Exercise qualify and its cleanup against real processes at the Docker boundary."""
     real_run = run_bounded
     real_dialog = dialog
-    case_path = ROOT / "scripts/perf/export72-case.json"
+    if case_path is None:
+        case_path = ROOT / "scripts/perf/export72-case.json"
     class BrokenDiagnostics(StringIO):
         def write(self, text: str) -> int:
             raise OSError("diagnostic sink closed")
@@ -1609,8 +1610,9 @@ def check_pipe_holder() -> None:
                               "withinTotalDeadline": time.monotonic() < pipe_budget.total_deadline}), flush=True)
 
 
-def self_check() -> None:
-    case_path = ROOT / "scripts/perf/export72-case.json"
+def self_check(case_path: Path | None = None) -> None:
+    if case_path is None:
+        case_path = ROOT / "scripts/perf/export72-case.json"
     probe = ROOT / "scripts/perf/export72-probe.mjs"
     parsed = parse_case(case_path)
     if parsed.logical_bytes != 52428800 or len(parsed.names) != 25:
@@ -2002,7 +2004,7 @@ def self_check() -> None:
     }
     witness = {"files": [{"name": "export72-ok", "type": "file", "size": 2}], "total": 2, "persistedZip": False}
     receipt = {"identity": identity, "witness": witness, "persistedZip": False, "logicalBytes": 1, "fixtures": [], "hwmBytes": 1, "network": {}}
-    check_qualification_cleanup(receipt)
+    check_qualification_cleanup(receipt, case_path)
     retained = retain_receipt(
         receipt, image_id="sha256:abc", probe_sha="a" * 64, case_sha="b" * 64, package_name="@nytt/server",
         canary_before=(0, 0, 0), canary_after=(0, 0, 0), stopped={"Status": "exited", "ExitCode": 0, "OOMKilled": False, "Pid": 0},
@@ -2119,6 +2121,9 @@ def main(argv: list[str]) -> int:
         case ["--self-check"]:
             self_check()
             return 0
+        case ["--self-check", "--case", path]:
+            self_check(Path(path))
+            return 0
         case ["--qualify", "--case", path]:
             qualify(Path(path))
             return 0
@@ -2129,7 +2134,7 @@ def main(argv: list[str]) -> int:
             qualify(Path(path), persisted=True)
             return 0
         case _:
-            raise Rejection("usage", "expected --self-check or --qualify --case PATH")
+            raise Rejection("usage", "expected --self-check [--case PATH] or --qualify --case PATH")
 
 
 if __name__ == "__main__":
