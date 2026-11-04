@@ -10,12 +10,73 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 from typing import Any
+
+
+def alias_checks(root: Path, scratch: Path, node: str) -> dict[str, Any]:
+    """Execute the authored shell entry with fake mounts, never a native namespace."""
+    fixture = scratch / 'alias-entry'
+    fixture.mkdir()
+    owned = fixture / 'original-private-parent'
+    for phase in ('baseline', 'candidate'):
+        source = owned / phase
+        (source / 'scripts/qa').mkdir(parents=True)
+        (source / 'scripts/perf').mkdir()
+        (source / 'apps/server/node_modules/tsx/dist').mkdir(parents=True)
+        (source / 'scripts/qa/portfolio-hosted-admission.mjs').write_text('console.log(JSON.stringify({entry:process.cwd()}))')
+        (source / 'scripts/perf/o12-hosted.py').write_text('authored-python-entry')
+        (source / 'apps/server/node_modules/tsx/dist/cli.mjs').write_text('console.log("authored-tsx-entry")')
+    for name in ('db-inspect.json', 'db-role.txt', 'pre-schema-admission.json'):
+        (owned / name).write_text(name)
+    (owned / 'result').mkdir()
+    (owned / 'socket').mkdir()
+    shell = (root / 'scripts/perf/o12-hosted.sh').read_text()
+    argv = shlex.split(shell.split('sudo --preserve-env=owned,node_binary,tsx_binary,source_root,stage unshare', 1)[1])
+    entry = argv[argv.index('-c') + 1]
+    assert 'mount --make-rprivate /' in entry
+    tmp = fixture / 'tmp'
+    tmp.mkdir()
+    entry = entry.replace('/tmp', str(tmp))
+    # Fake bind mounts copy only authored sentinel files; no source/app/SQL execution.
+    controls = r'''
+mount() {
+  if [[ "$1" == --bind && "$2" == "$owned/"* && "$3" == "$test_tmp/source/"* ]]; then
+    cp -a "$2/." "$3/"
+  fi
+}
+ip() { :; }
+chown() { :; }
+setpriv() {
+  while [[ "$1" != env ]]; do shift; done
+  shift
+  [[ "$1" != -i ]] || shift
+  while [[ "$1" == *=* ]]; do shift; done
+  "$@"
+}
+python3() {
+  [[ "$1" == "$test_tmp/source/baseline/scripts/perf/o12-hosted.py" && -r "$1" ]] || return 71
+  [[ "$3" == "$test_tmp/source/baseline" && "$4" == "$test_tmp/source/candidate" ]] || return 72
+  [[ "$6" == "$test_tmp/source/candidate/"* && -r "$6" ]] || return 73
+  "$5" "$6" > "$test_tmp/measurement/tsx-entry.txt"
+  printf "%s\n" "$@" > "$test_tmp/measurement/argv.txt"
+}
+'''
+    env = {**os.environ, 'owned': str(owned), 'node_binary': node,
+           'tsx_binary': str(owned / 'candidate/apps/server/node_modules/tsx/dist/cli.mjs'),
+           'source_root': str(owned), 'stage': 'qualification', 'test_tmp': str(tmp)}
+    result = subprocess.run(['bash', '-euo', 'pipefail', '-c', controls + entry], env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stdout + result.stderr + ' alias exit ' + str(result.returncode)
+    admission = json.loads((owned / 'result/admission.json').read_text())
+    assert admission['entry'] == str(tmp / 'source/baseline')
+    assert (owned / 'result/tsx-entry.txt').read_text().strip() == 'authored-tsx-entry'
+    return {'status': 'PASS', 'scope': 'fake mount shell-entry behavior only', 'admission': admission,
+            'argv': (owned / 'result/argv.txt').read_text().splitlines()}
 
 
 def stage_checks(module, root: Path, scratch: Path, node: str) -> dict[str, Any]:
@@ -219,6 +280,7 @@ def main() -> None:
         assert driver.returncode == 0, driver.stdout + driver.stderr
         driver_result = json.loads(driver.stdout)
         assert driver_result['status'] == 'PASS'
+        aliases = alias_checks(root, scratch, node)
     subprocess.run(['bash', '-n', str(root / 'scripts/perf/o12-hosted.sh')], check=True, timeout=10)
     header = (root / 'scripts/perf/o12-hosted.sh').read_text().split('[[ "${GITHUB_EVENT_NAME:?}"')[0]
     for stage, expected_code, expected_value in [(None, 0, 'qualification'), ('qualification', 0, 'qualification'), ('measurement', 0, 'measurement'), ('', 2, ''), ('unknown', 2, '')]:
@@ -229,7 +291,7 @@ def main() -> None:
         selected = subprocess.run(['bash', '-c', header + '\nprintf "%s" "$stage"'], env=env, capture_output=True, text=True, timeout=3)
         assert selected.returncode == expected_code and selected.stdout == expected_value
     assert not scratch.exists()
-    print(json.dumps({'status': 'PASS', 'negativeParserCases': negatives, 'negativeBoundedChildCases': child_negatives, 'stages': stages, 'driver': driver_result, 'shellSyntax': 'PASS', 'temporaryDirectoryRemoved': not scratch.exists(), 'applicationImported': False, 'SQL': False, 'M': False}))
+    print(json.dumps({'status': 'PASS', 'negativeParserCases': negatives, 'negativeBoundedChildCases': child_negatives, 'stages': stages, 'driver': driver_result, 'aliases': aliases, 'shellSyntax': 'PASS', 'temporaryDirectoryRemoved': not scratch.exists(), 'applicationImported': False, 'SQL': False, 'M': False}))
 
 
 if __name__ == '__main__':

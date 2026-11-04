@@ -98,10 +98,14 @@ sudo --preserve-env=owned,node_binary,tsx_binary,source_root,stage unshare --mou
   printf "%s" authored-private-canary > /tmp/private/canary
   chmod 700 /tmp/private
   mount --bind /tmp/private "$source_root/.git"
+  mkdir /tmp/source
   for phase in baseline candidate; do
-    mount --bind "$owned/$phase" "$owned/$phase"
-    mount -o remount,bind,ro "$owned/$phase"
+    mkdir "/tmp/source/$phase"
+    mount --bind "$owned/$phase" "/tmp/source/$phase"
+    mount -o remount,bind,ro "/tmp/source/$phase"
   done
+  tsx_binary="$(realpath /tmp/source/candidate/apps/server/node_modules/tsx/dist/cli.mjs)"
+  [[ "$tsx_binary" == /tmp/source/candidate/* && -r "$tsx_binary" ]]
   mount --bind "$owned/socket" /tmp/pgsocket
   mount -o remount,bind,ro /tmp/pgsocket
   mount --bind "$owned/result" "$owned/result"
@@ -111,7 +115,7 @@ sudo --preserve-env=owned,node_binary,tsx_binary,source_root,stage unshare --mou
   # Ephemeral .git directories contain no remotes, auth headers, or global config.
   # Their source and metadata are owned by UID65534 and mounted read-only with /.
   set +e
-  cd "$owned/baseline"
+  cd /tmp/source/baseline
   setpriv --reuid=65534 --regid=65534 --clear-groups --bounding-set=-all --no-new-privs \
     env -i PATH="$(dirname "$node_binary"):/usr/bin:/bin" HOME=/tmp/home TMPDIR=/tmp \
     "$node_binary" scripts/qa/portfolio-hosted-admission.mjs > /tmp/measurement/admission.json
@@ -120,7 +124,7 @@ sudo --preserve-env=owned,node_binary,tsx_binary,source_root,stage unshare --mou
   setpriv --reuid=65534 --regid=65534 --clear-groups --bounding-set=-all --no-new-privs \
     env -i PATH="$(dirname "$node_binary"):/usr/bin:/bin" HOME=/tmp/measurement TMPDIR=/tmp \
     PYTHONDONTWRITEBYTECODE=1 LANG=C \
-    python3 "$owned/baseline/scripts/perf/o12-hosted.py" /tmp/measurement "$owned/baseline" "$owned/candidate" "$node_binary" "$tsx_binary" "$stage"
+    python3 /tmp/source/baseline/scripts/perf/o12-hosted.py /tmp/measurement /tmp/source/baseline /tmp/source/candidate "$node_binary" "$tsx_binary" "$stage"
   code=$?
   set -e
   cp -a /tmp/measurement/. "$owned/result/"

@@ -97,6 +97,39 @@ jobs:
           FIXTURE_SERVICE_ID: ${{ job.services.postgres.id }}
           BOUNDS_EXPECTATION: ${{ inputs.portfolio_bounds == 'baseline' && 'baseline' || 'candidate' }}
         run: timeout --signal=TERM --kill-after=5s 120s bash scripts/qa/public-transport-bounds.sh
+      - name: Prepare bounded source quality only
+        if: ${{ inputs.portfolio_admission == true }}
+        run: |
+          set -euo pipefail
+          quality=.artifacts/o12-source-quality
+          mkdir -p "$quality/logs" "$quality/files"
+          node scripts/qa/bounded-output.mjs "$quality/logs" 110000 bash -euo pipefail -c '
+            pnpm exec prettier --write scripts/perf/o12-inputs/corpus.mts scripts/perf/o12-inputs/query-driver.mts scripts/perf/o12-inputs/run.mts scripts/perf/o12-inputs/preload-pgstdio.cjs scripts/perf/o12-inputs/protocol.json scripts/perf/o12-inputs/seed.json .github/workflows/ci.yml
+            pnpm exec eslint .
+            pnpm exec prettier --check .
+          '
+          git diff --binary > "$quality/source.patch"
+          for file in scripts/perf/o12-inputs/corpus.mts scripts/perf/o12-inputs/query-driver.mts scripts/perf/o12-inputs/run.mts scripts/perf/o12-inputs/preload-pgstdio.cjs scripts/perf/o12-inputs/protocol.json scripts/perf/o12-inputs/seed.json .github/workflows/ci.yml; do
+            mkdir -p "$quality/files/$(dirname "$file")"
+            cp "$file" "$quality/files/$file"
+          done
+          python3 - "$quality" <<'PY'
+          import hashlib, json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          files = sorted(p for p in root.rglob('*') if p.is_file())
+          assert all(not p.is_symlink() for p in root.rglob('*'))
+          assert sum(p.stat().st_size for p in files) <= 16 * 1024 * 1024
+          manifest = {str(p.relative_to(root)): {'bytes': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in files}
+          (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() && inputs.portfolio_admission == true }}
+        with:
+          name: o12-source-quality
+          path: .artifacts/o12-source-quality
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         if: ${{ always() && inputs.portfolio_admission == true }}
         with:

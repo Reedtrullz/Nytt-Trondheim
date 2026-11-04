@@ -90,8 +90,8 @@ function same(sc: C.Scenario, a: Actual, e: C.Expected): Diff | null {
 }
 function summarizePlan(p: PlanDoc[], qi: number, sha: string): PlanSummary {
   const doc = p[0]; if (!doc) throw new Error("empty EXPLAIN document");
-  const nodes: string[] = [], idx = new Set<string>(), rels = new Set<string>(); let hit = 0, read = 0;
-  (function w(n: PlanNode): void { nodes.push(n["Node Type"]); if (n["Index Name"]) idx.add(n["Index Name"]); if (n["Relation Name"]) rels.add(n["Relation Name"]); hit += n["Shared Hit Blocks"] || 0; read += n["Shared Read Blocks"] || 0; (n.Plans || []).forEach(w); })(doc.Plan);
+  const nodes: string[] = [], idx = new Set<string>(), rels = new Set<string>();
+  (function w(n: PlanNode): void { nodes.push(n["Node Type"]); if (n["Index Name"]) idx.add(n["Index Name"]); if (n["Relation Name"]) rels.add(n["Relation Name"]); (n.Plans || []).forEach(w); })(doc.Plan);
   return { qi, sha, exec: doc["Execution Time"], planning: doc["Planning Time"], jit: !!doc.JIT, rootRows: doc.Plan["Actual Rows"], nodes, indexes: [...idx], relations: [...rels], sharedHit: doc.Plan["Shared Hit Blocks"], sharedRead: doc.Plan["Shared Read Blocks"] };
 }
 function sizeOf(dir: string): number { let t = 0; if (!existsSync(dir)) return 0; for (const n of readdirSync(dir)) { const p = dir + "/" + n, s = statSync(p); t += s.isDirectory() ? sizeOf(p) : s.size; } return t; }
