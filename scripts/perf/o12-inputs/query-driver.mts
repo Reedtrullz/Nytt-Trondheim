@@ -341,10 +341,131 @@ async function runInvoke(src: string, phase: string, storeSha: string, workload:
   } finally { await rt.serverPool.end(); await rt.admin.end(); }
 }
 
+type Plan = { sql: string; params: unknown[]; role: "fixture_server"; plan: Row[] };
+type QualifiedCall = { id: string; repeat: number; digest: string; expectedDigest: string; expectedError: string | null; noQuery: boolean; shapes: string[]; deniedQueries: { sql: string; params: unknown[]; error: string; plan: null }[] };
+
+export function boundedQualification(value: Receipt): string {
+  const raw = JSON.stringify(value) + "\n";
+  if (Buffer.byteLength(raw) > 1048576) throw new Error("qualification receipt exceeds native stream bound");
+  return raw;
+}
+
+export async function capturePlans(captured: Cap[], realQuery: PoolLike["query"], plans: Record<string, Plan>): Promise<string[]> {
+  const shapes: string[] = [];
+  for (const q of captured) {
+    const key = sha(C.canon({ sql: q.text, params: q.params }));
+    shapes.push(key);
+    if (plans[key]) continue;
+    const result = await realQuery("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + q.text, q.params);
+    if (result.rows.length !== 1 || !Array.isArray(result.rows[0]?.["QUERY PLAN"])) throw new Error("missing native JSON plan");
+    const native = result.rows[0]["QUERY PLAN"] as unknown[];
+    if (native.length !== 1 || !native[0] || typeof native[0] !== "object" || !("Plan" in native[0])) throw new Error("malformed native JSON plan");
+    const plan = (native[0] as Row).Plan;
+    if (!plan || typeof plan !== "object" || typeof (plan as Row)["Node Type"] !== "string") throw new Error("malformed native JSON plan");
+    plans[key] = { sql: q.text, params: q.params, role: "fixture_server", plan: result.rows };
+    boundedQualification({ plans });
+  }
+  return shapes;
+}
+
+export async function serverWriteDenial(realQuery: PoolLike["query"]): Promise<Receipt> {
+  const sql = "UPDATE articles SET id = id WHERE false";
+  try { await realQuery(sql); }
+  catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "42501") throw error;
+    return { sql, params: [], role: "fixture_server", sqlState: "42501", plan: null };
+  }
+  throw new Error("server write unexpectedly permitted");
+}
+
+async function runQualification(src: string, phase: string, storeSha: string, workload: Workload, fixtureRaw: string, request: Receipt): Promise<Receipt> {
+  bindRequest(request, phase);
+  if (request.stage !== "qualification" || request.sample !== null || request.unit !== "qualification-" + phase) throw new Error("qualification binding required");
+  const got = boundStore(src, phase, storeSha);
+  const expected = requireFixtureDigest(fixtureRaw);
+  const pgLock = lockedDependency(readFileSync(join(src, "pnpm-lock.yaml"), "utf8"), "apps/server", "pg");
+  const rt = await loadRuntime(src);
+  try {
+    const role = await rt.realQuery("SELECT current_user AS role");
+    if (role.rows[0]?.role !== "fixture_server") throw new Error("query-plan server role mismatch");
+    const denial = await serverWriteDenial(rt.realQuery);
+    const deniedQueries: QualifiedCall["deniedQueries"] = [];
+    const capturedQuery = rt.serverPool.query.bind(rt.serverPool);
+    rt.serverPool.query = async (text, params) => {
+      try { return await capturedQuery(text, params); }
+      catch (error) {
+        deniedQueries.push({ sql: typeof text === "string" ? text : text.text, params: params ?? [], error: errMsg(error), plan: null });
+        throw error;
+      }
+    };
+    const corpus = C.buildCorpus(workload.domain, rt.shared);
+    const observed = await fixtureDigest(rt);
+    if (C.canon(observed) !== C.canon(expected)) throw new Error("fixture mismatch");
+    const exp: Record<string, C.Expected> = {}, filters = new Map<string, C.Filters>();
+    for (const sc of C.SCENARIOS) {
+      const f = resolveFilters(sc, exp);
+      exp[sc.id] = oracle(corpus, sc, f);
+      filters.set(sc.id, f);
+    }
+    const calls: QualifiedCall[] = [], plans: Record<string, Plan> = {};
+    for (let repeat = 0; repeat < workload.repeats; repeat++) for (const id of workload.scenarios) {
+      const sc = C.SCENARIOS.find((s) => s.id === id), f = filters.get(id), e = exp[id];
+      if (!sc || !f || !e) throw new Error("unknown oracle scenario " + id);
+      deniedQueries.length = 0;
+      const a = await actual(rt, sc, f);
+      if (!same(sc, a, e)) throw new Error("qualification correctness mismatch " + id);
+      const shapes = await capturePlans(a.q, rt.realQuery, plans);
+      calls.push({ id, repeat, digest: outDigest(sc, a.r, a.error), expectedDigest: outDigest(sc, e, e.error), expectedError: e.error ?? null, noQuery: a.q.length === 0 && deniedQueries.length === 0, shapes, deniedQueries: [...deniedQueries] });
+      boundedQualification({ calls, plans });
+    }
+    if (calls.length !== 81 || Object.keys(plans).length === 0) throw new Error("partial qualification");
+    const receipt: Receipt = { status: "complete", purpose: "correctness-only", stage: "qualification", semanticDigest: sha(C.canon(calls.map(({ id, repeat, digest, expectedDigest }) => ({ id, repeat, digest, expectedDigest })))), capabilities: { driver: "nytt-article-query", engine: "PgStore", pool: "pg", pgLock, roles: ["fixture_admin", "fixture_server"], workload: workload.id, domain: workload.domain, repeats: workload.repeats, scenarios: workload.scenarios.length, oracle: "corpus.mts" }, metrics: { qualified_calls: metric("count", calls.length) }, calls, plans, storeSha256: got, observedFixtureDigest: observed, corpusDigest: C.sha(C.canon(corpus.articles)) };
+    receipt.serverWriteDenial = denial;
+    for (const key of BIND) receipt[key] = request[key];
+    boundedQualification(receipt);
+    return receipt;
+  } finally { await rt.serverPool.end(); await rt.admin.end(); }
+}
+
 async function selfCheck(): Promise<void> {
   const { mkdtempSync, rmSync, writeFileSync, mkdirSync: mk } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const protocol = authoredWorkload(JSON.parse(readFileSync(join(HERE, "protocol.json"), "utf8")));
+  const denial = await serverWriteDenial(async (sql) => {
+    if (sql !== "UPDATE articles SET id = id WHERE false") throw new Error("altered denial query");
+    throw Object.assign(new Error("authored permission denial"), { code: "42501" });
+  });
+  if (denial.sqlState !== "42501" || denial.plan !== null) throw new Error("denial receipt");
+  for (const query of [async () => ({ rows: [], rowCount: 0 }), async () => { throw Object.assign(new Error("connection failure"), { code: "08006" }); }]) {
+    let rejectedDenial = false;
+    try { await serverWriteDenial(query); } catch { rejectedDenial = true; }
+    if (!rejectedDenial) throw new Error("accepted missing/wrong permission denial");
+  }
+  const fakePlans: Record<string, Plan> = {};
+  const cap: Cap = { text: "SELECT $1::int", params: [7], sha: "fake", rows: 1, bytes: 1, ms: 1 };
+  let planQueries = 0;
+  const fakeQuery: PoolLike["query"] = async (sql, params) => {
+    if (sql !== "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT $1::int" || C.canon(params) !== "[7]") throw new Error("altered plan binding");
+    planQueries++;
+    return { rows: [{ "QUERY PLAN": [{ Plan: { "Node Type": "Result" } }] }], rowCount: 1 };
+  };
+  await capturePlans([cap, cap], fakeQuery, fakePlans);
+  if (planQueries !== 1 || Object.values(fakePlans)[0]?.role !== "fixture_server") throw new Error("plan deduplication/role");
+  const planFailures: [PoolLike["query"], string][] = [
+    [async () => { throw new Error("authored plan denial"); }, "authored plan denial"],
+    [async () => ({ rows: [], rowCount: 0 }), "missing native JSON plan"],
+    [async () => ({ rows: [{ "QUERY PLAN": [{}] }], rowCount: 1 }), "malformed native JSON plan"],
+    [async () => ({ rows: [{ "QUERY PLAN": [{ Plan: { "Node Type": "Result", data: "x".repeat(1048576) } }] }], rowCount: 1 }), "stream bound"],
+  ];
+  for (const [query, reason] of planFailures) {
+    let rejectedPlan = false;
+    try { await capturePlans([cap], query, {}); } catch (error) {
+      if (!errMsg(error).includes(reason)) throw error;
+      rejectedPlan = true;
+    }
+    if (!rejectedPlan) throw new Error("accepted failed/malformed/oversized plan");
+  }
+  expectThrow(() => boundedQualification({ payload: "x".repeat(1048576) }), "stream bound");
   if (protocol.scenarios.length !== 27) throw new Error("self-check authored workload");
   const bad = structuredClone(JSON.parse(readFileSync(join(HERE, "protocol.json"), "utf8"))) as { workload: { scenarios: string[] } };
   bad.workload.scenarios.push("NOPE");
@@ -410,7 +531,7 @@ async function selfCheck(): Promise<void> {
   expectThrow(() => bindRequest({ ...request, phase: "candidate" }, "baseline"), "phase binding mismatch");
   const flatPg = String.fromCharCode(34) + "/" + "node_modules/pg/esm/index.mjs" + String.fromCharCode(34);
   if (readFileSync(fileURLToPath(import.meta.url), "utf8").includes(flatPg)) throw new Error("self-check hardcoded pg path");
-  process.stdout.write(JSON.stringify({ status: "PASS", checks: ["authored-w1", "phase", "store-hash", "fixture", "unknown-scenario", "partial", "digest", "query-count", "pg-lock", "resolver"] }) + "\n");
+  process.stdout.write(JSON.stringify({ status: "PASS", checks: ["authored-w1", "phase", "store-hash", "fixture", "unknown-scenario", "partial", "digest", "query-count", "pg-lock", "resolver", "fake-plan-bindings", "plan-deduplication", "plan-denial", "plan-malformed", "plan-overflow", "receipt-overflow", "server-write-denial", "wrong-denial-rejected"], applicationImported: false, SQL: false }) + "\n");
 }
 
 function call(id: string, digest: string): Call {
@@ -452,6 +573,11 @@ async function main(): Promise<void> {
     return;
   }
   unixSocket = flag(argv, "--socket");
+  if (mode === "qualification") {
+    if (!unixSocket || !request) throw new Error("hosted qualification requires native request and socket");
+    process.stdout.write(boundedQualification(await runQualification(src, phase, storeSha, workload, fixtureRaw, request)));
+    return;
+  }
   if (mode === "invoke") {
     if (unixSocket && !request) throw new Error("hosted invoke requires MEASURE_REQUEST");
     process.stdout.write(JSON.stringify(await runInvoke(src, phase, storeSha, workload, fixtureRaw, request)) + "\n");

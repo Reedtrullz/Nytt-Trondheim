@@ -19,6 +19,11 @@ on:
         description: Run the isolated real W1 query engine on the candidate and its common parent
         type: boolean
         default: false
+      portfolio_stage:
+        description: Explicit O12 stage; qualification never collects formal samples
+        type: choice
+        options: [qualification, measurement]
+        default: qualification
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -42,6 +47,8 @@ jobs:
           node-version: 22.22.3
       - run: corepack enable
       - name: Run the existing measure and compare engine on actual PgStore W1
+        env:
+          O12_STAGE: ${{ inputs.portfolio_stage }}
         run: bash scripts/perf/o12-hosted.sh
       - uses: actions/upload-artifact@v7
         if: always()

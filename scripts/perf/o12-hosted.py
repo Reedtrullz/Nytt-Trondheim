@@ -10,14 +10,75 @@ the unchanged engine owns ordering, requests, receipts and decisions.
 from __future__ import annotations
 
 import json
+import importlib
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 MODULES = ('measure', 'compare', 'protocol', 'native', 'resource_limits', 'decisions', 'receipt_audit', 'container_resources')
 QUERY_FILES = ('apps/server/src/store.ts', 'apps/server/test/articles-store.test.ts')
+
+
+def stage_request(value: str) -> str:
+    if value not in ('qualification', 'measurement'):
+        raise RuntimeError('explicit qualification or measurement stage required')
+    return value
+
+
+def execute_stage(stage: str, casefile: Path, tools: Path, output: Path, environment: dict[str, str]) -> None:
+    stage_request(stage)
+    protocol = importlib.import_module('protocol')
+    Case, digest, save, slot = protocol.Case, protocol.digest, protocol.save, protocol.slot
+    case = Case.read(casefile)
+    if (case.data.get('qualificationOnly') is True) != (stage == 'qualification'):
+        raise RuntimeError('case/stage mismatch')
+    if stage == 'qualification':
+        invoke = importlib.import_module('native').invoke
+        ResourceBudget = importlib.import_module('resource_limits').ResourceBudget
+        budget = ResourceBudget.read(case.data)
+        for phase in ('baseline', 'candidate'):
+            # Native's transport is shared; these identities are never formal slots.
+            request = {'stage': 'qualification', 'phase': phase, 'unit': 'qualification-' + phase,
+                       'sample': None, 'scenario': 'happy', 'caseHash': case.sha256,
+                       'revision': case.data[phase]['revision'], 'fixtureDigest': digest(case.data['fixtures']),
+                       'harnessDigest': digest(case.data['harness']), 'shape': case.data['shape'],
+                       'economicsDigest': case.data['economicsDigest']}
+            receipt = invoke(case, request)
+            save(output / ('qualification-' + phase + '.json'), receipt)
+            budget.enforce()
+            native = receipt.get('native', {})
+            calls = native.get('calls')
+            plans = native.get('plans')
+            denial = native.get('serverWriteDenial')
+            if (receipt.get('status') != 'PASS' or receipt.get('reaped') is not True
+                    or receipt.get('scratchCleaned') is not True or receipt.get('parentScratchCleaned') is not True
+                    or native.get('purpose') != 'correctness-only' or native.get('stage') != 'qualification'
+                    or native.get('sample', 'missing') is not None
+                    or not isinstance(calls, list) or len(calls) != 81
+                    or not isinstance(plans, dict) or not plans
+                    or not isinstance(denial, dict) or denial.get('sqlState') != '42501'
+                    or denial.get('role') != 'fixture_server' or denial.get('plan', 'missing') is not None):
+                raise RuntimeError('qualification failed; formal measurement forbidden')
+            expected_calls = [(id_, repeat) for repeat in range(3) for id_ in case.data['qualificationScenarios']]
+            if ([(call.get('id'), call.get('repeat')) for call in calls if isinstance(call, dict)] != expected_calls
+                    or any(not isinstance(call.get('digest'), str) or len(call['digest']) != 64
+                           or call['digest'] != call.get('expectedDigest') for call in calls)):
+                raise RuntimeError('partial qualification scenario/digest coverage')
+        save(output / 'qualification.json', {'status': 'PASS', 'purpose': 'correctness-only', 'formalSamples': 0, 'comparison': False, 'caseHash': case.sha256})
+        budget.enforce()
+        return
+    # These are the existing engine's exact slots, with no added observations.
+    for index in range(10 + 4 + 2 * case.data['pairs']):
+        state = slot(case.data, index)
+        argv = [sys.executable, str(tools / 'measure.py'), '--case', str(casefile), '--phase', state['phase'], '--scenario', 'happy', '--sample', str(index), '--output', str(output)]
+        result = subprocess.run(argv, env=environment, check=False, timeout=125)
+        if result.returncode:
+            raise RuntimeError('measurement failed; no retry or additional sample')
+    argv = [sys.executable, str(tools / 'compare.py'), '--task', '12', '--evidence', str(output.parent), '--case', str(casefile)]
+    subprocess.run(argv, env=environment, check=True, timeout=120)
 
 
 def admit_database(inspect_path: Path, role_path: Path) -> None:
@@ -39,7 +100,7 @@ def git(cwd: Path, *args: str) -> str:
     return subprocess.check_output(['/usr/bin/git', '-C', str(cwd), *args], text=True, timeout=10).strip()
 
 
-def checked(argv: list[str], env: dict[str, str], expected: str) -> dict:
+def checked(argv: list[str], env: dict[str, str], expected: str) -> dict[str, Any]:
     """Bound setup output; a zero exit alone is never a completion receipt."""
     # The existing stream controller bounds setup too, including a noisy child.
     out = Path(env['TMPDIR']) / 'setup-output'
@@ -55,7 +116,8 @@ def checked(argv: list[str], env: dict[str, str], expected: str) -> dict:
     return value
 
 
-def run(root: Path, baseline: Path, candidate: Path, node: str, tsx: str) -> None:
+def run(root: Path, baseline: Path, candidate: Path, node: str, tsx: str, stage: str) -> None:
+    stage_request(stage)
     if sys.platform != 'linux' or os.getuid() != 65534 or root != Path('/tmp/measurement'):
         raise RuntimeError('hosted unprivileged namespace required')
     tools = root / 'work/portfolio-performance/tools'
@@ -64,8 +126,9 @@ def run(root: Path, baseline: Path, candidate: Path, node: str, tsx: str) -> Non
     for name in MODULES:
         shutil.copyfile(origin / (name + '.py'), tools / (name + '.py'))
     sys.path.insert(0, str(tools))
-    from protocol import Case, digest, file_hash, runtime, save, slot
-    from resource_limits import ResourceBudget
+    protocol = importlib.import_module('protocol')
+    Case, digest, file_hash, runtime, save = protocol.Case, protocol.digest, protocol.file_hash, protocol.runtime, protocol.save
+    ResourceBudget = importlib.import_module('resource_limits').ResourceBudget
 
     scratch = root / '.omo/t05-run-tmp/w1'
     environment = {'PATH': str(Path(node).parent) + ':/usr/bin:/bin', 'LANG': 'C', 'PYTHONDONTWRITEBYTECODE': '1'}
@@ -122,7 +185,9 @@ def run(root: Path, baseline: Path, candidate: Path, node: str, tsx: str) -> Non
     for id_ in workload['scenarios']:
         counters.update({id_ + '_rows': 'count', id_ + '_bytes': 'bytes', id_ + '_queryCount': 'count'})
     metrics.update({n: {'kind': 'counter', 'direction': 'lower', 'scope': 'invocation', 'unit': u, 'aggregate': 'sum', 'repetitions': 1} for n, u in counters.items()})
-    commands = {p: command(p, 'invoke') for p in ('baseline', 'candidate')}
+    commands = {p: command(p, 'qualification' if stage == 'qualification' else 'invoke') for p in ('baseline', 'candidate')}
+    if stage == 'qualification':
+        metrics = {'qualified_calls': {'kind': 'counter', 'direction': 'lower', 'scope': 'invocation', 'unit': 'count', 'aggregate': 'sum', 'repetitions': 1}}
     fixtures = [baseline / ('scripts/perf/o12-inputs/' + n) for n in ('corpus.mts', 'protocol.json', 'seed.json')]
     harness = [tools / (n + '.py') for n in MODULES] + [Path(__file__), Path(node), Path(tsx), Path(sys.executable).resolve(), Path('/usr/bin/timeout'), root / 'db-inspect.json', root / 'db-role.txt', root / 'admission.json', root / 'pre-schema-admission.json']
     for cwd in (baseline, candidate):
@@ -139,12 +204,17 @@ def run(root: Path, baseline: Path, candidate: Path, node: str, tsx: str) -> Non
         paths = list((cwd / 'apps/server/src').rglob('*.ts')) + list((cwd / 'packages/shared/src').rglob('*.ts'))
         paths += [cwd / p for p in (*QUERY_FILES, 'apps/server/src/db/schema.sql', 'pnpm-lock.yaml', 'package.json')]
         case[name] = {'cwd': str(cwd), 'revision': git(cwd, 'rev-parse', 'HEAD'), 'tree': git(cwd, 'rev-parse', 'HEAD^{tree}'), 'sources': pins(paths)}
-    casefile = root / 'work/portfolio-performance/cases/T12-W1-unix.json'
+    if stage == 'qualification':
+        case.update(id='T12-W1-qualification', primary='qualified_calls', qualificationOnly=True, qualificationScenarios=workload['scenarios'])
+        output = output / 'qualification'
+    casefile = root / ('work/portfolio-performance/cases/T12-W1-qualification.json' if stage == 'qualification' else 'work/portfolio-performance/cases/T12-W1-unix.json')
     save(casefile, case)
     encoded = len(json.dumps(case, indent=2, sort_keys=True).encode())
     # Native receipts repeat the definition. Reserve bounded real call/SQL output
     # per unit and fail before seed if the fixed run cannot fit the 16 MiB cap.
-    if 34 * (encoded + 200000) + 2 * encoded + 1048576 > 16777216:
+    reservation = (2 * (encoded + 2 * 1048576) + 2 * encoded + 1048576
+                   if stage == 'qualification' else 34 * (encoded + 200000) + 2 * encoded + 1048576)
+    if reservation > 16777216:
         raise RuntimeError('fixed receipt set exceeds combined scratch budget')
     save(output / 'pre-observation.json', {'status': 'FROZEN_BEFORE_SEED_AND_QUERIES', 'caseSha256': file_hash(casefile), 'oracle': facts, 'phases': {p: case[p] for p in ('baseline', 'candidate')}})
     Case.read(casefile)
@@ -154,15 +224,7 @@ def run(root: Path, baseline: Path, candidate: Path, node: str, tsx: str) -> Non
         raise RuntimeError('seed does not match authored fixture')
     budget = ResourceBudget.read(case)
     budget.enforce()
-    # These are the existing engine's exact slots, with no added observations.
-    for index in range(10 + 4 + 2 * case['pairs']):
-        state = slot(case, index)
-        argv = [sys.executable, str(tools / 'measure.py'), '--case', str(casefile), '--phase', state['phase'], '--scenario', 'happy', '--sample', str(index), '--output', str(output)]
-        result = subprocess.run(argv, env=environment, check=False, timeout=125)
-        if result.returncode:
-            raise RuntimeError('measurement failed; no retry or additional sample')
-    argv = [sys.executable, str(tools / 'compare.py'), '--task', '12', '--evidence', str(output.parent), '--case', str(casefile)]
-    subprocess.run(argv, env=environment, check=True, timeout=120)
+    execute_stage(stage, casefile, tools, output, environment)
 
 
 if __name__ == '__main__':
@@ -170,8 +232,8 @@ if __name__ == '__main__':
         admit_database(Path(sys.argv[2]), Path(sys.argv[3]))
         print(json.dumps({'status': 'PASS', 'scope': 'actual Docker inspect and actual role readback'}))
         raise SystemExit(0)
-    if len(sys.argv) != 6:
-        raise SystemExit('ROOT BASELINE CANDIDATE NODE TSX required')
+    if len(sys.argv) != 7:
+        raise SystemExit('ROOT BASELINE CANDIDATE NODE TSX STAGE required')
     ROOT, BASELINE, CANDIDATE = map(Path, sys.argv[1:4])
     NODE, TSX = sys.argv[4:6]
-    run(ROOT, BASELINE, CANDIDATE, NODE, TSX)
+    run(ROOT, BASELINE, CANDIDATE, NODE, TSX, stage_request(sys.argv[6]))

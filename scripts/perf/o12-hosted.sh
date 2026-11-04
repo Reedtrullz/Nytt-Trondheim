@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+stage="${O12_STAGE-qualification}"
+case "$stage" in qualification|measurement) ;; *) exit 2 ;; esac
 [[ "${GITHUB_EVENT_NAME:?}" == workflow_dispatch && "${GITHUB_REF:?}" != refs/heads/main ]]
 [[ "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 31457280 ]]
 source_root="$PWD"
@@ -81,11 +83,11 @@ docker inspect "$fixture" > "$owned/db-inspect.json"
 docker exec -e PGPASSWORD=fixture_server_pw "$fixture" psql -X -h /sock -U fixture_server -d fixture_db -Atc \
   'SELECT current_user, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname=current_user' > "$owned/db-role.txt"
 python3 scripts/perf/o12-hosted.py --admit-db "$owned/db-inspect.json" "$owned/db-role.txt" > "$output/db-admission.json"
-export owned node_binary tsx_binary source_root
+export owned node_binary tsx_binary source_root stage
 # One read-only source/network/PID namespace covers both phases and all engine calls.
 # /tmp is the combined 16 MiB parent/child/cache/artifact filesystem.
 set +e
-sudo --preserve-env=owned,node_binary,tsx_binary,source_root unshare --mount --net --pid --fork --kill-child=KILL --mount-proc bash -euo pipefail -c '
+sudo --preserve-env=owned,node_binary,tsx_binary,source_root,stage unshare --mount --net --pid --fork --kill-child=KILL --mount-proc bash -euo pipefail -c '
   mount --make-rprivate /
   mount --bind / /
   mount -o remount,bind,ro /
@@ -118,7 +120,7 @@ sudo --preserve-env=owned,node_binary,tsx_binary,source_root unshare --mount --n
   setpriv --reuid=65534 --regid=65534 --clear-groups --bounding-set=-all --no-new-privs \
     env -i PATH="$(dirname "$node_binary"):/usr/bin:/bin" HOME=/tmp/measurement TMPDIR=/tmp \
     PYTHONDONTWRITEBYTECODE=1 LANG=C \
-    python3 "$owned/baseline/scripts/perf/o12-hosted.py" /tmp/measurement "$owned/baseline" "$owned/candidate" "$node_binary" "$tsx_binary"
+    python3 "$owned/baseline/scripts/perf/o12-hosted.py" /tmp/measurement "$owned/baseline" "$owned/candidate" "$node_binary" "$tsx_binary" "$stage"
   code=$?
   set -e
   cp -a /tmp/measurement/. "$owned/result/"
@@ -128,5 +130,5 @@ status=$?
 set -e
 sudo cp -a "$owned/result/." "$output/runtime/"
 sudo chown -R "$(id -u):$(id -g)" "$output/runtime"
-printf '{"exitCode":%d,"measurementScope":"W1 only; whole O12 incomplete"}\n' "$status" > "$output/result.json"
+printf '{"exitCode":%d,"stage":"%s","measurementScope":"W1 only; whole O12 incomplete"}\n' "$status" "$stage" > "$output/result.json"
 exit "$status"
